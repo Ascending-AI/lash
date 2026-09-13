@@ -1,34 +1,31 @@
 use super::*;
 
-pub(super) async fn claim_pending_wake_deliveries(
-    registry: &PostgresProcessRegistry,
-    limit: usize,
-) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
-    if limit == 0 {
-        return Ok(Vec::new());
-    }
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
-    let now = registry.clock.timestamp_ms() as i64;
-    sqlx::query(
+use crate::process_lifecycle_sql::wake_delivery_state;
+use lash_core::WakeDeliveryState;
+use std::sync::LazyLock;
+
+pub(crate) static RECLAIM_LAPSED_WAKE_CLAIMS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
         "UPDATE lash_process_wake_deliveries
-         SET state = 'pending', claim_token = NULL
-         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1",
+         SET state = {pending}, claim_token = NULL
+         WHERE state = {enqueuing} AND next_attempt_at_ms <= $1",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
     )
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let ids = sqlx::query_scalar::<_, String>(
+});
+
+pub(crate) static SELECT_CLAIMABLE_WAKE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
         "SELECT candidate.delivery_id
          FROM lash_process_wake_deliveries AS candidate
-         WHERE candidate.state = 'pending'
+         WHERE candidate.state = {pending}
            AND candidate.next_attempt_at_ms <= $2
            AND NOT EXISTS (
                SELECT 1
                FROM lash_process_wake_deliveries AS earlier
-               WHERE earlier.state <> 'enqueued'
+               WHERE earlier.state <> {enqueued}
                  AND NOT (
-                     earlier.state = 'discarded'
+                     earlier.state = {discarded}
                      AND (
                          earlier.discard_reason IS NULL
                          OR earlier.discard_reason = ANY($3::TEXT[])
@@ -44,32 +41,67 @@ pub(super) async fn claim_pending_wake_deliveries(
                   candidate.sequence ASC
          LIMIT $1
          FOR UPDATE OF candidate SKIP LOCKED",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueued = wake_delivery_state(WakeDeliveryState::Enqueued),
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
     )
-    .bind(limit as i64)
-    .bind(now)
-    .bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let mut deliveries = Vec::with_capacity(ids.len());
-    for id in ids {
-        let claim_token = uuid::Uuid::new_v4().to_string();
-        sqlx::query(
-            "UPDATE lash_process_wake_deliveries
-             SET state = 'enqueuing',
+});
+
+pub(crate) static START_WAKE_ENQUEUING_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+             SET state = {enqueuing},
                  claim_token = $4,
                  attempts = attempts + 1,
                  first_attempt_ms = COALESCE(first_attempt_ms, $2),
                  next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'pending'",
-        )
-        .bind(&id)
+             WHERE delivery_id = $1 AND state = {pending}",
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static SETTLE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+         SET state = $3, claim_token = NULL, discard_reason = $4
+         WHERE delivery_id = $1 AND state = {enqueuing} AND claim_token = $2",
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+    )
+});
+
+pub(super) async fn claim_pending_wake_deliveries(
+    registry: &PostgresProcessRegistry,
+    limit: usize,
+) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let now = registry.clock.timestamp_ms() as i64;
+    sqlx::query(RECLAIM_LAPSED_WAKE_CLAIMS_SQL.as_str())
         .bind(now)
-        .bind(now.saturating_add(registry.wake_delivery_config.enqueuing_stale_after_ms as i64))
-        .bind(claim_token)
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
+    let ids = sqlx::query_scalar::<_, String>(SELECT_CLAIMABLE_WAKE_SQL.as_str())
+        .bind(limit as i64)
+        .bind(now)
+        .bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    let mut deliveries = Vec::with_capacity(ids.len());
+    for id in ids {
+        let claim_token = uuid::Uuid::new_v4().to_string();
+        sqlx::query(START_WAKE_ENQUEUING_SQL.as_str())
+            .bind(&id)
+            .bind(now)
+            .bind(now.saturating_add(registry.wake_delivery_config.enqueuing_stale_after_ms as i64))
+            .bind(claim_token)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         deliveries.push(load_wake_delivery_tx(&mut tx, &id).await?);
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -124,19 +156,15 @@ pub(super) async fn update_wake_delivery_state(
 ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
     let state = disposition.state();
     let reason = disposition.discard_reason();
-    let changed = sqlx::query(
-        "UPDATE lash_process_wake_deliveries
-         SET state = $3, claim_token = NULL, discard_reason = $4
-         WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2",
-    )
-    .bind(delivery_id)
-    .bind(claim_token)
-    .bind(state.as_str())
-    .bind(reason.map(lash_core::WakeDiscardReason::as_str))
-    .execute(pool)
-    .await
-    .map_err(plugin_sqlx_error)?
-    .rows_affected();
+    let changed = sqlx::query(SETTLE_WAKE_CLAIM_SQL.as_str())
+        .bind(delivery_id)
+        .bind(claim_token)
+        .bind(state.as_str())
+        .bind(reason.map(lash_core::WakeDiscardReason::as_str))
+        .execute(pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected();
     if changed == 0 {
         let current: Option<String> = sqlx::query_scalar(
             "SELECT state FROM lash_process_wake_deliveries WHERE delivery_id = $1",

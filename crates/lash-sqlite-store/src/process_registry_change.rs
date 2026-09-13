@@ -300,6 +300,31 @@ fn prune_process_rows_conn(
     })
 }
 
+/// The prune eligibility predicate: retired rows with no wake still owed and
+/// no parent-end plan outstanding.
+pub(crate) static PRUNABLE_TERMINAL_PROCESS_SQL: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| {
+        format!(
+            "SELECT process_id, record_json FROM processes
+             WHERE {retired}
+               AND updated_at_ms < ?1
+               AND (?2 IS NULL OR change_seq <= ?2)
+               AND NOT EXISTS (
+                   SELECT 1 FROM process_wake_deliveries AS delivery
+                   WHERE delivery.process_id = processes.process_id
+                     AND {undelivered}
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM process_parent_end_plans AS plan
+                   WHERE plan.process_id = processes.process_id
+               )
+             ORDER BY process_id ASC",
+            retired = crate::process_lifecycle_sql::retired_process_status("status"),
+            undelivered =
+                crate::process_lifecycle_sql::undelivered_wake_delivery_state("delivery.state"),
+        )
+    });
+
 pub(crate) fn prunable_terminal_process_ids_conn(
     conn: &Connection,
     cutoff: i64,
@@ -308,22 +333,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 ) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
-        .prepare(
-            "SELECT process_id, record_json FROM processes
-             WHERE status NOT IN ('running', 'waiting')
-               AND updated_at_ms < ?1
-               AND (?2 IS NULL OR change_seq <= ?2)
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_wake_deliveries AS delivery
-                   WHERE delivery.process_id = processes.process_id
-                     AND delivery.state IN ('pending', 'enqueuing')
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_parent_end_plans AS plan
-                   WHERE plan.process_id = processes.process_id
-               )
-             ORDER BY process_id ASC",
-        )
+        .prepare(PRUNABLE_TERMINAL_PROCESS_SQL.as_str())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(params![cutoff, max_change_seq], |row| {

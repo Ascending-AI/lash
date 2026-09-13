@@ -1,11 +1,13 @@
 name: Bazel shared cache
 description: >-
-  Installs the pinned Bazelisk, derives this runner image's cache identity and
-  writes the authenticated cache client credentials. Exports the resulting Bazel
-  flags as BAZEL_SHARED_CACHE_FLAGS and the server's output base as
-  BAZEL_OUTPUT_USER_ROOT, so every job on this runner issues one cache
-  configuration. Pair it with an `if: always()` step that removes
-  "$RUNNER_TEMP/build-cache".
+  Installs the pinned Bazelisk, validates the shared pool configuration this
+  job's `build-cache` environment supplies and writes the authenticated client
+  credentials. Exports the resulting Bazel flags as BAZEL_SHARED_CACHE_FLAGS
+  and the server's output base as BAZEL_OUTPUT_USER_ROOT, so every job on this
+  runner issues one cache and execution configuration. Pass CACHE_ENDPOINT,
+  CACHE_INSTANCE, KILN_EXECUTOR_RUNTIME, CACHE_CA, CACHE_CERT and CACHE_KEY in
+  the calling step's `env`, and pair it with an `if: always()` step that
+  removes "$RUNNER_TEMP/build-cache".
 
 runs:
   using: composite
@@ -22,36 +24,86 @@ runs:
         chmod +x "$RUNNER_TEMP/bazel"
         echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-    # GitHub-hosted actions execute locally rather than in the shared executor's
-    # pinned runtime image, so their remote-cache identity is derived from the
-    # concrete runner image instead of `kiln_executor_runtime`. That identity is
-    # what keeps their action keys on their own side of the runtime boundary.
-    - name: Resolve GitHub runner cache identity
-      id: bazel-runtime
+    # Where the pool lives, which instance it serves and which runtime image it
+    # pins are deployment facts that move when the pool is redeployed. They are
+    # `build-cache` environment secrets written by the build-infra repository,
+    # never literals in this repository. An empty one means the environment is
+    # misconfigured, and a Bazel invocation missing an executor or advertising
+    # the wrong runtime would either fail obscurely or quietly match nothing in
+    # the pool, so fail here with the name that is missing.
+    - name: Verify shared pool configuration
+      id: pool
       shell: bash
       run: |
         set -euo pipefail
-        python3 scripts/ci_plan.py bazel-runtime \
-          --runner-os "${RUNNER_OS}" \
-          --runner-arch "${RUNNER_ARCH}" \
-          --image-os "${ImageOS:-}" \
-          --image-version "${ImageVersion:-}" >> "${GITHUB_OUTPUT}"
+        missing=()
+        for name in CACHE_ENDPOINT CACHE_INSTANCE KILN_EXECUTOR_RUNTIME \
+          CACHE_CA CACHE_CERT CACHE_KEY; do
+          if [ -z "${!name:-}" ]; then
+            missing+=("${name}")
+          fi
+        done
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::the build-cache environment supplied no ${missing[*]};" \
+            "the build-infra repository owns these secrets" >&2
+          exit 1
+        fi
+
+        # A secret is stored as text and routinely arrives with a trailing
+        # newline. Bazel would take one into the gRPC target and report only
+        # "Invalid DNS name" against a masked value, so normalize first and
+        # then check the shape rather than the value: an endpoint is the only
+        # one whose syntax we can assert without printing it.
+        endpoint="$(printf '%s' "${CACHE_ENDPOINT}" | tr -d '[:space:]')"
+        instance="$(printf '%s' "${CACHE_INSTANCE}" | tr -d '[:space:]')"
+        runtime="$(printf '%s' "${KILN_EXECUTOR_RUNTIME}" | tr -d '[:space:]')"
+        echo "::add-mask::${endpoint}"
+        echo "::add-mask::${instance}"
+        echo "::add-mask::${runtime}"
+        # Lengths are not secrets, and one failing run should tell whoever
+        # writes these whether all three are wrong, not just the first.
+        shape="endpoint ${#endpoint}, instance ${#instance}, runtime"
+        shape="${shape} ${#runtime} characters after trimming whitespace"
+        if ! [[ "${endpoint}" =~ ^grpcs?://[A-Za-z0-9.-]+:[0-9]+$ ]]; then
+          echo "::error::CACHE_ENDPOINT is not grpc[s]://host:port (${shape})" >&2
+          exit 1
+        fi
+        for pair in "CACHE_INSTANCE:${instance}" "KILN_EXECUTOR_RUNTIME:${runtime}"; do
+          if [ -z "${pair#*:}" ]; then
+            echo "::error::${pair%%:*} is whitespace only" >&2
+            exit 1
+          fi
+        done
+        {
+          echo "endpoint=${endpoint}"
+          echo "instance=${instance}"
+          echo "runtime=${runtime}"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Configure authenticated cache
       shell: bash
       run: |
         set -euo pipefail
         umask 077
-        test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
         mkdir -p "$RUNNER_TEMP/build-cache"
         printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
         printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
         printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
 
+    # The runner submits actions and waits: `--jobs` is a count of in-flight
+    # remote actions, not of local cores, and the pool advertises eight
+    # concurrent slots across two workers. `--remote_local_fallback=false`
+    # keeps an unreachable pool a red job rather than a silent two-core
+    # compile, which is the intended trust posture.
+    # The caller passes the raw secrets in this action's step `env`, and a step
+    # `env` outranks anything written to GITHUB_ENV, so the normalized values
+    # travel as outputs of the step above rather than as re-exported variables.
     - name: Export shared cache flags
       shell: bash
       env:
-        BAZEL_RUNTIME: ${{ steps.bazel-runtime.outputs.bazel_runtime }}
+        POOL_ENDPOINT: ${{ steps.pool.outputs.endpoint }}
+        POOL_INSTANCE: ${{ steps.pool.outputs.instance }}
+        POOL_RUNTIME: ${{ steps.pool.outputs.runtime }}
       run: |
         set -euo pipefail
         {
@@ -59,16 +111,18 @@ runs:
           echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
           echo "--repository_cache=$RUNNER_TEMP/bazel-repository"
           echo "--disk_cache="
-          echo "--spawn_strategy=local"
-          echo "--remote_cache=grpcs://178.105.21.6:8443"
-          echo "--remote_instance_name=kiln"
+          echo "--remote_executor=${POOL_ENDPOINT}"
+          echo "--remote_cache=${POOL_ENDPOINT}"
+          echo "--remote_instance_name=${POOL_INSTANCE}"
           echo "--tls_certificate=$RUNNER_TEMP/build-cache/ca.crt"
           echo "--tls_client_certificate=$RUNNER_TEMP/build-cache/client.crt"
           echo "--tls_client_key=$RUNNER_TEMP/build-cache/client.key"
-          echo "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}"
-          echo "--remote_default_exec_properties=cpu_count=1"
-          echo "--remote_default_exec_properties=memory_kb=2097152"
+          echo "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}"
+          echo "--remote_default_exec_properties=cpu_count=4"
+          echo "--remote_default_exec_properties=memory_kb=4194304"
+          echo "--remote_local_fallback=false"
           echo "--remote_download_outputs=toplevel"
-          echo "--remote_timeout=120"
+          echo "--remote_timeout=600"
+          echo "--jobs=32"
           echo "EOF"
         } >> "$GITHUB_ENV"

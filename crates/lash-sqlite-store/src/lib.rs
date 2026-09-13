@@ -45,6 +45,9 @@
 use lash_sansio::SessionId;
 mod namespace;
 mod process_key;
+mod process_lifecycle_sql;
+#[cfg(test)]
+mod process_lifecycle_sql_tests;
 mod session_deletion;
 
 use std::collections::BTreeMap;

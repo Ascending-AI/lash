@@ -1052,13 +1052,31 @@ impl ProcessStatus {
         terminal.status
     }
 
+    /// Whether the row is still on the live worklist.
+    ///
+    /// This is the Rust twin of the `status IN (...)` predicate every backend
+    /// worklist query carries, and the complement of
+    /// [`ProcessStatus::is_retired`]. The match is exhaustive on purpose: a new
+    /// variant must declare which side of the live/retired partition it falls
+    /// on before any query can compile.
+    pub fn is_live(&self) -> bool {
+        match self {
+            Self::Running | Self::Waiting => true,
+            Self::Completed
+            | Self::Failed
+            | Self::Cancelled
+            | Self::Abandoned
+            | Self::CallerDeparted => false,
+        }
+    }
+
     /// Lets process-store implementors apply retention only to completed, failed, cancelled, or
     /// abandoned rows; running, waiting, and caller-departed rows are never terminal.
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
-        )
+        match self {
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned => true,
+            Self::Running | Self::Waiting | Self::CallerDeparted => false,
+        }
     }
 
     /// Lets process-store implementors select the rows retention may reclaim.
@@ -1069,23 +1087,66 @@ impl ProcessStatus {
     /// record one: leaving those rows out would let a host accumulate them
     /// without bound, since nothing may honestly terminalize them.
     pub fn is_retired(&self) -> bool {
-        self.is_terminal() || matches!(self, Self::CallerDeparted)
-    }
-
-    /// Exposes label to store and process-engine implementors while persisting and coordinating
-    /// durable process execution.
-    pub fn label(&self) -> &'static str {
         match self {
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Abandoned => "abandoned",
-            Self::CallerDeparted => "caller_departed",
+            Self::Completed
+            | Self::Failed
+            | Self::Cancelled
+            | Self::Abandoned
+            | Self::CallerDeparted => true,
+            Self::Running | Self::Waiting => false,
         }
     }
 }
+
+/// Generates a durable lifecycle vocabulary and its complete variant list from
+/// one declaration.
+///
+/// The generated encoder match is exhaustive, so a new variant requires its
+/// persisted spelling here and thereby necessarily extends `ALL`. Backends fold
+/// `ALL` into SQL predicates
+/// (`crate::store_backend_support::live_process_status_predicate_sql` and
+/// friends), so a hand-maintained list would be exactly the drift those
+/// predicates exist to prevent.
+macro_rules! lifecycle_vocabulary {
+    ($type:ident, $encoder:ident, by_ref { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        impl $type {
+            /// Every variant, in declaration order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// Returns the stable spelling persisted by stores.
+            pub fn $encoder(&self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire),+
+                }
+            }
+        }
+    };
+    ($type:ident, $encoder:ident, by_value { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        impl $type {
+            /// Every variant, in declaration order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// Returns the stable spelling persisted by stores.
+            pub fn $encoder(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire),+
+                }
+            }
+        }
+    };
+}
+
+pub(crate) use lifecycle_vocabulary;
+
+lifecycle_vocabulary!(ProcessStatus, label, by_ref {
+    Running => "running",
+    Waiting => "waiting",
+    Completed => "completed",
+    Failed => "failed",
+    Cancelled => "cancelled",
+    Abandoned => "abandoned",
+    CallerDeparted => "caller_departed",
+});
 
 /// Durable process lifecycle fold. Observer membership and wake subscription
 /// are queryable edge state, audited by events but deliberately not projected

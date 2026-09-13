@@ -13,13 +13,96 @@ mod lifecycle;
 pub(crate) mod parent_end;
 mod prune;
 #[path = "process_registry/prune_api.rs"]
-mod prune_api;
+pub(crate) mod prune_api;
 mod retention;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
-mod wake_delivery;
+use crate::process_lifecycle_sql::{live_process_status, wake_delivery_state};
+use lash_core::WakeDeliveryState;
+use std::sync::LazyLock;
+
+pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT record_json FROM lash_processes
+             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
+               AND ($2::TEXT IS NULL OR originator_id = $2)
+               AND ($3::TEXT IS NULL OR identity_kind = $3)
+               AND ($4::TEXT IS NULL OR identity_label = $4)
+               AND ($5::JSONB IS NULL OR
+                    (record_json::JSONB #> '{{identity,definition}}') = $5)
+               AND ($6::TEXT IS NULL OR
+                    (record_json::JSONB #>> '{{provenance,caused_by,occurrence_id}}') = $6)
+               AND ($7::TEXT IS NULL OR
+                    (record_json::JSONB #>> '{{provenance,caused_by,subscription_id}}') = $7)
+               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
+               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
+               AND ($10::BIGINT IS NULL OR {live}
+                    OR updated_at_ms >= $10)
+             ORDER BY process_id ASC",
+        live = live_process_status("status"),
+    )
+});
+
+pub(crate) static LIST_OBSERVED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT p.record_json
+             FROM lash_process_observers o
+             JOIN lash_processes p ON p.process_id = o.process_id
+                                    AND p.incarnation = o.process_incarnation
+             WHERE o.session_id = $1
+               AND ($2::TEXT[] IS NULL OR p.status = ANY($2))
+               AND ($3::BIGINT IS NULL OR {live}
+                    OR p.updated_at_ms >= $3)
+             ORDER BY p.process_id",
+        live = live_process_status("p.status"),
+    )
+});
+
+pub(crate) static DISCARD_RETARGETED_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+                 SET state = {discarded}, discard_reason = 'retargeted'
+                 WHERE process_id = $1 AND target_session_id = $2 AND state = {pending}",
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static DISCARD_TARGET_GONE_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+             SET state = {discarded}, discard_reason = 'target_gone'
+             WHERE target_session_id = $1 AND state = {pending}",
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static REDRIVE_DISCARDED_WAKE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+             SET state = {pending}, attempts = 0, first_attempt_ms = NULL,
+                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
+                 discard_reason = NULL
+             WHERE delivery_id = $1 AND state = {discarded}",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+    )
+});
+
+pub(crate) static RELEASE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE lash_process_wake_deliveries
+             SET state = {pending}, claim_token = NULL, next_attempt_at_ms = $3
+             WHERE delivery_id = $1 AND state = {enqueuing} AND claim_token = $2",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+    )
+});
+
+pub(crate) mod wake_delivery;
 #[path = "process_registry/worklist.rs"]
-mod worklist;
+pub(crate) mod worklist;
 use prune::prune_process_rows_tx;
 use retention::{filter_tombstoned_process_ids, filter_unregistered_process_ids};
 use wake_delivery::{
@@ -85,37 +168,20 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
             .map(serde_json::to_value)
             .transpose()
             .map_err(process_decode_error)?;
-        let rows = sqlx::query(
-            "SELECT record_json FROM lash_processes
-             WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
-               AND ($2::TEXT IS NULL OR originator_id = $2)
-               AND ($3::TEXT IS NULL OR identity_kind = $3)
-               AND ($4::TEXT IS NULL OR identity_label = $4)
-               AND ($5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition}') = $5)
-               AND ($6::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,occurrence_id}') = $6)
-               AND ($7::TEXT IS NULL OR
-                    (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $7)
-               AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
-               AND ($9::BIGINT IS NULL OR created_at_ms < $9)
-               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')
-                    OR updated_at_ms >= $10)
-             ORDER BY process_id ASC",
-        )
-        .bind(filter.status.labels())
-        .bind(filter.originator_id.as_deref())
-        .bind(filter.identity_kind.as_deref())
-        .bind(filter.identity_label.as_deref())
-        .bind(definition)
-        .bind(filter.caused_by_occurrence_id.as_deref())
-        .bind(filter.caused_by_subscription_id.as_deref())
-        .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
-        .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
-        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(LIST_PROCESSES_SQL.as_str())
+            .bind(filter.status.labels())
+            .bind(filter.originator_id.as_deref())
+            .bind(filter.identity_kind.as_deref())
+            .bind(filter.identity_label.as_deref())
+            .bind(definition)
+            .bind(filter.caused_by_occurrence_id.as_deref())
+            .bind(filter.caused_by_subscription_id.as_deref())
+            .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
+            .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
+            .bind(filter.retired_since_ms.map(clamp_epoch_ms))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let mut records: Vec<ProcessRecord> = Vec::new();
         for row in rows {
             if let Some(record) = decode_matching_process(row, filter)? {
@@ -553,23 +619,13 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let rows = sqlx::query(
-            "SELECT p.record_json
-             FROM lash_process_observers o
-             JOIN lash_processes p ON p.process_id = o.process_id
-                                    AND p.incarnation = o.process_incarnation
-             WHERE o.session_id = $1
-               AND ($2::TEXT[] IS NULL OR p.status = ANY($2))
-               AND ($3::BIGINT IS NULL OR p.status IN ('running', 'waiting')
-                    OR p.updated_at_ms >= $3)
-             ORDER BY p.process_id",
-        )
-        .bind(session_id.as_str())
-        .bind(filter.status.labels())
-        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows = sqlx::query(LIST_OBSERVED_SQL.as_str())
+            .bind(session_id.as_str())
+            .bind(filter.status.labels())
+            .bind(filter.retired_since_ms.map(clamp_epoch_ms))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         rows.into_iter()
             .map(|row| {
                 serde_json::from_str::<ProcessRecord>(&row.get::<String, _>(0))
@@ -658,16 +714,12 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
             .await
             .map_err(plugin_sqlx_error)?;
         if let Some(previous) = previous {
-            sqlx::query(
-                "UPDATE lash_process_wake_deliveries
-                 SET state = 'discarded', discard_reason = 'retargeted'
-                 WHERE process_id = $1 AND target_session_id = $2 AND state = 'pending'",
-            )
-            .bind(process_id.as_str())
-            .bind(previous)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+            sqlx::query(DISCARD_RETARGETED_WAKES_SQL.as_str())
+                .bind(process_id.as_str())
+                .bind(previous)
+                .execute(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
         }
         tx.commit().await.map_err(plugin_sqlx_error)
     }
@@ -677,16 +729,12 @@ impl lash_core::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
     ) -> Result<lash_core::ProcessSessionDeleteReport, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let discarded_wake_delivery_count = sqlx::query(
-            "UPDATE lash_process_wake_deliveries
-             SET state = 'discarded', discard_reason = 'target_gone'
-             WHERE target_session_id = $1 AND state = 'pending'",
-        )
-        .bind(session_id.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected() as usize;
+        let discarded_wake_delivery_count = sqlx::query(DISCARD_TARGET_GONE_WAKES_SQL.as_str())
+            .bind(session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected() as usize;
         let removed_observer_count =
             sqlx::query("DELETE FROM lash_process_observers WHERE session_id = $1")
                 .bind(session_id.as_str())
@@ -1021,20 +1069,14 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
         let next_attempt_at_ms = self.clock.timestamp_ms();
-        let changed = sqlx::query(
-            "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
-                 discard_reason = NULL
-             WHERE delivery_id = $1 AND state = 'discarded'",
-        )
-        .bind(delivery_id)
-        .bind(expires_at_ms as i64)
-        .bind(next_attempt_at_ms as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let changed = sqlx::query(REDRIVE_DISCARDED_WAKE_SQL.as_str())
+            .bind(delivery_id)
+            .bind(expires_at_ms as i64)
+            .bind(next_attempt_at_ms as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if changed == 0 {
             return Err(PluginError::Session(format!(
                 "wake delivery `{delivery_id}` is not discarded or does not exist"
@@ -1049,18 +1091,14 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
         claim_token: &str,
         next_attempt_at_ms: u64,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
-        let changed = sqlx::query(
-            "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2",
-        )
-        .bind(delivery_id)
-        .bind(claim_token)
-        .bind(next_attempt_at_ms as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let changed = sqlx::query(RELEASE_WAKE_CLAIM_SQL.as_str())
+            .bind(delivery_id)
+            .bind(claim_token)
+            .bind(next_attempt_at_ms as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if changed == 0 {
             let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
             let delivery = load_wake_delivery_tx(&mut tx, delivery_id).await?;

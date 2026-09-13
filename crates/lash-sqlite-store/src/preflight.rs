@@ -41,7 +41,7 @@ use lash_core::{
     StoreSchemaStatus, StoreSchemaVerdict,
 };
 
-mod walk;
+pub(crate) mod walk;
 
 use crate::conn::SqliteConnection;
 use crate::schema::SqliteDatabase;

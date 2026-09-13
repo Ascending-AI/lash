@@ -164,26 +164,6 @@ def apply_event_deferrals(needs: dict, event: str) -> dict:
 
 
 class ConclusionTests(unittest.TestCase):
-    def test_github_runner_cache_identity_is_exact_and_runtime_specific(self) -> None:
-        first = ci_plan.github_runner_cache_identity(
-            "Linux", "X64", "ubuntu24", "20260907.1"
-        )
-        self.assertRegex(first, r"^github-actions-[0-9a-f]{64}$")
-        self.assertEqual(
-            first,
-            ci_plan.github_runner_cache_identity(
-                "Linux", "X64", "ubuntu24", "20260907.1"
-            ),
-        )
-        self.assertNotEqual(
-            first,
-            ci_plan.github_runner_cache_identity(
-                "Linux", "X64", "ubuntu24", "20260908.1"
-            ),
-        )
-        with self.assertRaises(ci_plan.PlanError):
-            ci_plan.github_runner_cache_identity("Linux", "X64", "", "version")
-
     def test_bazel_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
         trusted = successful_needs()
         self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))
