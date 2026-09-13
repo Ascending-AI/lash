@@ -2344,9 +2344,9 @@ async fn attachment_blob_store_differential_agrees() {
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
     // The MinIO this runs against is not always on port 9000: the
-    // process-operations E2E driver and `kiln test --service s3` both publish
-    // it on a free ephemeral port. Read the same LASH_MINIO_* settings the
-    // lash-s3-store suite reads, with the same defaults, so a literal here
+    // process-operations E2E driver and `scripts/ci/with-service.sh s3` both
+    // publish it on a free ephemeral port. Read the same LASH_MINIO_* settings
+    // the lash-s3-store suite reads, with the same defaults, so a literal here
     // cannot pin the endpoint to one deployment.
     let s3 = S3AttachmentStore::from_config(S3AttachmentStoreConfig {
         endpoint_url: Some(

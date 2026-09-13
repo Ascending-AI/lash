@@ -38,10 +38,11 @@ trusted="${BAZEL_TRUSTED:?BAZEL_TRUSTED must be 'true' or 'false'}"
 # CI exports both of these from .github/actions/bazel-shared-cache, and there
 # they must stay required: an unset value would mean the credentials step did
 # not run and the build would silently miss the shared cache. Outside CI --
-# `kiln test --service`, which starts a container and then runs these same
-# suites -- the shared cache is configured by the checkout's .bazelrc and
-# .kiln.bazelrc instead, so the defaults below name exactly what `kiln build`
-# uses and the output base the .bazelrc `startup` line already pins.
+# `scripts/ci/with-service.sh`, the same wrapper CI's store jobs use to start a
+# container and then run these same suites -- the shared cache is configured by
+# the checkout's .bazelrc and .kiln.bazelrc instead, so the defaults below name
+# exactly what `kiln build` uses and the output base the .bazelrc `startup` line
+# already pins.
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
   : "${BAZEL_SHARED_CACHE_FLAGS:?BAZEL_SHARED_CACHE_FLAGS must be set in CI}"
   : "${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set in CI}"

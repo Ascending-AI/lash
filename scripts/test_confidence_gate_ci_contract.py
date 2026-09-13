@@ -1650,15 +1650,39 @@ derive_mutation_jobs() {{
         # "ok in 0.00s" with `compared_backends=[]`, so losing the URL from one
         # suite silently returns the differential to comparing nothing.
         #
-        # The job supplies both once, at job level, so no step can carry one and
-        # a sibling step not. That inheritance is what a Cargo run reads. A Bazel
-        # test spawn inherits nothing from the client environment, so the shared
-        # `bazel_test` helper has to forward both by name — and the forwarding
-        # is also what keeps the PG major an execution-only input, outside every
-        # compile action key.
+        # The require flag is supplied once, at job level, so no step can drop
+        # it. The connection URL cannot live there: `scripts/ci/with-service.sh`
+        # publishes the database on a free ephemeral port per step, so a
+        # job-level literal would name a port nothing listens on. Instead the
+        # wrapper that chooses the port exports the URL, and every suite in this
+        # job runs inside it — `scripts/test_with_service.py` refuses a store
+        # suite that is not wrapped, which is the same "no step can lose it"
+        # property enforced at its source rather than by inheritance. Either
+        # way a Bazel test spawn inherits nothing from the client environment,
+        # so the shared `bazel_test` helper still forwards both by name — and
+        # that forwarding is what keeps the PG major an execution-only input,
+        # outside every compile action key.
         postgres_job_env = yaml.safe_load(workflow)["jobs"]["postgres-store"]["env"]
-        self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres_job_env)
+        self.assertNotIn("LASH_POSTGRES_DATABASE_URL", postgres_job_env)
         self.assertEqual("1", str(postgres_job_env["LASH_REQUIRE_POSTGRES"]))
+        wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("LASH_POSTGRES_DATABASE_URL=postgres://", wrapper)
+        for step_name in (
+            "Test PostgreSQL catalog compatibility",
+            "Test Postgres store (conformance and attempt atomicity)",
+            "Test runtime pool-wait binding",
+            "Test runtime Postgres agent scenarios",
+            "Test simulator backend faults on Postgres",
+            "Test cross-backend store differential",
+        ):
+            with self.subTest(step=step_name):
+                step = workflow_step_block(postgres_store_job, step_name)
+                self.assertIn(
+                    'bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" --',
+                    step,
+                )
 
         store_tests = STORE_TESTS.read_text(encoding="utf-8")
         bazel_helper = store_tests.split("bazel_test() {", 1)[1].split("\n}", 1)[0]
@@ -1748,6 +1772,21 @@ derive_mutation_jobs() {{
         s3_job_env = yaml.safe_load(workflow)["jobs"]["s3-store"]["env"]
         self.assertEqual("1", str(s3_job_env["LASH_REQUIRE_MINIO"]))
         self.assertNotIn("LASH_MINIO_ENDPOINT", s3_job_env)
+        # The endpoint follows the port `with-service.sh` chose, and every
+        # suite in this job runs inside that wrapper.
+        wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("LASH_MINIO_ENDPOINT=http://", wrapper)
+        for step_name in (
+            "Test S3 store conformance",
+            "Test attachment blob-store differential",
+        ):
+            with self.subTest(step=step_name):
+                self.assertIn(
+                    "bash scripts/ci/with-service.sh s3 --",
+                    workflow_step_block(s3_store_job, step_name),
+                )
         bazel_helper = STORE_TESTS.read_text(encoding="utf-8").split(
             "bazel_test() {", 1
         )[1].split("\n}", 1)[0]

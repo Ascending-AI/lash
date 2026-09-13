@@ -56,14 +56,17 @@ portable default-feature run.
 | Command | Coverage |
 | --- | --- |
 | `kiln test` | Deterministic, default-feature binaries in the cacheable Bazel partition. |
-| `kiln test --service <pg14\|pg16\|pg18\|s3\|all>` | The PostgreSQL and MinIO suites, against a container this command starts and removes. |
+| `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or MinIO suite, against a container this command starts and removes. |
 | `scripts/dev-test.sh` | Classifies the diff like CI and runs only those local families. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
-`kiln test --service` runs the same `scripts/ci/store-tests.sh` suites the
-`Test Postgres store` and `Test S3 store` jobs run, on binaries built from the
-shared pool, and closes by printing the service-shaped cases it did **not**
-cover with the exact Cargo recipe for each. See
+`scripts/ci/with-service.sh` is the same wrapper the `Test Postgres store` and
+`Test S3 store` jobs run each suite inside, so a local run and CI take one code
+path: it starts the CI image on a free ephemeral port, waits for readiness,
+exports the connection settings, and removes the container on success, failure
+and Ctrl-C alike. Run it with no arguments to list the services, and end a
+local run reading the service-shaped cases it did **not** cover, each with the
+exact recipe. See
 [`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md).
 
 The remaining Cargo-owned set comprises Restate and `lash-runtime` unit tests;

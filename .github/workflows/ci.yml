@@ -441,7 +441,7 @@ jobs:
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py
-          python3 scripts/test_kiln_service_manifest.py
+          python3 scripts/test_with_service.py
           python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py
@@ -1336,10 +1336,20 @@ jobs:
     # all three matrix legs reuse one set of compiled outputs. Untrusted events
     # receive no credentials and keep the Cargo compile. See
     # scripts/ci/store-tests.sh.
+    #
+    # Each suite runs inside `scripts/ci/with-service.sh pg<major>`, which owns
+    # the image, the container environment, the readiness probe and the
+    # connection URL, publishes the database on a free ephemeral port of the
+    # loopback interface, and removes the container on every exit path. A
+    # developer runs the identical line on their own box, so there is one code
+    # path and one copy of these facts rather than a workflow `services:` block
+    # and a second local runner.
     environment: build-cache
+    # The require flag stays at job level so no step can lose it on its own; the
+    # connection URL cannot, because the port is chosen per step by
+    # `with-service.sh` and a job-level literal would be a lie.
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-      LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
       LASH_REQUIRE_POSTGRES: "1"
     # The stable matrix always supplies real PostgreSQL evidence on pull requests
     # and merge groups. The heavier PG16 store/perf coverage remains deferred to
@@ -1366,22 +1376,6 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}
-
-    services:
-      postgres:
-        image: postgres:${{ matrix.postgres }}-alpine
-        command: -c shared_preload_libraries=pg_stat_statements
-        env:
-          POSTGRES_USER: lash
-          POSTGRES_PASSWORD: lash
-          POSTGRES_DB: lash
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U lash -d lash"
-          --health-interval 2s
-          --health-timeout 2s
-          --health-retries 30
 
     steps:
       - name: Check out repository
@@ -1435,18 +1429,20 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
-      # Required mode makes a missing URL fail, so missing CI configuration
-      # cannot silently skip a lane.
+      # `with-service.sh` exports LASH_REQUIRE_POSTGRES=1 alongside the URL, so
+      # a database this step could not reach fails the lane instead of silently
+      # skipping it.
       - name: Test PostgreSQL catalog compatibility
         if: matrix.role == 'compatibility'
-        run: bash scripts/ci/store-tests.sh pg-catalog-compatibility
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-catalog-compatibility
 
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
-      # Required mode fails when the URL is unset, so missing CI configuration
-      # cannot silently skip this lane. `connect()` applies the crate's
-      # `schema.sql` artifact itself, so no separate migrate step. The same run
+      # `connect()` applies the crate's `schema.sql` artifact itself, so there
+      # is no separate migrate step. The same run
       # carries the `schema_shape` and `schema_drift` suites, which assert this
       # major produces the committed expectation artifact byte-for-byte and that
       # each seeded drift class is rejected by name.
@@ -1458,11 +1454,15 @@ jobs:
       # narrowing to --test conformance would silently drop attempt atomicity.
       - name: Test Postgres store (conformance and attempt atomicity)
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: bash scripts/ci/store-tests.sh pg-store
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-store
 
       - name: Test runtime pool-wait binding
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: bash scripts/ci/store-tests.sh pg-pool-wait
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-pool-wait
 
       # crates/lash currently has one Agent Scenario gated by the shared
       # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the
@@ -1470,20 +1470,26 @@ jobs:
       # focused instead of scheduling tests by parsing changed source literals.
       - name: Test runtime Postgres agent scenarios
         if: matrix.role == 'primary'
-        run: bash scripts/ci/store-tests.sh pg-agent-scenario
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-agent-scenario
 
       # The simulator's backend-fault scenarios against a real PostgreSQL. They
       # compare fault semantics, not catalog rendering, so they run once on the
       # primary major instead of three times.
       - name: Test simulator backend faults on Postgres
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: bash scripts/ci/store-tests.sh pg-sim-backend-faults
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-sim-backend-faults
 
       # The full differential compares backend semantics, not catalog rendering,
       # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: bash scripts/ci/store-tests.sh pg-cross-backend
+        run: |
+          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+            bash scripts/ci/store-tests.sh pg-cross-backend
         env:
           LASH_CROSS_BACKEND_CASES: "4"
 
@@ -1501,9 +1507,12 @@ jobs:
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.stores == 'true'
     # Trusted events build these binaries from the shared cache and execute
-    # them uncached against the MinIO this job starts. See
-    # scripts/ci/store-tests.sh.
+    # them uncached against the MinIO `scripts/ci/with-service.sh s3` starts for
+    # each step -- the same wrapper, image and bucket setup a developer runs on
+    # their own box. See scripts/ci/store-tests.sh.
     environment: build-cache
+    # The require flag stays at job level so no step can lose it on its own; the
+    # endpoint cannot, because the port is chosen per step by `with-service.sh`.
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       LASH_REQUIRE_MINIO: "1"
@@ -1560,41 +1569,15 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
-      - name: Start MinIO and create test bucket
-        run: |
-          # Pull both images up front with retries so a transient Docker Hub
-          # error fails the pull instead of leaving `docker run` to report
-          # "No such image" and take the whole trunk run red.
-          bash scripts/docker-pull-with-retry.sh quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-          bash scripts/docker-pull-with-retry.sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-          docker run -d --name lash-ci-minio \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            -p 9000:9000 \
-            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for attempt in $(seq 1 60); do
-            if docker run --rm --network host quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z \
-              alias set ci http://127.0.0.1:9000 minioadmin minioadmin; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              docker logs lash-ci-minio
-              exit 1
-            fi
-            sleep 1
-          done
-          docker run --rm --network host --entrypoint /bin/sh quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z -c \
-            'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
-
       - name: Test S3 store conformance
-        run: bash scripts/ci/store-tests.sh s3-store
+        run: |
+          bash scripts/ci/with-service.sh s3 -- \
+            bash scripts/ci/store-tests.sh s3-store
 
       - name: Test attachment blob-store differential
-        run: bash scripts/ci/store-tests.sh s3-attachment-differential
-
-      - name: Stop MinIO
-        if: always()
-        run: docker rm -f lash-ci-minio
+        run: |
+          bash scripts/ci/with-service.sh s3 -- \
+            bash scripts/ci/store-tests.sh s3-attachment-differential
 
       - name: Remove client credentials
         if: always() && needs.plan.outputs.bazel_trusted == 'true'
