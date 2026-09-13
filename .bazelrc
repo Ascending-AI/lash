@@ -12,7 +12,7 @@ common --lockfile_mode=error
 build:shared --remote_executor=grpc://127.0.0.1:45191
 build:shared --remote_cache=grpc://127.0.0.1:45191
 build:shared --remote_instance_name=kiln
-build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
+build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime-sha256-47a135193ff09d3f57a441099739fbc9162ff0b55d5b4393a279b7b003f36bac
 # Rust compile and link actions are large and mostly single-invocation: on
 # one core the workspace test binaries take 20-30 minutes each and sit on the
 # serial tail of the graph. Four cores per action lets rustc parallelise
