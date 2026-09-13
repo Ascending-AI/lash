@@ -302,19 +302,19 @@ battery-fast:
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked store_contract_state_machine_properties -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked session_graph_state_machine_properties -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance session_graph_state_machine_properties -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance session_graph_state_machine_properties_when_configured -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::store_contract_state_machine -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance store_contract_state_machine -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance store_contract_state_machine -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::session_graph_state_machine -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance session_graph_state_machine -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance session_graph_state_machine -- --nocapture
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
 runtime-persistence-soak cases='256':
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked runtime_persistence_state_machine_properties -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance runtime_persistence_state_machine_properties -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance runtime_persistence_state_machine_properties_when_configured -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::runtime_persistence_state_machine -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance runtime_persistence_state_machine -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance runtime_persistence_state_machine -- --nocapture
 
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.

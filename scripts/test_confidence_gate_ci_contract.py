@@ -755,6 +755,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             3,
         )
         self.assertIn("store-contract-soak cases='256':", justfile)
+        for leaf in (
+            "store_contract_state_machine",
+            "runtime_persistence_state_machine",
+            "session_graph_state_machine",
+        ):
+            self.assertIn(f"::tests::{leaf}", scenario_harnesses)
+            self.assertIn(
+                f"cargo test -p lash-internal-conformance --locked ::tests::{leaf}",
+                justfile,
+            )
+            for package in (
+                "lash-internal-sqlite-store",
+                "lash-internal-postgres-store",
+            ):
+                self.assertIn(
+                    f"cargo test -p {package} --locked --test conformance {leaf}",
+                    justfile,
+                )
+            self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
         self.assertEqual(
@@ -1757,7 +1776,7 @@ derive_mutation_jobs() {{
             # effect-host laws, including the await-event law that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
             'step "Native effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-conformance --locked conformance::tests::effect_host",
+            "run_cargo_tests -p lash-internal-conformance --locked ::tests::effect_host",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
