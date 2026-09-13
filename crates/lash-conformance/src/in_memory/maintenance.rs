@@ -1,39 +1,25 @@
 use std::sync::Arc;
-#[tokio::test]
-async fn in_memory_cross_owner_attachment_adoption_conformance() {
-    crate::cross_owner_attachment_adoption_conformance(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .await;
-}
 
-#[tokio::test]
-async fn in_memory_attachment_condemnation_enumeration_conformance() {
-    crate::attachment_condemnation_enumeration_conformance(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn in_memory_store_satisfies_the_maintenance_outcome_contract() {
-    crate::conformance::store_maintenance_outcome_contract(
-        "in-memory",
-        || {
-            Arc::new(crate::InMemorySessionStoreFactory::new())
-                as Arc<dyn crate::SessionStoreFactory>
-        },
-        // The in-memory sweep reads only process memory under the write
-        // transaction: it has no failure path to inject.
-        None,
+crate::attachment_adoption_tests!({
+    (
+        (),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
     )
-    .await;
-}
+});
 
-#[tokio::test]
-async fn in_memory_terminal_evidence_retention_conformance() {
-    crate::retention_conformance(std::sync::Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .await;
-}
+// No abandoned/condemnation recovery macros: in-memory attachments cannot cold-reopen.
+
+crate::store_maintenance_tests!({
+    ((), "in-memory", || {
+        Arc::new(crate::InMemorySessionStoreFactory::new()) as Arc<dyn crate::SessionStoreFactory>
+    })
+});
+
+// No failure-law invocation: the in-memory sweep has no injectable failure path.
+
+crate::retention_tests!({
+    (
+        (),
+        std::sync::Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    )
+});

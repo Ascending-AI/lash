@@ -14,14 +14,11 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
     assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
 }
 
-#[tokio::test]
-async fn explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse() {
+lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
-    lash_conformance::session_tool_access_durable_recovery(Arc::new(
-        SqliteSessionStoreFactory::new(dir.path()),
-    ))
-    .await;
-}
+    let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()));
+    (dir, factory)
+});
 
 #[test]
 fn session_execution_lease_identity_check_rejects_a_partial_write() {
@@ -329,16 +326,18 @@ async fn durable_state(store: &Store, session_id: &SessionId) -> lash_core::Runt
     state
 }
 
-#[tokio::test]
-async fn checkpoint_probe_skips_writes_for_deferred_head() {
+lash_conformance::checkpoint_claim_probe_tests!({
     let store = Arc::new(Store::memory().await.expect("open counter store"));
-    lash_conformance::checkpoint_claim_probe_transaction_counts(
-        Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-        &SessionId::from("sqlite-checkpoint-counter"),
-        || store.checkpoint_claim_counts(),
+    let counting_store = Arc::clone(&store);
+    (
+        (),
+        store as Arc<dyn RuntimePersistence>,
+        SessionId::from("sqlite-checkpoint-counter"),
+        move || counting_store.checkpoint_claim_counts(),
+        // An in-memory SQLite store needs no session teardown.
+        async {},
     )
-    .await;
-}
+});
 
 #[tokio::test]
 async fn checkpoint_component_statement_count_is_depth_invariant() {

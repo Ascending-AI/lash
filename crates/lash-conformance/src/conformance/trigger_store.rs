@@ -238,6 +238,7 @@ pub async fn trigger_occurrence_retention_failure_law(
         .expect("inspect state after injected failure");
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0].occurrence_id, occurrence_ids[1]);
+    fault.clear_occurrence_delete_failure().await;
 }
 
 /// Proves that reconciliation delete failure rolls the whole trigger-retention
