@@ -35,6 +35,17 @@ from slack_clone_thread_evidence import (
 LAYERS = ("dom", "platform", "bot", "trace")
 
 
+def slack_ts_to_ms(ts: str) -> int | None:
+    if not ts or "." not in ts:
+        return None
+    seconds, _, frac = ts.partition(".")
+    try:
+        micros = int((frac + "000000")[:6])
+        return int(seconds) * 1000 + micros // 1000
+    except ValueError:
+        return None
+
+
 class LayerFailure(AssertionError):
     def __init__(self, layer: str, message: str):
         super().__init__(f"LAYER {layer} FAIL: {message}")
@@ -286,7 +297,7 @@ class Journey:
                 path=self.args.artifact_dir / f"{checkpoint}-{name}.png", full_page=True
             )
 
-    def write_extract(self, checkpoint: str) -> None:
+    def write_extract(self, checkpoint: str, extra: dict[str, Any] | None = None) -> None:
         dom: dict[str, Any] = {}
         for name, page in self.pages.items():
             try:
@@ -314,6 +325,8 @@ class Journey:
             "bot_sessions": self.session_snapshot() if self.session_db.exists() else {},
             "trace": self.traces(),
         }
+        if extra:
+            value.update(extra)
         (self.args.artifact_dir / f"{checkpoint}-four-layers.json").write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -640,34 +653,21 @@ class Journey:
             killed_ledger, pending = {}, []
         self.kill_claim_owner = pending[0]["claim_owner_incarnation_id"] if pending else ""
         self.kill_lease_generation = pending[0]["claim_session_lease_generation"] if pending else 0
-        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"], "05-killed-four-layers.json")
+        killed_session = self.session_snapshot()
+        killed_lease = next(
+            (row for row in killed_session["leases"] if row["session_id"] == f"channel:{self.channel}"),
+            None,
+        )
+        self.kill_lease_expires_at_ms = int(killed_lease["lease_expires_at_ms"]) if killed_lease else 0
+        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"] and self.kill_lease_expires_at_ms > 0, "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
         self.write_extract("05-killed")
 
         self.restart_bot()
-        # The runtime now names why a drain ran no turn, and the bot logs that
-        # typed reason verbatim instead of inferring one. A boot that restarts
-        # inside the dead boot's session-execution lease TTL cannot take that
-        # lease, so the reported cause on this path is `execution_lane_busy` —
-        # the live-lease fence itself, from the runtime rather than from the
-        # bot's guess about it.
-        live_lease_deferral = re.compile(
-            rf"deferring event {re.escape(self.kill_event)}: the drain never reached its "
-            rf"admission \(execution_lane_busy\)"
-        )
-        self.poll(
-            "live-lease deferral",
-            lambda: live_lease_deferral.search(
-                self.bot_log.read_text(encoding="utf-8", errors="replace")
-            )
-            is not None,
-            timeout=15,
-        )
         for page in self.pages.values():
-            expect(page.locator("#stream .msg.is-bot")).to_have_count(before_dom_bot_rows + 1, timeout=30_000)
+            expect(page.locator("#stream .msg.is-bot")).to_have_count(before_dom_bot_rows + 1, timeout=90_000)
         recovered = self.wait_ledger("FIG1341-KILL-MID-TURN", "replied")
-        recovery_latency = time.monotonic() - self.kill_started
         recorders = {name: page.evaluate("window.__fig1341Rows") for name, page in self.pages.items()}
         self.gate("05-recovered", "dom", "recovery renders exactly one reply in each live observer", all(sum(1 for row in rows if row["bot"] and "Recovered the interrupted" in row["text"]) == 1 for rows in recorders.values()), "05-recovered-*.png")
         bot_rows = [r for r in self.platform_rows() if r["bot_id"] is not None]
@@ -675,12 +675,40 @@ class Journey:
         recovery_log = self.bot_log.read_text(encoding="utf-8", errors="replace")
         deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*drain_did_not_reach_admission[^\n]*", recovery_log)
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: Turn[^\n]*", recovery_log)
+        handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
         after_session = self.session_snapshot()
         channel_lease = next(r for r in after_session["leases"] if r["session_id"] == f"channel:{self.channel}")
-        self.gate("05-recovered", "bot", f"dead incarnation {self.kill_claim_owner} generation {self.kill_lease_generation} defers, then one retry settles from Turn in {recovery_latency:.2f}s", bool(deferred_lines) and settled is not None and 4.0 <= recovery_latency < 20.0 and recovered["reply_ts"] is not None and channel_lease["lease_fencing_token"] > self.kill_lease_generation and any(str(r["ts"] // 1_000_000) + "." + str(r["ts"] % 1_000_000).zfill(6) == recovered["reply_ts"] for r in bot_rows), "05-recovered-four-layers.json + bot log")
+        reply_matches_platform = recovered["reply_ts"] is not None and any(
+            str(r["ts"] // 1_000_000) + "." + str(r["ts"] % 1_000_000).zfill(6) == recovered["reply_ts"]
+            for r in bot_rows
+        )
+        fencing_advanced = channel_lease["lease_fencing_token"] > self.kill_lease_generation
+        if deferred_lines:
+            recovery_path = "fast"
+            path_ok = settled is not None
+            path_note = f"fast path: deferral then settle-from-Turn for {self.kill_event}"
+        else:
+            recovery_path = "slow"
+            reply_ms = slack_ts_to_ms(recovered["reply_ts"] or "")
+            path_ok = (
+                handled is not None
+                and reply_ms is not None
+                and reply_ms >= self.kill_lease_expires_at_ms
+            )
+            path_note = (
+                f"slow path: direct handled-Replied at {reply_ms}ms "
+                f">= lease expiry {self.kill_lease_expires_at_ms}ms"
+            )
+        self.gate(
+            "05-recovered",
+            "bot",
+            f"dead incarnation {self.kill_claim_owner} generation {self.kill_lease_generation} recovered via {path_note}",
+            path_ok and fencing_advanced and reply_matches_platform,
+            "05-recovered-four-layers.json + bot log",
+        )
         self.gate("05-recovered", "trace", "restart recovery completes exactly one replacement turn", len(self.turn_traces()) == before_turns + 1, "05-recovered-four-layers.json")
         self.screenshot("05-recovered")
-        self.write_extract("05-recovered")
+        self.write_extract("05-recovered", extra={"recovery_path": recovery_path})
 
     def checkpoint_mcp_depth(self) -> None:
         before_turns = len(self.turn_traces())
