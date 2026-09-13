@@ -28,7 +28,7 @@ every configured backend. Its `0*`-prefixed artifacts are the truth for this jud
 runbook.
 
 **No real tokens.** Turns run against a deterministic in-process provider returning one
-fixed Lashlang program, plus a variant of it that parks forever. Do not configure a live
+fixed TypeScript program, plus a variant of it that parks forever. Do not configure a live
 provider for this scenario.
 
 **Fixture honesty.** The parked turn is a provider that never returns, which is the real

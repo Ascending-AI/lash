@@ -77,7 +77,7 @@ tokens containing `INJECT`.
 
 ## Phase 1 — Establish an in-flight turn
 
-Send a task that requires this exact multi-iteration shape: first use Lashlang `sleep` for
+Send a task that requires this exact multi-iteration shape: first use TypeScript `sleep` for
 15 seconds without calling a tool, then call the Parallel web-search MCP tool for one side
 of a current comparison, call it for the other side in a later iteration (do not batch the
 searches), and only then answer. If provider evidence does not show the initial sleep before

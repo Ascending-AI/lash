@@ -93,7 +93,7 @@ This table is binding. Browser dispatch names come from the in-page
 | `assistant_prose_delta` then committed assistant | provisional `message assistant`, replaced by one committed `message assistant` | durable; no provisional duplicate |
 | `reasoning_delta` | one `reasoning` disclosure | `/api/state.transcript.type == "reasoning"`; survives reload |
 | `code_block_started` | one `code-block` disclosure in running state | same element settles; never a second code row |
-| successful `code_block_completed` | the same `code-block`, summary `lashlang completed` | `/api/state.transcript.type == "code_block"`; survives reload |
+| successful `code_block_completed` | the same `code-block`, summary `typescript completed` | `/api/state.transcript.type == "code_block"`; survives reload |
 | failing `code_block_completed` | the same `code-block fail`, with the exact code error | durable code block; survives reload |
 | `tool_call_started` | one `tool pending` child **inside its code block** | completion updates it in place by `call_id`, or by the deterministic turn/name/arguments/graph/parent fallback when no id exists |
 | successful/failed `tool_call_completed` | the same nested child becomes `tool` / `tool fail` with `completed` / `failed` badge | reload has an honest source-operation/outcome summary for each retained call, not the live call identity or details |
@@ -194,7 +194,7 @@ Any DOM/API/store/trace disagreement is an Abort/RCA under the shared rules.
 Boot `rendered-surface`; submit any text. Poll the hook for `reasoning_delta`, capture the visible
 `reasoning` disclosure as `10-reasoning-live.png`, then poll through
 `code_block_started`, `code_block_completed`, and `final_value` to settled/idle. Require exactly
-one `reasoning`, one successful `code-block` whose body contains `lashlang completed`, and one
+one `reasoning`, one successful `code-block` whose body contains `typescript completed`, and one
 assistant row containing the structured marker `FIG-1350 deterministic final value`. There is
 no separate value row. Save `11-code-ok-final-settled.png` and the four `11-*` extracts.
 

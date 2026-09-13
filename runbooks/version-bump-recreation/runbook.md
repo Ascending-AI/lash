@@ -31,7 +31,7 @@ assertion holds.
 Its `0*`-prefixed artifacts are the backend truth for this judged runbook.
 
 **No real tokens.** The companion's turns run against a deterministic in-process provider
-that returns one fixed Lashlang program. Do not configure a live provider for this
+that returns one fixed TypeScript program. Do not configure a live provider for this
 scenario.
 
 **Fixture honesty.** The pre-bump store is created by the current binary and then stamped

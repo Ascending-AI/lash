@@ -5,14 +5,14 @@ These three live-model scenarios belong to the scripted deterministic layer gove
 then the checked-in shell oracle alone decides pass or fail. They are not browser journeys
 and receive no agent judgement.
 
-Run the six-row gate with:
+Run the three-row gate with:
 
 ```sh
 just rlm-smoke-e2e
 ```
 
-The runner executes every scenario once with `LASH_RUNBOOK_DIALECT=lashlang` and once with
-`LASH_RUNBOOK_DIALECT=typescript`. Every row gets a fresh workspace copy, durable data
+The runner executes every scenario once with `LASH_RUNBOOK_DIALECT=typescript`, the only
+RLM dialect ([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
 directory, session id, reserved port, trace offset, and artifact directory. The configured
 driver model is recorded separately from provider-reported served-model evidence.
 

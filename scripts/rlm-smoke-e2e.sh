@@ -36,7 +36,7 @@ sandbox_image="${RLM_SMOKE_SANDBOX_IMAGE:-alpine:3.22}"
 docker pull "$sandbox_image" >"$artifact_root/sandbox-image.log" 2>&1
 
 scenarios=(file-edit-bugfix missing-helper-file config-contract-edit)
-dialects=(lashlang typescript)
+dialects=(typescript)
 model="${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}"
 run_nonce="$(date +%s)-$$"
 row_index=0

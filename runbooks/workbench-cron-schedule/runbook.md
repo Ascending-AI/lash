@@ -14,7 +14,7 @@ as exactly one new agent row. Then prove the same registration can be disabled, 
 under the same identity, and deleted without a late or doubled tick.
 
 **Model-judged registration.** The schedule exists only if the agent authors and executes
-the Lashlang registration. The sidebar's **try scheduling** card is explanatory and has no
+the TypeScript registration. The sidebar's **try scheduling** card is explanatory and has no
 action. If the first prompt yields no valid registration, save the first turn's evidence
 and make one sharper retry. If that retry also yields no valid registration, mark the run
 **VOID (model registration)**, not product FAIL, and teardown. Once registration exists,

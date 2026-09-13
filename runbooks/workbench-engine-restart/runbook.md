@@ -81,7 +81,7 @@ ids to agree. Screenshot `00-ready.png`.
 
 ## Phase 1 — Park one exact turn in durable work
 
-Submit a shape-pinned prompt: ask the agent to execute one Lashlang block that declares
+Submit a shape-pinned prompt: ask the agent to execute one TypeScript cell that declares
 and starts a named process whose body sleeps for at least 60 seconds, then
 foreground-awaits the returned handle. Explicitly require this **spawned process-await**
 shape; ordinary tool work or a top-level turn-scoped sleep does not qualify.
@@ -106,7 +106,7 @@ to produce the pinned shape.
 ### Named variant — turn-scoped suspended sleep
 
 Run the complete scenario a second time with fresh Phase 0 identities and variant-labeled
-artifacts. In its Phase 1 prompt, require one Lashlang block whose top level directly
+artifacts. In its Phase 1 prompt, require one TypeScript cell whose top level directly
 sleeps for at least 60 seconds and then returns a short result. Explicitly forbid a
 process declaration, `start`, handle, or process `await`. This variant is admitted only
 when the same exact-turn `exec_code_started` gate passes, its recorded block has the

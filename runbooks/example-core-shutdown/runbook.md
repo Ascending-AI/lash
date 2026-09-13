@@ -36,7 +36,7 @@ The required scorecard rows are:
 | `workbench-bind-error` | A post-build bind failure remains the primary error and still produces exactly one factory marker. |
 
 The Workbench signal closes its host-owned HTTP producer streams so Axum can
-finish draining. It does not cancel an active turn or introduce a durable-turn
+complete draining. It does not cancel an active turn or introduce a durable-turn
 policy.
 
 Agent-service emits no trace record until a turn runs. These token-free rows

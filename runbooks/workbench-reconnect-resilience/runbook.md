@@ -210,7 +210,7 @@ Screenshot `01-baseline-live.png`; save `01-baseline-{dom,state,store,trace}.jso
 
 **2a — put a turn in flight and start watching.** Submit a turn that will stay in flight long
 enough to be interrupted — ask the agent to do a small amount of real work before answering
-(e.g. sleep a few seconds inside one Lashlang block, then answer with a unique marker
+(e.g. sleep a few seconds inside one TypeScript cell, then answer with a unique marker
 `FIG991-INFLIGHT-<run-id>`). Gate the `running` pill and exactly one
 `/api/state.active_turns` address for `<S>`, and record that exact turn id. Start the in-page
 **phase sampler** (~150ms into a timeline) **before** the kill — per golden rule 3 the

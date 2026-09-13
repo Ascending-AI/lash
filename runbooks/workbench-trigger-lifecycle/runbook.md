@@ -25,7 +25,7 @@ gate is
 [`trigger_lifecycle.rs`](../../examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs).
 
 **Real tokens.** OpenRouter authors and runs the trigger process. No exact model prose or
-exact generated Lashlang is an answer key; the trigger API, inbox API, active-turn API,
+exact generated TypeScript is an answer key; the trigger API, inbox API, active-turn API,
 and work registry are.
 
 ## Scenario-specific golden rules
@@ -172,7 +172,7 @@ In **accounts**, add `Work` and `Personal`. Poll `GET /api/accounts` until the `
 
 ## Phase 1 — Register one forwarding concierge
 
-In chat, ask for the outcome, not Lashlang: register one trigger named
+In chat, ask for the outcome, not TypeScript source: register one trigger named
 `lifecycle-forwarder` that copies each message received by `work` into `personal`, with
 an account filter so the personal emission is a no-op. Wait for the turn to settle.
 

@@ -69,7 +69,7 @@ request must target A or B explicitly.
 
 In each tab, ask for the same outcome: register a trigger named `shared-blue-watch` for
 the Blue host button that starts a durable process labeled `mirror_job` and records the
-button occurrence (Lashlang process identifiers cannot contain hyphens, so the rendered
+button occurrence (process identifiers cannot contain hyphens, so the rendered
 process label is `mirror_job`). Submit the two registration turns concurrently.
 
 Poll both tabs until idle. Save `GET /api/triggers?session_id=A` and the B equivalent as

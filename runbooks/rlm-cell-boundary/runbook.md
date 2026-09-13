@@ -5,7 +5,7 @@
 
 **Purpose.** Prove that a live Workbench RLM turn sends no provider stop
 sequences, records stop-sequence disposition honestly (`not_requested`), accepts
-the first complete Lashlang cell, and never executes content after that boundary.
+the first complete TypeScript cell, and never executes content after that boundary.
 
 ## Scenario-specific golden rules
 
@@ -55,7 +55,7 @@ session id disagree.
 
 ## Phase 1 — Exercise a first-cell boundary
 
-Submit a prompt that asks the RLM to compute a small value in one Lashlang cell
+Submit a prompt that asks the RLM to compute a small value in one TypeScript cell
 and explicitly asks it to explain another possible computation after the code.
 Before capturing evidence, explicitly toggle the workbench rail's `filterForeground`
 control on so foreground activity is rendered. Poll until the turn settles, then
