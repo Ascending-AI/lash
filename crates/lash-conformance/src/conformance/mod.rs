@@ -7,7 +7,7 @@
 //! can't drift from production behavior.
 //!
 //! Reopen and recovery laws use distinct outer handles over one substrate.
-//! [`runtime_persistence_recovery_laws`] certifies store behavior only across
+//! The runtime-persistence recovery laws certify store behavior only across
 //! claim, checkpoint, commit, and settlement boundaries. The distinct
 //! [`turn_crash_matrix_level_1`] suite executes a real scripted turn through
 //! conformance-owned store, provider, and effect-controller decorators; its
@@ -77,6 +77,64 @@ mod trigger_store;
 mod turn_control;
 mod turn_crash_matrix;
 mod wake_delivery;
+
+/// Implementation paths used only by exported conformance registration macros.
+#[doc(hidden)]
+pub mod registration_macro_support {
+    pub use super::artifact_store::*;
+    pub use super::attachment_adoption::*;
+    pub use super::attachment_owner::*;
+    pub use super::attachment_store::*;
+    pub use super::await_event_cold::*;
+    pub use super::direct_turn_acceptance::*;
+    pub use super::durable_queued_drain_wait::*;
+    pub use super::effect_group_drain::*;
+    pub use super::effect_group_host::*;
+    pub use super::effect_host::*;
+    pub use super::fence_integrity::*;
+    pub use super::graph_integrity::*;
+    pub use super::hostile_input::*;
+    pub use super::lineage::*;
+    pub use super::live_replay::*;
+    pub use super::observer_intent::*;
+    pub use super::process_change_feed::*;
+    pub use super::process_change_horizon::*;
+    pub use super::process_continuation_store::*;
+    pub use super::process_event_append_arms::*;
+    pub use super::process_filters::*;
+    pub use super::process_prune_reclaim::*;
+    pub use super::process_references::*;
+    pub use super::process_registry::status_filters::*;
+    pub use super::process_registry::*;
+    pub use super::process_trigger_retention::*;
+    pub use super::retention::*;
+    pub use super::runtime_persistence::*;
+    pub use super::runtime_persistence_state_machine::*;
+    pub use super::session_delete_blob_reclaim::*;
+    pub use super::session_execution_lease_renewal::*;
+    pub use super::session_graph_append::*;
+    pub use super::session_graph_state_machine::*;
+    pub use super::session_store_factory::*;
+    pub use super::session_store_factory_failure_evidence::*;
+    pub use super::store_contract_state_machine::*;
+    pub use super::store_maintenance_outcome::*;
+    pub use super::store_recovery::*;
+    pub use super::tool_access_persistence::*;
+    pub use super::tool_intent_runtime::*;
+    pub use super::trigger_store::*;
+    pub use super::turn_control::*;
+    pub use super::turn_crash_matrix::*;
+    pub use super::wake_delivery::*;
+    pub use lash_core::ProcessRegistry;
+
+    pub fn effect_group_suite_executors() -> std::sync::Arc<dyn crate::GroupExecutors> {
+        super::effect_group_host::suite_executors()
+    }
+
+    pub fn effect_group_test_prefix(label: &str) -> String {
+        format!("{label}-{}", uuid::Uuid::new_v4().simple())
+    }
+}
 
 pub use artifact_store::*;
 pub use attachment_owner::*;
@@ -163,16 +221,12 @@ mod tests {
         runtime: Arc<crate::InMemorySessionStore>,
     }
 
-    struct InMemoryTriggerOccurrenceRetentionFaultInjector {
-        store: Arc<crate::InMemoryTriggerStore>,
-    }
-
-    struct InMemoryLegacyTriggerMutationReceiptInjector {
+    struct InMemoryTriggerFaultFixture {
         store: Arc<crate::InMemoryTriggerStore>,
     }
 
     #[async_trait::async_trait]
-    impl LegacyTriggerMutationReceiptInjector for InMemoryLegacyTriggerMutationReceiptInjector {
+    impl LegacyTriggerMutationReceiptInjector for InMemoryTriggerFaultFixture {
         async fn insert_legacy_receipt(
             &self,
             operation_id: &str,
@@ -194,7 +248,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl TriggerOccurrenceRetentionFaultInjector for InMemoryTriggerOccurrenceRetentionFaultInjector {
+    impl TriggerOccurrenceRetentionFaultInjector for InMemoryTriggerFaultFixture {
         async fn fail_occurrence_delete(&self, occurrence_id: &str) {
             self.store
                 .fail_occurrence_delete_for_testing(occurrence_id.to_string());
@@ -219,28 +273,23 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn in_memory_graph_integrity_conformance() {
-        graph_integrity_conformance(|_| async {
+    crate::graph_integrity_tests!({
+        ((), |_| async {
             let runtime = Arc::new(crate::InMemorySessionStore::new());
             GraphIntegrityHandles {
                 runtime: Arc::clone(&runtime) as Arc<dyn crate::RuntimePersistence>,
                 injector: Arc::new(InMemoryGraphIntegrityInjector { runtime }),
             }
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_session_read_view_conformance() {
+    crate::session_read_view_tests!({
         let clock = Arc::new(crate::testing::TestClock::new(1_800_000_000_000));
         let factory = Arc::new(crate::InMemorySessionStoreFactory::with_clock(
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
         ));
-        session_store_factory_mid_stream_failure_evidence(factory.clone(), || clock.advance(1))
-            .await;
-        session_store_factory_read_session(factory).await;
-    }
+        ((), factory, move || clock.advance(1))
+    });
 
     #[tokio::test]
     async fn in_memory_leafless_session_ignores_populated_sibling_catalog() {
@@ -415,9 +464,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn in_memory_fence_integrity_conformance() {
-        fence_integrity_conformance(|_| async {
+    crate::fence_integrity_tests!({
+        ((), |_| async {
             let runtime = Arc::new(crate::InMemorySessionStore::new());
             let triggers = Arc::new(crate::InMemoryTriggerStore::default());
             FenceIntegrityHandles {
@@ -426,86 +474,66 @@ mod tests {
                 injector: Arc::new(InMemoryFenceIntegrityInjector { runtime, triggers }),
             }
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_attachment_store_satisfies_conformance() {
-        attachment_store(
+    // No signed-counter invocation: that law is specific to SQL signed-write conversion.
+
+    crate::attachment_store_tests!({
+        (
+            (),
             || Arc::new(crate::InMemoryAttachmentStore::new()) as Arc<dyn AttachmentStore>,
             AttachmentStorePersistence::Ephemeral,
         )
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_process_execution_env_store_satisfies_conformance() {
-        process_execution_env_store(|| {
+    crate::process_execution_env_store_tests!({
+        ((), || {
             Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
                 as Arc<dyn crate::ProcessExecutionEnvStore>
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_process_continuation_store_satisfies_conformance() {
+    crate::process_continuation_store_tests!({
         let storage = Arc::new(crate::TestLocalProcessRegistry::default());
         let registry = Arc::clone(&storage) as Arc<dyn crate::ProcessRegistry>;
         let store = storage as Arc<dyn crate::ProcessContinuationStore>;
-        process_continuation_store(registry, store).await;
-    }
+        ((), registry, store)
+    });
 
-    #[tokio::test]
-    async fn in_memory_trigger_store_satisfies_conformance() {
-        // Independent in-memory instances cannot reopen shared state, so the
-        // durable-only `trigger_store_reopenable` vector is genuinely N/A.
-        trigger_store(|| {
+    crate::trigger_store_tests!({
+        ((), || {
             Arc::new(crate::InMemoryTriggerStore::default()) as Arc<dyn crate::TriggerStore>
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_legacy_ownerless_trigger_receipt_is_retained() {
+    // No reopenable trigger-store invocation: independent in-memory instances share no state.
+    // No occurrence-listing corruption invocation: the in-memory store retains typed records.
+
+    crate::trigger_retention_fault_tests!({
         let store = Arc::new(crate::InMemoryTriggerStore::default());
-        let injector = InMemoryLegacyTriggerMutationReceiptInjector {
+        let fixture = Arc::new(InMemoryTriggerFaultFixture {
             store: Arc::clone(&store),
-        };
-        legacy_ownerless_trigger_receipt_is_retained_law(store, &injector).await;
-    }
+        });
+        (
+            (),
+            store as Arc<dyn crate::TriggerStore>,
+            Arc::clone(&fixture) as Arc<dyn LegacyTriggerMutationReceiptInjector>,
+            fixture as Arc<dyn TriggerOccurrenceRetentionFaultInjector>,
+        )
+    });
 
-    #[tokio::test]
-    async fn in_memory_trigger_occurrence_retention_failure_is_not_laundered() {
-        let store = Arc::new(crate::InMemoryTriggerStore::default());
-        let fault = InMemoryTriggerOccurrenceRetentionFaultInjector {
-            store: Arc::clone(&store),
-        };
-        trigger_occurrence_retention_failure_law(store, &fault).await;
-    }
-
-    #[tokio::test]
-    async fn in_memory_trigger_retention_reconciliation_is_transactional() {
-        let store = Arc::new(crate::InMemoryTriggerStore::default());
-        let fault = InMemoryTriggerOccurrenceRetentionFaultInjector {
-            store: Arc::clone(&store),
-        };
-        trigger_retention_reconciliation_failure_law(store, &fault).await;
-    }
-
-    #[tokio::test]
-    async fn in_memory_live_replay_store_satisfies_conformance() {
-        live_replay_store(|| {
-            Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>
-        })
-        .await;
-        live_replay_store_capacity_trim(|| {
-            Arc::new(crate::InMemoryLiveReplayStore::with_bounds(
-                1,
-                Duration::from_secs(120),
-            )) as Arc<dyn LiveReplayStore>
-        })
-        .await;
-        live_replay_store_ttl_trim(
+    crate::live_replay_tests!({
+        let original = crate::InMemoryLiveReplayStore::default();
+        let preserved = original.reopen_preserving_history();
+        (
+            (),
+            || Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
+            || {
+                Arc::new(crate::InMemoryLiveReplayStore::with_bounds(
+                    1,
+                    Duration::from_secs(120),
+                )) as Arc<dyn LiveReplayStore>
+            },
             || {
                 Arc::new(crate::InMemoryLiveReplayStore::with_bounds(
                     16,
@@ -513,30 +541,16 @@ mod tests {
                 )) as Arc<dyn LiveReplayStore>
             },
             Duration::from_millis(20),
+            (
+                Arc::new(original) as Arc<dyn LiveReplayStore>,
+                Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
+                Arc::new(preserved) as Arc<dyn LiveReplayStore>,
+            ),
         )
-        .await;
-        let original = crate::InMemoryLiveReplayStore::default();
-        let preserved = original.reopen_preserving_history();
-        incarnation_change_invalidates_cursor(
-            Arc::new(original) as Arc<dyn LiveReplayStore>,
-            Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
-            Arc::new(preserved) as Arc<dyn LiveReplayStore>,
-        )
-        .await;
-    }
+    });
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_process_registry_satisfies_conformance() {
-        process_registry(|| {
-            Arc::new(crate::TestLocalProcessRegistry::default())
-                as Arc<dyn crate::ConformanceProcessRegistry>
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_process_trigger_retention_satisfies_conformance() {
-        process_trigger_retention(|| async {
+    crate::process_trigger_retention_tests!({
+        ((), || async {
             let triggers = Arc::new(crate::InMemoryTriggerStore::default());
             let registry = Arc::new(crate::TestLocalProcessRegistry::default());
             let sessions = Arc::new(crate::InMemorySessionStoreFactory::default());
@@ -546,12 +560,10 @@ mod tests {
                 sessions,
             }
         })
-        .await;
-    }
+    });
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_store_contract_state_machine_properties() {
-        store_contract_state_machine("in-memory", |_, _| async {
+    crate::store_contract_state_machine_tests!({
+        ((), "in-memory", |_, _| async {
             StoreContractHandles {
                 registry: Arc::new(crate::TestLocalProcessRegistry::default())
                     as Arc<dyn ProcessRegistry>,
@@ -559,12 +571,10 @@ mod tests {
                     as Arc<dyn RuntimePersistence>,
             }
         })
-        .await;
-    }
+    });
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_runtime_persistence_state_machine_properties() {
-        runtime_persistence_state_machine("in-memory", |_| async {
+    crate::runtime_persistence_state_machine_tests!({
+        ((), "in-memory", |_| async {
             RuntimePersistenceStateMachineHandles::create(
                 Arc::new(crate::InMemorySessionStoreFactory::new()),
                 false,
@@ -572,32 +582,27 @@ mod tests {
             .await
             .expect("create in-memory runtime-persistence property handles")
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_complete_runtime_checkpoint_component_set_survives_cold_reopens() {
+    crate::checkpoint_component_reopen_tests!({
         let substrate =
             Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn RuntimePersistence>;
-        Box::pin(
-            complete_runtime_checkpoint_component_set_survives_cold_reopens(move || {
-                crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(Arc::clone(
-                    &substrate,
-                ))
-            }),
-        )
-        .await;
-    }
+        ((), move || {
+            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(Arc::clone(
+                &substrate,
+            ))
+        })
+    });
 
-    #[tokio::test]
-    async fn in_memory_runtime_persistence_recovery_laws() {
+    crate::store_recovery_tests!({
         let clock = Arc::new(crate::testing::TestClock::new(10_000));
         let store_clock = Arc::clone(&clock);
         let substrates = Arc::new(Mutex::new(
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
-        runtime_persistence_recovery_laws(
-            move |scenario| {
+        (
+            (),
+            move |scenario: &str| {
                 let mut substrates = substrates.lock_recover();
                 let store_clock = Arc::clone(&store_clock);
                 let substrate =
@@ -610,34 +615,17 @@ mod tests {
             },
             StoreRecoveryLeaseTiming::controlled(move |duration_ms| clock.advance(duration_ms)),
         )
-        .await;
-    }
+    });
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_real_turn_crash_trace_is_current() {
+    crate::turn_crash_matrix_tests!({
         let substrates = Arc::new(Mutex::new(
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
-        Box::pin(turn_crash_trace_drift_check(move |scenario| {
-            let mut substrates = substrates.lock_recover();
-            let substrate = Arc::clone(
-                substrates
-                    .entry(scenario.to_string())
-                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
-            );
-            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
-        }))
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_real_turn_crash_matrix() {
-        let substrates = Arc::new(Mutex::new(
-            BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
-        ));
-        Box::pin(turn_crash_matrix_level_1(
-            move |scenario| {
-                let mut substrates = substrates.lock_recover();
+        let make_substrates = Arc::clone(&substrates);
+        (
+            substrates,
+            move |scenario: &str| {
+                let mut substrates = make_substrates.lock_recover();
                 let substrate = Arc::clone(
                     substrates
                         .entry(scenario.to_string())
@@ -645,22 +633,18 @@ mod tests {
                 );
                 crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
             },
-            |_| ConformanceInvocation::native(),
-        ))
-        .await;
-    }
+            |_: &str| ConformanceInvocation::native(),
+        )
+    });
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn in_memory_session_graph_state_machine_properties() {
-        Box::pin(session_graph_state_machine("in-memory", |_| async {
+    crate::session_graph_state_machine_tests!({
+        ((), "in-memory", |_| async {
             Arc::new(crate::InMemorySessionStoreFactory::new())
                 as Arc<dyn crate::SessionStoreFactory>
-        }))
-        .await;
-    }
+        })
+    });
 
-    #[tokio::test]
-    async fn in_memory_wake_delivery_crash_matrix() {
+    crate::wake_delivery_crash_tests!({
         let clock = Arc::new(crate::testing::TestClock::new(1_800_000_000_000));
         let registry = Arc::new(
             crate::TestLocalProcessRegistry::default()
@@ -678,40 +662,46 @@ mod tests {
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(
             registry.clone() as Arc<dyn ProcessRegistry>
         ));
-        Box::pin(wake_delivery_crash_matrix(
+        (
+            (),
             factory,
             registry,
             clock,
             process_work,
             ProcessTerminalWaitWitness::Direct,
-        ))
-        .await;
-    }
+            || async {},
+            || async {},
+        )
+    });
 
-    #[tokio::test]
-    async fn in_memory_wake_delivery_ordering_group_conformance() {
+    crate::wake_delivery_ordering_tests!({
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(
             Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
         ));
-        wake_delivery_ordering_group_conformance(
+        (
+            (),
             Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
             registry as Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
             process_work,
             ProcessTerminalWaitWitness::Direct,
+            || async {},
+            || async {},
         )
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_session_store_factory_satisfies_conformance() {
+    crate::session_store_factory_tests!({
         let unbound = crate::InMemorySessionStore::default();
-        crate::conformance::session_store_factory("in-memory", Some(Arc::new(unbound)), || {
-            Arc::new(crate::InMemorySessionStoreFactory::new())
-                as Arc<dyn crate::store::ConformanceSessionStoreFactory>
-        })
-        .await;
-    }
+        (
+            (),
+            "in-memory",
+            Some(Arc::new(unbound) as Arc<dyn crate::store::StoreMaintenance>),
+            || {
+                Arc::new(crate::InMemorySessionStoreFactory::new())
+                    as Arc<dyn crate::store::ConformanceSessionStoreFactory>
+            },
+        )
+    });
 
     #[tokio::test]
     async fn session_config_settlement_timeout_is_typed() {
@@ -728,46 +718,49 @@ mod tests {
         Box::pin(session_store_factory::superseded_config_settlement_adopts_the_newer_head()).await;
     }
 
-    #[tokio::test]
-    async fn in_memory_session_delete_blob_reclaim_conformance() {
-        session_delete_blob_reclaim_conformance("in-memory", || {
+    crate::session_delete_blob_reclaim_tests!({
+        ((), "in-memory", || {
             let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
             SessionDeleteBlobHandles {
                 factory: Arc::clone(&factory) as Arc<dyn crate::SessionStoreFactory>,
                 probe: factory as Arc<dyn SessionDeleteBlobProbe>,
             }
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_fresh_session_admission_returns_created() {
-        fresh_session_admission_returns_created(|_| {
+    crate::fresh_session_admission_tests!({
+        ((), |_session_id: &str| {
             Arc::new(crate::InMemorySessionStore::default()) as Arc<dyn crate::RuntimePersistence>
         })
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn in_memory_fork_observer_intent_transient_failure_conformance() {
-        fork_observer_intent_transient_failure(Arc::new(crate::InMemorySessionStoreFactory::new()))
-            .await;
-    }
+    crate::observer_intent_tests!({
+        (
+            (),
+            Arc::new(crate::InMemorySessionStoreFactory::new())
+                as Arc<dyn crate::SessionStoreFactory>,
+        )
+    });
 
-    #[tokio::test]
-    async fn in_memory_session_graph_append_branch_liveness() {
-        session_graph_append_branch_liveness(Arc::new(crate::InMemorySessionStoreFactory::new())
-            as Arc<dyn crate::SessionStoreFactory>)
-        .await;
-    }
+    crate::session_graph_append_tests!({
+        (
+            (),
+            Arc::new(crate::InMemorySessionStoreFactory::new())
+                as Arc<dyn crate::SessionStoreFactory>,
+        )
+    });
 
-    #[tokio::test]
-    async fn in_memory_session_store_uses_injected_clock_for_expiry() {
+    crate::runtime_persistence_clock_tests!({
         let clock = Arc::new(crate::testing::TestClock::new(10_000));
         let store = Arc::new(crate::InMemorySessionStore::with_clock(clock.clone()))
             as Arc<dyn crate::RuntimePersistence>;
-        runtime_persistence_clock_expiry(store, |duration_ms| clock.advance(duration_ms)).await;
-    }
+        (
+            (),
+            store,
+            move |duration_ms| clock.advance(duration_ms),
+            |_store| async {},
+        )
+    });
 
     struct InMemorySessionExecutionLeaseRenewalZeroRowInjector {
         store: Arc<crate::InMemorySessionStore>,
@@ -786,24 +779,40 @@ mod tests {
         async fn disarm(&self) {}
     }
 
-    #[tokio::test]
-    async fn in_memory_zero_row_session_execution_lease_renewal_is_refused() {
+    crate::session_execution_lease_renewal_tests!({
         let store = Arc::new(crate::InMemorySessionStore::new());
-        session_execution_lease_zero_row_renewal_is_refused(
+        (
+            (),
             SessionExecutionLeaseRenewalZeroRowHandles {
                 store: Arc::clone(&store) as Arc<dyn RuntimePersistence>,
                 injector: Arc::new(InMemorySessionExecutionLeaseRenewalZeroRowInjector { store }),
             },
         )
-        .await;
-    }
+    });
 
-    #[tokio::test]
-    async fn native_effect_host_satisfies_conformance() {
-        effect_host(|| Arc::new(crate::NativeEffectHost::default())).await;
-        effect_host_await_events(|| Arc::new(crate::NativeEffectHost::default())).await;
-        turn_work_driver(Arc::new(crate::NativeEffectHost::default())).await;
-    }
+    crate::effect_host_tests!({
+        ((), || {
+            Arc::new(crate::NativeEffectHost::default()) as Arc<dyn crate::EffectHost>
+        })
+    });
+
+    // No replay/retirement/fencing macros: the native host owns no durable journal.
+
+    crate::effect_host_await_event_tests!({
+        ((), || {
+            Arc::new(crate::NativeEffectHost::default()) as Arc<dyn crate::EffectHost>
+        })
+    });
+
+    // No cold-AwaitEvent invocation: the native host has no durable reopen boundary.
+
+    crate::turn_work_driver_tests!({
+        (
+            (),
+            Arc::new(crate::NativeEffectHost::default()) as Arc<dyn crate::EffectHost>,
+            crate::await_event_registration_observed,
+        )
+    });
 
     #[tokio::test]
     async fn non_enumerable_effect_host_reports_typed_unsupported() {

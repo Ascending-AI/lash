@@ -194,7 +194,7 @@ where
 pub async fn effect_host_await_events_with_active_wait_witness<F, W, WFut>(make: F, witness: W)
 where
     F: Fn() -> Arc<dyn EffectHost>,
-    W: FnOnce(Arc<dyn EffectHost>) -> WFut,
+    W: FnOnce(Arc<dyn EffectHost>, ActiveWaitRetirementAssertion) -> WFut,
     WFut: std::future::Future<Output = ()>,
 {
     let first = make();
@@ -209,7 +209,7 @@ where
     effect_host_await_event_revokes_session_scope(make()).await;
     effect_host_await_event_retires_non_session_scopes(make()).await;
     effect_host_await_event_reinstate_lifts_process_scope_fence(make()).await;
-    witness(make()).await;
+    witness(make(), boxed_active_wait_retirement_assertion).await;
     effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     effect_host_await_event_session_cancel_resolves_outstanding_waits(make()).await;
     let host = make();
@@ -1258,6 +1258,7 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// (ADR 0049), and a law over the dropped case would assert two answers.
 pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     host: Arc<dyn EffectHost>,
+    assert_retirement: ActiveWaitRetirementAssertion,
 ) {
     let suffix = uuid::Uuid::new_v4().simple();
     let scope = ExecutionScope::runtime_operation(format!("await-event-live-wait-{suffix}"));
@@ -1284,7 +1285,28 @@ pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert!(!waiter.is_finished(), "the wait is still open");
 
-    effect_host_registered_wait_rejects_quiescent_retirement(host, scope, key, waiter).await;
+    assert_retirement(host, scope, key, waiter).await;
+}
+
+/// Boxed shared assertion supplied to implementation-owned active-wait
+/// witnesses so backend registration code never names an individual law.
+pub type ActiveWaitRetirementAssertion =
+    fn(
+        Arc<dyn EffectHost>,
+        ExecutionScope,
+        crate::AwaitEventKey,
+        tokio::task::JoinHandle<Result<Resolution, crate::RuntimeError>>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+pub(super) fn boxed_active_wait_retirement_assertion(
+    host: Arc<dyn EffectHost>,
+    scope: ExecutionScope,
+    key: crate::AwaitEventKey,
+    waiter: tokio::task::JoinHandle<Result<Resolution, crate::RuntimeError>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(effect_host_registered_wait_rejects_quiescent_retirement(
+        host, scope, key, waiter,
+    ))
 }
 
 /// Assert the active-wait retirement law after the caller has witnessed the

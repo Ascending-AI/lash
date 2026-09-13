@@ -70,8 +70,7 @@ async fn configured_storage(test_name: &str) -> Option<(SharedDatabaseLock, Post
     Some((lock, storage))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_when_configured() {
+lash_conformance::backend_clock_queued_work_tests!({
     let Some((_lock, storage)) = configured_storage("PostgreSQL ready-gap law").await else {
         return;
     };
@@ -87,12 +86,12 @@ async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_wh
             .await
             .expect("reset ready-gap law rows");
     }
-    lash_conformance::queued_work_redrive_selects_claim_identity_across_ready_gap(
-        Arc::new(storage.session_store(session_id)),
-        &lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
+    (
+        _lock,
+        Arc::new(storage.session_store(session_id)) as Arc<dyn lash_core::RuntimePersistence>,
+        lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
-    .await;
-}
+});
 
 fn source_region<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start_index = source

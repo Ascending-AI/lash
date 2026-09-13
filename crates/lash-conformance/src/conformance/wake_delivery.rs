@@ -67,12 +67,16 @@ pub enum ProcessTerminalWaitWitness {
 
 /// Proves that blocking, non-blocking, and reasonless discarded heads have the same ordering-group
 /// behavior on every process-registry backend.
-pub async fn wake_delivery_ordering_group_conformance(
+pub async fn wake_delivery_ordering_group_conformance<BeforeTerminal, BeforeTerminalFuture>(
     registry: Arc<dyn crate::ProcessRegistry>,
     injector: Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     terminal_wait_witness: ProcessTerminalWaitWitness,
-) {
+    before_terminal: BeforeTerminal,
+) where
+    BeforeTerminal: FnOnce() -> BeforeTerminalFuture,
+    BeforeTerminalFuture: std::future::Future<Output = ()>,
+{
     ordering_group_discard_case(
         &registry,
         &injector,
@@ -95,16 +99,21 @@ pub async fn wake_delivery_ordering_group_conformance(
         &process_work,
         &ProcessId::from("wake-ordering-terminal"),
         terminal_wait_witness,
+        before_terminal,
     )
     .await;
 }
 
-async fn assert_process_terminal_wait(
+async fn assert_process_terminal_wait<BeforeTerminal, BeforeTerminalFuture>(
     registry: &Arc<dyn crate::ProcessRegistry>,
     process_work: &Arc<dyn crate::ProcessWorkSubstrate>,
     process_id: &ProcessId,
     witness: ProcessTerminalWaitWitness,
-) {
+    before_terminal: BeforeTerminal,
+) where
+    BeforeTerminal: FnOnce() -> BeforeTerminalFuture,
+    BeforeTerminalFuture: std::future::Future<Output = ()>,
+{
     let registered = registry
         .register_process(process_registry::registration(process_id))
         .await
@@ -138,6 +147,7 @@ async fn assert_process_terminal_wait(
             }
         })
     };
+    before_terminal().await;
     tokio::task::yield_now().await;
     registry
         .complete_process(
@@ -250,13 +260,17 @@ async fn ordering_group_discard_case(
 ///
 /// A process append owns the outbox insertion. Delivery may happen on a later
 /// host instance, must be idempotent, and must never mutate the lifecycle fold.
-pub async fn wake_delivery_crash_matrix(
+pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
     clock: Arc<TestClock>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     terminal_wait_witness: ProcessTerminalWaitWitness,
-) {
+    before_terminal: BeforeTerminal,
+) where
+    BeforeTerminal: FnOnce() -> BeforeTerminalFuture,
+    BeforeTerminalFuture: std::future::Future<Output = ()>,
+{
     let probe = Arc::clone(&registry);
     let registry: Arc<dyn crate::ProcessRegistry> = registry;
     let target_session_id = "wake-crash-target";
@@ -1036,6 +1050,7 @@ pub async fn wake_delivery_crash_matrix(
         &process_work,
         &ProcessId::from("wake-crash-terminal"),
         terminal_wait_witness,
+        before_terminal,
     )
     .await;
     expired_is_a_typed_discard(factory, registry, clock).await;

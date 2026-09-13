@@ -1,13 +1,12 @@
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_append_receipt_refuses_negative_stored_identity_encoding_version_when_configured()
-{
+lash_conformance::append_receipt_identity_corruption_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres corrupt receipt test: database is not configured");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
-    lash_conformance::append_receipt_corrupt_identity_encoding_version_is_refused(
+    (
+        _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move || async move {
             sqlx::query(
@@ -21,5 +20,4 @@ async fn postgres_append_receipt_refuses_negative_stored_identity_encoding_versi
             .expect("install negative Postgres append identity version");
         },
     )
-    .await;
-}
+});

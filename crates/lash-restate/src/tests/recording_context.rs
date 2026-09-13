@@ -1,5 +1,8 @@
 use super::*;
 
+mod helpers;
+pub(super) use helpers::{runtime_invocation, test_turn_cancel_wait_request};
+
 #[test]
 pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
     let cases = vec![
@@ -591,6 +594,28 @@ impl lash_trace::TraceSink for RecordingTraceSink {
 }
 
 impl RecordingContext {
+    pub(super) async fn wait_for_await_event_registration(
+        &self,
+        session_id: &SessionId,
+        key: &AwaitEventKey,
+    ) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if self
+                    .session_waits
+                    .lock_recover()
+                    .get(session_id)
+                    .is_some_and(|waits| waits.contains(key))
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the Restate durable waiter is registered before the sweep");
+    }
+
     pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {
         Self {
             endpoint: Some(endpoint),
@@ -2468,35 +2493,5 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         'ctx: 'run,
     {
         self.events.session_is_revoked(session_id)
-    }
-}
-
-pub(super) fn runtime_invocation(
-    kind: RuntimeEffectKind,
-    effect_id: &str,
-) -> lash_core::RuntimeEffectInvocation {
-    lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(
-            durable_turn_scope("session", "turn"),
-            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
-        )
-        .expect("valid recording-context effect address"),
-        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
-        effect_id,
-    )
-}
-
-pub(super) fn test_turn_cancel_wait_request(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> RestateDurableWaitAwaitRequest {
-    let key = restate_await_event_key(
-        &durable_turn_scope(session_id, turn_id),
-        AwaitEventWaitIdentity::TurnCancelGate,
-    )
-    .expect("test turn cancellation gate key");
-    RestateDurableWaitAwaitRequest {
-        key,
-        deadline: None,
     }
 }

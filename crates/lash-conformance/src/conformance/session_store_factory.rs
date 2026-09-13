@@ -29,6 +29,49 @@ pub async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
     turn_cancel::turn_cancel_exact_replay_preserves_different_pending_authorization(factory).await;
 }
 
+/// Prove that cancellation closure settlement is fenced and immutable.
+pub async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_closure_settlement_is_fenced_and_non_overwritable(factory).await;
+}
+
+/// Prove that cancellation closure scope retirement serializes with authorization.
+pub async fn turn_cancel_scope_retirement_serializes_with_authorization(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_scope_retirement_serializes_with_authorization(factory).await;
+}
+
+/// Prove that escalation advances intent without replacing the durable base.
+pub async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_request_escalation_advances_intent_without_replacing_base(factory)
+        .await;
+}
+
+/// Prove that repair retains the base cancellation across escalation and reopen.
+pub async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_repair_preserves_base_across_escalation_and_reopen(factory).await;
+}
+
+/// Prove that repair orders cancellation intent and ordinary redefer atomically.
+pub async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(factory).await;
+}
+
+/// Prove that final commit applies its cancellation-intent CAS atomically.
+pub async fn turn_cancel_final_commit_intent_cas_is_atomic(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(factory).await;
+}
+
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
@@ -63,14 +106,7 @@ pub async fn session_store_factory<F>(
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
-    turn_cancel::turn_cancel_closure_settlement_is_fenced_and_non_overwritable(make()).await;
-    turn_cancel::turn_cancel_scope_retirement_serializes_with_authorization(make()).await;
     turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
-    turn_cancel::turn_cancel_request_escalation_advances_intent_without_replacing_base(make())
-        .await;
-    turn_cancel::turn_cancel_repair_preserves_base_across_escalation_and_reopen(make()).await;
-    turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(make()).await;
-    turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;

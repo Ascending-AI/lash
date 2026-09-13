@@ -1,8 +1,33 @@
 //! Runs the shared `ProcessRegistry` conformance suite against SQLite.
 
+// No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
+// No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
+// No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+
+#[path = "blob_probe.rs"]
+mod blob_probe;
+
+lash_conformance::attachment_adoption_tests!({
+    let dir = tempfile::tempdir().unwrap();
+    let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()));
+    (dir, factory)
+});
+
+lash_conformance::attachment_condemnation_recovery_tests!({
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    (
+        dir,
+        Arc::new(SqliteSessionStoreFactory::new(&root)),
+        move || async move {
+            Arc::new(SqliteSessionStoreFactory::new(root)) as Arc<dyn SessionStoreFactory>
+        },
+    )
+});
 
 #[tokio::test]
 async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
@@ -44,35 +69,32 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
     ));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_abandoned_attachment_write_recovery_survives_cold_reopen() {
+lash_conformance::abandoned_attachment_recovery_tests!({
     let dir = tempfile::tempdir().unwrap();
-    for reclaimed in [false, true] {
-        let root = dir
-            .path()
-            .join(if reclaimed { "reclaimed" } else { "condemned" });
-        lash_conformance::abandoned_attachment_write_recovery_after_cold_reopen(
-            Arc::new(SqliteSessionStoreFactory::new(&root)),
-            reclaimed,
-            move || async move {
-                Arc::new(SqliteSessionStoreFactory::new(root)) as Arc<dyn SessionStoreFactory>
-            },
-        )
-        .await;
-    }
-}
+    let root = dir.path().to_path_buf();
+    (dir, move |reclaimed: bool| {
+        let root = root.join(if reclaimed { "reclaimed" } else { "condemned" });
+        let reopen_root = root.clone();
+        async move {
+            (
+                Arc::new(SqliteSessionStoreFactory::new(&root)) as Arc<dyn SessionStoreFactory>,
+                move || async move {
+                    Arc::new(SqliteSessionStoreFactory::new(reopen_root))
+                        as Arc<dyn SessionStoreFactory>
+                },
+            )
+        }
+    })
+});
 
-#[path = "conformance/turn_cancel_closure.rs"]
-mod turn_cancel_closure;
-
-#[path = "conformance/attachment_adoption.rs"]
-mod attachment_adoption;
 #[path = "conformance/await_event_discovery.rs"]
 mod await_event_discovery;
 #[path = "conformance/claim_atomicity.rs"]
 mod claim_atomicity;
 #[path = "conformance/lineage.rs"]
 mod lineage;
+#[path = "conformance/turn_cancel_closure.rs"]
+mod turn_cancel_closure;
 
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -256,8 +278,7 @@ impl SessionExecutionLeaseRenewalZeroRowInjector
     }
 }
 
-#[tokio::test]
-async fn sqlite_zero_row_session_execution_lease_renewal_is_refused() {
+lash_conformance::session_execution_lease_renewal_tests!({
     let dir = tempfile::tempdir().expect("SQLite zero-row renewal tempdir");
     let path = dir.path().join("zero-row-renewal.db");
     let store = Arc::new(
@@ -265,7 +286,8 @@ async fn sqlite_zero_row_session_execution_lease_renewal_is_refused() {
             .await
             .expect("open SQLite zero-row renewal store"),
     );
-    lash_conformance::session_execution_lease_zero_row_renewal_is_refused(
+    (
+        (),
         SessionExecutionLeaseRenewalZeroRowHandles {
             store: store as Arc<dyn RuntimePersistence>,
             injector: Arc::new(SqliteSessionExecutionLeaseRenewalZeroRowInjector {
@@ -274,8 +296,7 @@ async fn sqlite_zero_row_session_execution_lease_renewal_is_refused() {
             }),
         },
     )
-    .await;
-}
+});
 
 fn artifact_store_handles(
     path: &Path,
@@ -465,9 +486,8 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
     }
 }
 
-#[tokio::test]
-async fn sqlite_fence_integrity_conformance() {
-    lash_conformance::fence_integrity_conformance(|case| async move {
+lash_conformance::fence_integrity_tests!({
+    ((), |case| async move {
         let dir = tempfile::tempdir().expect("SQLite fence fixture tempdir");
         let runtime_path = dir.path().join(format!("{case}-runtime.db"));
         let trigger_path = dir.path().join(format!("{case}-triggers.db"));
@@ -491,8 +511,7 @@ async fn sqlite_fence_integrity_conformance() {
             }),
         }
     })
-    .await;
-}
+});
 
 struct SqliteGraphIntegrityInjector {
     _dir: TempDir,
@@ -596,9 +615,8 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
     }
 }
 
-#[tokio::test]
-async fn sqlite_graph_integrity_conformance() {
-    lash_conformance::graph_integrity_conformance(|case| async move {
+lash_conformance::graph_integrity_tests!({
+    ((), |case| async move {
         let dir = tempfile::tempdir().expect("SQLite graph fixture tempdir");
         let runtime_path = dir.path().join(format!("{case}-runtime.db"));
         let runtime = Arc::new(
@@ -615,8 +633,7 @@ async fn sqlite_graph_integrity_conformance() {
             }),
         }
     })
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
@@ -660,20 +677,18 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
     assert!(graph.nodes.iter().any(|node| node.node_id == leaf_node_id));
 }
 
-#[tokio::test]
-async fn sqlite_signed_counter_write_domain_conformance() {
+lash_conformance::signed_counter_write_domain_tests!({
     let store = Arc::new(
         Store::memory()
             .await
             .expect("open SQLite signed-write fixture"),
     );
-    lash_conformance::signed_counter_write_domain_conformance(store).await;
-}
+    ((), store)
+});
 
-#[tokio::test]
-async fn sqlite_artifact_store_satisfies_conformance() {
+lash_conformance::artifact_store_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::fused_artifact_store::artifact_store_reopenable(|| {
+    (Arc::clone(&dirs), move || {
         let path = fresh_db_path(&dirs, "artifacts.db");
         let reopen_path = path.clone();
         lash_conformance::fused_artifact_store::ReopenableArtifactStore {
@@ -681,8 +696,7 @@ async fn sqlite_artifact_store_satisfies_conformance() {
             reopen: Arc::new(move || artifact_store_handles(&reopen_path)),
         }
     })
-    .await;
-}
+});
 
 fn exec_envelope(
     scope: ExecutionScope,
@@ -746,32 +760,17 @@ fn current_epoch_ms_for_test() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_registry_satisfies_conformance() {
+lash_conformance::process_registry_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::process_registry_reopenable(|| {
-        let path = fresh_db_path(&dirs, "processes.db");
+    let retained_dirs = Arc::clone(&dirs);
+    (retained_dirs, move |label: &str| {
+        let path = fresh_db_path(&dirs, &format!("{label}.db"));
         ReopenableProcessRegistry {
             open: open_registry(&path),
             reopen: open_registry(&path),
         }
     })
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_registry_pagination_satisfies_conformance() {
-    let dir = tempfile::tempdir().expect("pagination tempdir");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open pagination registry"),
-    ) as Arc<dyn ProcessRegistry>;
-    lash_conformance::process_registry_pagination(registry).await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
@@ -853,36 +852,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_prune_batch_tombstones_are_ordered() {
-    let dir = tempfile::tempdir().expect("batch prune tempdir");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open batch prune registry"),
-    );
-    lash_conformance::process_prune_batch_tombstones(registry).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_prune_scopes_to_the_retention_filter() {
-    let dir = tempfile::tempdir().expect("scoped prune tempdir");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open scoped prune registry"),
-    );
-    lash_conformance::process_prune_scoped_by_originator(registry).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_leased_completion_replay_repairs_projection() {
+lash_conformance::process_projection_repair_tests!({
     let dir = tempfile::tempdir().expect("leased replay repair tempdir");
     let path = dir.path().join("processes.db");
     let registry = Arc::new(
@@ -891,9 +861,10 @@ async fn sqlite_leased_completion_replay_repairs_projection() {
             .expect("open leased replay repair registry"),
     );
     let corruption_path = path.clone();
-    lash_conformance::leased_completion_replay_repairs_projection(
+    (
+        dir,
         registry as Arc<dyn ProcessRegistry>,
-        move |stale| async move {
+        move |stale: lash_core::ProcessRecord| async move {
             let conn = rusqlite::Connection::open(corruption_path)
                 .expect("open projection corruption connection");
             let changed = conn
@@ -908,13 +879,11 @@ async fn sqlite_leased_completion_replay_repairs_projection() {
             assert_eq!(changed, 1);
         },
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_store_contract_state_machine_properties() {
+lash_conformance::store_contract_state_machine_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::store_contract_state_machine("sqlite", move |seed, _| {
+    ((), "sqlite", move |seed, _| {
         let dirs = Arc::clone(&dirs);
         async move {
             let dir = tempfile::tempdir().expect("store-contract tempdir");
@@ -935,13 +904,11 @@ async fn sqlite_store_contract_state_machine_properties() {
             lash_conformance::StoreContractHandles { registry, runtime }
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_runtime_persistence_state_machine_properties() {
+lash_conformance::runtime_persistence_state_machine_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::runtime_persistence_state_machine("sqlite", move |_| {
+    ((), "sqlite", move |_| {
         let dirs = Arc::clone(&dirs);
         async move {
             let dir = tempfile::tempdir().expect("runtime-persistence property tempdir");
@@ -962,30 +929,23 @@ async fn sqlite_runtime_persistence_state_machine_properties() {
             handles
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_session_graph_state_machine_properties() {
+lash_conformance::session_graph_state_machine_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    Box::pin(lash_conformance::session_graph_state_machine(
-        "sqlite",
-        move |_| {
-            let dirs = Arc::clone(&dirs);
-            async move {
-                let dir = tempfile::tempdir().expect("session-graph property tempdir");
-                let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-                    as Arc<dyn SessionStoreFactory>;
-                dirs.lock_recover().push(dir);
-                factory
-            }
-        },
-    ))
-    .await;
-}
+    ((), "sqlite", move |_| {
+        let dirs = Arc::clone(&dirs);
+        async move {
+            let dir = tempfile::tempdir().expect("session-graph property tempdir");
+            let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
+                as Arc<dyn SessionStoreFactory>;
+            dirs.lock_recover().push(dir);
+            factory
+        }
+    })
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_continuation_store_satisfies_conformance() {
+lash_conformance::process_continuation_store_tests!({
     let storage = Arc::new(
         SqliteProcessRegistry::memory()
             .await
@@ -993,53 +953,46 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
     );
     let registry = Arc::clone(&storage) as Arc<dyn lash_core::ProcessRegistry>;
     let store = storage as Arc<dyn lash_core::ProcessContinuationStore>;
-    lash_conformance::process_continuation_store(registry, store).await;
-}
+    ((), registry, store)
+});
 
-#[tokio::test]
-async fn sqlite_session_store_factory_satisfies_conformance() {
+lash_conformance::session_store_factory_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let unbound = Store::memory().await.expect("unbound durable-core store");
     let unbound = Some(Arc::new(unbound) as Arc<dyn lash_core::StoreMaintenance>);
-    lash_conformance::session_store_factory("sqlite", unbound, || {
+    let make_dirs = Arc::clone(&dirs);
+    let make = move || {
         let dir = tempfile::tempdir().expect("tempdir");
         let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
             as Arc<dyn ConformanceSessionStoreFactory>;
-        dirs.lock_recover().push(dir);
+        make_dirs.lock_recover().push(dir);
         factory
-    })
-    .await;
-}
+    };
+    (dirs, "sqlite", unbound, make)
+});
 
-#[tokio::test]
-async fn sqlite_fresh_session_admission_returns_created() {
-    lash_conformance::fresh_session_admission_returns_created(|_| {
+lash_conformance::fresh_session_admission_tests!({
+    ((), |_session_id: &str| {
         Arc::new(sync_await(Store::memory()).expect("in-memory SQLite store"))
             as Arc<dyn RuntimePersistence>
     })
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_fork_observer_intent_transient_failure_conformance() {
+lash_conformance::observer_intent_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
-    lash_conformance::fork_observer_intent_transient_failure(Arc::new(
-        SqliteSessionStoreFactory::new(dir.path()),
-    ))
-    .await;
-}
+    let factory =
+        Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+    (dir, factory)
+});
 
-#[tokio::test]
-async fn sqlite_session_graph_append_branch_liveness_conformance() {
+lash_conformance::session_graph_append_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
-    lash_conformance::session_graph_append_branch_liveness(
-        Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>,
-    )
-    .await;
-}
+    let factory =
+        Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+    (dir, factory)
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_attachment_owner_cold_replay_conformance() {
+lash_conformance::attachment_owner_cold_replay_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let clock = Arc::new(lash_core::testing::TestClock::new(
         current_epoch_ms_for_test().saturating_sub(100_000),
@@ -1090,7 +1043,8 @@ async fn sqlite_attachment_owner_cold_replay_conformance() {
         Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
     };
 
-    lash_conformance::attachment_owner_cold_replay(
+    (
+        dir,
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
@@ -1101,11 +1055,9 @@ async fn sqlite_attachment_owner_cold_replay_conformance() {
             advance_clock,
         },
     )
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_process_prune_deletes_owned_session_stores() {
+lash_conformance::process_prune_session_store_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let process_path = dir.path().join("processes.db");
     let sessions = dir.path().join("sessions");
@@ -1118,58 +1070,62 @@ async fn sqlite_process_prune_deletes_owned_session_stores() {
         &sessions,
         &process_path,
     )) as Arc<dyn SessionStoreFactory>;
+    (dir, factory, registry)
+});
 
-    lash_conformance::process_prune_deletes_owned_session_stores(factory, registry).await;
-}
-
-#[tokio::test]
-async fn sqlite_store_uses_injected_clock_for_expiry() {
+lash_conformance::runtime_persistence_clock_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(20_000));
+    let advance_clock = Arc::clone(&clock);
+    let verify_clock = Arc::clone(&clock);
     let store = Arc::new(
         Store::memory_with_clock(clock.clone())
             .await
             .expect("clock-driven sqlite store"),
     ) as Arc<dyn RuntimePersistence>;
-    lash_conformance::runtime_persistence_clock_expiry(Arc::clone(&store), |duration_ms| {
-        clock.advance(duration_ms);
-    })
-    .await;
-    let observation = store
-        .get_session_execution_lease(&SessionId::from("sqlite-injected-clock-diagnostic"))
-        .await
-        .expect("read SQLite session-lease diagnostics");
-    assert_eq!(
-        observation.observed_at_epoch_ms,
-        lash_core::ClockWallTime::timestamp_ms(clock.as_ref()),
-        "SQLite diagnostics must return the same injected clock that authors lease timestamps"
-    );
-}
+    (
+        (),
+        store,
+        move |duration_ms| advance_clock.advance(duration_ms),
+        move |store: Arc<dyn RuntimePersistence>| async move {
+            let observation = store
+                .get_session_execution_lease(&SessionId::from("sqlite-injected-clock-diagnostic"))
+                .await
+                .expect("read SQLite session-lease diagnostics");
+            assert_eq!(
+                observation.observed_at_epoch_ms,
+                lash_core::ClockWallTime::timestamp_ms(verify_clock.as_ref()),
+                "SQLite diagnostics must return the same injected clock that authors lease timestamps"
+            );
+        },
+    )
+});
 
-#[tokio::test]
-async fn sqlite_trigger_store_satisfies_conformance() {
+#[test]
+fn trigger_subscription_owner_filter_is_pushed_down() {
     lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
         "SQLite",
         lash_sqlite_store::testing::trigger_subscription_list_sql,
     );
+}
+
+lash_conformance::trigger_store_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::trigger_store_reopenable(|| {
+    (Arc::clone(&dirs), move || {
         let path = fresh_db_path(&dirs, "triggers.db");
         ReopenableTriggerStore {
             open: open_trigger_store(&path),
             reopen: open_trigger_store(&path),
         }
     })
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_trigger_occurrence_listing_corruption_is_not_partial_success() {
+lash_conformance::trigger_occurrence_listing_tests!({
     let dir = tempfile::tempdir().expect("SQLite occurrence-listing tempdir");
     let path = dir.path().join("occurrence-listing.db");
     let store = open_trigger_store(&path);
-    let injector = SqliteTriggerOccurrenceListingFaultInjector { path };
-    lash_conformance::trigger_occurrence_listing_corruption_law(store, &injector).await;
-}
+    let injector = Arc::new(SqliteTriggerOccurrenceListingFaultInjector { path });
+    (dir, store, injector)
+});
 
 #[tokio::test]
 async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_serving() {
@@ -1297,6 +1253,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     (
+        Arc::clone(&dirs),
         move |session_id: &str| {
             let dir = tempfile::tempdir().expect("runtime-persistence conformance tempdir");
             let factory_dir = dir.path().to_path_buf();
@@ -1332,11 +1289,10 @@ lash_conformance::runtime_persistence_reopenable_tests!({
     )
 });
 
-#[tokio::test]
-async fn sqlite_unbound_session_reads_resolve_the_same_session() {
+lash_conformance::unbound_session_read_tests!({
     let dir = tempfile::tempdir().expect("unbound-read tempdir");
     let root = dir.path().to_path_buf();
-    lash_conformance::unbound_session_reads_resolve_the_same_session(move |admission_state| {
+    (dir, move |admission_state| {
         let axis_root = root.join(format!("{admission_state:?}"));
         async move {
             std::fs::create_dir_all(&axis_root).expect("create unbound-read axis directory");
@@ -1349,22 +1305,15 @@ async fn sqlite_unbound_session_reads_resolve_the_same_session() {
             }
         }
     })
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_store_enforces_core_lease_fence_authority() {
-    let store = Store::memory().await.expect("in-memory SQLite store");
-    lash_conformance::session_execution_lease_fence_authority(&store).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_runtime_persistence_recovery_laws() {
+lash_conformance::store_recovery_tests!({
     let dir = tempfile::tempdir().expect("store-recovery tempdir");
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
-    lash_conformance::runtime_persistence_recovery_laws(
-        move |scenario| {
+    (
+        (),
+        move |scenario: &str| {
             open_store_with_clock(
                 &dir.path().join(format!("store-recovery-{scenario}.db")),
                 Arc::clone(&store_clock) as Arc<dyn lash_core::Clock>,
@@ -1374,40 +1323,33 @@ async fn sqlite_runtime_persistence_recovery_laws() {
             clock.advance(duration_ms)
         }),
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_real_turn_crash_matrix() {
+lash_conformance::turn_crash_matrix_tests!({
     let dir = tempfile::tempdir().expect("real-turn crash matrix tempdir");
-    Box::pin(lash_conformance::turn_crash_matrix_level_1(
-        |scenario| open_store(&dir.path().join(format!("turn-crash-matrix-{scenario}.db"))),
-        |_| lash_conformance::ConformanceInvocation::native(),
-    ))
-    .await;
-}
+    let root = dir.path().to_path_buf();
+    (
+        dir,
+        move |scenario: &str| open_store(&root.join(format!("turn-crash-matrix-{scenario}.db"))),
+        |_: &str| lash_conformance::ConformanceInvocation::native(),
+    )
+});
 
-#[tokio::test]
-async fn sqlite_complete_runtime_checkpoint_component_set_survives_cold_reopens() {
+lash_conformance::checkpoint_component_reopen_tests!({
     let dir = tempfile::tempdir().expect("checkpoint-component tempdir");
     let path = dir.path().join("checkpoint-components.db");
-    Box::pin(
-        lash_conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
-            open_store(&path)
-        }),
-    )
-    .await;
-}
+    (dir, move || open_store(&path))
+});
 
-#[tokio::test]
-async fn sqlite_append_receipt_replays_after_ancestor_superseded() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("append-receipt-ancestor.db");
+lash_conformance::append_head_switch_tests!({
+    let dir = tempfile::tempdir().expect("append head-switch tempdir");
+    let path = dir.path().join("append-head-switch.db");
     let store = Arc::new(Store::open(&path).await.expect("open store"));
-    let mutation_path = path.clone();
-    lash_conformance::append_request_receipt_replays_after_ancestor_superseded(
+    let mutation_path = path;
+    (
+        dir,
         store as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id| async move {
+        move |leaf_node_id: String| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE session_head
@@ -1418,40 +1360,17 @@ async fn sqlite_append_receipt_replays_after_ancestor_superseded() {
             .expect("switch sqlite active branch");
         },
     )
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_inactive_append_ancestor_precedes_stale_head() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("append-precedence.db");
-    let store = Arc::new(Store::open(&path).await.expect("open store"));
-    let mutation_path = path.clone();
-    lash_conformance::inactive_append_ancestor_precedes_stale_head(
-        store as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id| async move {
-            let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
-            conn.execute(
-                "UPDATE session_head
-                 SET leaf_node_id = ?1, head_revision = head_revision + 1
-                 WHERE session_id = 'root'",
-                rusqlite::params![leaf_node_id],
-            )
-            .expect("switch sqlite active branch");
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_tombstoned_old_leaf_is_rejected() {
-    let dir = tempfile::tempdir().expect("tempdir");
+lash_conformance::append_tombstone_tests!({
+    let dir = tempfile::tempdir().expect("tombstoned-old-leaf tempdir");
     let path = dir.path().join("tombstoned-old-leaf.db");
     let store = Arc::new(Store::open(&path).await.expect("open store"));
-    let mutation_path = path.clone();
-    lash_conformance::tombstoned_old_leaf_is_rejected(
+    let mutation_path = path;
+    (
+        dir,
         store as Arc<dyn RuntimePersistence>,
-        move |node_id| async move {
+        move |node_id: String| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
@@ -1460,80 +1379,84 @@ async fn sqlite_tombstoned_old_leaf_is_rejected() {
             .expect("tombstone sqlite old leaf");
         },
     )
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_append_receipt_restores_mixed_usage_envelope() {
-    let dir = tempfile::tempdir().expect("tempdir");
+lash_conformance::append_receipt_envelope_tests!({
+    let dir = tempfile::tempdir().expect("mixed-usage envelope tempdir");
     let store = Arc::new(
         Store::open(&dir.path().join("append-receipt-mixed-envelope.db"))
             .await
             .expect("open store"),
     );
-    lash_conformance::append_receipt_mixed_usage_envelope(store).await;
-}
+    (dir, store as Arc<dyn RuntimePersistence>)
+});
 
+// The commit-seam pause needs the fault injector, which only the `testing`
+// feature builds.
 #[cfg(feature = "testing")]
-#[tokio::test]
-async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
+mod cancelled_queued_append {
+    use super::*;
     use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint};
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let injector = SqliteFaultInjector::default();
-    let factory = SqliteSessionStoreFactory::new(dir.path()).with_fault_injector(injector.clone());
-    let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("root"),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    lash_conformance::append_usage_cancellation_tests!({
+        let dir = tempfile::tempdir().expect("append-usage cancellation tempdir");
+        let injector = SqliteFaultInjector::default();
+        let factory =
+            SqliteSessionStoreFactory::new(dir.path()).with_fault_injector(injector.clone());
+        let store = factory
+            .create_store(&lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from("root"),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create cancellation store");
+        (dir, store, move || {
+            // Pause the graph append after lease-fenced admission's write transaction.
+            let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 2);
+            async move {
+                pause.wait_until_reached().await;
+                move || pause.release()
+            }
         })
-        .await
-        .expect("create cancellation store");
-    lash_conformance::append_usage_cancellation_publishes_exactly_once(store, move || {
-        // Pause the graph append after lease-fenced admission's write transaction.
-        let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 2);
-        async move {
-            pause.wait_until_reached().await;
-            move || pause.release()
-        }
-    })
-    .await;
+    });
 }
 
-#[tokio::test]
-async fn sqlite_old_format_append_receipt_returns_public_leaf() {
-    let dir = tempfile::tempdir().expect("tempdir");
+lash_conformance::append_receipt_rewrite_tests!({
+    let dir = tempfile::tempdir().expect("old-format receipt tempdir");
     let path = dir.path().join("append-receipt-old-format.db");
     let store = Arc::new(Store::open(&path).await.expect("open store"));
-    lash_conformance::old_format_append_receipt_returns_public_leaf(store, move || async move {
-        let conn = rusqlite::Connection::open(path).expect("open raw SQLite receipt fixture");
-        let result_json: String = conn
-            .query_row(
-                "SELECT result_json FROM runtime_turn_commits
+    (
+        dir,
+        store as Arc<dyn RuntimePersistence>,
+        move || async move {
+            let conn = rusqlite::Connection::open(path).expect("open raw SQLite receipt fixture");
+            let result_json: String = conn
+                .query_row(
+                    "SELECT result_json FROM runtime_turn_commits
                      WHERE turn_id LIKE '%old-format-append-receipt%'
                        AND turn_id NOT LIKE '%old-format-append-receipt-seed%'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read runtime receipt JSON");
-        let mut result: serde_json::Value =
-            serde_json::from_str(&result_json).expect("decode runtime receipt JSON");
-        let fields = result.as_object_mut().expect("receipt result object");
-        fields.remove("committed_leaf_node_id");
-        fields.remove("receipt_replayed");
-        conn.execute(
-            "UPDATE runtime_turn_commits
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read runtime receipt JSON");
+            let mut result: serde_json::Value =
+                serde_json::from_str(&result_json).expect("decode runtime receipt JSON");
+            let fields = result.as_object_mut().expect("receipt result object");
+            fields.remove("committed_leaf_node_id");
+            fields.remove("receipt_replayed");
+            conn.execute(
+                "UPDATE runtime_turn_commits
                  SET result_json = ?1
                  WHERE turn_id LIKE '%old-format-append-receipt%'
                    AND turn_id NOT LIKE '%old-format-append-receipt-seed%'",
-            rusqlite::params![serde_json::to_string(&result).expect("encode old receipt")],
-        )
-        .expect("install raw pre-upgrade receipt fixture");
-    })
-    .await;
-}
+                rusqlite::params![serde_json::to_string(&result).expect("encode old receipt")],
+            )
+            .expect("install raw pre-upgrade receipt fixture");
+        },
+    )
+});
 
 #[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
@@ -1611,21 +1534,43 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
         .expect("query sqlite_master")
 }
 
-#[tokio::test]
-async fn sqlite_effect_host_satisfies_scope_conformance() {
+lash_conformance::effect_host_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("effect-host.db");
-    lash_conformance::effect_host(move || {
+    (dir, move || {
         let path = path.clone();
         Arc::new(sync_await(async move {
             SqliteEffectHost::open(&path).await.expect("effect host")
         })) as Arc<dyn EffectHost>
     })
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_public_signal_intent_wakes_a_parked_process() {
+lash_conformance::turn_work_driver_tests!({
+    let dir = tempfile::tempdir().expect("tempdir");
+    let host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("turn-work-driver.db"))
+            .await
+            .expect("effect host"),
+    ) as Arc<dyn EffectHost>;
+    (
+        dir,
+        host,
+        lash_conformance::await_event_registration_observed,
+    )
+});
+
+lash_conformance::effect_host_await_event_tests!({
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("warm-await-event.db");
+    (dir, move || {
+        let path = path.clone();
+        Arc::new(sync_await(async move {
+            SqliteEffectHost::open(&path).await.expect("effect host")
+        })) as Arc<dyn EffectHost>
+    })
+});
+
+lash_conformance::signal_intent_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let effect_host = Arc::new(
         SqliteEffectHost::open(&dir.path().join("signal-intent-effects.db"))
@@ -1643,14 +1588,16 @@ async fn sqlite_public_signal_intent_wakes_a_parked_process() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
         &registry,
     )));
-    lash_conformance::public_signal_intent_wakes_parked_process(
+    (
+        dir,
         "sqlite-public-signal-intent",
         effect_host,
         registry,
         process_work,
+        // The SQLite host owns no post-wake journal assertion beyond the shared check.
+        || async {},
     )
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings() {
@@ -1722,8 +1669,7 @@ async fn sqlite_completion_key_preparation_tracks_backing() {
     ));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_effect_host_satisfies_cold_instance_await_event_conformance() {
+lash_conformance::effect_host_cold_await_event_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("cold-await-event.db");
     // The parked-owner vector abandons an in-progress effect, so its cold
@@ -1734,7 +1680,7 @@ async fn sqlite_effect_host_satisfies_cold_instance_await_event_conformance() {
     let lease_timings =
         lash_core::facade_support::LeaseTimings::from_ttl(std::time::Duration::from_secs(1))
             .expect("cold-instance conformance lease timings");
-    lash_conformance::effect_host_await_events_cold_instance(|| {
+    (dir, move || {
         let path = path.clone();
         let options = SqliteEffectReplayOptions { lease_timings };
         Arc::new(sync_await(async move {
@@ -1743,8 +1689,7 @@ async fn sqlite_effect_host_satisfies_cold_instance_await_event_conformance() {
                 .expect("cold SQLite effect host")
         })) as Arc<dyn EffectHost>
     })
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
@@ -2101,35 +2046,13 @@ async fn sqlite_real_turn_satisfies_cold_process_crash_matrix() {
     .await;
 }
 
-#[tokio::test]
-async fn sqlite_effect_controller_satisfies_replay_conformance() {
+lash_conformance::effect_controller_replay_tests!({
     let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
-    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
-
-    lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
+    let (controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    (controller_dir, move || {
         sqlite_conformance_invocation(controller.clone(), scope.clone())
     })
-    .await;
-
-    let tool_scope = durable_turn_scope(
-        "tool-attempt-conformance-session",
-        "tool-attempt-conformance-turn",
-    );
-    let (_tool_controller_dir, tool_controller) =
-        open_ephemeral_effect_controller(tool_scope.clone()).await;
-    lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        sqlite_conformance_invocation(tool_controller.clone(), tool_scope.clone())
-    })
-    .await;
-
-    let durable_scope = durable_turn_scope("durable-step-session", "durable-step-turn");
-    let (_durable_controller_dir, durable_controller) =
-        open_ephemeral_effect_controller(durable_scope.clone()).await;
-    lash_conformance::effect_controller_journaled_effect_replay(|| {
-        sqlite_conformance_invocation(durable_controller.clone(), durable_scope.clone())
-    })
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
@@ -2248,68 +2171,35 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     );
 }
 
-#[tokio::test]
-async fn sqlite_effect_host_retires_session_journal_rows() {
+lash_conformance::effect_host_retirement_tests!({
     let dir = tempfile::tempdir().expect("effect replay tempdir");
     let path = dir.path().join("effect-replay.db");
-    let host = SqliteEffectHost::open(&path)
-        .await
-        .expect("open SQLite effect host");
+    let host = Arc::new(
+        SqliteEffectHost::open(&path)
+            .await
+            .expect("open SQLite effect host"),
+    ) as Arc<dyn EffectHost>;
+    (dir, host)
+});
 
-    lash_conformance::effect_host_retires_session_journal(&host).await;
-    lash_conformance::effect_host_retires_process_journal(&host).await;
-    lash_conformance::effect_host_retires_runtime_operation_journal(&host).await;
-
-    let conn = rusqlite::Connection::open(path).expect("open effect journal for row count");
-    let retained: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_effect_replay WHERE session_id = ?1",
-            ["retired-journal-session"],
-            |row| row.get(0),
-        )
-        .expect("count retained session journal rows");
-    assert_eq!(retained, 0);
-    let process_retained: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_effect_replay WHERE session_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count retained process journal rows");
-    assert_eq!(
-        process_retained, 1,
-        "only the in-flight runtime operation's row survives among session-free scopes"
-    );
-    let fences: i64 = conn
-        .query_row("SELECT COUNT(*) FROM effect_scope_retirements", [], |row| {
-            row.get(0)
-        })
-        .expect("count scope fences");
-    assert_eq!(
-        fences, 2,
-        "the process and the retired runtime operation each leave one permanent fence"
-    );
-}
-
-#[tokio::test]
-async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
+lash_conformance::effect_controller_replay_mismatch_tests!({
     let scope = durable_turn_scope("session", "turn");
-    let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
-    lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || sqlite_conformance_invocation(controller.clone(), scope.clone()),
+    let (controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    (
+        controller_dir,
+        move || sqlite_conformance_invocation(controller.clone(), scope.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
-    .await;
-}
+});
 
-#[tokio::test]
-async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
+lash_conformance::effect_controller_lease_fencing_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let path = fresh_db_path(&dirs, "effect-lease-fencing.db");
     let make_path = path.clone();
     let steal_path = path.clone();
     let expire_path = path.clone();
-    lash_conformance::effect_controller_lease_fencing(
+    (
+        dirs,
         lash_conformance::EffectLeaseFencingBackend {
             make_controller: Box::new(move |ttl, clock| {
                 let path = make_path.clone();
@@ -2367,8 +2257,7 @@ async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
             }),
         },
     )
-    .await;
-}
+});
 
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
@@ -2379,9 +2268,9 @@ mod sleep_replay;
 
 include!("conformance/append_identity.rs");
 
-#[tokio::test]
-async fn sqlite_terminal_evidence_retention_conformance() {
+lash_conformance::retention_tests!({
     let dir = tempfile::tempdir().unwrap();
-    lash_conformance::retention_conformance(Arc::new(SqliteSessionStoreFactory::new(dir.path())))
-        .await;
-}
+    let factory =
+        Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+    (dir, factory)
+});

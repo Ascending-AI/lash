@@ -24,60 +24,8 @@ async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> 
         .expect("create the SQLite direct-turn acceptance store")
 }
 
-#[tokio::test]
-async fn sqlite_direct_turn_accepts_before_driving() {
+lash_conformance::direct_turn_acceptance_tests!({
     let dir = tempfile::tempdir().expect("direct-turn acceptance tempdir");
-    Box::pin(lash_conformance::direct_turn_accepts_before_driving(
-        "sqlite",
-        sqlite_direct_turn_store(&dir).await,
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_orphaned_direct_turn_input_is_drivable_by_another_worker() {
-    let dir = tempfile::tempdir().expect("direct-turn recovery tempdir");
-    Box::pin(
-        lash_conformance::orphaned_direct_turn_input_is_drivable_by_another_worker(
-            "sqlite",
-            sqlite_direct_turn_store(&dir).await,
-        ),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_direct_turn_acceptance_mints_no_idempotency_key() {
-    let dir = tempfile::tempdir().expect("direct-turn identity tempdir");
-    Box::pin(
-        lash_conformance::direct_turn_acceptance_mints_no_idempotency_key(
-            "sqlite",
-            sqlite_direct_turn_store(&dir).await,
-        ),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_unclaimed_turn_input_settlement_is_a_conditional_write() {
-    let dir = tempfile::tempdir().expect("unclaimed settlement tempdir");
-    Box::pin(
-        lash_conformance::unclaimed_turn_input_settlement_is_a_conditional_write(
-            "sqlite",
-            sqlite_direct_turn_store(&dir).await,
-        ),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn sqlite_busy_execution_lane_refuses_direct_turn_before_acceptance() {
-    let dir = tempfile::tempdir().expect("busy execution lane tempdir");
-    Box::pin(
-        lash_conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
-            "sqlite",
-            sqlite_direct_turn_store(&dir).await,
-        ),
-    )
-    .await;
-}
+    let store = sqlite_direct_turn_store(&dir).await;
+    (dir, "sqlite", store)
+});

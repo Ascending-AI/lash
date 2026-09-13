@@ -389,13 +389,12 @@ async fn direct_session_store_defers_missing_identity_validation() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
+lash_conformance::unbound_session_meta_tests!({
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping unbound session-meta refusal: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect unbound session-meta storage");
@@ -425,13 +424,11 @@ async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
         .await
         .unwrap_or_else(|error| panic!("seed `{session_id}` metadata: {error}"));
     }
-
-    lash_conformance::unbound_session_meta_refuses_ambiguous_resolution(
-        "PostgreSQL",
-        crate::session_meta::load_session_meta(storage.pool(), None),
-    )
-    .await;
-}
+    let pool = storage.pool().clone();
+    ((database_lock, storage), "PostgreSQL", async move {
+        crate::session_meta::load_session_meta(&pool, None).await
+    })
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidate_order() {
@@ -1115,13 +1112,12 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
     ));
 }
 
-#[tokio::test]
-async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
+lash_conformance::checkpoint_claim_probe_tests!({
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping Postgres checkpoint counter: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect checkpoint counter storage");
@@ -1130,18 +1126,22 @@ async fn checkpoint_probe_skips_writes_for_deferred_head_when_configured() {
         std::process::id()
     ));
     let store = Arc::new(storage.session_store(&session_id));
-    lash_conformance::checkpoint_claim_probe_transaction_counts(
-        Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-        &session_id,
-        || store.checkpoint_claim_counts(),
+    let counting_store = Arc::clone(&store);
+    let teardown_session = session_id.clone();
+    (
+        database_lock,
+        store as Arc<dyn RuntimePersistence>,
+        session_id,
+        move || counting_store.checkpoint_claim_counts(),
+        async move {
+            storage
+                .session_store_factory()
+                .delete_session(&teardown_session)
+                .await
+                .expect("delete checkpoint counter session");
+        },
     )
-    .await;
-    storage
-        .session_store_factory()
-        .delete_session(&session_id)
-        .await
-        .expect("delete checkpoint counter session");
-}
+});
 
 /// Arming a delete and a writer taking the digest back are the two halves of
 /// the same CAS: run concurrently against PostgreSQL, at most one of them

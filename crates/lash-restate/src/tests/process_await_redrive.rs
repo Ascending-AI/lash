@@ -1972,10 +1972,8 @@ pub(super) fn restate_effect_name_uses_lash_replay_key() {
     );
 }
 
-#[tokio::test]
-pub(super) async fn restate_effect_host_satisfies_scope_factory_conformance() {
-    lash_conformance::effect_host(|| {
-        Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080"))
+lash_conformance::effect_host_tests!({
+    ((), || {
+        Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080")) as Arc<dyn EffectHost>
     })
-    .await;
-}
+});

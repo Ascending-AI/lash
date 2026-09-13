@@ -50,7 +50,7 @@
 //! asserting the reverse of what the engine does.
 //!
 //! The engine-owed half of this behavior is discharged live instead, by
-//! [`effect_group_host_conformance`](super::effect_group_host_conformance)
+//! the shared effect-group host laws
 //! running against a real Restate deployment: the loser-settlement guarantee
 //! is `run_to_completion_losers_settle_after_the_caller_is_gone`, and the
 //! routing and exactly-once guarantees the drain rows also imply are covered

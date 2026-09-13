@@ -21,42 +21,16 @@ use pretty_assertions::assert_eq;
 /// Breaks a backend so its next `gc_unreachable` must fail.
 ///
 /// Supplied by backends whose sweep reads durable state that a test can
-/// corrupt. A backend with no failure path in its sweep passes `None` to
-/// [`store_maintenance_outcome_contract`]; the skip is traced, never silent.
+/// corrupt.
 #[async_trait::async_trait]
 pub trait StoreMaintenanceFaultInjector: Send + Sync {
     /// Corrupt the store so the next sweep over `session_id` fails.
     async fn break_gc_scope(&self, session_id: &SessionId);
 }
 
-/// Every arm of the maintenance outcome contract, on one backend.
-///
-/// `make` must return a fresh, empty factory. `fault` is the backend's
-/// sweep-failure injector, when it has one.
-pub async fn store_maintenance_outcome_contract<F>(
-    backend: &str,
-    make: F,
-    fault: Option<Arc<dyn StoreMaintenanceFaultInjector>>,
-) where
-    F: Fn() -> Arc<dyn crate::SessionStoreFactory>,
-{
-    report_failure_channels_are_incomplete(backend);
-    idle_store_reports_witnessed_nothing_to_do(backend, make()).await;
-    superseded_checkpoint_is_a_witnessed_sweep(backend, make()).await;
-    empty_root_set_refusal_returns_its_partial_report(backend, make()).await;
-    match fault {
-        Some(fault) => sweep_failure_is_not_an_empty_report(backend, make(), fault.as_ref()).await,
-        None => tracing::warn!(
-            backend,
-            "backend supplied no gc fault injector: the failure arm of the maintenance \
-             outcome contract is unexercised here"
-        ),
-    }
-}
-
 /// A completed report with failed or deferred destructive steps is incomplete,
 /// never a healthy empty pass or a clean sweep.
-fn report_failure_channels_are_incomplete(backend: &str) {
+pub fn report_failure_channels_are_incomplete(backend: &str) {
     let failed_id =
         crate::AttachmentId::parse("maintenance-failed").expect("valid failed attachment id");
     let failed = crate::attachments::AttachmentReclamationReport {
@@ -119,7 +93,7 @@ pub async fn store_maintenance_unimplemented_levers_fail(
 
 /// An idle session's levers complete and report zero: emptiness that was
 /// *observed*, not emptiness standing in for a failure.
-async fn idle_store_reports_witnessed_nothing_to_do(
+pub async fn idle_store_reports_witnessed_nothing_to_do(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -159,7 +133,7 @@ async fn idle_store_reports_witnessed_nothing_to_do(
 /// Superseding a checkpoint orphans its blob, and the next sweep reports the
 /// reclaim as a sweep — the arm a backend that swallows errors could never be
 /// told apart from.
-async fn superseded_checkpoint_is_a_witnessed_sweep(
+pub async fn superseded_checkpoint_is_a_witnessed_sweep(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -201,7 +175,7 @@ async fn superseded_checkpoint_is_a_witnessed_sweep(
 
 /// A refused sweep hands back the report it accumulated before refusing, and
 /// destroys nothing.
-async fn empty_root_set_refusal_returns_its_partial_report(
+pub async fn empty_root_set_refusal_returns_its_partial_report(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -260,7 +234,7 @@ async fn empty_root_set_refusal_returns_its_partial_report(
 /// A broken sweep fails and says so. This is the law ADR 0067 §4 names: a
 /// backend that catches its own error and answers `Ok(GcReport::default())` is
 /// indistinguishable from a healthy store with nothing to do, and reds here.
-async fn sweep_failure_is_not_an_empty_report(
+pub async fn sweep_failure_is_not_an_empty_report(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
     fault: &dyn StoreMaintenanceFaultInjector,

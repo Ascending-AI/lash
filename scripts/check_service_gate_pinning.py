@@ -79,7 +79,7 @@ IGNORED_SUITE_BINARIES = ("cross_backend_store_differential",)
 # recipe, which is what holds the effect-group choreography to its conformance
 # and design witnesses.
 IGNORED_SUITE_FILTERS = (
-    "live_restate_effect_group_conformance",
+    "tests::conformance_and_poison::",
     "live_effect_group_sdk_preconditions",
 )
 

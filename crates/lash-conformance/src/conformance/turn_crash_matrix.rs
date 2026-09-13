@@ -2055,7 +2055,7 @@ fn is_ticket_id(ticket: &str) -> bool {
 
 /// Re-record the reference turn and fail if its live seam traffic drifts from
 /// the committed golden trace or the outcome table omits a generated point.
-pub(crate) async fn turn_crash_trace_drift_check<F>(make: F)
+pub async fn turn_crash_trace_drift_check<F>(make: F)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {

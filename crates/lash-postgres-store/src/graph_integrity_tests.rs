@@ -163,20 +163,19 @@ async fn reset_graph_integrity_storage(storage: &PostgresStorage) {
         .expect("reset Postgres graph-integrity tables");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_graph_integrity_conformance_when_configured() {
+lash_conformance::graph_integrity_tests!({
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping Postgres graph-integrity conformance: database URL is not set");
         return;
     };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
     let storage = Arc::new(
         PostgresStorage::connect(&database_url)
             .await
             .expect("connect Postgres graph-integrity storage"),
     );
     reset_graph_integrity_storage(&storage).await;
-    lash_conformance::graph_integrity_conformance(|case| {
+    (database_lock, move |case| {
         let storage = Arc::clone(&storage);
         async move {
             reset_graph_integrity_storage(&storage).await;
@@ -186,6 +185,4 @@ async fn postgres_graph_integrity_conformance_when_configured() {
             }
         }
     })
-    .await;
-    reset_graph_integrity_storage(&storage).await;
-}
+});

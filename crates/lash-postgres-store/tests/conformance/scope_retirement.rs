@@ -170,11 +170,10 @@ async fn postgres_direct_effect_retirement_serializes_with_bound_catalog() {
     drop(database_lock);
 }
 
-/// A quiescence-gated retirement leaves a draining scope's rows alone and
-/// fences nothing; once the drain settles it removes the rows and leaves the
-/// fence (FIG-2499 fix round 1).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_quiescent_retirement_waits_for_the_drain() {
+// A quiescence-gated retirement leaves a draining scope's rows alone and
+// fences nothing; once the drain settles it removes the rows and leaves the
+// fence (FIG-2499 fix round 1).
+lash_conformance::effect_group_quiescent_retirement_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres quiescent retirement test: LASH_POSTGRES_DATABASE_URL is not set"
@@ -183,8 +182,9 @@ async fn postgres_quiescent_retirement_waits_for_the_drain() {
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    let scope_id =
-        lash_conformance::effect_group_quiescent_retirement_waits_for_live_children(|executors| {
+    (
+        database_lock,
+        move |executors| {
             let database_url = database_url.clone();
             let storage = sync_await(async move {
                 PostgresStorage::connect(&database_url)
@@ -197,33 +197,35 @@ async fn postgres_quiescent_retirement_waits_for_the_drain() {
                     .expect("a freshly connected host has no resolver yet");
             }
             Arc::new(host) as Arc<dyn EffectHost>
-        })
-        .await;
-    let pool = storage.pool();
-    let count = |sql: &'static str| {
-        let scope_id = scope_id.clone();
-        async move {
-            sqlx::query_scalar::<_, i64>(sql)
-                .bind(scope_id)
-                .fetch_one(pool)
-                .await
-                .expect("count journal rows")
-        }
-    };
-    assert_eq!(
-        count("SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE scope_id = $1").await,
-        0
-    );
-    assert_eq!(
-        count("SELECT COUNT(*) FROM lash_runtime_effect_group WHERE scope_id = $1").await,
-        0
-    );
-    assert_eq!(
-        count("SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1").await,
-        1
-    );
-    drop(database_lock);
-}
+        },
+        move |scope_id: String| async move {
+            let pool = storage.pool();
+            let count = |sql: &'static str| {
+                let scope_id = scope_id.clone();
+                async move {
+                    sqlx::query_scalar::<_, i64>(sql)
+                        .bind(scope_id)
+                        .fetch_one(pool)
+                        .await
+                        .expect("count journal rows")
+                }
+            };
+            assert_eq!(
+                count("SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE scope_id = $1").await,
+                0
+            );
+            assert_eq!(
+                count("SELECT COUNT(*) FROM lash_runtime_effect_group WHERE scope_id = $1").await,
+                0
+            );
+            assert_eq!(
+                count("SELECT COUNT(*) FROM lash_effect_scope_retirements WHERE scope_id = $1")
+                    .await,
+                1
+            );
+        },
+    )
+});
 
 /// Scope retirement serializes behind the same advisory lock every admission
 /// path takes (`lock_scope`, namespace 563): while a transaction holds the
