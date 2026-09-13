@@ -329,6 +329,14 @@ pub enum RuntimeError {
         "projected host descriptor `{name}` ({type_name}) is unavailable after restore; re-supply the binding or rerun the producing tool"
     )]
     ProjectedValueUnavailable { name: String, type_name: String },
+    /// A projected host descriptor was asked a read it does not answer
+    /// (FIG-2863). Distinct from a descriptor answering "there is no value".
+    #[error("projected host descriptor `{name}` ({type_name}) does not answer `{request}`")]
+    ProjectedReadUnsupported {
+        name: String,
+        type_name: String,
+        request: String,
+    },
     /// `validate` received a second argument that is not a type literal.
     #[error("`validate` requires a Type literal as the second argument")]
     ValidateTypeLiteralRequired,
@@ -569,6 +577,7 @@ impl RuntimeError {
             Self::IncompatibleSequenceConcatenation => ErrorTaxonomy::Catchable,
             Self::ReadOnlyProjectedBinding { .. } => ErrorTaxonomy::Catchable,
             Self::ProjectedValueUnavailable { .. } => ErrorTaxonomy::Catchable,
+            Self::ProjectedReadUnsupported { .. } => ErrorTaxonomy::Catchable,
             Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
             Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
             Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
@@ -702,6 +711,7 @@ impl RuntimeError {
             Self::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
             Self::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
             Self::ProjectedValueUnavailable { .. } => "ProjectedValueUnavailable",
+            Self::ProjectedReadUnsupported { .. } => "ProjectedReadUnsupported",
             Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             Self::NotTypeValue { .. } => "NotTypeValue",
             Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
@@ -975,6 +985,11 @@ mod tests {
             RuntimeError::ProjectedValueUnavailable {
                 name: "report".into(),
                 type_name: "Report".into(),
+            },
+            RuntimeError::ProjectedReadUnsupported {
+                name: "history".into(),
+                type_name: "list".into(),
+                request: "contains".into(),
             },
             RuntimeError::ValidateTypeLiteralRequired,
             RuntimeError::NotTypeValue {
@@ -1303,6 +1318,9 @@ mod tests {
                 RuntimeError::ProjectedValueUnavailable { .. } => {
                     "projected host descriptor `report` (Report) is unavailable after restore; re-supply the binding or rerun the producing tool"
                 }
+                RuntimeError::ProjectedReadUnsupported { .. } => {
+                    "projected host descriptor `history` (list) does not answer `contains`"
+                }
                 RuntimeError::ValidateTypeLiteralRequired => {
                     "`validate` requires a Type literal as the second argument"
                 }
@@ -1519,6 +1537,7 @@ mod tests {
     RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
     RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
     RuntimeError::ProjectedValueUnavailable { .. } => "ProjectedValueUnavailable",
+    RuntimeError::ProjectedReadUnsupported { .. } => "ProjectedReadUnsupported",
     RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
     RuntimeError::NotTypeValue { .. } => "NotTypeValue",
     RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",

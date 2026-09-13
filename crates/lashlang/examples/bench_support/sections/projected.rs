@@ -178,67 +178,68 @@ impl ProjectedHostDescriptor for ProjectedList {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             let ProjectedReadRequest::Index(index) = request else {
                 return match request {
-                    ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.values.len()),
-                    ProjectedReadRequest::Empty => {
-                        ProjectedReadResponse::Bool(self.values.is_empty())
+                    ProjectedReadRequest::Len => {
+                        Some(ProjectedReadResponse::Len(self.values.len()))
                     }
-                    ProjectedReadRequest::Truthy => ProjectedReadResponse::Bool(true),
-                    ProjectedReadRequest::Contains(needle) => ProjectedReadResponse::Bool(
+                    ProjectedReadRequest::Empty => {
+                        Some(ProjectedReadResponse::Bool(self.values.is_empty()))
+                    }
+                    ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
+                    ProjectedReadRequest::Contains(needle) => Some(ProjectedReadResponse::Bool(
                         self.values.iter().any(|value| value == &needle),
-                    ),
+                    )),
                     ProjectedReadRequest::Join(sep) => {
                         let Ok(sep) = string_value(&sep) else {
-                            return ProjectedReadResponse::Missing;
+                            return None;
                         };
                         let mut joined = String::new();
                         for (index, value) in self.values.iter().enumerate() {
                             let Ok(value) = string_value(value) else {
-                                return ProjectedReadResponse::Missing;
+                                return None;
                             };
                             if index > 0 {
                                 joined.push_str(sep.as_ref());
                             }
                             joined.push_str(value.as_ref());
                         }
-                        ProjectedReadResponse::Value(Value::String(joined.into()))
+                        Some(ProjectedReadResponse::Value(Value::String(joined.into())))
                     }
                     ProjectedReadRequest::Slice { start, end } => {
                         let Some((start, end)) = clamp_slice_bounds(start, end, self.values.len())
                         else {
-                            return ProjectedReadResponse::Value(Value::List(Vec::new().into()));
+                            return Some(ProjectedReadResponse::Value(Value::List(
+                                Vec::new().into(),
+                            )));
                         };
-                        ProjectedReadResponse::Value(Value::List(
+                        Some(ProjectedReadResponse::Value(Value::List(
                             self.values[start..end].to_vec().into(),
-                        ))
+                        )))
                     }
                     ProjectedReadRequest::Push(item) => {
                         let mut values = self.values.to_vec();
                         values.push(item);
-                        ProjectedReadResponse::Value(Value::List(values.into()))
+                        Some(ProjectedReadResponse::Value(Value::List(values.into())))
                     }
-                    ProjectedReadRequest::Render => ProjectedReadResponse::Text(format!(
+                    ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(format!(
                         "<{}:{}>",
                         self.name,
                         self.values.len()
+                    ))),
+                    ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                        Value::List(self.values.clone()),
                     )),
-                    ProjectedReadRequest::Materialize => {
-                        ProjectedReadResponse::Value(Value::List(self.values.clone()))
-                    }
-                    _ => ProjectedReadResponse::Missing,
+                    _ => None,
                 };
             };
-            let Some(index) = resolve_index(&index, self.values.len()) else {
-                return ProjectedReadResponse::Missing;
-            };
+            let index = resolve_index(&index, self.values.len())?;
             self.values
                 .get(index)
                 .cloned()
                 .map(ProjectedReadResponse::Value)
-                .unwrap_or(ProjectedReadResponse::Missing)
         })
     }
 }
@@ -278,93 +279,92 @@ impl ProjectedHostDescriptor for ProjectedText {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
-                ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.text.chars().count()),
-                ProjectedReadRequest::Empty => ProjectedReadResponse::Bool(self.text.is_empty()),
-                ProjectedReadRequest::Truthy => ProjectedReadResponse::Bool(!self.text.is_empty()),
+                ProjectedReadRequest::Len => {
+                    Some(ProjectedReadResponse::Len(self.text.chars().count()))
+                }
+                ProjectedReadRequest::Empty => {
+                    Some(ProjectedReadResponse::Bool(self.text.is_empty()))
+                }
+                ProjectedReadRequest::Truthy => {
+                    Some(ProjectedReadResponse::Bool(!self.text.is_empty()))
+                }
                 ProjectedReadRequest::Index(index) => {
-                    let Some(index) = resolve_index(&index, self.text.chars().count()) else {
-                        return ProjectedReadResponse::Missing;
-                    };
-                    self.text
-                        .chars()
-                        .nth(index)
-                        .map(|ch| {
-                            ProjectedReadResponse::Value(Value::String(ch.to_compact_string()))
-                        })
-                        .unwrap_or(ProjectedReadResponse::Missing)
+                    let index = resolve_index(&index, self.text.chars().count())?;
+                    self.text.chars().nth(index).map(|ch| {
+                        ProjectedReadResponse::Value(Value::String(ch.to_compact_string()))
+                    })
                 }
                 ProjectedReadRequest::Find { needle, start } => {
                     let Value::String(needle) = needle else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
-                    ProjectedReadResponse::Value(match find_text(&self.text, &needle, start) {
-                        Some(index) => Value::Number(index as f64),
-                        None => Value::Null,
-                    })
+                    Some(ProjectedReadResponse::Value(
+                        match find_text(&self.text, &needle, start) {
+                            Some(index) => Value::Number(index as f64),
+                            None => Value::Null,
+                        },
+                    ))
                 }
                 ProjectedReadRequest::GrepText(needle) => {
                     let Value::String(needle) = needle else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
-                    grep_text_records(&self.text, &needle)
-                        .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
+                    grep_text_records(&self.text, &needle).map(ProjectedReadResponse::Value)
                 }
                 ProjectedReadRequest::StartsWith(prefix) => {
                     let Value::String(prefix) = prefix else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
-                    ProjectedReadResponse::Bool(self.text.starts_with(&*prefix))
+                    Some(ProjectedReadResponse::Bool(self.text.starts_with(&*prefix)))
                 }
                 ProjectedReadRequest::EndsWith(suffix) => {
                     let Value::String(suffix) = suffix else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
-                    ProjectedReadResponse::Bool(self.text.ends_with(&*suffix))
+                    Some(ProjectedReadResponse::Bool(self.text.ends_with(&*suffix)))
                 }
                 ProjectedReadRequest::Split(needle) => {
                     let Value::String(needle) = needle else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
-                    ProjectedReadResponse::Value(Value::List(
+                    Some(ProjectedReadResponse::Value(Value::List(
                         self.text
                             .split(&*needle)
                             .map(|part| Value::String(part.into()))
                             .collect::<Vec<_>>()
                             .into(),
-                    ))
+                    )))
                 }
-                ProjectedReadRequest::Trim => {
-                    ProjectedReadResponse::Value(Value::String(self.text.trim().into()))
-                }
-                ProjectedReadRequest::Slice { start, end } => ProjectedReadResponse::Value(
+                ProjectedReadRequest::Trim => Some(ProjectedReadResponse::Value(Value::String(
+                    self.text.trim().into(),
+                ))),
+                ProjectedReadRequest::Slice { start, end } => Some(ProjectedReadResponse::Value(
                     Value::String(slice_string(&self.text, start, end).into()),
-                ),
+                )),
                 ProjectedReadRequest::ToNumber => self
                     .text
                     .parse::<f64>()
                     .ok()
                     .map(Value::Number)
-                    .map(ProjectedReadResponse::Value)
-                    .unwrap_or(ProjectedReadResponse::Missing),
+                    .map(ProjectedReadResponse::Value),
                 ProjectedReadRequest::JsonParse => {
                     serde_json::from_str::<serde_json::Value>(&self.text)
+                        .ok()
                         .map(from_json)
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
-                ProjectedReadRequest::Render => ProjectedReadResponse::Text(format!(
+                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(format!(
                     "<{}:{} chars>",
                     self.name,
                     self.text.chars().count()
+                ))),
+                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                    Value::String(self.text.as_ref().into()),
                 )),
-                ProjectedReadRequest::Materialize => {
-                    ProjectedReadResponse::Value(Value::String(self.text.as_ref().into()))
-                }
-                _ => ProjectedReadResponse::Missing,
+                _ => None,
             }
         })
     }

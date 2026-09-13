@@ -142,12 +142,12 @@ struct PendingMaterialization {
 }
 
 impl Future for PendingMaterialization {
-    type Output = ProjectedReadResponse;
+    type Output = Option<ProjectedReadResponse>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.state.ready.load(Ordering::Acquire) || self.state.cancelled.load(Ordering::Acquire)
         {
-            return Poll::Ready(ProjectedReadResponse::Value(self.value.clone()));
+            return Poll::Ready(Some(ProjectedReadResponse::Value(self.value.clone())));
         }
 
         *self
@@ -181,13 +181,13 @@ impl ProjectedHostDescriptor for PendingDescriptor {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         match request {
             ProjectedReadRequest::Materialize => Box::pin(PendingMaterialization {
                 value: self.value.clone(),
                 state: self.state.clone(),
             }),
-            _ => Box::pin(async { ProjectedReadResponse::Missing }),
+            _ => Box::pin(async { None }),
         }
     }
 }

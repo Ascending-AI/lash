@@ -32,7 +32,7 @@ use super::exceptions::PendingErrorOrigin;
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 12;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 13;
 
 /// The execution identity pending-tool handles carry.
 ///
