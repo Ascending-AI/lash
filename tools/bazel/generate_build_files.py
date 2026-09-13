@@ -129,13 +129,11 @@ def cargo_test_policy(
     if package_name == "lash-internal-core" and kind == "unit-test":
         # Partition-owned, but not remotely executable: rustc for the
         # workspace's largest test binary -- 446 files, over seventeen hundred
-        # cases -- is killed without a diagnostic on the shared pool. A
-        # per-target `exec_properties` budget cannot fix it, because Bazel
-        # applies `--remote_default_exec_properties` only to actions that carry
-        # none, so raising `memory_kb` there drops the executor-runtime
-        # property the pool schedules on. CI's Bazel job compiles and runs this
-        # label on its own runner instead. Pin the placement rather than split
-        # the binary or drop cases from it.
+        # cases -- is killed without a diagnostic by CI's executor pool, twice
+        # in a row and at different points in the compile. The same action
+        # succeeds on the developer pool, including at a raised per-target
+        # `memory_kb`, so the budget is not the lever. Compile and run it on
+        # the runner rather than split the binary or drop cases from it.
         tags.append("no-remote-exec")
     if package_name == "lash-internal-typescript" and kind == "test":
         # Partition-owned, but not remotely executable: the no-abort guarantee

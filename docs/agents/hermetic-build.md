@@ -197,11 +197,12 @@ rather than exempted:
 
 `//crates/lash-core:lash-core__unit_test` carries `no-remote-exec` for the same
 class of reason: rustc for the workspace's largest test binary is killed
-without a diagnostic on the shared pool, and a per-target `exec_properties`
-budget cannot fix it, because Bazel applies
-`--remote_default_exec_properties` only to actions that carry none -- raising
-`memory_kb` there drops the executor-runtime property the pool schedules on.
-CI's Bazel job compiles and runs the label on its own runner.
+without a diagnostic by CI's executor pool, twice in a row and at different
+points in the compile, while the same action succeeds on the developer pool
+even at a raised per-target `memory_kb`. The budget is not the lever, so the
+label compiles and runs on the runner. Its two source lints resolve module
+paths through symlinks for that reason: a locally executed test reads its
+sources from a runfiles symlink tree.
 
 `//crates/lash-sim:lash-sim__unit_test` declares `timeout = "long"`. It carries
 the generated-simulation and minimizer fixture replays and ran 227-300 s on the
