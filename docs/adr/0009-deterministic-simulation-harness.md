@@ -38,6 +38,52 @@ Lash lease/effect semantics. A custom async executor, live provider tests, or a
 new fifth scenario family would all create parallel contracts that drift from
 the existing architecture.
 
+## Substrate fault classes: what the harness models, and what it does not
+
+The harness injects substrate faults at the real store transaction seam, behind
+each backend crate's `testing` feature, through one neutral vocabulary
+(`BackendFaultKind`, `BackendFaultPoint`, `BackendFaultArm`,
+`BackendFaultObservation` in `crates/lash-sim/src/backend_fault.rs`), so one
+scenario plan drives the SQLite injector
+(`lash_sqlite_store::testing::SqliteFaultInjector`) and the PostgreSQL injector
+(`lash_postgres_store::testing::PostgresFaultInjector`) alike. Two fault classes
+from lash's own bug history are deliberately not modeled in the simulator; both
+are covered by live behavioral tests instead, and this section is the written
+decision.
+
+**Clock skew is not modeled in the simulator.** The harness has exactly one
+virtual clock (`crates/lash-sim/src/clock.rs`), while skew is by definition a
+disagreement between two processes' clocks, so a simulated skew would only
+re-time the harness, never the authority that decides a lease. The property that
+matters — that lease and claim validity is decided by the store's own clock and
+persisted row, never by a caller's supplied expiry — is covered directly against
+a real database by `crates/lash-postgres-store/tests/postgres_clock_contract.rs`
+(a client clock skewed ten years into the future: claims stay claimable and live
+claims stay uncancellable, with a lint that keeps those paths off the client wall
+clock) and by `crates/lash-postgres-store/tests/postgres_lease_multiconnection.rs`
+lines 296-318, where a fenced host forges a decade-future expiry on its stale
+lease and is still refused. Adding a second simulated clock would duplicate that
+contract in a place that cannot fail for the real reason.
+
+**Torn writes are modeled only at the commit boundary.** `CommitIo` is exactly
+that fault: the substrate fails at the moment of commit, and the durable-prefix
+and no-duplicate-effect oracles judge what survived. Sub-transaction tearing —
+half of one transaction's rows reaching the disk — is not modeled, because both
+supported backends are transactional and lash writes nothing durable outside a
+transaction: every session commit, lease decision, claim, and checkpoint body
+runs inside one `BEGIN`/`COMMIT`. A simulated partial-transaction write would
+therefore assert against a state the storage engines forbid rather than against
+a state lash can reach. If lash ever gains a non-transactional durable writer,
+that writer brings this decision back.
+
+**Slow-but-alive is modeled** (`crates/lash-sim/src/slow_alive.rs`): a
+store-operation delay injector on the virtual clock advances time past the lease
+TTL between a live worker's claim and its commit, and two oracles judge the
+result — the lease-loss refusal fires
+(`StoreError::SessionExecutionLeaseExpired`), and no partial write survives, the
+durable prefix being exactly what a reopen reads while the refused operation
+still publishes exactly once under fresh authority.
+
 ## Consequences
 
 - `lash-sim` owns generation, scheduling, replay, model-store simulation,

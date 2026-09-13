@@ -1472,6 +1472,13 @@ jobs:
         if: matrix.role == 'primary'
         run: bash scripts/ci/store-tests.sh pg-agent-scenario
 
+      # The simulator's backend-fault scenarios against a real PostgreSQL. They
+      # compare fault semantics, not catalog rendering, so they run once on the
+      # primary major instead of three times.
+      - name: Test simulator backend faults on Postgres
+        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: bash scripts/ci/store-tests.sh pg-sim-backend-faults
+
       # The full differential compares backend semantics, not catalog rendering,
       # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential

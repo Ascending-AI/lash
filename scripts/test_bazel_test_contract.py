@@ -706,6 +706,7 @@ class BazelTestContractTests(unittest.TestCase):
                 "pg-store",
                 "pg-pool-wait",
                 "pg-agent-scenario",
+                "pg-sim-backend-faults",
                 "pg-cross-backend",
                 "s3-store",
                 "s3-attachment-differential",

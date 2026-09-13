@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::backend_fault::{
+    BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation, BackendFaultPoint,
+};
 use lash_core::{
     OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-};
-use lash_sqlite_store::testing::{
-    SqliteFaultArm, SqliteFaultInjector, SqliteFaultObservation, SqliteFaultPoint,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -19,14 +19,14 @@ pub const DEFAULT_SQLITE_FAULT_SEED_BASE: u64 = 0x0000_0000_0859_0000;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SqliteFaultScenarioKind {
+pub enum BackendFaultScenarioKind {
     AbortAfterBegin,
     AbortBeforeCommit,
     CommitIo,
     ReopenMidSequence,
 }
 
-impl SqliteFaultScenarioKind {
+impl BackendFaultScenarioKind {
     const ALL: [Self; 4] = [
         Self::AbortAfterBegin,
         Self::AbortBeforeCommit,
@@ -43,49 +43,66 @@ impl SqliteFaultScenarioKind {
         }
     }
 
-    fn fault_point(self) -> Option<SqliteFaultPoint> {
+    fn fault_point(self) -> Option<BackendFaultPoint> {
         match self {
-            Self::AbortAfterBegin => Some(SqliteFaultPoint::AfterBegin),
-            Self::AbortBeforeCommit => Some(SqliteFaultPoint::BeforeCommit),
-            Self::CommitIo => Some(SqliteFaultPoint::CommitIo),
+            Self::AbortAfterBegin => Some(BackendFaultPoint::AfterBegin),
+            Self::AbortBeforeCommit => Some(BackendFaultPoint::BeforeCommit),
+            Self::CommitIo => Some(BackendFaultPoint::CommitIo),
             Self::ReopenMidSequence => None,
         }
     }
 
-    fn oracle_id(self) -> &'static str {
-        match self {
-            Self::AbortAfterBegin => "sim.oracle.sqlite-abort-after-begin.v1",
-            Self::AbortBeforeCommit => "sim.oracle.sqlite-abort-before-commit.v1",
-            Self::CommitIo => "sim.oracle.sqlite-commit-io.v1",
-            Self::ReopenMidSequence => "sim.oracle.sqlite-reopen-mid-sequence.v1",
+    fn oracle_id(self, backend: BackendFaultKind) -> &'static str {
+        match (backend, self) {
+            (BackendFaultKind::Sqlite, Self::AbortAfterBegin) => {
+                "sim.oracle.sqlite-abort-after-begin.v1"
+            }
+            (BackendFaultKind::Sqlite, Self::AbortBeforeCommit) => {
+                "sim.oracle.sqlite-abort-before-commit.v1"
+            }
+            (BackendFaultKind::Sqlite, Self::CommitIo) => "sim.oracle.sqlite-commit-io.v1",
+            (BackendFaultKind::Sqlite, Self::ReopenMidSequence) => {
+                "sim.oracle.sqlite-reopen-mid-sequence.v1"
+            }
+            (BackendFaultKind::Postgres, Self::AbortAfterBegin) => {
+                "sim.oracle.postgres-abort-after-begin.v1"
+            }
+            (BackendFaultKind::Postgres, Self::AbortBeforeCommit) => {
+                "sim.oracle.postgres-abort-before-commit.v1"
+            }
+            (BackendFaultKind::Postgres, Self::CommitIo) => "sim.oracle.postgres-commit-io.v1",
+            (BackendFaultKind::Postgres, Self::ReopenMidSequence) => {
+                "sim.oracle.postgres-reopen-mid-sequence.v1"
+            }
         }
     }
 }
 
 #[derive(Debug, Serialize)]
-pub struct SqliteFaultProfileReport {
+pub struct BackendFaultProfileReport {
     pub schema: &'static str,
+    pub backend: BackendFaultKind,
     pub status: &'static str,
     pub configured_seeds: Vec<u64>,
-    pub scenarios: Vec<SqliteFaultScenarioReport>,
-    pub composition_witness: SqliteFaultCompositionWitness,
-    pub coverage: SqliteFaultCoverage,
+    pub scenarios: Vec<BackendFaultScenarioReport>,
+    pub composition_witness: BackendFaultCompositionWitness,
+    pub coverage: BackendFaultCoverage,
     #[serde(skip)]
     pub report_path: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
-pub struct SqliteFaultCoverage {
-    pub complete_scenario_set: Vec<SqliteFaultScenarioKind>,
-    pub exercised_scenarios: Vec<SqliteFaultScenarioKind>,
-    pub dropped_scenarios: Vec<SqliteFaultScenarioKind>,
+pub struct BackendFaultCoverage {
+    pub complete_scenario_set: Vec<BackendFaultScenarioKind>,
+    pub exercised_scenarios: Vec<BackendFaultScenarioKind>,
+    pub dropped_scenarios: Vec<BackendFaultScenarioKind>,
     pub bounded_prefix_commits_per_seed: &'static str,
     pub bounded_composition_policy: &'static str,
 }
 
 /// Explicit multi-arm plan selected from one generated workload.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SqliteFaultCompositionPlan {
+pub struct BackendFaultCompositionPlan {
     pub schema: String,
     pub workload_seed: u64,
     pub workload_profile: String,
@@ -93,18 +110,18 @@ pub struct SqliteFaultCompositionPlan {
     pub workload_id: String,
     pub selection_policy: String,
     pub max_attempts: usize,
-    pub arms: Vec<GeneratedSqliteFaultArm>,
+    pub arms: Vec<GeneratedBackendFaultArm>,
 }
 
 /// One injector arm and the generated boundary that selected it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct GeneratedSqliteFaultArm {
+pub struct GeneratedBackendFaultArm {
     pub source_boundary_id: String,
-    pub arm: SqliteFaultArm,
+    pub arm: BackendFaultArm,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct SqliteFaultCompositionAttempt {
+pub struct BackendFaultCompositionAttempt {
     pub attempt: usize,
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,49 +130,49 @@ pub struct SqliteFaultCompositionAttempt {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub committed_head_revision: Option<u64>,
-    pub fired_observations: Vec<SqliteFaultObservation>,
+    pub fired_observations: Vec<BackendFaultObservation>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct SqliteFaultCompositionRun {
+pub struct BackendFaultCompositionRun {
     pub label: String,
     pub selected_arm_indices: Vec<usize>,
-    pub attempts: Vec<SqliteFaultCompositionAttempt>,
+    pub attempts: Vec<BackendFaultCompositionAttempt>,
     pub operation_failed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_class: Option<String>,
     pub durable_prefix_revision: u64,
     pub final_reopened_head_revision: u64,
-    pub injection_observations: Vec<SqliteFaultObservation>,
+    pub injection_observations: Vec<BackendFaultObservation>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct SqliteFaultCompositionWitness {
+pub struct BackendFaultCompositionWitness {
     pub schema: &'static str,
-    pub plan: SqliteFaultCompositionPlan,
-    pub zero_arm_control: SqliteFaultCompositionRun,
-    pub single_arm_controls: Vec<SqliteFaultCompositionRun>,
-    pub paired: SqliteFaultCompositionRun,
-    pub repeated_paired: SqliteFaultCompositionRun,
+    pub plan: BackendFaultCompositionPlan,
+    pub zero_arm_control: BackendFaultCompositionRun,
+    pub single_arm_controls: Vec<BackendFaultCompositionRun>,
+    pub paired: BackendFaultCompositionRun,
+    pub repeated_paired: BackendFaultCompositionRun,
     pub repeat_matches: bool,
-    pub oracle: SqliteFaultOracle,
+    pub oracle: BackendFaultOracle,
     pub replay_command: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct SqliteFaultScenarioReport {
+pub struct BackendFaultScenarioReport {
     pub seed: u64,
-    pub scenario: SqliteFaultScenarioKind,
+    pub scenario: BackendFaultScenarioKind,
     pub prefix_commits: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub injected_fault: Option<SqliteFaultPoint>,
-    pub injection_observations: Vec<SqliteFaultObservation>,
-    pub oracles: Vec<SqliteFaultOracle>,
+    pub injected_fault: Option<BackendFaultPoint>,
+    pub injection_observations: Vec<BackendFaultObservation>,
+    pub oracles: Vec<BackendFaultOracle>,
     pub replay_command: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct SqliteFaultOracle {
+pub struct BackendFaultOracle {
     pub oracle_id: &'static str,
     pub status: &'static str,
     pub assertion: &'static str,
@@ -163,15 +180,16 @@ pub struct SqliteFaultOracle {
 }
 
 #[derive(Debug, Serialize)]
-struct SqliteFaultFailurePackage<'a> {
+struct BackendFaultFailurePackage<'a> {
     schema: &'static str,
+    backend: BackendFaultKind,
     seed: u64,
-    scenario: SqliteFaultScenarioKind,
+    scenario: BackendFaultScenarioKind,
     oracle_id: &'a str,
     reason: &'a str,
     database_root: String,
     prefix_commits: usize,
-    injected_fault: Option<SqliteFaultPoint>,
+    injected_fault: Option<BackendFaultPoint>,
     exact_replay_command: String,
 }
 
@@ -189,9 +207,13 @@ impl ScenarioFailure {
         }
     }
 
-    fn oracle(kind: SqliteFaultScenarioKind, reason: impl Into<String>) -> Self {
+    fn oracle(
+        backend: BackendFaultKind,
+        kind: BackendFaultScenarioKind,
+        reason: impl Into<String>,
+    ) -> Self {
         Self {
-            oracle_id: kind.oracle_id(),
+            oracle_id: kind.oracle_id(backend),
             reason: reason.into(),
         }
     }
@@ -203,23 +225,47 @@ pub fn sqlite_fault_seeds(count: usize) -> Vec<u64> {
         .collect()
 }
 
+/// Runs the commit-boundary fault scenarios against the real SQLite substrate.
 pub async fn run_sqlite_fault_profile(
     artifact_root: impl AsRef<Path>,
     seeds: &[u64],
-) -> Result<SqliteFaultProfileReport, String> {
+) -> Result<BackendFaultProfileReport, String> {
+    Ok(
+        run_backend_fault_profile(BackendFaultKind::Sqlite, artifact_root, seeds)
+            .await?
+            .expect("the SQLite lane is always configured"),
+    )
+}
+
+/// Runs the same scenario plan against one backend's real fault injector.
+///
+/// Returns `Ok(None)` when the requested backend is not configured, which only
+/// happens for Postgres without `LASH_POSTGRES_DATABASE_URL`.
+pub async fn run_backend_fault_profile(
+    backend: BackendFaultKind,
+    artifact_root: impl AsRef<Path>,
+    seeds: &[u64],
+) -> Result<Option<BackendFaultProfileReport>, String> {
     if seeds.is_empty() {
-        return Err("SQLite fault profile requires at least one seed".to_string());
+        return Err(format!(
+            "{} fault profile requires at least one seed",
+            backend.name()
+        ));
     }
     let artifact_root = artifact_root.as_ref();
     std::fs::create_dir_all(artifact_root).map_err(|err| err.to_string())?;
+    let Some(lane) = BackendFaultLane::open(backend).await? else {
+        return Ok(None);
+    };
     let mut scenarios = Vec::with_capacity(seeds.len());
     for &seed in seeds {
-        match run_seed(artifact_root, seed).await {
+        match run_seed(&lane, artifact_root, seed).await {
             Ok(report) => scenarios.push(report),
             Err(failure) => {
-                let failure_path = persist_failure(artifact_root, seed, &failure)?;
+                let failure_path = persist_failure(backend, artifact_root, seed, &failure)?;
                 return Err(format!(
-                    "SQLite substrate fault seed {seed} failed oracle `{}`: {}; reproduction: {}; replay with `cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}`",
+                    "{} substrate fault seed {seed} failed oracle `{}`: {}; reproduction: {}; replay with `cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}`",
+                    backend.name(),
                     failure.oracle_id,
                     failure.reason,
                     failure_path.display(),
@@ -233,24 +279,31 @@ pub async fn run_sqlite_fault_profile(
         .iter()
         .map(|scenario| scenario.scenario)
         .collect::<BTreeSet<_>>();
-    let dropped = SqliteFaultScenarioKind::ALL
+    let dropped = BackendFaultScenarioKind::ALL
         .iter()
         .copied()
         .filter(|scenario| !exercised.contains(scenario))
         .collect::<Vec<_>>();
     if !dropped.is_empty() {
-        eprintln!("SQLite substrate fault coverage dropped by configured seed bound: {dropped:?}");
+        eprintln!(
+            "{} substrate fault coverage dropped by configured seed bound: {dropped:?}",
+            backend.name()
+        );
     }
-    let composition_witness = run_composition_witness(artifact_root, seeds[0]).await?;
-    let report_path = artifact_root.join("sqlite-faults.json");
-    let report = SqliteFaultProfileReport {
+    let composition_witness = run_composition_witness(&lane, artifact_root, seeds[0]).await?;
+    let report_path = artifact_root.join(match backend {
+        BackendFaultKind::Sqlite => "sqlite-faults.json",
+        BackendFaultKind::Postgres => "postgres-faults.json",
+    });
+    let report = BackendFaultProfileReport {
         schema: "lash.sim.sqlite-substrate-faults.v2",
+        backend,
         status: "passed",
         configured_seeds: seeds.to_vec(),
         scenarios,
         composition_witness,
-        coverage: SqliteFaultCoverage {
-            complete_scenario_set: SqliteFaultScenarioKind::ALL.to_vec(),
+        coverage: BackendFaultCoverage {
+            complete_scenario_set: BackendFaultScenarioKind::ALL.to_vec(),
             exercised_scenarios: exercised.into_iter().collect(),
             dropped_scenarios: dropped,
             bounded_prefix_commits_per_seed: "1..=8 selected deterministically by seed",
@@ -259,10 +312,10 @@ pub async fn run_sqlite_fault_profile(
         report_path: report_path.clone(),
     };
     write_json(&report_path, &report)?;
-    Ok(report)
+    Ok(Some(report))
 }
 
-fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, String> {
+fn generated_multi_arm_plan(seed: u64) -> Result<BackendFaultCompositionPlan, String> {
     const PROFILE: &str = "fast-random";
     const MAX_BOUNDARIES: usize = 24;
 
@@ -287,30 +340,33 @@ fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, Str
         })
         .ok_or_else(|| "generated workload has no terminal backend-failure boundary".to_string())?;
     let points = match workload.seed % 3 {
-        0 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit],
-        1 => [SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
-        _ => [SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
+        0 => [
+            BackendFaultPoint::AfterBegin,
+            BackendFaultPoint::BeforeCommit,
+        ],
+        1 => [BackendFaultPoint::AfterBegin, BackendFaultPoint::CommitIo],
+        _ => [BackendFaultPoint::BeforeCommit, BackendFaultPoint::CommitIo],
     };
     let occurrence = NonZeroU64::new(1).expect("one is non-zero");
     let arms = vec![
-        GeneratedSqliteFaultArm {
+        GeneratedBackendFaultArm {
             source_boundary_id: retryable.boundary_id.clone(),
-            arm: SqliteFaultArm::new(
+            arm: BackendFaultArm::new(
                 seed ^ retryable.at.rotate_left(17) ^ 0x4649_4731_3135_3501,
                 points[0],
                 occurrence,
             ),
         },
-        GeneratedSqliteFaultArm {
+        GeneratedBackendFaultArm {
             source_boundary_id: terminal.boundary_id.clone(),
-            arm: SqliteFaultArm::new(
+            arm: BackendFaultArm::new(
                 seed ^ terminal.at.rotate_left(17) ^ 0x4649_4731_3135_3502,
                 points[1],
                 occurrence,
             ),
         },
     ];
-    Ok(SqliteFaultCompositionPlan {
+    Ok(BackendFaultCompositionPlan {
         schema: "lash.sim.sqlite-fault-plan.v1".to_string(),
         workload_seed: seed,
         workload_profile: PROFILE.to_string(),
@@ -323,16 +379,18 @@ fn generated_multi_arm_plan(seed: u64) -> Result<SqliteFaultCompositionPlan, Str
 }
 
 async fn run_composition_witness(
+    lane: &BackendFaultLane,
     artifact_root: &Path,
     seed: u64,
-) -> Result<SqliteFaultCompositionWitness, String> {
+) -> Result<BackendFaultCompositionWitness, String> {
     let plan = generated_multi_arm_plan(seed)?;
     let zero_arm_control =
-        run_composition_case(artifact_root, &plan, "zero-arms", Vec::new()).await?;
+        run_composition_case(lane, artifact_root, &plan, "zero-arms", Vec::new()).await?;
     let mut single_arm_controls = Vec::with_capacity(plan.arms.len());
     for arm_index in 0..plan.arms.len() {
         single_arm_controls.push(
             run_composition_case(
+                lane,
                 artifact_root,
                 &plan,
                 &format!("single-arm-{arm_index}"),
@@ -341,9 +399,9 @@ async fn run_composition_witness(
             .await?,
         );
     }
-    let paired = run_composition_case(artifact_root, &plan, "paired", vec![0, 1]).await?;
+    let paired = run_composition_case(lane, artifact_root, &plan, "paired", vec![0, 1]).await?;
     let repeated_paired =
-        run_composition_case(artifact_root, &plan, "paired-repeat", vec![0, 1]).await?;
+        run_composition_case(lane, artifact_root, &plan, "paired-repeat", vec![0, 1]).await?;
     let repeat_matches = paired.selected_arm_indices == repeated_paired.selected_arm_indices
         && paired.attempts == repeated_paired.attempts
         && paired.operation_failed == repeated_paired.operation_failed
@@ -355,7 +413,7 @@ async fn run_composition_witness(
         "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
         artifact_root.join("replay").display()
     );
-    let mut witness = SqliteFaultCompositionWitness {
+    let mut witness = BackendFaultCompositionWitness {
         schema: "lash.sim.sqlite-fault-composition.v1",
         plan,
         zero_arm_control,
@@ -363,7 +421,7 @@ async fn run_composition_witness(
         paired,
         repeated_paired,
         repeat_matches,
-        oracle: SqliteFaultOracle {
+        oracle: BackendFaultOracle {
             oracle_id: "sim.oracle.sqlite-multi-arm-composition.v1",
             status: "passed",
             assertion: "the generated two-arm plan exhausts a two-attempt operation while zero-arm and either single-arm controls commit, and repeating the seed reproduces fired identities, order, and storage outcome",
@@ -391,23 +449,21 @@ async fn run_composition_witness(
 }
 
 async fn run_composition_case(
+    lane: &BackendFaultLane,
     artifact_root: &Path,
-    plan: &SqliteFaultCompositionPlan,
+    plan: &BackendFaultCompositionPlan,
     label: &str,
     selected_arm_indices: Vec<usize>,
-) -> Result<SqliteFaultCompositionRun, String> {
+) -> Result<BackendFaultCompositionRun, String> {
     let case_root = artifact_root.join("composition").join(label);
     if case_root.exists() {
         std::fs::remove_dir_all(&case_root).map_err(|error| error.to_string())?;
     }
     std::fs::create_dir_all(&case_root).map_err(|error| error.to_string())?;
-    let injector = SqliteFaultInjector::default();
-    let factory: Arc<dyn SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(case_root.join("sqlite-store"))
-            .with_fault_injector(injector.clone()),
-    );
+    let (factory, injector) = lane.armed_factory(&case_root);
     let session_id = SessionId::from(format!(
-        "lash-sim-composition-{:016x}-{label}",
+        "lash-sim-{}-composition-{:016x}-{label}",
+        lane.kind().name(),
         plan.workload_seed
     ));
 
@@ -457,7 +513,7 @@ async fn run_composition_case(
         let fired_observations = observations[observations_before..].to_vec();
         match result {
             Ok(result) => {
-                attempts.push(SqliteFaultCompositionAttempt {
+                attempts.push(BackendFaultCompositionAttempt {
                     attempt,
                     outcome: "committed".to_string(),
                     store_error_variant: None,
@@ -469,7 +525,7 @@ async fn run_composition_case(
                 break;
             }
             Err(error @ StoreError::StorageFailure { .. }) => {
-                attempts.push(SqliteFaultCompositionAttempt {
+                attempts.push(BackendFaultCompositionAttempt {
                     attempt,
                     outcome: "storage_failure".to_string(),
                     store_error_variant: Some(error.variant_name().to_string()),
@@ -501,7 +557,7 @@ async fn run_composition_case(
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("composition case `{label}` lost the durable prefix"))?;
-    Ok(SqliteFaultCompositionRun {
+    Ok(BackendFaultCompositionRun {
         label: label.to_string(),
         selected_arm_indices,
         attempts,
@@ -513,7 +569,7 @@ async fn run_composition_case(
     })
 }
 
-fn validate_composition_witness(witness: &SqliteFaultCompositionWitness) -> Result<(), String> {
+fn validate_composition_witness(witness: &BackendFaultCompositionWitness) -> Result<(), String> {
     if witness.plan.arms.len() != 2 || witness.plan.max_attempts != 2 {
         return Err("composition witness requires exactly two arms and two attempts".to_string());
     }
@@ -582,17 +638,19 @@ fn validate_composition_witness(witness: &SqliteFaultCompositionWitness) -> Resu
     Ok(())
 }
 
-fn observation_matches_arm(observation: &SqliteFaultObservation, arm: &SqliteFaultArm) -> bool {
+fn observation_matches_arm(observation: &BackendFaultObservation, arm: &BackendFaultArm) -> bool {
     observation.seed == arm.seed
         && observation.point == arm.point
         && observation.point_occurrence == arm.occurrence.get()
 }
 
 async fn run_seed(
+    lane: &BackendFaultLane,
     artifact_root: &Path,
     seed: u64,
-) -> Result<SqliteFaultScenarioReport, ScenarioFailure> {
-    let scenario = SqliteFaultScenarioKind::for_seed(seed);
+) -> Result<BackendFaultScenarioReport, ScenarioFailure> {
+    let backend = lane.kind();
+    let scenario = BackendFaultScenarioKind::for_seed(seed);
     let prefix_commits = 1 + ((seed >> 2) as usize % 8);
     let seed_root = artifact_root.join(format!("seed-{seed:016x}"));
     if seed_root.exists() {
@@ -601,12 +659,8 @@ async fn run_seed(
     }
     std::fs::create_dir_all(&seed_root)
         .map_err(|err| ScenarioFailure::harness(format!("create seed root: {err}")))?;
-    let injector = SqliteFaultInjector::default();
-    let factory: Arc<dyn SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(seed_root.join("sqlite-store"))
-            .with_fault_injector(injector.clone()),
-    );
-    let session_id = SessionId::from(format!("lash-sim-sqlite-fault-{seed:016x}"));
+    let (factory, injector) = lane.armed_factory(&seed_root);
+    let session_id = SessionId::from(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
     let mut store = create_store(Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
@@ -642,17 +696,21 @@ async fn run_seed(
             store.commit_runtime_state(target_commit.clone()),
         )
         .await
-        .map_err(|_| ScenarioFailure::oracle(scenario, "injected commit hung for five seconds"))?;
+        .map_err(|_| {
+            ScenarioFailure::oracle(backend, scenario, "injected commit hung for five seconds")
+        })?;
         let error_message = match injected {
             Err(StoreError::StorageFailure { message, .. }) => message,
             Err(other) => {
                 return Err(ScenarioFailure::oracle(
+                    backend,
                     scenario,
                     format!("injected commit returned non-storage-failure error {other:?}"),
                 ));
             }
             Ok(result) => {
                 return Err(ScenarioFailure::oracle(
+                    backend,
                     scenario,
                     format!(
                         "injected commit unexpectedly succeeded at head revision {}",
@@ -665,11 +723,12 @@ async fn run_seed(
         if observations.len() != 1 || observations[0].seed != seed || observations[0].point != point
         {
             return Err(ScenarioFailure::oracle(
+                backend,
                 scenario,
                 format!("fault did not fire exactly once as armed: {observations:?}"),
             ));
         }
-        oracles.push(SqliteFaultOracle {
+        oracles.push(BackendFaultOracle {
             oracle_id: "sim.oracle.sqlite-fault-typed-error.v1",
             status: "passed",
             assertion: "the substrate fault returns StoreError::StorageFailure within the timeout rather than hanging or panicking",
@@ -686,9 +745,12 @@ async fn run_seed(
             .load_session()
             .await
             .map_err(|err| ScenarioFailure::harness(format!("load after fault: {err}")))?
-            .ok_or_else(|| ScenarioFailure::oracle(scenario, "committed prefix disappeared"))?;
+            .ok_or_else(|| {
+                ScenarioFailure::oracle(backend, scenario, "committed prefix disappeared")
+            })?;
         if after_fault.head_revision != durable_prefix_revision {
             return Err(ScenarioFailure::oracle(
+                backend,
                 scenario,
                 format!(
                     "fault changed durable head from {durable_prefix_revision} to {}",
@@ -696,7 +758,7 @@ async fn run_seed(
                 ),
             ));
         }
-        oracles.push(SqliteFaultOracle {
+        oracles.push(BackendFaultOracle {
             oracle_id: "sim.oracle.sqlite-fault-preserves-committed-work.v1",
             status: "passed",
             assertion: "reopen retains every commit preceding the fault and publishes none of the failed transaction",
@@ -713,14 +775,19 @@ async fn run_seed(
             open_store(Arc::clone(&factory), &session_id),
         )
         .await
-        .map_err(|_| ScenarioFailure::oracle(scenario, "reopen hung for five seconds"))??;
+        .map_err(|_| {
+            ScenarioFailure::oracle(backend, scenario, "reopen hung for five seconds")
+        })??;
         let reopened = store
             .load_session()
             .await
             .map_err(|err| ScenarioFailure::harness(format!("load after reopen: {err}")))?
-            .ok_or_else(|| ScenarioFailure::oracle(scenario, "committed prefix disappeared"))?;
+            .ok_or_else(|| {
+                ScenarioFailure::oracle(backend, scenario, "committed prefix disappeared")
+            })?;
         if reopened.head_revision != durable_prefix_revision {
             return Err(ScenarioFailure::oracle(
+                backend,
                 scenario,
                 format!(
                     "reopen changed durable head from {durable_prefix_revision} to {}",
@@ -728,7 +795,7 @@ async fn run_seed(
                 ),
             ));
         }
-        oracles.push(SqliteFaultOracle {
+        oracles.push(BackendFaultOracle {
             oracle_id: "sim.oracle.sqlite-reopen-preserves-committed-work.v1",
             status: "passed",
             assertion: "closing the live handle and reopening mid-sequence retains the exact committed head without a hang or panic",
@@ -743,18 +810,21 @@ async fn run_seed(
     let first = store
         .commit_runtime_state(target_commit.clone())
         .await
-        .map_err(|err| ScenarioFailure::oracle(scenario, format!("target retry failed: {err}")))?;
+        .map_err(|err| {
+            ScenarioFailure::oracle(backend, scenario, format!("target retry failed: {err}"))
+        })?;
     let duplicate = store
         .commit_runtime_state(target_commit)
         .await
         .map_err(|err| {
-            ScenarioFailure::oracle(scenario, format!("duplicate retry failed: {err}"))
+            ScenarioFailure::oracle(backend, scenario, format!("duplicate retry failed: {err}"))
         })?;
     if first.head_revision != durable_prefix_revision + 1
         || duplicate.head_revision != first.head_revision
         || duplicate.checkpoint_ref != first.checkpoint_ref
     {
         return Err(ScenarioFailure::oracle(
+            backend,
             scenario,
             format!(
                 "idempotent retry diverged: prefix={durable_prefix_revision}, first={}, duplicate={}",
@@ -768,9 +838,12 @@ async fn run_seed(
         .load_session()
         .await
         .map_err(|err| ScenarioFailure::harness(format!("final load: {err}")))?
-        .ok_or_else(|| ScenarioFailure::oracle(scenario, "final committed state disappeared"))?;
+        .ok_or_else(|| {
+            ScenarioFailure::oracle(backend, scenario, "final committed state disappeared")
+        })?;
     if final_read.head_revision != first.head_revision {
         return Err(ScenarioFailure::oracle(
+            backend,
             scenario,
             format!(
                 "final reopen changed head from {} to {}",
@@ -778,7 +851,7 @@ async fn run_seed(
             ),
         ));
     }
-    oracles.push(SqliteFaultOracle {
+    oracles.push(BackendFaultOracle {
         oracle_id: "sim.oracle.sqlite-fault-no-duplicate-effect.v1",
         status: "passed",
         assertion: "retrying the same durable operation returns its receipt and advances the head exactly once",
@@ -790,8 +863,8 @@ async fn run_seed(
             "same_checkpoint_ref": duplicate.checkpoint_ref == first.checkpoint_ref,
         }),
     });
-    oracles.push(SqliteFaultOracle {
-        oracle_id: scenario.oracle_id(),
+    oracles.push(BackendFaultOracle {
+        oracle_id: scenario.oracle_id(backend),
         status: "passed",
         assertion: "the seed-selected substrate fault preserves committed work, advances the retried operation exactly once, and returns any injected failure as a typed error",
         evidence: json!({
@@ -803,7 +876,7 @@ async fn run_seed(
         }),
     });
 
-    Ok(SqliteFaultScenarioReport {
+    Ok(BackendFaultScenarioReport {
         seed,
         scenario,
         prefix_commits,
@@ -859,6 +932,7 @@ async fn open_store(
 }
 
 fn persist_failure(
+    backend: BackendFaultKind,
     artifact_root: &Path,
     seed: u64,
     failure: &ScenarioFailure,
@@ -868,10 +942,11 @@ fn persist_failure(
         .join(format!("seed-{seed:016x}"));
     std::fs::create_dir_all(&failure_root).map_err(|err| err.to_string())?;
     let path = failure_root.join("reproduction.json");
-    let package = SqliteFaultFailurePackage {
+    let package = BackendFaultFailurePackage {
         schema: "lash.sim.sqlite-substrate-fault-failure.v1",
+        backend,
         seed,
-        scenario: SqliteFaultScenarioKind::for_seed(seed),
+        scenario: BackendFaultScenarioKind::for_seed(seed),
         oracle_id: failure.oracle_id,
         reason: &failure.reason,
         database_root: artifact_root
@@ -880,7 +955,7 @@ fn persist_failure(
             .display()
             .to_string(),
         prefix_commits: 1 + ((seed >> 2) as usize % 8),
-        injected_fault: SqliteFaultScenarioKind::for_seed(seed).fault_point(),
+        injected_fault: BackendFaultScenarioKind::for_seed(seed).fault_point(),
         exact_replay_command: format!(
             "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
             artifact_root.join("replay").display()
@@ -907,15 +982,15 @@ mod tests {
         let repeated = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
             .expect("repeated generated multi-arm plan");
         let encoded = serde_json::to_value(&plan).expect("encode plan");
-        let decoded: SqliteFaultCompositionPlan =
+        let decoded: BackendFaultCompositionPlan =
             serde_json::from_value(encoded).expect("decode plan");
 
         assert_eq!(decoded, plan);
         assert_eq!(repeated, plan);
         assert_eq!(plan.max_attempts, 2);
         assert_eq!(plan.arms.len(), 2);
-        assert_eq!(plan.arms[0].arm.point, SqliteFaultPoint::AfterBegin);
-        assert_eq!(plan.arms[1].arm.point, SqliteFaultPoint::CommitIo);
+        assert_eq!(plan.arms[0].arm.point, BackendFaultPoint::AfterBegin);
+        assert_eq!(plan.arms[1].arm.point, BackendFaultPoint::CommitIo);
         assert_ne!(
             plan.arms[0].source_boundary_id,
             plan.arms[1].source_boundary_id
@@ -934,9 +1009,12 @@ mod tests {
         assert_eq!(
             schedules,
             vec![
-                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::CommitIo],
-                vec![SqliteFaultPoint::BeforeCommit, SqliteFaultPoint::CommitIo],
-                vec![SqliteFaultPoint::AfterBegin, SqliteFaultPoint::BeforeCommit,],
+                vec![BackendFaultPoint::AfterBegin, BackendFaultPoint::CommitIo],
+                vec![BackendFaultPoint::BeforeCommit, BackendFaultPoint::CommitIo],
+                vec![
+                    BackendFaultPoint::AfterBegin,
+                    BackendFaultPoint::BeforeCommit,
+                ],
             ]
         );
     }
@@ -944,7 +1022,11 @@ mod tests {
     #[tokio::test]
     async fn generated_two_arm_witness_requires_both_arms_to_exhaust_retry_budget() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let witness = run_composition_witness(tmp.path(), DEFAULT_SQLITE_FAULT_SEED_BASE)
+        let lane = BackendFaultLane::open(BackendFaultKind::Sqlite)
+            .await
+            .expect("open SQLite lane")
+            .expect("the SQLite lane is always configured");
+        let witness = run_composition_witness(&lane, tmp.path(), DEFAULT_SQLITE_FAULT_SEED_BASE)
             .await
             .expect("two-arm witness");
 
@@ -963,6 +1045,7 @@ mod tests {
 
         let mut omitted_arm_witness = witness.clone();
         omitted_arm_witness.paired = run_composition_case(
+            &lane,
             tmp.path(),
             &witness.plan,
             "paired-omitted-second-arm",
@@ -998,15 +1081,58 @@ mod tests {
         }
     }
 
+    /// The same bounded seed set on a real PostgreSQL, proving the Postgres
+    /// injector reaches the production write transaction and that every
+    /// commit-boundary oracle holds there too.
+    ///
+    /// Skips when `LASH_POSTGRES_DATABASE_URL` is unset; `LASH_REQUIRE_POSTGRES=1`
+    /// makes that a panic, so the CI lane cannot silently pass.
+    #[tokio::test]
+    async fn postgres_backend_fault_seed_set_covers_every_fault_and_oracle() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let Some(report) = run_backend_fault_profile(
+            BackendFaultKind::Postgres,
+            tmp.path(),
+            &sqlite_fault_seeds(4),
+        )
+        .await
+        .expect("Postgres fault profile") else {
+            eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not configured");
+            return;
+        };
+        assert_eq!(report.backend, BackendFaultKind::Postgres);
+        assert_eq!(report.status, "passed");
+        assert!(report.coverage.dropped_scenarios.is_empty());
+        assert_eq!(report.scenarios.len(), 4);
+        assert!(report.report_path.exists());
+        for scenario in report.scenarios {
+            assert!(
+                scenario
+                    .oracles
+                    .iter()
+                    .all(|oracle| oracle.status == "passed")
+            );
+            if scenario.injected_fault.is_some() {
+                assert_eq!(scenario.injection_observations.len(), 1);
+            }
+        }
+    }
+
     #[test]
     fn oracle_failure_is_persisted_with_exact_seed_replay() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let failure = ScenarioFailure::oracle(
-            SqliteFaultScenarioKind::CommitIo,
+            BackendFaultKind::Sqlite,
+            BackendFaultScenarioKind::CommitIo,
             "deliberate oracle failure",
         );
-        let path = persist_failure(tmp.path(), DEFAULT_SQLITE_FAULT_SEED_BASE + 2, &failure)
-            .expect("persist failure");
+        let path = persist_failure(
+            BackendFaultKind::Sqlite,
+            tmp.path(),
+            DEFAULT_SQLITE_FAULT_SEED_BASE + 2,
+            &failure,
+        )
+        .expect("persist failure");
         let body = std::fs::read_to_string(path).expect("failure package");
         assert!(body.contains("deliberate oracle failure"));
         assert!(body.contains("--seed 140050434"));

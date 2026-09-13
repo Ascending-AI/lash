@@ -150,6 +150,21 @@ case "${suite}" in
     fi
     ;;
 
+  # The simulator's backend-fault plan against a real PostgreSQL: the same
+  # commit-boundary scenarios the SQLite lane runs, driven through
+  # `lash_postgres_store::testing::PostgresFaultInjector`. The test skips itself
+  # without a database URL, and LASH_REQUIRE_POSTGRES=1 turns a missing URL into
+  # a panic, so a missing CI variable cannot silently pass this lane.
+  pg-sim-backend-faults)
+    if [ "${trusted}" = true ]; then
+      bazel_test --test_arg=postgres_backend_fault \
+        //crates/lash-sim:lash-sim__unit_test
+    else
+      cargo nextest run --profile ci -p lash-sim --lib --locked \
+        -E 'test(postgres_backend_fault)'
+    fi
+    ;;
+
   # The full differential compares backend semantics, not catalog rendering, so
   # it runs once on the primary major instead of three times. `--run-ignored
   # all` is libtest's `--include-ignored`; `-j1` is `--test-threads=1`;

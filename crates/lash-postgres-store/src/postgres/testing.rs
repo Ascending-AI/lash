@@ -25,6 +25,13 @@ pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilt
 #[doc(hidden)]
 pub use crate::runtime_persistence::TestTurnCancelReadPause as TurnCancelReadPause;
 
+/// Deterministic PostgreSQL substrate fault injection, the twin of
+/// `lash_sqlite_store::testing`'s injector.
+#[cfg(feature = "testing")]
+pub use crate::fault_injection::{
+    PostgresFaultArm, PostgresFaultInjector, PostgresFaultObservation, PostgresFaultPoint,
+};
+
 /// A throwaway Postgres database, created for one test and dropped with it.
 ///
 /// Construction connects to the maintenance database named in the base URL,
