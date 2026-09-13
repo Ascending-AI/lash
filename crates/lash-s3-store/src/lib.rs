@@ -742,8 +742,10 @@ mod tests {
         if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
             return None;
         }
-        let prefix = std::env::var("LASH_MINIO_PREFIX")
-            .unwrap_or_else(|_| format!("tests/{}", uuid_like_suffix()));
+        let prefix = format!(
+            "tests/{}",
+            std::env::var("LASH_MINIO_PREFIX").unwrap_or_else(|_| uuid_like_suffix())
+        );
         Some(S3AttachmentStoreConfig {
             endpoint_url: Some(
                 std::env::var("LASH_MINIO_ENDPOINT")
