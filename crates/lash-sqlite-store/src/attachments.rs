@@ -39,61 +39,76 @@ use lash_sansio::sync::MutexExt;
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 
-/// Adopt stored references under the boundary transaction, including a new
-/// receiver root when only another session has ever put the bytes.
+/// Adopt stored references under the boundary transaction.
+///
+/// Validate every digest for upload evidence first, so a batch containing one
+/// unknown digest writes nothing at all, then acquire this session's roots.
 pub(crate) fn commit_attachment_refs_conn(
     tx: &rusqlite::Connection,
     session_id: &SessionId,
     attachment_ids: &[AttachmentId],
     now: i64,
 ) -> Result<(), StoreError> {
+    let mut evidence = std::collections::BTreeMap::new();
     for id in attachment_ids {
-        let condemnation = tx
+        let deleting = tx
             .query_row(
-                "SELECT phase, write_token FROM attachment_condemnations WHERE attachment_id = ?1",
+                "SELECT 1 FROM attachment_condemnations
+                 WHERE attachment_id = ?1 AND phase = 'deleting'",
                 params![id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                |_| Ok(()),
             )
             .optional()
-            .map_err(sqlite_error)?;
-        match condemnation
-            .as_ref()
-            .map(|(phase, token)| (phase.as_str(), token.is_some()))
-        {
-            Some(("deleting", _)) => {
-                return Err(StoreError::Backend(format!(
-                    "cannot adopt attachment `{id}` while physical deletion is in flight"
-                )));
-            }
-            Some(("reclaimed", _)) => {
-                return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
-            }
-            Some(("condemned", true)) => {
-                return Err(StoreError::Backend(format!(
-                    "cannot adopt attachment `{id}` while its bytes are being restored"
-                )));
-            }
-            None | Some(("condemned", false)) => {}
-            Some((phase, _)) => {
-                return Err(StoreError::Backend(format!(
-                    "attachment `{id}` has unknown condemnation phase `{phase}`"
-                )));
-            }
+            .map_err(sqlite_error)?
+            .is_some();
+        if deleting {
+            return Err(StoreError::UnknownAttachment { digest: id.clone() });
         }
+        // Evidence from any session: the uploader and the adopter need not be
+        // the same, and the earliest proven upload is the one that is copied.
+        let written_at_ms = tx
+            .query_row(
+                "SELECT MIN(written_at_ms) FROM attachment_manifest
+                 WHERE attachment_id = ?1 AND written_at_ms IS NOT NULL",
+                params![id.as_str()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .flatten();
+        let Some(written_at_ms) = written_at_ms else {
+            return Err(StoreError::UnknownAttachment { digest: id.clone() });
+        };
+        evidence.insert(id.clone(), written_at_ms);
+    }
+    for id in attachment_ids {
+        // The fresh committed root supersedes an unarmed, unclaimed
+        // condemnation. A restoring writer's claim is left for that writer to
+        // settle.
         tx.execute(
             "DELETE FROM attachment_condemnations
              WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL",
             params![id.as_str()],
         )
         .map_err(sqlite_error)?;
+        // Copy the evidence onto the adopter's row so it outlives the
+        // uploader's intent being forgotten.
         tx.execute(
             "INSERT INTO attachment_manifest
-             (attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms)
-             VALUES (?2, ?3, ?4, ?1, ?1)
+             (attachment_id, session_id, canonical_uri, intent_at_ms, written_at_ms, committed_at_ms)
+             VALUES (?2, ?3, ?4, ?1, ?5, ?1)
              ON CONFLICT (session_id, attachment_id) DO UPDATE
-             SET committed_at_ms = COALESCE(attachment_manifest.committed_at_ms, excluded.committed_at_ms)",
-            params![now, id.as_str(), session_id.as_str(), format!("lash-attachment://blake3/{id}")],
-        ).map_err(sqlite_error)?;
+             SET committed_at_ms = COALESCE(attachment_manifest.committed_at_ms, excluded.committed_at_ms),
+                 written_at_ms = COALESCE(attachment_manifest.written_at_ms, excluded.written_at_ms)",
+            params![
+                now,
+                id.as_str(),
+                session_id.as_str(),
+                format!("lash-attachment://blake3/{id}"),
+                evidence.get(id).copied(),
+            ],
+        )
+        .map_err(sqlite_error)?;
     }
     Ok(())
 }
@@ -745,6 +760,15 @@ impl Store {
                         params![attachment_id],
                     )
                     .map_err(sqlite_error)?;
+                    // The digest is proven unrooted, so every remaining manifest
+                    // row for it is stale evidence of an upload whose bytes this
+                    // sweep is about to delete. Clearing them here is what makes
+                    // a negative byte-absence tombstone unnecessary.
+                    tx.execute(
+                        "DELETE FROM attachment_manifest WHERE attachment_id = ?1",
+                        params![attachment_id],
+                    )
+                    .map_err(sqlite_error)?;
                     Ok(lash_core::AttachmentCondemnation::Condemned)
                 })(
                 );
@@ -806,8 +830,8 @@ impl Store {
     }
 
     /// Clear an abandoned restoring writer under explicit host quiescence.
-    /// Preserve `Reclaimed`; retire `Condemned` only when its associated intent
-    /// became committed, otherwise preserve it after removing that intent.
+    /// Retire `Condemned` only when its associated intent became committed,
+    /// otherwise preserve it after removing that unstamped intent.
     pub(crate) async fn recover_abandoned_attachment_write(
         &self,
         attachment_id: &AttachmentId,
@@ -821,7 +845,7 @@ impl Store {
                             "SELECT write_token, write_session_id
                              FROM attachment_condemnations
                              WHERE attachment_id = ?1
-                               AND phase IN ('condemned', 'reclaimed')
+                               AND phase = 'condemned'
                                AND write_token IS NOT NULL",
                             params![attachment_id],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -834,7 +858,7 @@ impl Store {
                     tx.execute(
                         "DELETE FROM attachment_manifest
                          WHERE attachment_id = ?1 AND session_id = ?2
-                           AND committed_at_ms IS NULL",
+                           AND written_at_ms IS NULL AND committed_at_ms IS NULL",
                         params![attachment_id, session_id],
                     )
                     .map_err(sqlite_error)?;
@@ -871,8 +895,10 @@ impl Store {
             .map_err(sqlite_error)?
     }
 
-    /// `Deleting -> Reclaimed` after the physical delete succeeds.
-    pub(crate) async fn reclaim_attachment_condemnation(
+    /// Delete the condemnation row after the physical delete succeeds: the
+    /// digest returns to `Free` holding no upload evidence, because the
+    /// condemnation already cleared every manifest row for it.
+    pub(crate) async fn retire_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
     ) -> Result<(), StoreError> {
@@ -880,7 +906,7 @@ impl Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE attachment_condemnations SET phase = 'reclaimed'
+                    "DELETE FROM attachment_condemnations
                      WHERE attachment_id = ?1 AND phase = 'deleting'",
                     params![attachment_id],
                 )
@@ -892,109 +918,8 @@ impl Store {
 }
 
 impl AttachmentManifest for Store {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
-        block_on_store(async {
-            let digest = intent.attachment_id.clone();
-            let attachment_id = intent.attachment_id.as_str().to_string();
-            let session_id = intent.session_id.clone();
-            let canonical_uri = intent.canonical_uri.as_str().to_string();
-            let intent_at_ms = intent.intent_at_epoch_ms as i64;
-            let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
-            let owner_id = intent.owner_id;
-            let owner_incarnation = intent
-                .owner_incarnation
-                .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
-                .transpose()
-                .map_err(|_| {
-                    StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
-                })?;
-            self.conn
-                .write_flow(move |tx| {
-                    let outcome: Result<(), StoreError> = (|| {
-                        crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
-                        let condemnation = tx
-                            .query_row(
-                                "SELECT phase, write_token FROM attachment_condemnations
-                                 WHERE attachment_id = ?1",
-                                params![attachment_id],
-                                |row| {
-                                    Ok((
-                                        row.get::<_, String>(0)?,
-                                        row.get::<_, Option<String>>(1)?,
-                                    ))
-                                },
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?;
-                        match condemnation
-                            .as_ref()
-                            .map(|(phase, token)| (phase.as_str(), token.is_some()))
-                        {
-                            Some(("deleting", _)) => {
-                                return Err(StoreError::Backend(format!(
-                                    "cannot record attachment `{attachment_id}` while physical deletion is in flight"
-                                )));
-                            }
-                            Some(("reclaimed", false)) => {
-                                return Err(StoreError::AttachmentBytesReclaimed {
-                                    digest,
-                                });
-                            }
-                            Some(("condemned", false)) => {
-                                return Err(StoreError::Backend(format!(
-                                    "cannot record attachment `{attachment_id}` through the unfenced manifest path while it is condemned; use begin_attachment_write"
-                                )));
-                            }
-                            Some(("condemned" | "reclaimed", true)) => {
-                                return Err(StoreError::Backend(format!(
-                                    "cannot record attachment `{attachment_id}` while its bytes are being restored"
-                                )));
-                            }
-                            None => {}
-                            Some((phase, _)) => {
-                                return Err(StoreError::Backend(format!(
-                                    "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
-                                )));
-                            }
-                        }
-                        // Re-recording refreshes the timestamp and durable owner
-                        // together. GC later composes this age with owner-death proof.
-                        tx.execute(
-                            "INSERT INTO attachment_manifest
-                            (attachment_id, session_id, canonical_uri, intent_at_ms,
-                             committed_at_ms, owner_kind, owner_id, owner_incarnation)
-                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)
-                         ON CONFLICT(session_id, attachment_id) DO UPDATE SET
-                            canonical_uri = excluded.canonical_uri,
-                            intent_at_ms = excluded.intent_at_ms,
-                            owner_kind = excluded.owner_kind,
-                            owner_id = excluded.owner_id,
-                            owner_incarnation = excluded.owner_incarnation",
-                            params![
-                                attachment_id,
-                                session_id.as_str(),
-                                canonical_uri,
-                                intent_at_ms,
-                                owner_kind,
-                                owner_id,
-                                owner_incarnation
-                            ],
-                        )
-                        .map_err(sqlite_error)?;
-                        Ok(())
-                    })();
-                    Ok(match outcome {
-                        Ok(()) => TxOutcome::Commit(Ok(())),
-                        Err(err) => TxOutcome::Rollback(Err(err)),
-                    })
-                })
-                .await
-                .map_err(sqlite_error)?
-        })
-    }
-
-    /// The writer half of the GC fence: the condemnation check, the revoke, and
-    /// the intent insert are one SQLite transaction, so a sweeper's condemn CAS
+    /// The writer half of the GC fence: the condemnation check, the claim, and
+    /// the intent upsert are one SQLite transaction, so a sweeper's condemn CAS
     /// either precedes this whole mutation or fails against the intent it wrote.
     fn begin_attachment_write(
         &self,
@@ -1014,6 +939,7 @@ impl AttachmentManifest for Store {
                 .map_err(|_| {
                     StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
                 })?;
+            let write_id = lash_core::AttachmentWriteToken::new();
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<lash_core::AttachmentWriteFence, StoreError> = (|| {
@@ -1032,28 +958,30 @@ impl AttachmentManifest for Store {
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        let permit = match condemnation
+                        match condemnation
                             .as_ref()
                             .map(|(phase, token)| (phase.as_str(), token.is_some()))
                         {
                             // The physical delete is already in flight: record
                             // nothing, so these bytes cannot land inside it.
-                            Some(("deleting", _))
-                            | Some(("condemned" | "reclaimed", true)) => {
+                            Some(("deleting", _)) | Some(("condemned", true)) => {
                                 return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                             }
-                            // Keep the prior phase present and own it with an
-                            // opaque token until the backend put settles.
-                            Some(("condemned" | "reclaimed", false)) => {
-                                let token = lash_core::AttachmentWriteToken::new();
+                            // Keep the condemnation present and own it with this
+                            // attempt's identity until the backend put settles.
+                            Some(("condemned", false)) => {
                                 let claimed = tx
                                     .execute(
                                         "UPDATE attachment_condemnations
                                          SET write_token = ?2, write_session_id = ?3
                                          WHERE attachment_id = ?1
-                                           AND phase IN ('condemned', 'reclaimed')
+                                           AND phase = 'condemned'
                                            AND write_token IS NULL",
-                                        params![attachment_id, token.as_hex(), session_id.as_str()],
+                                        params![
+                                            attachment_id,
+                                            write_id.as_hex(),
+                                            session_id.as_str()
+                                        ],
                                     )
                                     .map_err(sqlite_error)?;
                                 if claimed == 0 {
@@ -1061,23 +989,26 @@ impl AttachmentManifest for Store {
                                         lash_core::AttachmentWriteFence::ReclamationInFlight,
                                     );
                                 }
-                                lash_core::AttachmentWritePermit::restoring(token)
                             }
-                            None => lash_core::AttachmentWritePermit::ordinary(),
+                            None => {}
                             Some((phase, _)) => {
                                 return Err(StoreError::Backend(format!(
                                     "attachment `{attachment_id}` has unknown condemnation phase `{phase}`"
                                 )));
                             }
-                        };
+                        }
+                        // A fresh attempt has proven nothing, so it takes the row
+                        // with no upload stamp. Evidence and commitment already on
+                        // the row were earned by earlier attempts and are kept.
                         tx.execute(
                             "INSERT INTO attachment_manifest
-                            (attachment_id, session_id, canonical_uri, intent_at_ms,
-                             committed_at_ms, owner_kind, owner_id, owner_incarnation)
-                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)
+                            (attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
+                             written_at_ms, committed_at_ms, owner_kind, owner_id, owner_incarnation)
+                         VALUES (?1, ?2, ?3, ?4, ?8, NULL, NULL, ?5, ?6, ?7)
                          ON CONFLICT(session_id, attachment_id) DO UPDATE SET
                             canonical_uri = excluded.canonical_uri,
                             intent_at_ms = excluded.intent_at_ms,
+                            write_id = excluded.write_id,
                             owner_kind = excluded.owner_kind,
                             owner_id = excluded.owner_id,
                             owner_incarnation = excluded.owner_incarnation",
@@ -1088,11 +1019,14 @@ impl AttachmentManifest for Store {
                                 intent_at_ms,
                                 owner_kind,
                                 owner_id,
-                                owner_incarnation
+                                owner_incarnation,
+                                write_id.as_hex()
                             ],
                         )
                         .map_err(sqlite_error)?;
-                        Ok(lash_core::AttachmentWriteFence::Granted(permit))
+                        Ok(lash_core::AttachmentWriteFence::Granted(
+                            lash_core::AttachmentWritePermit::new(write_id),
+                        ))
                     })(
                     );
                     Ok(match outcome {
@@ -1110,22 +1044,51 @@ impl AttachmentManifest for Store {
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
+        let digest = intent.attachment_id.clone();
         let attachment_id = intent.attachment_id.as_str().to_string();
+        let session_id = intent.session_id.clone();
+        let write_id = permit.write_id().as_hex();
+        let written_at_ms = crate::clamp_epoch_ms(self.clock.timestamp_ms());
         block_on_store(async move {
             self.conn
-                .write(move |tx| {
-                    tx.execute(
-                        "DELETE FROM attachment_condemnations
-                         WHERE attachment_id = ?1 AND write_token = ?2",
-                        params![attachment_id, token.as_hex()],
-                    )
+                .write_flow(move |tx| {
+                    let outcome: Result<(), StoreError> = (|| {
+                        // Id-matched: only the row this attempt still owns is
+                        // stamped, and the first proven upload is kept.
+                        let stamped = tx
+                            .execute(
+                                "UPDATE attachment_manifest
+                                 SET written_at_ms = COALESCE(written_at_ms, ?4)
+                                 WHERE attachment_id = ?1 AND session_id = ?2
+                                   AND write_id = ?3",
+                                params![
+                                    attachment_id,
+                                    session_id.as_str(),
+                                    write_id,
+                                    written_at_ms
+                                ],
+                            )
+                            .map_err(sqlite_error)?;
+                        if stamped == 0 {
+                            return Err(StoreError::StaleWritePermit { digest });
+                        }
+                        // The bytes exist now, so this attempt's claim on the
+                        // condemnation is released with the condemnation itself.
+                        tx.execute(
+                            "DELETE FROM attachment_condemnations
+                             WHERE attachment_id = ?1 AND write_token = ?2",
+                            params![attachment_id, write_id],
+                        )
+                        .map_err(sqlite_error)?;
+                        Ok(())
+                    })();
+                    Ok(match outcome {
+                        Ok(()) => TxOutcome::Commit(Ok(())),
+                        Err(err) => TxOutcome::Rollback(Err(err)),
+                    })
                 })
                 .await
-                .map_err(sqlite_error)?;
-            Ok(())
+                .map_err(sqlite_error)?
         })
     }
 
@@ -1134,56 +1097,44 @@ impl AttachmentManifest for Store {
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
         let attachment_id = intent.attachment_id.as_str().to_string();
         let session_id = intent.session_id.clone();
+        let write_id = permit.write_id().as_hex();
         block_on_store(async move {
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
-                        let token = token.as_hex();
-                        let owns_phase = tx
-                            .query_row(
-                                "SELECT 1 FROM attachment_condemnations
-                                 WHERE attachment_id = ?1 AND write_token = ?2",
-                                params![attachment_id, token],
-                                |_| Ok(()),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .is_some();
-                        if owns_phase {
-                            tx.execute(
-                                "DELETE FROM attachment_manifest
-                                 WHERE attachment_id = ?1 AND session_id = ?2
-                                   AND committed_at_ms IS NULL",
-                                params![attachment_id, session_id.as_str()],
+                        // Only this attempt's own unstamped, uncommitted row. A
+                        // superseded permit matches nothing and deletes nothing.
+                        tx.execute(
+                            "DELETE FROM attachment_manifest
+                             WHERE attachment_id = ?1 AND session_id = ?2
+                               AND write_id = ?3
+                               AND written_at_ms IS NULL AND committed_at_ms IS NULL",
+                            params![attachment_id, session_id.as_str(), write_id],
+                        )
+                        .map_err(sqlite_error)?;
+                        let condemned_superseded = tx
+                            .execute(
+                                "DELETE FROM attachment_condemnations
+                                 WHERE attachment_id = ?1 AND write_token = ?2
+                                   AND phase = 'condemned'
+                                   AND EXISTS (
+                                       SELECT 1 FROM attachment_manifest
+                                        WHERE attachment_id = ?1 AND session_id = ?3
+                                          AND committed_at_ms IS NOT NULL
+                                   )",
+                                params![attachment_id, write_id, session_id.as_str()],
                             )
                             .map_err(sqlite_error)?;
-                            let condemned_superseded = tx
-                                .execute(
-                                    "DELETE FROM attachment_condemnations
-                                     WHERE attachment_id = ?1 AND write_token = ?2
-                                       AND phase = 'condemned'
-                                       AND EXISTS (
-                                           SELECT 1 FROM attachment_manifest
-                                            WHERE attachment_id = ?1 AND session_id = ?3
-                                              AND committed_at_ms IS NOT NULL
-                                       )",
-                                    params![attachment_id, token, session_id.as_str()],
-                                )
-                                .map_err(sqlite_error)?;
-                            if condemned_superseded == 0 {
-                                tx.execute(
-                                    "UPDATE attachment_condemnations
+                        if condemned_superseded == 0 {
+                            tx.execute(
+                                "UPDATE attachment_condemnations
                                  SET write_token = NULL, write_session_id = NULL
                                  WHERE attachment_id = ?1 AND write_token = ?2",
-                                    params![attachment_id, token],
-                                )
-                                .map_err(sqlite_error)?;
-                            }
+                                params![attachment_id, write_id],
+                            )
+                            .map_err(sqlite_error)?;
                         }
                         Ok(())
                     })();
@@ -1235,7 +1186,8 @@ impl AttachmentManifest for Store {
                 .call(move |conn| {
                     let mut stmt = conn.prepare(
                         "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                                committed_at_ms, owner_kind, owner_id, owner_incarnation
+                                committed_at_ms, owner_kind, owner_id, owner_incarnation,
+                                written_at_ms
                          FROM attachment_manifest
                          WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
                          ORDER BY intent_at_ms ASC",
@@ -1254,6 +1206,7 @@ impl AttachmentManifest for Store {
                                 u64_from_sql("AttachmentManifest", "owner_incarnation", value)
                             })
                             .transpose()?;
+                        let written_at_ms: Option<i64> = row.get(8)?;
                         let (owner_kind, owner_id, owner_incarnation) =
                             lash_core::store::decode_attachment_owner(
                                 owner_kind.as_deref(),
@@ -1274,6 +1227,11 @@ impl AttachmentManifest for Store {
                                 "intent_at_ms",
                                 intent_at_ms,
                             )?,
+                            written_at_epoch_ms: written_at_ms
+                                .map(|value| {
+                                    u64_from_sql("AttachmentManifest", "written_at_ms", value)
+                                })
+                                .transpose()?,
                             committed_at_epoch_ms: committed_at_ms
                                 .map(|value| {
                                     u64_from_sql("AttachmentManifest", "committed_at_ms", value)

@@ -62,8 +62,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     write_token text,
     write_session_id text,
     CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
-    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = ANY (ARRAY['condemned'::text, 'reclaimed'::text])))),
-    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text, 'reclaimed'::text])))
+    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = 'condemned'::text))),
+    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
 );
 
 
@@ -76,6 +76,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     session_id text NOT NULL,
     canonical_uri text NOT NULL,
     intent_at_ms bigint NOT NULL,
+    write_id text,
+    written_at_ms bigint,
     committed_at_ms bigint,
     owner_kind text,
     owner_id text,
@@ -866,7 +868,7 @@ INSERT INTO lash_durable_read_fixture.lash_artifact_owners VALUES ('process_exec
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, '228f8718bc6d475d9a486663495629db', 1700000000000, 1700000000000, NULL, NULL, NULL);
 
 
 --
@@ -1072,7 +1074,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 91);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 92);
 
 
 --
@@ -1713,6 +1715,13 @@ CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.las
 --
 
 CREATE INDEX idx_lash_attachment_manifest_uncommitted ON lash_durable_read_fixture.lash_attachment_manifest USING btree (committed_at_ms) WHERE (committed_at_ms IS NULL);
+
+
+--
+-- Name: idx_lash_attachment_manifest_written; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_attachment_manifest_written ON lash_durable_read_fixture.lash_attachment_manifest USING btree (attachment_id, written_at_ms);
 
 
 --

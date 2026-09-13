@@ -18,6 +18,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-70-26d22e05/postgres-expected.json",
+];
 const CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-69-330850ee/postgres-expected.json",
 ];
@@ -126,7 +129,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 91);
+    assert_eq!(PostgresStorage::schema_version(), 92);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -311,6 +314,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
          ALTER TABLE lash_attachment_manifest
+             ADD COLUMN IF NOT EXISTS write_id TEXT,
+             ADD COLUMN IF NOT EXISTS written_at_ms BIGINT,
              ADD COLUMN IF NOT EXISTS owner_incarnation BIGINT,
              DROP CONSTRAINT IF EXISTS lash_attachment_manifest_check,
              DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity,
@@ -325,6 +330,13 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ON lash_attachment_manifest(
                  session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms
              );
+         DROP INDEX IF EXISTS idx_lash_attachment_manifest_written;
+         CREATE INDEX idx_lash_attachment_manifest_written
+             ON lash_attachment_manifest(attachment_id, written_at_ms);
+         ALTER TABLE lash_attachment_condemnations
+             DROP CONSTRAINT IF EXISTS lash_attachment_condemnations_phase_check,
+             ADD CONSTRAINT lash_attachment_condemnations_phase_check
+                 CHECK (phase IN ('condemned', 'deleting'));
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate',
              ADD COLUMN IF NOT EXISTS intent_revision BIGINT NOT NULL DEFAULT 1;

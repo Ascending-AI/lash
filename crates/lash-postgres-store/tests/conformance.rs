@@ -1308,18 +1308,25 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         })
         .await
         .expect("create clocked Postgres session store");
+    let clock_intent = lash_core::AttachmentIntent {
+        attachment_id: lash_core::AttachmentId::parse("postgres-clock-attachment")
+            .expect("valid attachment id"),
+        session_id: SessionId::from(SESSION_ID.to_string()),
+        canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
+        intent_at_epoch_ms: NOW_MS.saturating_sub(1),
+        owner_kind: Some(lash_core::AttachmentOwnerKind::Turn),
+        owner_id: Some(TURN_ID.to_string()),
+        owner_incarnation: None,
+    };
+    let lash_core::AttachmentWriteFence::Granted(clock_permit) = store
+        .begin_attachment_write(clock_intent.clone())
+        .expect("begin turn-owned write")
+    else {
+        panic!("a free digest must grant its writer");
+    };
     store
-        .record_intent(lash_core::AttachmentIntent {
-            attachment_id: lash_core::AttachmentId::parse("postgres-clock-attachment")
-                .expect("valid attachment id"),
-            session_id: SessionId::from(SESSION_ID.to_string()),
-            canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
-            intent_at_epoch_ms: NOW_MS.saturating_sub(1),
-            owner_kind: Some(lash_core::AttachmentOwnerKind::Turn),
-            owner_id: Some(TURN_ID.to_string()),
-            owner_incarnation: None,
-        })
-        .expect("record turn-owned intent");
+        .complete_attachment_write(&clock_intent, clock_permit)
+        .expect("stamp turn-owned upload");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store
         .try_claim_session_execution_lease(

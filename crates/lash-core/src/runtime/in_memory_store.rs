@@ -116,9 +116,12 @@ pub type RawQueuedWorkForTesting = (
 pub(crate) type SharedAttachmentCondemnations =
     Arc<Mutex<HashMap<crate::AttachmentId, AttachmentCondemnationPhase>>>;
 
-/// The three condemnation phases. Absence from the map is the `Free` state.
-/// A claim on `Condemned` or `Reclaimed` gives one writer temporary ownership
-/// while it restores the bytes; the phase itself remains durable until success.
+/// The two condemnation phases. Absence from the map is the `Free` state.
+/// A claim on `Condemned` gives one writer temporary ownership while it
+/// restores the bytes; the phase itself remains until the write succeeds.
+/// A completed physical delete removes the entry entirely — there is no
+/// terminal phase, because condemnation already removed every manifest row and
+/// adoption is gated on positive upload evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AttachmentCondemnationPhase {
     /// Claimed by a sweeper, no physical delete issued yet: a writer revokes it.
@@ -127,18 +130,14 @@ pub(crate) enum AttachmentCondemnationPhase {
     },
     /// The physical delete is in flight: a writer must wait for its outcome.
     Deleting,
-    /// The physical delete succeeded: adoption refuses until a fresh put.
-    Reclaimed {
-        write_claim: Option<AttachmentWriteClaim>,
-    },
 }
 
-/// Durable association between one restoring attempt and its manifest intent.
-/// Host recovery uses the session identity to remove exactly the abandoned
-/// attempt's uncommitted row before releasing its token.
+/// Association between one restoring attempt and its manifest intent. Host
+/// recovery uses the session identity to remove exactly the abandoned attempt's
+/// uncommitted row before releasing its claim.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AttachmentWriteClaim {
-    pub(super) token: crate::AttachmentWriteToken,
+    pub(super) write_id: crate::AttachmentWriteToken,
     pub(super) session_id: SessionId,
 }
 
@@ -200,6 +199,11 @@ pub struct InMemorySessionStore {
     pending_turn_input_next_seq: Mutex<u64>,
     turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
     attachment_manifest: SharedAttachmentManifest,
+    /// The attempt identity currently owning each manifest row, held beside the
+    /// manifest rather than on the public entry projection: a host may observe
+    /// *that* an upload completed, never present the fence identity that proves
+    /// it. Shared factory-wide with the manifest it keys.
+    pub(crate) attachment_write_ids: SharedAttachmentWriteIds,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
     /// intent insert and the sweeper's condemn CAS must meet here.
@@ -294,6 +298,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashSet::new())),
+            Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
@@ -314,6 +319,7 @@ impl InMemorySessionStore {
         attachment_condemnations: SharedAttachmentCondemnations,
         attachment_manifest: SharedAttachmentManifest,
         retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
+        attachment_write_ids: SharedAttachmentWriteIds,
     ) -> Self {
         warnings::process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
@@ -350,6 +356,7 @@ impl InMemorySessionStore {
             pending_turn_input_next_seq: Mutex::new(0),
             turn_cancel_requests: Mutex::new(HashMap::new()),
             attachment_manifest,
+            attachment_write_ids,
             attachment_condemnations,
             #[cfg(any(test, feature = "testing"))]
             claim_after_lease_validation_hook: Mutex::new(None),
@@ -1624,3 +1631,7 @@ pub use factory::lineage_conformance_support::handles as in_memory_lineage_handl
 
 type SharedAttachmentManifest =
     Arc<Mutex<HashMap<(SessionId, crate::AttachmentId), crate::AttachmentManifestEntry>>>;
+
+/// Attempt identity per manifest row, keyed exactly as the manifest is.
+pub(crate) type SharedAttachmentWriteIds =
+    Arc<Mutex<HashMap<(SessionId, crate::AttachmentId), crate::AttachmentWriteToken>>>;

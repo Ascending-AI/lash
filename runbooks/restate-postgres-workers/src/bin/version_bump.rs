@@ -58,15 +58,15 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 89;
-/// Cancellation authority tables absent from component 88.
+const MIGRATION_FLOOR_VERSION: i32 = 90;
+/// Cancellation authority tables absent from component 90.
 const POST_FLOOR_TABLES: [&str; 4] = [
     "lash_turn_cancellation_bindings",
     "lash_turn_cancel_closure_authorizations",
     "lash_turn_cancel_retired_scopes",
     "lash_turn_cancel_closure_participants",
 ];
-/// Component 89 adds no independent index on a predecessor table.
+/// Component 91 adds no independent index on a predecessor table.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// The intent-revision column absent from the preceding cancellation shape.
 const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [("lash_turn_cancel_requests", "intent_revision")];

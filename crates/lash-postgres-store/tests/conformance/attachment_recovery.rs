@@ -5,7 +5,7 @@ lash_conformance::abandoned_attachment_recovery_tests!({
         return;
     };
     let database_lock = SharedDatabaseLock::acquire(&database_url).await;
-    (database_lock, move |_reclaimed: bool| {
+    (database_lock, move || {
         let database_url = database_url.clone();
         async move {
             let reopen_url = database_url.clone();

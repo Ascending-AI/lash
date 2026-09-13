@@ -1537,12 +1537,11 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
         owner_id: None,
         owner_incarnation: None,
     };
-    store
-        .record_intent(intent(&intent_id, 100))
-        .expect("record intent-only");
-    store
-        .record_intent(intent(&committed_id, 100))
-        .expect("record committed intent");
+    crate::conformance::helpers::record_completed_attachment_write(&store, intent(&intent_id, 100));
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        intent(&committed_id, 100),
+    );
     store
         .commit_refs(
             &SessionId::from("root"),
@@ -1724,9 +1723,9 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
         .await
         .expect("enqueue queued work");
     let attachment = AttachmentId::parse("reopen-attachment").expect("valid attachment id");
-    factory
-        .open
-        .record_intent(AttachmentIntent {
+    crate::conformance::helpers::record_completed_attachment_write(
+        &factory.open,
+        AttachmentIntent {
             attachment_id: attachment.clone(),
             session_id: SessionId::from("root"),
             canonical_uri: "sha256:reopen-attachment".to_string(),
@@ -1734,8 +1733,8 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
             owner_kind: None,
             owner_id: None,
             owner_incarnation: None,
-        })
-        .expect("record attachment intent");
+        },
+    );
 
     let reopened_meta = factory
         .reopen

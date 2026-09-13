@@ -608,8 +608,9 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
         .put(b"degraded-proof".to_vec(), attachment_meta("degraded"))
         .await
         .expect("put blob");
-    store
-        .record_intent(crate::AttachmentIntent {
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        crate::AttachmentIntent {
             attachment_id: reference.id.clone(),
             session_id: request.session_id,
             canonical_uri: format!("lash-attachment://{}", reference.id),
@@ -617,8 +618,8 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
             owner_kind: Some(crate::AttachmentOwnerKind::Process),
             owner_id: Some("absent-process-owner".to_string()),
             owner_incarnation: Some(crate::ProcessIncarnation::from_registration_sequence(1)),
-        })
-        .expect("record process intent");
+        },
+    );
     for empty in [false, true] {
         if empty {
             backend

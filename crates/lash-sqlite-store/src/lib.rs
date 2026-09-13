@@ -1421,14 +1421,14 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         store.recover_abandoned_attachment_write(id).await
     }
 
-    async fn reclaim_attachment_condemnation(
+    async fn retire_attachment_condemnation(
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
         let store = self
-            .open_catalog_for_maintenance("condemnation reclaim")
+            .open_catalog_for_maintenance("condemnation retirement")
             .await?;
-        store.reclaim_attachment_condemnation(id).await
+        store.retire_attachment_condemnation(id).await
     }
 }
 

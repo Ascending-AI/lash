@@ -191,13 +191,21 @@ pub enum StoreError {
     /// admitted. The retirement tombstone is permanent for that scope.
     #[error("turn cancellation closure scope `{scope_id}` is retired")]
     TurnCancelClosureScopeRetired { scope_id: String },
-    /// Stored-reference adoption found the durable byte-absence fact left by a
-    /// completed attachment GC delete. The boundary commit publishes nothing;
-    /// the caller may re-put the digest and retry.
+    /// Stored-reference adoption found no upload evidence for the digest: no
+    /// manifest row anywhere in this store records a completed write of these
+    /// bytes, or a physical delete of them is in flight. The boundary commit
+    /// publishes nothing; the caller puts the bytes and retries.
     #[error(
-        "attachment `{digest}` bytes were reclaimed; re-put the attachment before retrying the commit"
+        "attachment `{digest}` has no completed upload in this store; put the bytes before committing a reference to them"
     )]
-    AttachmentBytesReclaimed { digest: crate::AttachmentId },
+    UnknownAttachment { digest: crate::AttachmentId },
+    /// An attachment write permit was settled after its attempt had been
+    /// superseded by a newer `begin_attachment_write` for the same row. A stale
+    /// attempt certifies no upload: nothing was stamped.
+    #[error(
+        "attachment write permit for `{digest}` is stale; a newer write attempt owns this manifest row"
+    )]
+    StaleWritePermit { digest: crate::AttachmentId },
     #[error(
         "runtime operation `{operation_key}` for session `{session_id}` was retried with different commit content; reuse an operation identity only for the same logical operation"
     )]
@@ -633,7 +641,8 @@ impl StoreError {
             }
             Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
             Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
-            Self::AttachmentBytesReclaimed { .. } => "AttachmentBytesReclaimed",
+            Self::UnknownAttachment { .. } => "UnknownAttachment",
+            Self::StaleWritePermit { .. } => "StaleWritePermit",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
             Self::RuntimeCommitLeaseAuthorityConflict { .. } => {
                 "RuntimeCommitLeaseAuthorityConflict"

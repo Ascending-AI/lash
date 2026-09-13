@@ -576,8 +576,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 60"),
-        "error must report the real expected version 60: {message}"
+        message.contains("schema version 61"),
+        "error must report the real expected version 61: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -613,7 +613,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 60);
+    assert_eq!(user_version, 61);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -661,17 +661,24 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     let store = factory.create_store(&request).await.expect("create store");
     let attachment_id =
         lash_core::AttachmentId::parse("unwired-process-attachment").expect("valid attachment id");
+    let intent = lash_core::AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: request.session_id,
+        canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
+        intent_at_epoch_ms: 1,
+        owner_kind: Some(lash_core::AttachmentOwnerKind::Process),
+        owner_id: Some("missing-process".to_string()),
+        owner_incarnation: Some(lash_core::ProcessIncarnation::from_registration_sequence(1)),
+    };
+    let lash_core::AttachmentWriteFence::Granted(permit) = store
+        .begin_attachment_write(intent.clone())
+        .expect("begin process-owned write")
+    else {
+        panic!("a free digest must grant its writer");
+    };
     store
-        .record_intent(lash_core::AttachmentIntent {
-            attachment_id: attachment_id.clone(),
-            session_id: request.session_id,
-            canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
-            intent_at_epoch_ms: 1,
-            owner_kind: Some(lash_core::AttachmentOwnerKind::Process),
-            owner_id: Some("missing-process".to_string()),
-            owner_incarnation: Some(lash_core::ProcessIncarnation::from_registration_sequence(1)),
-        })
-        .expect("record process intent");
+        .complete_attachment_write(&intent, permit)
+        .expect("stamp process-owned upload");
 
     let refs = factory
         .live_attachment_refs(u64::MAX)
@@ -728,7 +735,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 60") && error.contains("version 51"),
+        error.contains("schema version 61") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

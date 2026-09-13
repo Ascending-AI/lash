@@ -752,19 +752,23 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
         lash_core::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
         let store = Store::open(&catalog).await.expect("open catalog");
-        lash_core::AttachmentManifest::record_intent(
-            &store,
-            lash_core::AttachmentIntent {
-                attachment_id: attachment_id.clone(),
-                session_id: SessionId::from("sess-1"),
-                canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
-                intent_at_epoch_ms: 1_000,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
-            },
-        )
-        .expect("record intent");
+        let intent = lash_core::AttachmentIntent {
+            attachment_id: attachment_id.clone(),
+            session_id: SessionId::from("sess-1"),
+            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+            intent_at_epoch_ms: 1_000,
+            owner_kind: None,
+            owner_id: None,
+            owner_incarnation: None,
+        };
+        let lash_core::AttachmentWriteFence::Granted(permit) =
+            lash_core::AttachmentManifest::begin_attachment_write(&store, intent.clone())
+                .expect("begin write")
+        else {
+            panic!("a free digest must grant its writer");
+        };
+        lash_core::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
+            .expect("stamp upload evidence");
         lash_core::AttachmentManifest::commit_refs(
             &store,
             &SessionId::from("sess-1"),
@@ -826,19 +830,23 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     )
     .await
     .expect("put shared backend blob");
-    lash_core::AttachmentManifest::record_intent(
-        &*store,
-        lash_core::AttachmentIntent {
-            attachment_id: attachment.id.clone(),
-            session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
-            intent_at_epoch_ms: 1,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
-        },
-    )
-    .expect("record live attachment intent");
+    let live_intent = lash_core::AttachmentIntent {
+        attachment_id: attachment.id.clone(),
+        session_id: request.session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
+        intent_at_epoch_ms: 1,
+        owner_kind: None,
+        owner_id: None,
+        owner_incarnation: None,
+    };
+    let lash_core::AttachmentWriteFence::Granted(live_permit) =
+        lash_core::AttachmentManifest::begin_attachment_write(&*store, live_intent.clone())
+            .expect("begin live attachment write")
+    else {
+        panic!("a free digest must grant its writer");
+    };
+    lash_core::AttachmentManifest::complete_attachment_write(&*store, &live_intent, live_permit)
+        .expect("stamp live attachment upload");
     lash_core::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,

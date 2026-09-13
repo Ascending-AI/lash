@@ -194,13 +194,13 @@ Committing a stored attachment reference acquires a manifest root for the
 committing session, including references first put by another session. The
 boundary transaction owns this acquisition and its attachment GC fence, so
 successful adoption cannot be separated from publication of its receiver root.
-FIG-2512 amends the fence with a terminal `Reclaimed` phase after a successful
-physical delete or a fenced final `HEAD` that proves bytes absent. Adoption that
-observes it fails atomically with `AttachmentBytesReclaimed`; a fresh put claims
-the phase with an opaque token while recording its write intent, restores the
-bytes, and only then clears the token-matched phase. Failure preserves the
-original phase. This is a pure store fact and never calls host blob code from
-the transaction.
+FIG-2795 gates that adoption on positive upload evidence: a digest is adoptable
+only while some manifest row carries `written_at_ms` for it and no physical
+delete is in flight, and condemnation clears every such row for the digest under
+the same fence. Adoption without evidence fails atomically with
+`StoreError::UnknownAttachment`; a fresh put mints a new attempt, restores the
+bytes, and stamps the evidence through its own id-matched completion. This is a
+pure store fact and never calls host blob code from the transaction.
 
 Committed attachment manifest rows survive owner deletion while any of that
 owner's graph nodes remain retained. The graph's existing head/child/pin

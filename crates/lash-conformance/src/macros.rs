@@ -1841,11 +1841,8 @@ macro_rules! abandoned_attachment_recovery_tests {
             async fn $law() {
                 let (_guard, make) = $fixture;
                 let _ = $label;
-                // Both condemnation axes run against their own fresh durable root.
-                for reclaimed in [false, true] {
-                    let (factory, reopen) = make(reclaimed).await;
-                    $crate::registration_macro_support::$law(factory, reclaimed, reopen).await;
-                }
+                let (factory, reopen) = make().await;
+                $crate::registration_macro_support::$law(factory, reopen).await;
             }
         )*
     };

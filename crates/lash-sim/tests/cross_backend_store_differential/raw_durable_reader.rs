@@ -234,8 +234,8 @@ impl RawDurableReader {
                     })
                     .collect();
                 let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
-                    "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
-                            owner_kind, owner_id, owner_incarnation
+                    "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
+                            committed_at_ms, owner_kind, owner_id, owner_incarnation
                      FROM lash_attachment_manifest
                      WHERE session_id = $1
                      ORDER BY attachment_id ASC",
@@ -251,6 +251,7 @@ impl RawDurableReader {
                             attachment_id,
                             canonical_uri,
                             intent_at_epoch_ms,
+                            written_at_epoch_ms,
                             committed_at_epoch_ms,
                             owner_kind,
                             owner_id,
@@ -260,6 +261,7 @@ impl RawDurableReader {
                                 .expect("valid attachment id"),
                             canonical_uri,
                             intent_at_epoch_ms: intent_at_epoch_ms as u64,
+                            written: written_at_epoch_ms.is_some(),
                             committed: committed_at_epoch_ms.is_some(),
                             owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
                             owner_id,

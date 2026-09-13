@@ -312,6 +312,9 @@ handle = { __handle__: "process", id: "awaited-attachment-child", incarnation: 1
 attachment = (await handle)?
 finish attachment"#,
             ))
+            .seeded_attachment_write(
+                lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id"),
+            )
             .precompleted_process(
                 "awaited-attachment-child",
                 lash_core::ProcessAwaitOutput::from_tool_output(

@@ -674,6 +674,17 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
+        if inserted == 1 {
+            // The digest is proven unrooted, so every remaining manifest row for
+            // it is stale evidence of an upload whose bytes this sweep is about
+            // to delete. Clearing them here is what makes a negative byte-absence
+            // tombstone unnecessary.
+            sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = $1")
+                .bind(id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if inserted == 1 {
             lash_core::AttachmentCondemnation::Condemned
@@ -726,14 +737,14 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         crate::attachments::recover_abandoned_attachment_write(&self.pool, id.as_str()).await
     }
 
-    async fn reclaim_attachment_condemnation(
+    async fn retire_attachment_condemnation(
         &self,
         id: &lash_core::AttachmentId,
     ) -> Result<(), lash_core::StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         sqlx::query(
-            "UPDATE lash_attachment_condemnations SET phase = 'reclaimed'
+            "DELETE FROM lash_attachment_condemnations
              WHERE attachment_id = $1 AND phase = 'deleting'",
         )
         .bind(id.as_str())
