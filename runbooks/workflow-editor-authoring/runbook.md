@@ -14,6 +14,17 @@ workflow.
 **No real tokens.** `examples/workflow-graph-roundtrip` uses deterministic host-owned
 mock operations. Do not configure OpenRouter or a Restate stack for this run.
 
+**The canonical source in this scenario is not an RLM dialect.** This host opens no RLM
+session and prompts no model. The `process blank() { finish 0 }` text the code pane shows
+is the **workflow-graph lens's** canonical printer over the IR — the `/project` and
+`/workflow` seams round-trip through it — and
+[ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves that printer
+where it is while retiring the authoring surface: a TypeScript canonical printer and its
+round-trip laws are named there as unbuilt future work with their own ADR, tracked as
+FIG-3033. So every source string asserted below is the lens's output, not a language a
+model was asked to write, and it changes when the lens's printer changes, not with this
+arc.
+
 ## Scenario-specific golden rules
 
 1. **The draft is not the saved workflow.** Before Save, `GET /workflow` must still
@@ -68,7 +79,10 @@ After readiness, gate these API facts before opening the editor:
 - `GET /operations` identifies Show message's `text` as `string`, Set progress's `pct`
   as `number`, and Finish's `expression` as `expression`;
 - projecting `process probe() { finish 0 }` through `POST /project` returns 200, canonical
-  source, one process, and one terminal without changing `GET /workflow`'s version.
+  source, one process, and one terminal without changing `GET /workflow`'s version. Every
+  such source string in this runbook is the workflow-graph lens's canonical printer output,
+  not a language a model was asked to write, and it changes when the TypeScript canonical
+  printer lands under FIG-3033, not with this arc.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical
 source pane, and Display panel. Screenshot `00-ready.png`.

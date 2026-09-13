@@ -25,8 +25,13 @@ def parse_shard(value: str) -> tuple[int, int]:
     return index, count
 
 
-def row(config: dict[str, object], group: str, scenario: str, dialect: str) -> dict[str, str]:
-    """One judged row, carrying the execution tier it is funded at.
+def row(config: dict[str, object], group: str, scenario: str, label: str) -> dict[str, str]:
+    """One judged row, carrying its artifact label and the tier it is funded at.
+
+    `label` is the row's artifact directory and the claim its evidence has to
+    support: `typescript` says a pinned RLM session produced it, `standard`
+    says the scenario opened none. It is not a choice — ADR 0096 left one
+    language — which is why it is read off `language` rather than iterated.
 
     The tier and model travel *on the row* rather than being looked up by the
     runner, because a row's evidence bundle has to record which model produced
@@ -36,7 +41,7 @@ def row(config: dict[str, object], group: str, scenario: str, dialect: str) -> d
     entry = config[group][scenario]
     return {
         "scenario": scenario,
-        "dialect": dialect,
+        "label": label,
         "runbook": f"runbooks/{scenario}/runbook.md",
         "tier": entry["tier"],
         "model": entry["model"],
@@ -44,17 +49,16 @@ def row(config: dict[str, object], group: str, scenario: str, dialect: str) -> d
 
 
 def rows(config: dict[str, object]) -> list[dict[str, str]]:
+    language = config["language"]
     result = [
-        row(config, "scenarios", scenario, dialect)
-        for scenario in config["scenarios"]
-        for dialect in config["dialects"]
+        row(config, "scenarios", scenario, language) for scenario in config["scenarios"]
     ]
     result.extend(
-        row(config, "typescript_only", scenario, "typescript")
+        row(config, "typescript_only", scenario, language)
         for scenario in config["typescript_only"]
     )
-    # Scenarios that open no RLM session have no dialect to pin and no honest
-    # twin: one row each, labelled with the mode.
+    # Scenarios that open no RLM session have no language to pin: one row each,
+    # labelled with the mode.
     result.extend(
         row(config, "no_rlm_session_only", scenario, "standard")
         for scenario in config["no_rlm_session_only"]
@@ -128,7 +132,7 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "schema": "lash.judged-runbook-shard.v2",
+                "schema": "lash.judged-runbook-shard.v3",
                 "shard": f"{index}/{count}",
                 "tiers": config["tiers"],
                 "judge_model_floor": config["judge_model_floor"],

@@ -62,15 +62,15 @@ session id. Screenshot `00-ready.png`.
 
 ## Phase 1 — Start two durable Runtime Processes
 
-Ask the agent to define and start two explicitly named Lashlang Runtime Processes in one
-turn. Process names are Lashlang identifiers, so use underscores; the work rail renders
-the definition name verbatim:
+Ask the agent to define and start two explicitly named durable Runtime Processes in one
+turn. `defineProcess` takes a string-literal `name` and must initialize a top-level
+`const`, so use underscores in both; the work rail renders the definition name verbatim:
 
-- `FIG425_survivor_<runid>` waits roughly 4 minutes, then finishes successfully with a
+- `FIG425_survivor_<runid>` waits roughly 4 minutes, then returns successfully with a
   literal terminal marker. The longer wait leaves enough time for browser-paced evidence
   collection and owner deletion before it completes;
 - `FIG425_cancellable_<runid>` waits several minutes by looping over 2-second sleeps,
-  then finishes with a marker that must never be reached. Do not use one multi-minute
+  then returns a marker that must never be reached. Do not use one multi-minute
   sleep: Restate-suspended sleep observes cooperative cancellation only when the workflow
   is re-invoked. Re-invocation after each short sleep therefore settles cancellation in
   roughly 2 seconds instead of waiting minutes for one suspension to end.
@@ -78,13 +78,21 @@ the definition name verbatim:
 Use this wait shape inside the cancellable definition (with its forbidden marker after
 the loop):
 
-```lashlang
-elapsed_seconds = 0
-while elapsed_seconds < 240 {
-  sleep for "2s"
-  elapsed_seconds = elapsed_seconds + 2
+```typescript
+let elapsedSeconds = 0;
+while (elapsedSeconds < 240) {
+  await sleep(2000);
+  elapsedSeconds += 2;
 }
 ```
+
+`sleep` takes milliseconds and must be awaited, and `run` is `async`, so the loop body is
+a durable step boundary rather than a busy wait. Count the iterations as above rather than
+timing the loop against the clock: `Date.now()` lowers to the journaled runtime operation
+`typescript.runtime.now`, which the durable process engine does not serve, so a
+clock-driven loop fails the process on its first iteration instead of waiting. If a run
+produces that failure, the prompt did not pin the shape hard enough — say the loop shape
+again, do not raise the driver tier.
 
 Poll `/api/work` until both named rows are non-terminal, capture their full process ids,
 and require matching running cards in the rendered work rail. Verify `processes.db`
@@ -121,13 +129,13 @@ Press **cancel** on `FIG425_cancellable_<runid>` and capture the response as
 `03-cancel-receipt.json`; require `accepted: true` and the exact process id. Poll
 `/api/work` until that card is terminal/cancelled and its event tail includes
 `process.cancel_requested`. Require the same ordered evidence in `process_events` and
-require that the forbidden finish marker is absent. Screenshot
+require that the forbidden terminal marker is absent. Screenshot
 `03-orphan-cancelled.png`.
 
 ## Phase 3b — Cancel a background session turn and keep working (FIG-884)
 
 Cancelling a *background session turn* — a subagent process, whose input is a session turn
-rather than a Lashlang definition — used to wedge the session that started it: the child
+rather than a process definition — used to wedge the session that started it: the child
 turn's registration was only removed after the child await, so a cancelled process left a
 permanent "running turn" behind. The session then refused to close the child and rejected
 every later turn on it. This phase proves the registration is released by cancellation.
@@ -190,7 +198,7 @@ card as `03b-session-still-usable.png`.
 
 Without opening or recreating the deleted session, poll until `FIG425_survivor_<runid>`
 is terminal/completed in `/api/work` and in the rendered rail. Require its terminal
-success event and literal finish marker in `processes.db`; re-query after one more work
+success event and literal terminal marker in `processes.db`; re-query after one more work
 refresh to prove the terminal is retained rather than transient. Screenshot
 `04-survivor-completed.png`; save `04-terminal-work.json` and
 `04-terminal-store.json`.
@@ -208,7 +216,7 @@ container are gone.
 | Global cancel | exact id accepted; `cancel_requested` then cancelled | | `03-orphan-cancelled.png`, `03-cancel-receipt.json`, store events |
 | Session survives a cancelled background session turn (FIG-884) | after cancelling a subagent, a follow-up turn answers and a second subagent runs; `managed_turn.release` released, no `already has a running turn` denial | | `03b-subagent-running.png`, `03b-subagent-cancel-receipt.json`, `03b-session-still-usable.png`, trace |
 | Cancelled child session left no durable-catalog rows (FIG-884) | `03b-sessions-before.json` has a non-zero baseline for the recorded child id; `03b-sessions-after.json` has zero rows for that id in all five cleanup tables | | `03b-subagent-running.json` (child session id), `03b-sessions-before.json`, `03b-sessions-after.json`, `03b-sessions-delta.txt` |
-| Survivor completion | completed terminal and finish marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
+| Survivor completion | completed terminal and terminal marker persist after owner deletion | | `04-survivor-completed.png`, `04-terminal-*.json` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 
 **Aggregate:** did the workbench visibly and durably preserve Runtime Process ownership at

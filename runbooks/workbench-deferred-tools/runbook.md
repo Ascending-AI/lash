@@ -1,4 +1,4 @@
-# E2E Scenario: Workbench Deferred Tools — Search, Next-Block Call, Restart
+# E2E Scenario: Workbench Deferred Tools — Search, Next-Cell Call, Restart
 
 > **Read [../RULES.md](../RULES.md) first** — especially named screenshots,
 > polling, the three-layer cross-check, real-token use, Abort/RCA, restart environment,
@@ -12,7 +12,7 @@
 
 **Purpose.** Prove the production Workbench deferred-tool path with a real model: the
 resident `tools.search` capability returns a non-resident utility and persists its grant,
-the model calls that utility in a separate next Lashlang block, and the same grant remains
+the model calls that utility in a separate next TypeScript cell, and the same grant remains
 callable after the Workbench process restarts against the same SQLite state.
 
 **Deterministic companion.** `cargo test -p agent-workbench deferred_ -- --nocapture`
@@ -26,10 +26,10 @@ the model's surrounding prose.
 
 ## Scenario-specific golden rules
 
-1. **Two blocks are the contract.** The first turn must contain a completed
+1. **Two cells are the contract.** The first turn must contain a completed
    `tools.search` call whose observation names `text.sha256`, followed by a distinct
-   Lashlang execution block that calls `text.sha256`. A single block containing both is
-   a link failure, not a passing shortcut.
+   `<typescript>` execution cell that calls `text.sha256`. A single cell containing both
+   is a link failure, not a passing shortcut.
 2. **The search observation is evidence.** Prompt text containing `text.sha256` proves
    nothing. Require the completed search tool result to contain `call_path:
    "text.sha256"`, and save the matching trace extract.
@@ -81,10 +81,10 @@ rows. Record baseline DOM/API/store message counts and the trace byte offsets. S
 
 ## Phase 1 — Search observation, then deferred call
 
-Submit one composer turn with this outcome constraint (do not paste Lashlang):
+Submit one composer turn with this outcome constraint (do not paste a ready-made cell):
 
 > Use the deferred capability search to find a text checksum operation. Obey the
-> next-code-block rule: first search, inspect its observation, then in a separate block
+> next-cell rule: first search, inspect its observation, then in a separate cell
 > use the discovered operation to compute the SHA-256 of the exact UTF-8 text
 > `FIG-1116 before restart`. Return the digest.
 
@@ -94,7 +94,7 @@ order:
 1. The completed `search_tools` result in `trace.jsonl` names `text.sha256` in its
    observation. Save the exact record(s) as `01-search-observation.json`.
 2. `lashlang-execution.jsonl` shows the search and deferred call in distinct foreground
-   blocks, in that order. Save the matching records as `01-two-blocks.json`.
+   cells, in that order. Save the matching records as `01-two-blocks.json`.
 3. A completed raw `workbench_deferred_text_sha256` tool call exists after the search
    observation. Save it as `01-deferred-call.json`.
 4. The rendered assistant row and `/api/state.messages` contain the exact digest of
@@ -153,7 +153,7 @@ Workbench process and managed Restate container are gone. Preserve the artifact 
 |------|----------------|---------|----------|
 | Fresh identity | health ready; rendered/API/disk session ids agree; grant DB empty | | `00-*` |
 | Search observation | completed `search_tools` result names `text.sha256` | | `01-search-observation.json` |
-| Two-step handshake | search block precedes a distinct deferred-call block | | `01-two-blocks.json` |
+| Two-step handshake | search cell precedes a distinct deferred-call cell | | `01-two-blocks.json` |
 | Deferred execution | raw deferred call completes; UI/API show exact digest | | `01-deferred-call.json`, `01-search-call-complete.png` |
 | Durable grant | SQLite row contains definition, source, binding | | `01-grants.json` |
 | Workbench restart | new PID; same Restate/session/data; transcript reconstructs | | `02-*` |
@@ -161,7 +161,7 @@ Workbench process and managed Restate container are gone. Preserve the artifact 
 | Three-layer projection | DOM, API/store, and trace counts agree pairwise after both turns | | `01-crosscheck.json`, `03-crosscheck.json` |
 
 **Aggregate:** did a real model discover a non-resident operation, call it only in the
-next block, and call the persisted grant again after a Workbench restart without another
+next cell, and call the persisted grant again after a Workbench restart without another
 search, with UI/API/store/trace agreement throughout?
 
 ---

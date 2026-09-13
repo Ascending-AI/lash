@@ -12,7 +12,7 @@
 
 **Purpose.** Prove with the real configured model that a host-gated tool parks
 on Lash's real Restate completion-key machinery, the workbench exposes the wait
-to an operator, approve resumes successfully, deny reaches Lashlang as a typed
+to an operator, approve resumes successfully, deny reaches the cell as a typed
 tool failure, and a parked wait survives a workbench process restart.
 
 **Deterministic companion.** Run
@@ -53,7 +53,7 @@ race. Cancellation is a tool completion, not cancellation of the redriven turn.
 | Cancel | `Resolution::Cancelled` | `ok=false`, runtime cancellation message |
 
 This companion is deterministic CI evidence, not a judged browser run. Scenarios
-A–C below remain the live approval/restart scorecard in both dialects. The browser
+A–C below remain the live approval/restart scorecard. The browser
 currently offers approve and deny only; it has no timeout/cancel-completion route.
 Do not claim the four callback variants were exercised through the browser.
 If the required model key is absent, record a Phase 0 harness gap under RULES.md;
@@ -65,8 +65,8 @@ do not substitute a scripted model for the live rows.
    `/workspace/tmp/fig1117-approval-{scenario}-{data,run,artifacts}` paths.
 2. Boot only with `just agent-workbench <port>`. Export the same
    `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR` for every restart.
-3. The model must call raw tool id `workbench_ops_apply_change` from a Lashlang
-   cell. A model description of approval is not evidence.
+3. The model must call raw tool id `workbench_ops_apply_change` from a
+   `<typescript>` cell. A model description of approval is not evidence.
 4. At every park checkpoint, the rendered `.approval-card`, `GET /api/state`
    `pending_approvals`, and `GET /api/approvals` must agree on key, tool,
    arguments, requesting session, and cardinality. The session graph must show
@@ -91,9 +91,9 @@ browser showing `idle`. Require `GET /api/approvals` and
 Submit this intent (the exact prose may be adjusted only to make the real model
 obey the structural request):
 
-> In one Lashlang cell call `ops.apply_change` with target `demo-cluster` and
-> change `enable safe mode`, unwrap it with `?`, then finish the returned
-> record. Do not merely explain the call.
+> In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
+> change `enable safe mode`, awaiting it so a failure propagates, then
+> `finish` the returned record. Do not merely explain the call.
 
 1. Poll until exactly one approval card renders. Save
    `01-approve-parked.png`, `01-approve-state.json`, and
@@ -110,15 +110,16 @@ obey the structural request):
 
 Reset to a fresh session and submit:
 
-> In one Lashlang cell call `ops.apply_change` with target `demo-cluster` and
-> change `disable audit log` without `?`. Inspect the failed result and finish
-> a record containing its typed failure code and message. Do not retry it.
+> In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
+> change `disable audit log`, catching the failure instead of letting it
+> propagate. Inspect the thrown error and `finish` a record carrying the
+> failure code and message from its `cause`. Do not retry it.
 
 1. Gate on one matching approval across DOM, `/api/state`, and
    `/api/approvals`; save `03-deny-parked.png`, `03-deny-state.json`, and
    `03-deny-approvals.json`.
-2. Click **deny**. Poll for terminal completion. Require the Lashlang result to
-   expose `ok=false`, code `approval_denied`, message
+2. Click **deny**. Poll for terminal completion. Require the recorded tool
+   failure the cell observed to expose `ok=false`, code `approval_denied`, message
    `the operator denied this change`, source `tool`, and retry disposition
    `never` as typed fields rather than a serialized string. Require no second
    `workbench_ops_apply_change` execution. Save `04-denied-handled.png`,
@@ -130,9 +131,9 @@ Reset to a fresh session and submit:
 
 Reset to a fresh session and submit:
 
-> In one Lashlang cell call `ops.apply_change` with target `restart-demo` and
-> change `rotate workers`, unwrap it with `?`, then finish its status. Do not
-> merely explain the call.
+> In one TypeScript cell call `ops.apply_change` with target `restart-demo` and
+> change `rotate workers`, awaiting it so a failure propagates, then `finish`
+> its status. Do not merely explain the call.
 
 1. Gate on one approval across all three host projections and record the
    session id, approval key, active turn id, DOM row identities, committed
@@ -169,7 +170,7 @@ Reset to a fresh session and submit:
 | Approve parks | one identical wait across DOM and both APIs; active graph uncommitted | | `01-*` |
 | Approve resumes | typed success result; one tool execution; terminal layers agree | | `02-*` |
 | Deny parks | one identical wait across DOM and both APIs | | `03-*` |
-| Deny is typed | Lashlang handles typed `approval_denied`; no retry | | `04-*` |
+| Deny is typed | the cell handles typed `approval_denied`; no retry | | `04-*` |
 | Restart continuity | same session, turn, key, arguments, and row/message identities | | `05-*`, `06-*` |
 | Restart resumes once | one typed tool completion + one turn completion + one decided ledger row | | `07-*` |
 | Teardown | workbench and owned containers stopped; ports free | | teardown log |

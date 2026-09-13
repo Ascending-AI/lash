@@ -30,66 +30,61 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 | `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress, process-workflow, and effect-group HTTP live tests; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md), [`agent-service-effect-groups`](agent-service-effect-groups/runbook.md), and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). The deterministic, operator-only [`agent-service-effect-group-retirement`](agent-service-effect-group-retirement/runbook.md) rehearsal is inventoried separately and is never a judged browser row. |
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and `Package feature checks` runs the package-scoped workbench check; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. |
 | `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth and runtime integration attach/detach. |
-| `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs `file-edit-bugfix`, `missing-helper-file`, and `config-contract-edit` against exact shell oracles after live OpenRouter turns, once per dialect. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
+| `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs `file-edit-bugfix`, `missing-helper-file`, and `config-contract-edit` against exact shell oracles after live OpenRouter turns. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
-## Dialect parity is mandatory
+## One judged row per scenario, pinned to TypeScript
 
-Every judged scenario **that runs an RLM session** is a two-row acceptance matrix: run it
-once with the session pinned to `lashlang` and once with the session pinned to
-`typescript`. This includes scenarios whose primary mechanism is dialect-independent. Use a
-fresh session id, data directory, ports, trace offset, and artifact directory for each row;
-never reuse one dialect's evidence for the other. The machine-readable inventory is
-[`parity-matrix.toml`](parity-matrix.toml).
+[ADR 0096](../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves one RLM
+authoring language. Every judged scenario **that runs an RLM session** is therefore a
+single row, pinned to the language id `typescript`, not a parity pair: there is no second
+surface to run, no twin evidence to keep apart, and no default to record. The
+machine-readable inventory is [`parity-matrix.toml`](parity-matrix.toml), whose top-level
+`language` key is that id, spelled out.
 
-The exception is named there rather than argued per scenario: a scenario that **opens no
-RLM session** has no dialect to pin and no honest twin. A second row would buy an identical
-judged run, an identical bill, and a `dialect` label describing a session that does not
-exist. Those scenarios sit in `no_rlm_session_only` and emit one row each, labelled
-`standard` — the mode, not a language. A standard-mode host using
-`LashCore::standard_builder` is one example; the predicate is whether the scenario opens
-an RLM session, and the claim is checkable in its runbook binary or driver.
+Each row still gets a fresh session id, data directory, ports, trace offset, and artifact
+directory. Freshness was never only about telling two dialects apart: a carried-over store
+serves a previous row's processes, leases and trace offsets, which is mislabeled evidence
+whatever the row is pinned to.
 
-Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that value in
-the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
-recorded as the default substitution. A TypeScript row that receives a Lashlang prompt,
-cell tag, execution event, or restored engine id is a contract violation and triggers the
-normal Abort/RCA rule. This includes a subagent's prompt: a session tree is one dialect in
-v1, and children inherit the parent's, so a TypeScript row whose child session reads a
-Lashlang prompt is the same violation. Letting a host pick a different dialect per child
-is future work.
+Each emitted row carries a `label`, which is both its artifact directory and a claim its
+evidence has to support. `typescript` says the row opened an RLM session and pinned it. A
+scenario that **opens no RLM session** can make no such claim; those sit in
+`no_rlm_session_only` and emit one row each labelled `standard` — the mode, not a
+language. A standard-mode host using `LashCore::standard_builder` is one example; the
+predicate is whether the scenario opens an RLM session, and the claim is checkable in its
+runbook binary or driver.
 
-The data directory must be fresh per row, not merely per scenario. A session's dialect is
-durably pinned at its **first commit**, and the recorded pin always wins: every shipped
-host *states* the ambient `LASH_RUNBOOK_DIALECT` — unset being the Lashlang default — on
-every session open, and that statement is a guarded set-if-unset write (ADR 0066) — it
-lands on a session that recorded nothing, is a no-op on one that recorded the same
-dialect, and **refuses** on one that recorded another. Nothing catches that refusal. So
-reopening a carried-over store under the other row's `LASH_RUNBOOK_DIALECT` fails the
-open loudly, rather than serving the recorded dialect behind green routes while the
-environment claims the other one — the mislabeled evidence this matrix exists to catch.
+Until [FIG-3022](https://linear.app/ascending-ai/issue/FIG-3022) removes the host-side
+selector, hosts still *default* an unpinned session to the retired surface. So every RLM
+row sets `LASH_RUNBOOK_DIALECT=typescript` explicitly and the host passes that value in
+the RLM session-creation contract; absence is not allowed on any row, and a row that
+served anything but a TypeScript prompt, cell tag, execution event or restored engine id
+is a contract violation that triggers the normal Abort/RCA rule. This includes a
+subagent's prompt: children inherit the parent's session language. When the selector goes,
+the variable goes with it and this paragraph retires; nothing else in this section moves,
+because the pin is no longer a choice.
 
-A failed open on a carried-over store is a harness error, not a finding: fix the data
-directory and rerun the row. A fresh data directory per row is what makes the environment
-variable and the served dialect the same fact. Confirm the served dialect from the row's
-own evidence (prompt, cell tag, execution events), never from the environment.
+Confirm the served language from the row's **own evidence** — prompt, cell tag, execution
+events — never from the environment. The environment is what you asked for; the evidence
+is what you got, and the gap between them is the whole reason the label exists.
 
-Runbook prose predating the parity matrix may say “Lashlang cell/program/source.” Read
-that as “the active dialect's cell/program/source” unless it names a stable product API,
-artifact filename, trace field, or historical term (for example
-`/api/lashlang-graphs` or `lashlang-execution.jsonl`). Prompts ask for outcomes, not
-ready-made source, in both rows. Deterministic providers must expose equivalent fixed
-programs for both dialect ids; silently feeding their Lashlang program to a TypeScript
-row is a failed harness, not a skipped row.
+Runbook prose predating this ruling may say "Lashlang cell/program/source". Read that as
+the TypeScript cell and its source unless it names a stable product API, artifact
+filename, trace field, or historical term (for example `/api/lashlang-graphs` or
+`lashlang-execution.jsonl`), which keep their spellings because they name the IR and the
+VM, which are not retired. Prompts ask for outcomes, not ready-made source. A
+deterministic provider must expose a TypeScript program its scenario can actually run;
+serving a program in the retired surface is a failed harness, not a skipped row.
 
-Independent scenario/dialect rows may execute concurrently from the start, subject to the
+Independent scenario rows may execute concurrently from the start, subject to the
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **67 rows**: 31 RLM scenarios in two
-dialects, four no-RLM-session rows, and one TypeScript-only composite. The arithmetic is
-asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this
-number stale without turning CI red.
+stable JSON work shard. The matrix currently expands to **36 rows**: 31 RLM scenarios, four
+no-RLM-session rows, and one composite that exercises host-language surface. The arithmetic
+is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
+this number stale without turning CI red.
 
 Score a `cargo test`/`cargo nextest` run by its **passed count**, never by its exit code. A
 filter that matches nothing exits `0` and prints `0 passed; N filtered out`, which reads as
@@ -123,9 +118,9 @@ Three rules keep the tiers honest:
 1. **The tier is not a licence to weaken a gate.** If a gate only passes at `frontier`, the
    row is `frontier`; do not retune the answer key downward to fit a cheaper driver.
 2. **Record the served model from the row's own evidence**, never from the environment — the
-   same rule the dialect pin already carries. Any substitution (a slug that is unavailable, a
+   same rule the language pin already carries. Any substitution (a slug that is unavailable, a
    tier raised mid-row after a repeated model failure) is recorded on the row's scorecard with
-   the reason, exactly as a dialect substitution is.
+   the reason.
 3. **A tier change is a matrix change.** Running a row at a model the matrix does not name for
    it produces mislabeled evidence in the same way a carried-over data directory does. Move
    the scenario's tier in `parity-matrix.toml` first, in its own commit, with the reason.

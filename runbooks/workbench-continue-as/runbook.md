@@ -12,7 +12,7 @@
 
 **Purpose.** Referee an RLM agent-initiated `control.continue_as({ task, seed })` tail-call
 through the workbench browser surface. The scenario proves that one logical composer turn
-can open a fresh `AgentFrame`, carry only its explicit seed into that frame, finish coherently,
+can open a fresh `AgentFrame`, carry only its explicit seed into that frame, conclude coherently,
 and remain truthful across the deliberately asymmetric transcript projection and a process
 restart.
 
@@ -101,8 +101,8 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 7. **Exercise a real tool before switching.** At least one pressure turn must produce paired
    successful `tool_call_started` / `tool_call_completed` records for the same call id. Pick a
    read-only tool from the session's advertised catalog: prefer the Parallel web-search MCP
-   tool when it is present, otherwise use any other advertised read-only tool. A Lashlang block
-   without a tool call does not satisfy this gate.
+   tool when it is present, otherwise use any other advertised read-only tool. A
+   `<typescript>` cell without a tool call does not satisfy this gate.
 8. **Try the organic lever once, then guide explicitly.** After compaction pressure exists,
    first ask the agent to continue the marker-retention task without naming the tool and
    inspect the trace. If it switches, record `pressure/organic`. If it does not, submit one
@@ -177,7 +177,7 @@ Submit several bounded turns. Each establishes one literal marker fact and asks 
 acknowledgement; deterministic inert filler may make each prompt roughly 4,000–6,000 tokens.
 One turn must ask the agent to call a small read-only workbench tool before acknowledging its
 marker. Choose it from the session's advertised catalog: prefer the Parallel web-search MCP
-tool (`mcp__parallel__web_search_*`, Lashlang `parallel.web_search_<digest>`) when it is
+tool (`mcp__parallel__web_search_*`, call path `parallel.web_search_<digest>`) when it is
 advertised, otherwise pick any other advertised read-only tool. Keep `FIG992A-SEED-<run-id>` as the future baton and
 explicitly label
 `FIG992A-NONSEED-<run-id>` as `unseeded_secret` in old-frame context.
