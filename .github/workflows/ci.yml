@@ -330,6 +330,9 @@ jobs:
         if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
         env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
@@ -775,6 +778,9 @@ jobs:
       - name: Configure shared build cache
         uses: ./.github/actions/bazel-shared-cache
         env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
@@ -1159,6 +1165,9 @@ jobs:
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
         env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
@@ -1498,6 +1507,9 @@ jobs:
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
         env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
@@ -1613,6 +1625,9 @@ jobs:
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
         env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}

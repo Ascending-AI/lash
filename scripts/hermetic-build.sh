@@ -23,6 +23,17 @@ elif [[ "${1:-}" == "--shared" ]]; then
   shift
 fi
 
+# kiln writes .kiln.bazelrc on every fork and golden refresh: the pool
+# endpoint, the client certificate, the pinned runtime image and this host's
+# caches. .bazelrc `try-import`s it, so without it `--config=shared` would
+# quietly build with no executor at all.
+if [[ "$config" == shared && ! -f "$repo/.kiln.bazelrc" ]]; then
+  echo "hermetic-build: $repo/.kiln.bazelrc is missing, so there is no shared" \
+    "executor to build on. Re-create the fork with 'kiln fork', or pass" \
+    "--local to execute actions in this checkout." >&2
+  exit 1
+fi
+
 operation="${1:-}"
 if [[ -z "$operation" ]]; then
   operation=build

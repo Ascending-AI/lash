@@ -19,7 +19,6 @@ import yaml
 
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import bazel_executor_runtime  # noqa: E402
 import ci_plan  # noqa: E402
 
 
@@ -276,66 +275,117 @@ class BazelTestContractTests(unittest.TestCase):
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
-        self.assertIn("--remote_executor=grpcs://178.105.21.6:8443", flags)
-        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", flags)
-        self.assertIn("--remote_instance_name=kiln", flags)
         self.assertIn("--remote_local_fallback=false", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
         self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)
         self.assertNotIn("github_runner_runtime", flags)
         self.assertNotIn("spawn_strategy=local", flags)
 
-    def test_ci_and_local_builds_advertise_one_executor_runtime(self) -> None:
-        """The pool matches `kiln_executor_runtime` exactly, so CI may not own a copy.
+    def test_no_deployment_fact_is_committed(self) -> None:
+        """Where the pool lives is a deployment fact, not a repository fact.
 
-        `.bazelrc` is the single source: `scripts/bazel_executor_runtime.py`
-        reads the value from it and the composite action interpolates whatever
-        that prints. The only way CI and `.bazelrc` could disagree is a second
-        checked-in copy of the fingerprint, so this test refuses one anywhere
-        under `.github/`.
+        The endpoint, the instance, the runtime fingerprint, the client
+        certificate paths and this host's cache directories move when the pool
+        is redeployed or the executor is repinned, and they differ between a
+        development host and a CI runner. `.bazelrc` imports kiln's generated
+        `.kiln.bazelrc` for the local copy, CI reads `build-cache` environment
+        secrets for its own, and neither copy is committed.
         """
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
-        fingerprint = bazel_executor_runtime.executor_runtime(bazelrc)
-        self.assertRegex(fingerprint, r"^kiln-runtime-sha256-[0-9a-f]{64}$")
+        self.assertIn("try-import %workspace%/.kiln.bazelrc", bazelrc)
         self.assertIn(
-            "build:shared "
-            f"--remote_default_exec_properties=kiln_executor_runtime={fingerprint}",
-            bazelrc,
+            "/.kiln.bazelrc", (ROOT / ".gitignore").read_text(encoding="utf-8")
         )
-        with self.assertRaises(bazel_executor_runtime.FingerprintError):
-            bazel_executor_runtime.executor_runtime("build --jobs=8\n")
-
-        setup = shared_cache_action()
-        runtime = job_step(setup, "Resolve shared executor runtime")
-        self.assertIn("scripts/bazel_executor_runtime.py", runtime["run"])
-        with tempfile.TemporaryDirectory() as temporary:
-            github_output = pathlib.Path(temporary) / "output"
-            subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", runtime["run"]],
-                cwd=ROOT,
-                env=os.environ | {"GITHUB_OUTPUT": str(github_output)},
-                check=True,
-            )
-            self.assertEqual(
-                f"executor_runtime={fingerprint}",
-                github_output.read_text(encoding="utf-8").strip(),
-            )
-
-        flags = job_step(setup, "Export shared cache flags")["run"]
+        # What the pool is asked FOR stays in the repository.
         self.assertIn(
-            "--remote_default_exec_properties=kiln_executor_runtime=${EXECUTOR_RUNTIME}",
+            "build:shared --remote_default_exec_properties=cpu_count=4", bazelrc
+        )
+        self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
+
+        sources = [(pathlib.Path(".bazelrc"), bazelrc)]
+        for path in sorted((ROOT / ".github").rglob("*")):
+            if path.is_file():
+                sources.append(
+                    (
+                        path.relative_to(ROOT),
+                        path.read_text(encoding="utf-8", errors="surrogateescape"),
+                    )
+                )
+        sources.append(
+            (
+                pathlib.Path("scripts/ci_plan.py"),
+                (ROOT / "scripts/ci_plan.py").read_text(encoding="utf-8"),
+            )
+        )
+        patterns = (
+            # Loopback is a property of the runner a service job stands up,
+            # not of where the pool lives.
+            (r"\b(?!127\.|0\.0\.0\.0)\d{1,3}(?:\.\d{1,3}){3}\b", "an IP address"),
+            (r"kiln-runtime-sha256-", "an executor runtime fingerprint"),
+            (r"--remote_instance_name=(?!\$)", "a literal REAPI instance name"),
+            (r"--remote_(?:executor|cache)=grpc", "a literal pool endpoint"),
+            (r"--tls_[a-z_]*=(?![\"$])", "a literal certificate path"),
+            (r"/home/[a-z]+/", "a home-directory path"),
+        )
+        for path, text in sources:
+            for pattern, description in patterns:
+                self.assertIsNone(
+                    re.search(pattern, text),
+                    f"{path} carries {description}; it is a deployment fact and "
+                    "belongs in .kiln.bazelrc or a build-cache secret",
+                )
+
+    def test_the_shared_cache_action_fails_closed_on_a_missing_secret(self) -> None:
+        """A misconfigured environment must name what is missing, not build wrong.
+
+        A Bazel invocation with no executor falls back to a two-core runner
+        compile and one advertising the wrong runtime matches nothing in the
+        pool, so an empty value can neither be defaulted nor ignored.
+        """
+        verify = job_step(shared_cache_action(), "Verify shared pool configuration")[
+            "run"
+        ]
+        names = [
+            "CACHE_ENDPOINT",
+            "CACHE_INSTANCE",
+            "KILN_EXECUTOR_RUNTIME",
+            "CACHE_CA",
+            "CACHE_CERT",
+            "CACHE_KEY",
+        ]
+        supplied = {name: f"value-of-{name}" for name in names}
+        complete = subprocess.run(
+            ["bash", "-c", verify],
+            cwd=ROOT,
+            env=os.environ | supplied,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, complete.returncode, complete.stderr)
+        for name in names:
+            with self.subTest(missing=name):
+                result = subprocess.run(
+                    ["bash", "-c", verify],
+                    cwd=ROOT,
+                    env=os.environ | supplied | {name: ""},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(1, result.returncode)
+                self.assertIn(name, result.stderr)
+
+        # Masked before any flag carrying them is written.
+        for name in ("CACHE_ENDPOINT", "CACHE_INSTANCE", "KILN_EXECUTOR_RUNTIME"):
+            self.assertIn(f'echo "::add-mask::${{{name}}}"', verify)
+        flags = job_step(shared_cache_action(), "Export shared cache flags")["run"]
+        self.assertIn("--remote_executor=${CACHE_ENDPOINT}", flags)
+        self.assertIn("--remote_cache=${CACHE_ENDPOINT}", flags)
+        self.assertIn("--remote_instance_name=${CACHE_INSTANCE}", flags)
+        self.assertIn(
+            "--remote_default_exec_properties=kiln_executor_runtime="
+            "${KILN_EXECUTOR_RUNTIME}",
             flags,
         )
-        for path in sorted((ROOT / ".github").rglob("*")):
-            if not path.is_file():
-                continue
-            text = path.read_text(encoding="utf-8", errors="surrogateescape")
-            self.assertNotIn(
-                "kiln-runtime-sha256-",
-                text,
-                f"{path.relative_to(ROOT)} carries its own copy of the executor "
-                "runtime fingerprint; read it from .bazelrc instead",
-            )
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
         jobs = workflow()["jobs"]

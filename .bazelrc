@@ -1,23 +1,23 @@
-# Keep repository and action caches off the space-constrained workspace
-# filesystem. These caches are safe to share across independent Kiln forks.
-startup --output_user_root=/home/sam/.cache/lash-bazel/user-root
+# Where the pool lives, which certificate reaches it, which runtime image it
+# pins, and where this host keeps its caches are deployment facts, not
+# repository facts: they move when the pool is redeployed or the executor is
+# repinned, and they differ between a development host and a CI runner. None
+# of them is committed here.
+#
+# Locally, kiln writes them to .kiln.bazelrc on every fork and golden refresh,
+# from the installed executor manifest. The file is gitignored and this import
+# is `try-`: a checkout without it still builds, it just has no shared
+# executor, and `scripts/hermetic-build.sh --shared` says so rather than
+# failing obscurely. In CI they are `build-cache` environment secrets, written
+# by the build-infra repository and read by
+# `.github/actions/bazel-shared-cache`.
+try-import %workspace%/.kiln.bazelrc
+
 startup --host_jvm_args=-Xmx4g
-common --repository_cache=/home/sam/.cache/lash-bazel/repository
-common --disk_cache=/home/sam/.cache/lash-bazel/disk
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
-# The shared Kiln execution pool is selected explicitly: one scheduler, one
-# CAS/AC, and workers on this host and in Hetzner. The endpoint requires a
-# client certificate installed separately from this repository; an unavailable
-# endpoint or a missing certificate fails closed.
-build:shared --remote_executor=grpcs://178.105.21.6:8443
-build:shared --remote_cache=grpcs://178.105.21.6:8443
-build:shared --remote_instance_name=kiln
-build:shared --tls_certificate=/home/sam/.config/dev-setup/kiln-build-infra/tls/ca.crt
-build:shared --tls_client_certificate=/home/sam/.config/dev-setup/kiln-build-infra/tls/hetzner-dev.crt
-build:shared --tls_client_key=/home/sam/.config/dev-setup/kiln-build-infra/tls/hetzner-dev.key
-build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime-sha256-47a135193ff09d3f57a441099739fbc9162ff0b55d5b4393a279b7b003f36bac
+# What the pool is asked FOR is a repository fact and stays here.
 # Rust compile and link actions are large and mostly single-invocation: on
 # one core the workspace test binaries take 20-30 minutes each and sit on the
 # serial tail of the graph. Four cores per action lets rustc parallelise

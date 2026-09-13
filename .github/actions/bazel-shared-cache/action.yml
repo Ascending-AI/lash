@@ -1,11 +1,13 @@
 name: Bazel shared cache
 description: >-
-  Installs the pinned Bazelisk, resolves the shared executor runtime and writes
-  the authenticated client credentials. Exports the resulting Bazel flags as
-  BAZEL_SHARED_CACHE_FLAGS and the server's output base as
-  BAZEL_OUTPUT_USER_ROOT, so every job on this runner issues one cache and
-  execution configuration. Pair it with an `if: always()` step that removes
-  "$RUNNER_TEMP/build-cache".
+  Installs the pinned Bazelisk, validates the shared pool configuration this
+  job's `build-cache` environment supplies and writes the authenticated client
+  credentials. Exports the resulting Bazel flags as BAZEL_SHARED_CACHE_FLAGS
+  and the server's output base as BAZEL_OUTPUT_USER_ROOT, so every job on this
+  runner issues one cache and execution configuration. Pass CACHE_ENDPOINT,
+  CACHE_INSTANCE, KILN_EXECUTOR_RUNTIME, CACHE_CA, CACHE_CERT and CACHE_KEY in
+  the calling step's `env`, and pair it with an `if: always()` step that
+  removes "$RUNNER_TEMP/build-cache".
 
 runs:
   using: composite
@@ -22,26 +24,38 @@ runs:
         chmod +x "$RUNNER_TEMP/bazel"
         echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-    # CI submits its actions to the same execution pool a local fork uses, so
-    # it must advertise the same runtime image: the scheduler matches
-    # `kiln_executor_runtime` exactly. `.bazelrc` is the one place that value
-    # lives and this step reads it from there;
-    # `scripts/test_bazel_test_contract.py` refuses a second copy anywhere
-    # under `.github/`.
-    - name: Resolve shared executor runtime
-      id: executor-runtime
+    # Where the pool lives, which instance it serves and which runtime image it
+    # pins are deployment facts that move when the pool is redeployed. They are
+    # `build-cache` environment secrets written by the build-infra repository,
+    # never literals in this repository. An empty one means the environment is
+    # misconfigured, and a Bazel invocation missing an executor or advertising
+    # the wrong runtime would either fail obscurely or quietly match nothing in
+    # the pool, so fail here with the name that is missing.
+    - name: Verify shared pool configuration
       shell: bash
       run: |
         set -euo pipefail
-        printf 'executor_runtime=%s\n' \
-          "$(python3 scripts/bazel_executor_runtime.py)" >> "${GITHUB_OUTPUT}"
+        missing=()
+        for name in CACHE_ENDPOINT CACHE_INSTANCE KILN_EXECUTOR_RUNTIME \
+          CACHE_CA CACHE_CERT CACHE_KEY; do
+          if [ -z "${!name:-}" ]; then
+            missing+=("${name}")
+          fi
+        done
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::the build-cache environment supplied no ${missing[*]};" \
+            "the build-infra repository owns these secrets" >&2
+          exit 1
+        fi
+        echo "::add-mask::${CACHE_ENDPOINT}"
+        echo "::add-mask::${CACHE_INSTANCE}"
+        echo "::add-mask::${KILN_EXECUTOR_RUNTIME}"
 
     - name: Configure authenticated cache
       shell: bash
       run: |
         set -euo pipefail
         umask 077
-        test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
         mkdir -p "$RUNNER_TEMP/build-cache"
         printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
         printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
@@ -54,8 +68,6 @@ runs:
     # compile, which is the intended trust posture.
     - name: Export shared cache flags
       shell: bash
-      env:
-        EXECUTOR_RUNTIME: ${{ steps.executor-runtime.outputs.executor_runtime }}
       run: |
         set -euo pipefail
         {
@@ -63,13 +75,13 @@ runs:
           echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
           echo "--repository_cache=$RUNNER_TEMP/bazel-repository"
           echo "--disk_cache="
-          echo "--remote_executor=grpcs://178.105.21.6:8443"
-          echo "--remote_cache=grpcs://178.105.21.6:8443"
-          echo "--remote_instance_name=kiln"
+          echo "--remote_executor=${CACHE_ENDPOINT}"
+          echo "--remote_cache=${CACHE_ENDPOINT}"
+          echo "--remote_instance_name=${CACHE_INSTANCE}"
           echo "--tls_certificate=$RUNNER_TEMP/build-cache/ca.crt"
           echo "--tls_client_certificate=$RUNNER_TEMP/build-cache/client.crt"
           echo "--tls_client_key=$RUNNER_TEMP/build-cache/client.key"
-          echo "--remote_default_exec_properties=kiln_executor_runtime=${EXECUTOR_RUNTIME}"
+          echo "--remote_default_exec_properties=kiln_executor_runtime=${KILN_EXECUTOR_RUNTIME}"
           echo "--remote_default_exec_properties=cpu_count=4"
           echo "--remote_default_exec_properties=memory_kb=4194304"
           echo "--remote_local_fallback=false"
