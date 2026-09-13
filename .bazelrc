@@ -22,8 +22,8 @@ build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime
 # one core the workspace test binaries take 20-30 minutes each and sit on the
 # serial tail of the graph. Four cores per action lets rustc parallelise
 # codegen and linking. Pool capacity at four cores an action: the development
-# host advertises 16 CPUs and caps itself at four tasks in flight, the Hetzner
-# ccx33 worker advertises 8 and caps at two, so six of these actions run at
+# host advertises 24 CPUs and caps itself at six tasks in flight, the Hetzner
+# ccx33 worker advertises 8 and caps at two, so eight of these actions run at
 # once across the pool.
 build:shared --remote_default_exec_properties=cpu_count=4
 build:shared --remote_default_exec_properties=memory_kb=4194304
