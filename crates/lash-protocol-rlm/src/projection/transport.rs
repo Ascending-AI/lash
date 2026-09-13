@@ -307,14 +307,15 @@ pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a
             }
             FlowValue::Record(record) => flow_record_to_json_value(record).await,
             FlowValue::Projected(value) => {
-                let entry = if let Some(reference) = value.projection_ref() {
-                    let reference = serde_json::from_value::<ProjectionRef>(reference.clone())
-                        .expect("projected values must carry a valid projection reference");
-                    RlmProjectedSeedEntry::Ref(reference)
-                } else {
-                    RlmProjectedSeedEntry::Materialized(
+                let entry = match value
+                    .projection_ref()
+                    .cloned()
+                    .map(serde_json::from_value::<ProjectionRef>)
+                {
+                    Some(Ok(reference)) => RlmProjectedSeedEntry::Ref(reference),
+                    Some(Err(_)) | None => RlmProjectedSeedEntry::Materialized(
                         flow_to_json_value(&value.materialize_async().await).await,
-                    )
+                    ),
                 };
                 projected_wrapper(entry)
             }
