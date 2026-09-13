@@ -135,6 +135,7 @@ pub(super) fn observed_work_item() -> lash_core::facade_support::ObservedWorkIte
         process: observed_process(),
         events: Vec::new(),
         event_tail_sequence: 0,
+        state: lash_core::facade_support::ObservedWorkItemState::Coherent,
         kind: "external".to_string(),
         label: "External".to_string(),
     }

@@ -702,14 +702,14 @@ pub mod process {
         ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
         ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedWorkItem, facade_support::ProcessAdmissionDeferred,
-        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
-        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
-        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
-        facade_support::SessionScopeId, facade_support::watch_process_registry,
-        facade_support::watch_process_registry_with_sink,
+        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
+        facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionIntake,
+        facade_support::ProcessAdmissionReport, facade_support::ProcessChangeHub,
+        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
+        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
+        facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
+        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
