@@ -389,6 +389,9 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     let outcomes = journal_deferred_outcomes(
         referenced.clone(),
         move || {
+            // Retained outcomes own their exact paths. Classify live ambient
+            // availability only after masking them, so later incompatible
+            // schemas cannot preempt journal replay during environment build.
             let host_environment = surface.host_environment_masking(catalog, &recorded_paths)?;
             Ok(referenced_for_ambient
                 .iter()
@@ -575,6 +578,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    mod journal_replay;
     mod runtime_built_in;
 
     #[derive(Clone, Copy)]
