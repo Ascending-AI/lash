@@ -2461,6 +2461,25 @@ jobs:
             done
             git merge-base origin/main HEAD >/dev/null
           fi
+          # A merge base existing is not the same as the whole shared ancestry
+          # being connected. `--deepen` extends every shallow boundary, so a
+          # branch that merged main in earlier reaches main through a second
+          # chain rooted much further down; the loop stops at the first merge
+          # base, and the main commits that chain exposes are never covered by
+          # the base's own boundary, so the range does not exclude them. PR
+          # #1226 head c5aad0ae6 carries ten such merges and reported 12
+          # findings, all fingerprinted to 0625be3de, an ancestor of main.
+          # With no merge in the range there is a single chain and the shallow
+          # graph is already exact; with merges, only a complete graph excludes
+          # correctly.
+          if [[ -n "${BASE_SHA}" ]]; then
+            range_base="$(git merge-base "${BASE_SHA}" HEAD)"
+          else
+            range_base="$(git merge-base origin/main HEAD)"
+          fi
+          if [[ "$(git rev-list --merges --count "${range_base}..HEAD")" -gt 0 ]]; then
+            unshallow_if_needed
+          fi
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
       - name: Check diff hygiene
@@ -2530,6 +2549,25 @@ jobs:
               depth=$((depth * 2))
             done
             git merge-base origin/main HEAD >/dev/null
+          fi
+          # A merge base existing is not the same as the whole shared ancestry
+          # being connected. `--deepen` extends every shallow boundary, so a
+          # branch that merged main in earlier reaches main through a second
+          # chain rooted much further down; the loop stops at the first merge
+          # base, and the main commits that chain exposes are never covered by
+          # the base's own boundary, so the range does not exclude them. PR
+          # #1226 head c5aad0ae6 carries ten such merges and reported 12
+          # findings, all fingerprinted to 0625be3de, an ancestor of main.
+          # With no merge in the range there is a single chain and the shallow
+          # graph is already exact; with merges, only a complete graph excludes
+          # correctly.
+          if [[ -n "${BASE_SHA}" ]]; then
+            range_base="$(git merge-base "${BASE_SHA}" HEAD)"
+          else
+            range_base="$(git merge-base origin/main HEAD)"
+          fi
+          if [[ "$(git rev-list --merges --count "${range_base}..HEAD")" -gt 0 ]]; then
+            unshallow_if_needed
           fi
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
