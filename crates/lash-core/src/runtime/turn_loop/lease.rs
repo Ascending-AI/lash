@@ -8,6 +8,22 @@
 use super::*;
 use crate::TurnId;
 
+/// Whether `candidate` is part of the logical execution recovered under
+/// `resumable_turn_id`.
+///
+/// Keep this aligned with the active-input exclusion in
+/// `store_backend_support::orphaned_active_turn_input_is_repairable`: closure
+/// pins and the input they protect must make the same recovery decision.
+pub(super) fn is_resumable_turn_or_follow_on(
+    candidate: &TurnId,
+    resumable_turn_id: &TurnId,
+) -> bool {
+    candidate
+        .as_str()
+        .strip_prefix(resumable_turn_id.as_str())
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
+}
+
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
     session_id: SessionId,
@@ -376,9 +392,89 @@ impl LashRuntime {
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,
         resumable_turn_id: &TurnId,
-    ) -> usize {
-        match store
-            .defer_orphaned_active_turn_inputs(
+        scoped_effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<usize, RuntimeError> {
+        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
+        let turn_control_binding = turn_control_host
+            .turn_control_binding(scoped_effect_controller)
+            .await?;
+        let settle_resumable_before_runtime_work = matches!(
+            &turn_control_binding,
+            crate::TurnControlBinding::HostOwned { .. }
+        );
+        let turn_control_resolver = turn_control_binding.resolver();
+        let binding_id = turn_control_binding.binding_id();
+
+        // The binding check and pending lookup are one fenced activation gate.
+        // A reopened host with a different physical authority is refused before
+        // commands, input acceptance, model calls, or other session work.
+        let pending = store
+            .pending_turn_cancel_closures(
+                &self.state.session_id,
+                fence,
+                binding_id,
+                &crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                    &crate::TurnAddress::new(&self.state.session_id, resumable_turn_id),
+                    scoped_effect_controller.execution_scope(),
+                    binding_id,
+                ),
+            )
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        let mut repaired_count = 0;
+        for authorization in pending {
+            let resumes_here =
+                is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id);
+            if resumes_here && !settle_resumable_before_runtime_work {
+                // The interrupted logical turn must replay to the original
+                // closure position before issuing any of this authorization's
+                // promise operations. Retain both its input and exact durable
+                // authorization; final commit adopts and settles it there.
+                continue;
+            }
+            let address = authorization.address();
+            let control = crate::runtime::turn_control::ActiveTurnControl::new(
+                turn_control_resolver,
+                address.clone(),
+            )
+            .await?;
+            let settlement = control
+                .settle_authorized(turn_control_resolver, &authorization)
+                .await?;
+            if resumes_here {
+                // Host-owned turn control has no invocation journal whose
+                // prefix can replay this decision. Settle the predecessor's
+                // exact proposal before fresh provider or tool work, while
+                // retaining its input and pin for atomic final consumption.
+                continue;
+            }
+            loop {
+                let observed = store
+                    .turn_cancel_request_intent(&address)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                match store
+                    .repair_orphaned_active_turn_inputs(
+                        &self.state.session_id,
+                        fence,
+                        authorization.turn_id(),
+                        &observed,
+                        Some(&settlement),
+                    )
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?
+                {
+                    crate::TurnCancelRepairResult::Applied(outcome) => {
+                        repaired_count += outcome.affected_inputs.len();
+                        break;
+                    }
+                    crate::TurnCancelRepairResult::IntentChanged => continue,
+                }
+            }
+        }
+
+        let turn_ids = store
+            .orphaned_active_turn_ids(
                 &self.state.session_id,
                 fence,
                 crate::OrphanedTurnInputScope::LaneGeneration {
@@ -386,38 +482,84 @@ impl LashRuntime {
                 },
             )
             .await
-        {
-            Ok(repaired) if repaired.is_empty() => 0,
-            Ok(repaired) => {
-                tracing::info!(
-                    session_id = %self.state.session_id,
-                    repaired = repaired.len(),
-                    live_generation = fence.fencing_token,
-                    event = "turn_input.deferred_before_drain",
-                    "re-deferred active-turn inputs pinned to turns that can no longer commit"
-                );
-                repaired.len()
-            }
-            // The lane went out from under this drain; whoever holds it now owns
-            // the repair, and the drain's own next store call reports the loss.
-            Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
-                tracing::debug!(
-                    session_id = %self.state.session_id,
-                    event = "turn_input.defer_before_drain_fenced",
-                    "a superseded lane leaves the orphan repair to its successor"
-                );
-                0
-            }
-            Err(err) => {
-                tracing::warn!(
-                    session_id = %self.state.session_id,
-                    error = %err,
-                    event = "turn_input.defer_before_drain_failed",
-                    "failed to re-defer orphaned active-turn inputs before a queued-work drain"
-                );
-                0
+            .map_err(super::runtime_error_from_store_commit)?;
+        for turn_id in turn_ids {
+            let address = crate::TurnAddress::new(&self.state.session_id, &turn_id);
+            'discover: loop {
+                let observed = store
+                    .turn_cancel_request_intent(&address)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                let settlement = match observed.request() {
+                    Some(request) => {
+                        let control = crate::runtime::turn_control::ActiveTurnControl::new(
+                            turn_control_resolver,
+                            address.clone(),
+                        )
+                        .await?;
+                        let authorization = control.closure_authorization(
+                            binding_id,
+                            crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                                &address,
+                                scoped_effect_controller.execution_scope(),
+                                binding_id,
+                            ),
+                            fence,
+                            observed.clone(),
+                            true,
+                            Some(request.evidence()),
+                        )?;
+                        match store
+                            .authorize_turn_cancel_closure(fence, &authorization)
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(crate::StoreError::TurnCancelIntentChanged { .. }) => continue,
+                            Err(error) => {
+                                return Err(super::runtime_error_from_store_commit(error));
+                            }
+                        }
+                        let settlement = control
+                            .settle_authorized(turn_control_resolver, &authorization)
+                            .await?;
+                        Some(settlement)
+                    }
+                    None => None,
+                };
+                let mut repair_observed = observed;
+                loop {
+                    match store
+                        .repair_orphaned_active_turn_inputs(
+                            &self.state.session_id,
+                            fence,
+                            &turn_id,
+                            &repair_observed,
+                            settlement.as_ref(),
+                        )
+                        .await
+                    {
+                        Ok(crate::TurnCancelRepairResult::Applied(outcome)) => {
+                            repaired_count += outcome.affected_inputs.len();
+                            break 'discover;
+                        }
+                        Ok(crate::TurnCancelRepairResult::IntentChanged)
+                            if settlement.is_some() =>
+                        {
+                            // The exact promise operation is already pinned and
+                            // may not be overwritten. Refresh only the store CAS
+                            // predicate and finish the authenticated winner.
+                            repair_observed = store
+                                .turn_cancel_request_intent(&address)
+                                .await
+                                .map_err(super::runtime_error_from_store_commit)?;
+                        }
+                        Ok(crate::TurnCancelRepairResult::IntentChanged) => continue 'discover,
+                        Err(err) => return Err(super::runtime_error_from_store_commit(err)),
+                    }
+                }
             }
         }
+        Ok(repaired_count)
     }
 
     /// Re-defer the inputs a torn-down turn can no longer deliver (FIG-1573).
@@ -442,6 +584,7 @@ impl LashRuntime {
         &self,
         trace_turn_id: &TurnId,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        scoped_effect_controller: &crate::ScopedEffectController<'_>,
     ) {
         let Some(store) = self
             .session
@@ -459,39 +602,204 @@ impl LashRuntime {
             );
             return;
         };
-        match store
-            .defer_orphaned_active_turn_inputs(
-                &self.state.session_id,
-                fence,
-                crate::OrphanedTurnInputScope::Turn(trace_turn_id),
-            )
+        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
+        let turn_control_binding = match turn_control_host
+            .turn_control_binding(scoped_effect_controller)
             .await
         {
-            Ok(repaired) if repaired.is_empty() => {}
-            Ok(repaired) => tracing::info!(
-                session_id = %self.state.session_id,
-                turn_id = %trace_turn_id,
-                repaired = repaired.len(),
-                event = "turn_input.deferred_after_teardown",
-                "re-deferred active-turn inputs pinned to a turn that ended without committing"
-            ),
-            // A fence refusal is the ordinary outcome for a turn whose lane was
-            // taken over: the repair is the new holder's, not ours.
-            Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
-                tracing::debug!(
-                    session_id = %self.state.session_id,
-                    turn_id = %trace_turn_id,
-                    event = "turn_input.defer_after_teardown_fenced",
-                    "a superseded lane leaves the torn-down turn's inputs to its successor"
-                )
+            Ok(binding) => binding,
+            Err(err) => {
+                tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_binding_failed");
+                return;
             }
-            Err(err) => tracing::warn!(
-                session_id = %self.state.session_id,
-                turn_id = %trace_turn_id,
-                error = %err,
-                event = "turn_input.defer_after_teardown_failed",
-                "failed to re-defer active-turn inputs after a turn ended without committing"
-            ),
+        };
+        let turn_control_resolver = turn_control_binding.resolver();
+        let binding_id = turn_control_binding.binding_id();
+        let address = crate::TurnAddress::new(&self.state.session_id, trace_turn_id);
+        loop {
+            let observed = match store.turn_cancel_request_intent(&address).await {
+                Ok(observed) => observed,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_intent_read_failed");
+                    return;
+                }
+            };
+            let observed_decision =
+                match crate::runtime::turn_control::ActiveTurnControl::peek_orphan_repair_decision(
+                    turn_control_resolver,
+                    &address,
+                )
+                .await
+                {
+                    Ok(Some(decision)) => decision,
+                    Ok(None) => return,
+                    Err(err) => {
+                        tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_peek_failed");
+                        return;
+                    }
+                };
+            if observed_decision == crate::TurnCancelRepairDecision::NoCancellationIntent {
+                match store
+                    .repair_orphaned_active_turn_inputs(
+                        &self.state.session_id,
+                        fence,
+                        trace_turn_id,
+                        &observed,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(crate::TurnCancelRepairResult::IntentChanged) => continue,
+                    Ok(crate::TurnCancelRepairResult::Applied(repaired)) => {
+                        if !repaired.is_empty() {
+                            tracing::info!(
+                                session_id = %self.state.session_id,
+                                turn_id = %trace_turn_id,
+                                repaired = repaired.len(),
+                                event = "turn_input.deferred_after_teardown",
+                                "re-deferred active-turn inputs without sealing an unresolved cancellation gate"
+                            );
+                        }
+                        return;
+                    }
+                    Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                        tracing::debug!(
+                            session_id = %self.state.session_id,
+                            turn_id = %trace_turn_id,
+                            event = "turn_input.defer_after_teardown_fenced",
+                            "a superseded lane leaves the torn-down turn's inputs to its successor"
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            session_id = %self.state.session_id,
+                            turn_id = %trace_turn_id,
+                            error = %err,
+                            event = "turn_input.defer_after_teardown_failed",
+                            "failed to re-defer active-turn inputs after a turn ended without committing"
+                        );
+                        return;
+                    }
+                }
+            }
+            let (cancelled, evidence) = match observed_decision {
+                crate::TurnCancelRepairDecision::CancellationWon(evidence) => {
+                    (true, Some(evidence))
+                }
+                crate::TurnCancelRepairDecision::CancellationDidNotWin => (false, None),
+                crate::TurnCancelRepairDecision::NoCancellationIntent => unreachable!(
+                    "no-intent teardown repair returned before cancellation closure authorization"
+                ),
+            };
+            let control = match crate::runtime::turn_control::ActiveTurnControl::new(
+                turn_control_resolver,
+                address.clone(),
+            )
+            .await
+            {
+                Ok(control) => control,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_prepare_failed");
+                    return;
+                }
+            };
+            let authorization = match control.closure_authorization(
+                binding_id,
+                crate::runtime::effect::executor::admitted_turn_cancel_scope(
+                    &address,
+                    scoped_effect_controller.execution_scope(),
+                    binding_id,
+                ),
+                fence,
+                observed.clone(),
+                cancelled,
+                evidence,
+            ) {
+                Ok(authorization) => authorization,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_closure_assembly_failed");
+                    return;
+                }
+            };
+            match store
+                .authorize_turn_cancel_closure(fence, &authorization)
+                .await
+            {
+                Ok(_) => {}
+                Err(crate::StoreError::TurnCancelIntentChanged { .. }) => continue,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_closure_authorization_failed");
+                    return;
+                }
+            }
+            let settlement = match control
+                .settle_authorized(turn_control_resolver, &authorization)
+                .await
+            {
+                Ok(settlement) => settlement,
+                Err(err) => {
+                    tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_gate_settlement_failed");
+                    return;
+                }
+            };
+            let mut repair_observed = observed;
+            loop {
+                match store
+                    .repair_orphaned_active_turn_inputs(
+                        &self.state.session_id,
+                        fence,
+                        trace_turn_id,
+                        &repair_observed,
+                        Some(&settlement),
+                    )
+                    .await
+                {
+                    Ok(crate::TurnCancelRepairResult::IntentChanged) => {
+                        repair_observed = match store.turn_cancel_request_intent(&address).await {
+                            Ok(observed) => observed,
+                            Err(err) => {
+                                tracing::warn!(session_id = %self.state.session_id, turn_id = %trace_turn_id, error = %err, event = "turn_input.cancel_intent_refresh_failed");
+                                return;
+                            }
+                        };
+                    }
+                    Ok(crate::TurnCancelRepairResult::Applied(repaired)) if repaired.is_empty() => {
+                        return;
+                    }
+                    Ok(crate::TurnCancelRepairResult::Applied(repaired)) => {
+                        tracing::info!(
+                        session_id = %self.state.session_id,
+                        turn_id = %trace_turn_id,
+                        repaired = repaired.len(),
+                        event = "turn_input.deferred_after_teardown",
+                        "re-deferred active-turn inputs pinned to a turn that ended without committing"
+                            );
+                        return;
+                    }
+                    // A fence refusal is the ordinary outcome for a turn whose lane was
+                    // taken over: the repair is the new holder's, not ours.
+                    Err(crate::store::StoreError::SessionExecutionLeaseExpired { .. }) => {
+                        tracing::debug!(
+                        session_id = %self.state.session_id,
+                        turn_id = %trace_turn_id,
+                        event = "turn_input.defer_after_teardown_fenced",
+                        "a superseded lane leaves the torn-down turn's inputs to its successor"
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            session_id = %self.state.session_id,
+                            turn_id = %trace_turn_id,
+                            error = %err,
+                            event = "turn_input.defer_after_teardown_failed",
+                            "failed to re-defer active-turn inputs after a turn ended without committing"
+                        );
+                        return;
+                    }
+                }
+            }
         }
     }
 }

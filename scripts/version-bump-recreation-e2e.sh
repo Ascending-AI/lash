@@ -116,7 +116,7 @@ def fail(message):
 # own `RefusalKind::as_str` literals, so a rename cannot go unnoticed until a
 # container gate runs.
 EXPECTED_REFUSAL_KINDS = {
-    "refused_divergent_store": "no_applicable_migration",
+    "refused_divergent_store": "divergent_artifacts",
     "refused_older_store": "no_applicable_migration",
     "refused_newer_store": "no_applicable_migration",
     "recreated_store": "no_applicable_migration",

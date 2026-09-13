@@ -920,11 +920,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
         .with_hidden_tools(["app_lookup"])
         .expect("valid hidden tool");
 
-    session
-        .admin()
-        .config()
-        .set_tool_access(access.clone())
-        .await?;
+    Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
 
     let store = store_factory
         .raw_store_for_testing(&SessionId::from("config-admin-tool-access"))

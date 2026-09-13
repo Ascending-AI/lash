@@ -90,6 +90,7 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     let process_registry = process_registry();
     fig1293_seed_control_target(&process_registry, &SessionId::from(session_id)).await;
     let plugin_factories = fig1293_migrated_tool_factories();
@@ -338,6 +339,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
 
     let mut first = replay_test_runtime(
         &SessionId::from(session_id),
@@ -458,7 +460,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
-    let host = host.with_process_engine_registration(
+    let mut host = host.with_process_engine_registration(
         lash_core::ProcessEngineRegistration::accepting(Arc::new(RestateParentEndLawEngine)),
     );
     let store = Arc::new(
@@ -470,6 +472,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     context.defer_process_workflows();
     let process_registry = process_registry();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
@@ -962,6 +965,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
 
     let mut suspended = replay_test_runtime(
         &SessionId::from(session_id),
@@ -1008,7 +1012,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         runtime_store,
     )
     .await;
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let scoped_effect_controller = controller
         .scoped_effect_controller(durable_turn_scope(session_id, turn_id))
         .expect("scoped replay controller");
@@ -1282,6 +1286,7 @@ finish (await handle)?
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
+    bind_restate_test_effect_host(&mut host, &context);
     let process_registry = process_registry()
         .with_runtime_clock(corpus_clock)
         .expect("SQLite process registry accepts the fixed corpus clock");
@@ -1322,8 +1327,9 @@ finish (await handle)?
         ))
         .expect("valid test native substrate config");
     context.install_process_worker(process_worker);
-    let signal_wait_controller =
-        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    let signal_wait_controller = Arc::new(RestateRuntimeEffectController::new_for_test(
+        Arc::clone(&context),
+    ));
     let signal_wait_key = signal_wait_controller
         .await_event_key(
             &ExecutionScope::process("restate-recorded-intent-target"),
@@ -1374,7 +1380,7 @@ finish (await handle)?
             "first turn completed before the pending tool published its completion key: {turn:?}"
         ),
     };
-    let resolver = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let resolver = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     assert_eq!(
         resolver
             .resolve_await_event(
@@ -1587,7 +1593,7 @@ finish (await handle)?
 #[tokio::test]
 pub(super) async fn restate_controller_schedules_process_workflow_without_running_executor() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let registration = external_registration("task-1");
     let outcome = host
@@ -1673,7 +1679,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
 #[tokio::test]
 pub(super) async fn restate_controller_replays_process_start_await_command_sequence() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let process_id = "task-start-await-replay";
 
@@ -1745,7 +1751,7 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
 #[tokio::test]
 pub(super) async fn restate_controller_start_emits_send_when_external_ref_already_exists() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let process_id = "task-start-existing-ref";
     let registration = external_registration(process_id);

@@ -14,8 +14,9 @@ use lash_core::{
 };
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
-    RestateAdminClient, RestateConnection, RestateEffectHost, RestateIngressClient,
-    RestateInvocationId, RestateInvocationStatus, RestateProcessDeployment, RestateTurnDeployment,
+    RestateAdminClient, RestateAuthorityId, RestateConnection, RestateEffectHost,
+    RestateIngressClient, RestateInvocationId, RestateInvocationStatus, RestateProcessDeployment,
+    RestateTurnDeployment,
 };
 use lash_restate_postgres_workers_e2e::{
     ATTACHMENT_MIME, BUTTON_SOURCE_TYPE, DEFAULT_SESSION_ID, DirectDurableWaitAwaitRequest,
@@ -37,6 +38,13 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::process::Command;
 
 const DEFAULT_RUNNER_STALL_TIMEOUT: Duration = Duration::from_secs(240);
+
+fn restate_authority_id() -> Result<RestateAuthorityId> {
+    RestateAuthorityId::new(
+        std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
+    )
+    .map_err(anyhow::Error::from)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WorkflowSegment {
@@ -113,7 +121,7 @@ struct WorkflowSpec {
 // - e2e-suspended-sleep-cancel
 // - e2e-engine-restart-{cancel,suspended-sleep,complete}, including the complete
 //   engine-restart-ready/engine-restart-complete shell handshake
-// - the four ordered turn-control workflows, then the durable-wait index gates
+// - the five ordered turn-control workflows, then the durable-wait index gates
 //   and e2e-turn-break-glass (last because it strands a shared lease); the
 //   index gates and break-glass ride segment 2 but are NOT inventory members —
 //   they produce no terminal-result row and are covered by their own driver
@@ -127,7 +135,7 @@ struct WorkflowSpec {
 // manifests, so shrinking the workflow set would otherwise pass the CI
 // coverage summary silently. Removing or adding a workflow must touch this
 // pin, forcing the change into reviewer view.
-const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 28;
+const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 29;
 const _: () = assert!(WORKFLOW_INVENTORY.len() == EXPECTED_WORKFLOW_INVENTORY_LEN);
 
 const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
@@ -225,6 +233,10 @@ const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
     },
     WorkflowSpec {
         id: "e2e-engine-restart-complete",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-late-normal",
         segment: WorkflowSegment::Two,
     },
     WorkflowSpec {
@@ -374,6 +386,15 @@ async fn async_main() -> Result<()> {
         admin_url.clone(),
         runner_stall_timeout()?,
     ));
+
+    if std::env::var("LASH_E2E_TURN_CONTROL_ONLY").as_deref() == Ok("1") {
+        drive_turn_control_scenarios(&storage, &ingress_url).await?;
+        assert_no_active_lash_restate_invocations(&admin_url).await?;
+        assert_no_problem_lash_restate_invocations(&admin_url).await?;
+        watchdog.abort();
+        println!("focused turn-control E2E passed");
+        return Ok(());
+    }
 
     let selection = SegmentSelection::from_env()?;
     let segment_one = if selection.includes(WorkflowSegment::One) {

@@ -647,7 +647,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         assert_eq!(issue.retryable, Some(false));
 
         let persisted = session.admin().state().persist_current().await?;
-        session.close().await?;
+        Box::pin(session.close()).await?;
 
         let reopened = core.session("rlm-provider-retry-prose").open().await?;
         reopened.admin().state().set_persisted(persisted).await?;
@@ -699,14 +699,11 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
             .run()
             .await?;
         assert_eq!(first.assistant_message(), Some(MARKER));
-        session
-            .admin()
-            .state()
-            .append_messages(vec![
+        Box::pin(session.admin().state().append_messages(vec![
                 lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, MARKER)
                     .with_id("workbench-assistant:natural-turn"),
-            ])
-            .await?;
+            ]))
+        .await?;
 
         session
             .turn(TurnInput::text("check natural completion history"))
@@ -1954,12 +1951,7 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
             .model(mock_model_spec())
             .store_factory(store_factory.clone())
             .build(crate::testing::runtime_lease_owner())?;
-    bootstrap_core
-        .session(session_id)
-        .open()
-        .await?
-        .close()
-        .await?;
+    Box::pin(bootstrap_core.session(session_id).open().await?.close()).await?;
     drop(bootstrap_core);
 
     let first_core =

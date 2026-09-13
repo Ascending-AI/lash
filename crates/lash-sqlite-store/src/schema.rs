@@ -253,7 +253,25 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
     record_json TEXT NOT NULL,
+    intent_revision INTEGER NOT NULL CHECK (intent_revision >= 1),
     PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
+    session_id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
+    admitted_scope_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    authorization_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_retired_scopes (
+    scope_id TEXT PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS session_execution_leases (
@@ -387,6 +405,33 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
+
+-- Cancellation-only durable promises for Native sessions. These tables live
+-- in durable core so reopening the session recovers the same authority without
+-- migrating unrelated Native effects into the effect journal.
+CREATE TABLE IF NOT EXISTS await_event_meta (
+    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+    signing_secret  BLOB NOT NULL
+);
+INSERT INTO await_event_meta (singleton, signing_secret)
+VALUES (1, randomblob(32))
+ON CONFLICT(singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS await_event_waits (
+    key_id          TEXT PRIMARY KEY,
+    scope_json      TEXT NOT NULL,
+    wait_json       TEXT NOT NULL,
+    session_id      TEXT,
+    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
+    terminal_json   TEXT,
+    created_at_ms   INTEGER NOT NULL,
+    resolved_at_ms  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
+    ON await_event_waits(session_id);
+CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
+    session_id      TEXT PRIMARY KEY,
+    revoked_at_ms   INTEGER NOT NULL
+);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -552,10 +597,13 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 55 keeps that phase present under an opaque write token associated
 /// with its manifest session until a restoring backend put succeeds, so failed
 /// re-puts and explicit host recovery can restore it exactly.
-/// Version 56 persists full effect addresses in session causal metadata.
-/// Version 57 also requires pending-input claim identity and token to be either
-/// both NULL or both populated; both version-56 parent catalogs are recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 57;
+/// Version 56 requires pending-input claim identity and token to be either both
+/// NULL or both populated; version 55 catalogs are recreated.
+/// Version 57 combines truthful admitted effect identities with all-or-none
+/// pending-input claims. Version 58 adds intent revisions, Native cancellation
+/// authority, exact closure authorizations, and retired-scope fencing. A
+/// component-57 catalog cannot recover these facts and must be recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 58;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1008,6 +1056,17 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
     retired_at_ms   INTEGER NOT NULL
 );
+
+-- Durable catalogs that may hold an authorized cancellation closure under a
+-- physical scope. Owner retirement and participant registration serialize on
+-- this database; a participant is released only after its catalog fences new
+-- authorizations and proves that none remain.
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
+    scope_id       TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    scope_json     TEXT NOT NULL,
+    PRIMARY KEY (scope_id, participant_id)
+);
 ";
 
 // Version 6 keys session-owned effects by the permanent session id and removes
@@ -1065,7 +1124,10 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // whose authority admitted the effect.
 // Version 19 rejects the retired trigger-list envelope shape. Older journals
 // are recreated rather than replayed across this encoding cutover.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 19;
+// Version 20 adds owner-side cancellation-closure participants. This makes
+// scope retirement serialize with authorization held in separate session
+// catalogs; pre-20 effect databases are rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

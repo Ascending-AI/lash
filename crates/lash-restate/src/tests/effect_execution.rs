@@ -374,6 +374,146 @@ pub(super) fn restate_connection_timeout_config_has_serde_defaults() {
 }
 
 #[tokio::test]
+pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authority() {
+    let authority = RestateAuthorityId::new("production-authority").unwrap();
+    let other_authority = RestateAuthorityId::new("other-authority").unwrap();
+    let first_host =
+        RestateEffectHost::new("https://old-endpoint.example/restate", authority.clone());
+    let restarted_host =
+        RestateEffectHost::new("https://new-endpoint.example/restate", authority.clone());
+    let other_host = RestateEffectHost::new(
+        "https://old-endpoint.example/restate",
+        other_authority.clone(),
+    );
+    assert_eq!(
+        first_host.turn_control_binding_id(),
+        restarted_host.turn_control_binding_id(),
+        "a same-authority owner restart keeps the persisted binding identity"
+    );
+    assert_ne!(
+        first_host.turn_control_binding_id(),
+        other_host.turn_control_binding_id(),
+        "a distinct configured Restate authority cannot adopt the binding"
+    );
+    let scope = ExecutionScope::turn("session", "turn");
+    let first_key = restate_await_event_key_for_authority(
+        &authority,
+        &scope,
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .unwrap();
+    let restarted_key = restate_await_event_key_for_authority(
+        &authority,
+        &scope,
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .unwrap();
+    let other_key = restate_await_event_key_for_authority(
+        &other_authority,
+        &scope,
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .unwrap();
+    assert_eq!(
+        first_key, restarted_key,
+        "an endpoint move keeps promise ownership"
+    );
+    assert_ne!(
+        first_key, other_key,
+        "a distinct authority owns distinct promises"
+    );
+    let mixed_controller = other_host
+        .scoped(scope.clone())
+        .expect("scope the distinct configured owner");
+    let mixed = first_host.turn_control_binding(&mixed_controller).await;
+    assert!(
+        matches!(
+            mixed,
+            Err(ref error)
+                if error.code == lash_core::RuntimeErrorCode::InvalidTurnCancelRequest
+        ),
+        "a host cannot persist its identity around another configured owner's controller"
+    );
+    assert_eq!(
+        first_host
+            .resolve_await_event(&other_key, Resolution::Cancelled)
+            .await
+            .expect("wrong-owner resolution is a typed observation"),
+        ResolveOutcome::UnknownOrRevoked
+    );
+    let wrong_peek = first_host
+        .peek_await_event(&other_key)
+        .await
+        .expect_err("a key presented to another configured owner is refused before ingress");
+    assert_eq!(
+        wrong_peek.code,
+        lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked
+    );
+
+    let session_id = SessionId::from("restate-authority-reopen");
+    let store = lash_core::facade_support::InMemorySessionStore::default();
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(
+                "restate-authority-reopen",
+                "restate-authority-reopen:incarnation",
+            ),
+            "restate-authority-reopen:executor",
+            60_000,
+        )
+        .await
+        .expect("claim authority reopen lane")
+        .acquired()
+        .expect("authority reopen lane is free");
+    let physical_scope = ExecutionScope::process("restate-authority-process");
+    let first_binding = lash_core::facade_support::turn_control_binding_id_for_scope(
+        &first_host.turn_control_binding_id(),
+        &physical_scope,
+    )
+    .unwrap();
+    let restarted_binding = lash_core::facade_support::turn_control_binding_id_for_scope(
+        &restarted_host.turn_control_binding_id(),
+        &physical_scope,
+    )
+    .unwrap();
+    let other_binding = lash_core::facade_support::turn_control_binding_id_for_scope(
+        &other_host.turn_control_binding_id(),
+        &physical_scope,
+    )
+    .unwrap();
+    store
+        .validate_turn_cancellation_binding(
+            &session_id,
+            &lease.fence(),
+            &first_binding,
+            &physical_scope,
+        )
+        .await
+        .expect("admit the original Restate authority and physical scope");
+    store
+        .pending_turn_cancel_closures(
+            &session_id,
+            &lease.fence(),
+            &restarted_binding,
+            &physical_scope,
+        )
+        .await
+        .expect("the same authority survives an endpoint move before work");
+    assert!(matches!(
+        store
+            .pending_turn_cancel_closures(
+                &session_id,
+                &lease.fence(),
+                &other_binding,
+                &physical_scope,
+            )
+            .await,
+        Err(lash_core::StoreError::TurnCancelBindingMismatch { .. })
+    ));
+}
+
+#[tokio::test]
 pub(super) async fn restate_control_operation_times_out_against_black_hole() {
     let (base_url, server) = spawn_restate_http_black_hole().await;
     let client = RestateIngressClient::new(RestateConnection::with_config(
@@ -1097,7 +1237,7 @@ pub(super) async fn restate_process_attach_reattaches_after_timeout_until_termin
 #[tokio::test]
 pub(super) async fn restate_turn_attach_preserves_re_attach_code_on_ceiling() {
     let (base_url, black_hole) = spawn_restate_http_black_hole().await;
-    let attach = RestateTurnAttach::new(RestateConnection::with_config(
+    let attach = RestateTurnAttach::new_for_test(RestateConnection::with_config(
         base_url,
         short_restate_timeouts(100, 25),
     ));
@@ -1169,8 +1309,11 @@ pub(super) async fn restate_attach_before_run_resolves_with_delayed_workflow_out
     )
     .await;
     let registry = process_registry();
-    let deployment =
-        RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
+    let deployment = RestateProcessDeployment::new_for_test(
+        base_url,
+        Arc::clone(&registry),
+        continuation_store(),
+    );
     let driver = deployment.test_process_work();
     // A non-terminal process routes await_terminal through the ingress attach
     // rather than the registry short-circuit.
@@ -1218,8 +1361,11 @@ pub(super) async fn restate_driver_short_circuits_terminal_without_ingress_call(
     // the attach is never consulted for an already-terminal process.
     let (base_url, captured, server) = spawn_restate_http_capture(vec![]).await;
     let registry = process_registry();
-    let deployment =
-        RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
+    let deployment = RestateProcessDeployment::new_for_test(
+        base_url,
+        Arc::clone(&registry),
+        continuation_store(),
+    );
     let driver = deployment.test_process_work();
     let output = process_success(serde_json::json!("already-terminal"));
     let record = registry
@@ -1307,7 +1453,7 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
     // hosts' wrap funnel: a sink installed there observes every append made
     // through the deployment's shared registry, including terminal events.
     let sink = RecordingProcessEventSink::default();
-    let deployment = RestateProcessDeployment::new_with_sink(
+    let deployment = RestateProcessDeployment::new_with_sink_for_test(
         "http://127.0.0.1:8080",
         process_registry(),
         continuation_store(),
@@ -1593,7 +1739,8 @@ pub(super) fn durable_wait_index_is_keyed_by_scope_for_session_free_waits() {
 /// exactly as a session-bearing scope already did (FIG-2499 review round 1).
 #[tokio::test]
 pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answering_locally() {
-    let host = crate::RestateEffectHost::new(crate::RestateConnection::new("http://127.0.0.1:1"));
+    let host =
+        crate::RestateEffectHost::new_for_test(crate::RestateConnection::new("http://127.0.0.1:1"));
     let scope = lash_core::ExecutionScope::runtime_operation("unreachable-op");
     let retirement = host
         .retire_effect_journal(

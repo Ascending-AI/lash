@@ -149,7 +149,7 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig790ProcessAwaitRedriveInput>,
     ) -> HandlerResult<Json<ProcessAwaitOutput>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let cancellation = tokio_util::sync::CancellationToken::new();
         let effect = controller.execute_effect(
             RuntimeEffectEnvelope::new(
@@ -886,7 +886,7 @@ impl Fig1631SleepGate for Fig1631SleepGateImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<Fig1631SleepGateInput>,
     ) -> HandlerResult<Json<String>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let outcome = controller
             .execute_effect(
                 RuntimeEffectEnvelope::new(
@@ -947,12 +947,12 @@ impl Fig1631AwaitEventGate for Fig1631AwaitEventGateImpl {
         Json(_input): Json<Fig1126PendingToolRedriveInput>,
     ) -> HandlerResult<Json<String>> {
         let scope = durable_turn_scope(FIG1631_AWAIT_SESSION, "turn");
-        let key = restate_await_event_key(
+        let key = test_restate_await_event_key(
             &scope,
             AwaitEventWaitIdentity::tool_completion("fig1631-await-call"),
         )
         .map_err(TerminalError::from_error)?;
-        let outcome = RestateRuntimeEffectController::new(ctx)
+        let outcome = RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1631-await-gate"),
@@ -1865,17 +1865,17 @@ pub(super) fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_st
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 5"));
+    assert!(wrong_epoch.contains("incompatible with epoch 6"));
     assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 
 #[test]
-pub(super) fn durable_wait_identity_epoch_five_rejects_epoch_four_state() {
+pub(super) fn durable_wait_identity_epoch_six_rejects_epoch_five_state() {
     let error =
-        validate_durable_wait_index_epoch(Some(4), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-4 durable-wait state must not open under epoch 5");
-    assert!(error.contains("identity epoch 4 is incompatible with epoch 5"));
+        validate_durable_wait_index_epoch(Some(5), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
+            .expect_err("epoch-5 durable-wait state must not open under epoch 6");
+    assert!(error.contains("identity epoch 5 is incompatible with epoch 6"));
     assert!(error.contains("drain and recreate"));
 }
 
@@ -1974,6 +1974,6 @@ pub(super) fn restate_effect_name_uses_lash_replay_key() {
 
 lash_conformance::effect_host_tests!({
     ((), || {
-        Arc::new(RestateEffectHost::new("http://127.0.0.1:8080")) as Arc<dyn EffectHost>
+        Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080")) as Arc<dyn EffectHost>
     })
 });

@@ -113,6 +113,7 @@ fn validate_process_command_journal_identity<T: PartialEq>(
 
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
+    authority_id: &RestateAuthorityId,
     invocation: &RuntimeEffectInvocation,
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
@@ -237,6 +238,7 @@ where
                 );
             }
             let turn_cancel = restate_process_turn_cancel_wait_request(
+                authority_id,
                 invocation,
                 turn_cancellation.is_some(),
                 turn_cancellation
@@ -562,7 +564,8 @@ where
                 result.event.sequence,
             )
             .await?;
-            let key = restate_await_event_key(
+            let key = restate_await_event_key_for_authority(
+                authority_id,
                 &ExecutionScope::process(process_ref.process_id.clone()),
                 AwaitEventWaitIdentity::process_signal(
                     process_ref.process_id,

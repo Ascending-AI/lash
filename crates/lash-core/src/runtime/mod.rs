@@ -174,8 +174,10 @@ pub use effect::{
     RuntimeSubject, ScopeBoundController, ScopedEffectController, SegmentProgress, SleepSpec,
     StoreEffectGroupDrain, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome,
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-    TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
+    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
@@ -287,10 +289,11 @@ pub use session_manager::DirectCompletionClient;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 pub use turn_control::{
-    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOriginHint, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancelRequestRecord, TurnCancellationEvidence,
-    TurnTerminal, TurnWorkDriver,
+    TurnAddress, TurnAttach, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureProposal, TurnCancelClosureSettlement,
+    TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
+    TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
+    TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
@@ -1362,6 +1365,30 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         _session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
+    }
+
+    /// Read exact cancellation closure pins before session deletion or
+    /// process-scope retirement. Implementors that cannot provide this
+    /// lifecycle fence fail closed; callers must never infer an empty set from
+    /// an unsupported inspection.
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::pending_turn_cancel_closure_pins",
+        })
+    }
+
+    /// Atomically refuse retirement while any closure names `scope`, otherwise
+    /// persist the scope tombstone that every later authorization checks.
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<(), crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::retire_turn_cancel_closure_scope",
+        })
     }
 
     /// Cheap durable read used to reject an idle queued-work notification

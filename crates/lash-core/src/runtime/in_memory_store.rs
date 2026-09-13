@@ -37,7 +37,9 @@ mod testing_access;
 #[cfg(any(test, feature = "testing"))]
 pub use testing_access::RawSessionExecutionLeaseRow;
 mod claim_hold;
+mod turn_cancel_closure;
 mod turn_input;
+mod warnings;
 use claim_hold::ClaimHold;
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
@@ -52,46 +54,6 @@ struct InMemoryQueuedBatch {
 struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
     claim: ClaimHold,
-}
-
-fn settlement_mismatch<'a, R>(
-    rows: &'a [R],
-    row_ids: &'a [String],
-    session_id: &SessionId,
-    identity: impl Fn(&R) -> (&str, &str),
-    matches: impl Fn(&R) -> bool,
-) -> Option<(Option<&'a String>, Option<&'a R>)> {
-    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
-        return None;
-    }
-    let row_id = row_ids.iter().find(|id| {
-        !rows
-            .iter()
-            .any(|row| identity(row).1 == id.as_str() && matches(row))
-    });
-    let current = row_id.and_then(|id| {
-        rows.iter()
-            .find(|row| identity(row) == (session_id, id.as_str()))
-    });
-    Some((row_id, current))
-}
-
-/// The in-memory store's turn-input settlement predicate.
-///
-/// One predicate, two regimes: the claim fields only strengthen it. A claimed
-/// settlement requires the row to still carry that claim; an unclaimed
-/// settlement requires it to still be unclaimed and unsettled
-/// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §5).
-fn turn_input_settlement_matches(
-    entry: &InMemoryPendingTurnInput,
-    completed: &crate::TurnInputCompletion,
-) -> bool {
-    entry.input.session_id == completed.session_id
-        && completed.input_ids.contains(&entry.input.input_id)
-        && match completed.claim.as_ref() {
-            Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
-            None => entry.claim.id().is_none() && !entry.input.state.is_terminal(),
-        }
 }
 
 #[derive(Clone)]
@@ -162,6 +124,10 @@ pub(crate) struct AttachmentWriteClaim {
 
 pub struct InMemorySessionStore {
     clock: Arc<dyn crate::Clock>,
+    /// Factory-lifetime authority for the reserved turn-cancellation promises.
+    /// Factory-created stores expose the same resolver and binding identity on
+    /// reopen. Standalone stores leave authority with their configured host.
+    turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
     /// Serializes every operation whose correctness depends on observing the
     /// session lease and mutating fenced runtime state atomically. Component
     /// mutexes still guard their data; this mutex supplies the transaction
@@ -201,6 +167,10 @@ pub struct InMemorySessionStore {
     pub(crate) runtime_commit_count: Mutex<usize>,
     runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
     session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
+    turn_cancellation_binding: Mutex<Option<(String, Option<crate::ExecutionScope>)>>,
+    turn_cancel_closure_authorizations:
+        Mutex<HashMap<TurnId, crate::TurnCancelClosureAuthorization>>,
+    retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
     queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
@@ -208,7 +178,7 @@ pub struct InMemorySessionStore {
     wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
-    turn_cancel_requests: Mutex<HashMap<TurnId, crate::TurnCancelRequestRecord>>,
+    turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
     attachment_manifest: SharedAttachmentManifest,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
@@ -241,6 +211,8 @@ pub struct InMemorySessionStore {
     #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
+    inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
+    #[cfg(any(test, feature = "testing"))]
     fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
@@ -265,21 +237,15 @@ pub struct InMemorySessionStore {
     pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
-fn warn_process_owner_death_degraded(path: &'static str) {
-    static WARN: std::sync::Once = std::sync::Once::new();
-    WARN.call_once(|| {
-        tracing::warn!(
-            store = "memory",
-            path,
-            consequence = "process-owned uncommitted intents are never reclaimed",
-            "in-memory attachment GC cannot prove process-owner death"
-        )
-    });
+#[derive(Clone)]
+struct InMemoryTurnCancelRequest {
+    record: crate::TurnCancelRequestRecord,
+    intent_revision: u64,
 }
 
 impl InMemorySessionStore {
     pub fn new() -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::new");
+        warnings::process_owner_death_degraded("InMemorySessionStore::new");
         Self::with_clock(Arc::new(crate::SystemClock))
     }
 
@@ -291,9 +257,10 @@ impl InMemorySessionStore {
     /// hide malformed durable rows.
     ///
     pub fn with_clock(clock: Arc<dyn crate::Clock>) -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::with_clock");
+        warnings::process_owner_death_degraded("InMemorySessionStore::with_clock");
         Self::with_shared_history(
             clock,
+            Some(factory::turn_cancellation_authority()),
             Arc::new(Mutex::new(())),
             Arc::new(Mutex::new(crate::SessionGraph::default())),
             Arc::new(Mutex::new(HashMap::new())),
@@ -306,12 +273,14 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashSet::new())),
         )
     }
 
     #[allow(clippy::too_many_arguments)]
     fn with_shared_history(
         clock: Arc<dyn crate::Clock>,
+        turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
         write_transaction: Arc<Mutex<()>>,
         global_session_graph: Arc<Mutex<crate::SessionGraph>>,
         global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
@@ -324,10 +293,12 @@ impl InMemorySessionStore {
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
         attachment_manifest: SharedAttachmentManifest,
+        retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
     ) -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::with_shared_history");
+        warnings::process_owner_death_degraded("InMemorySessionStore::with_shared_history");
         Self {
             clock,
+            turn_cancellation_authority,
             write_transaction,
             bound_session_id: Mutex::new(None),
             session_head_meta: Mutex::new(None),
@@ -349,6 +320,9 @@ impl InMemorySessionStore {
             runtime_commit_count: Mutex::new(0),
             runtime_turn_commits: Mutex::new(std::collections::HashMap::new()),
             session_execution_leases: Mutex::new(HashMap::new()),
+            turn_cancellation_binding: Mutex::new(None),
+            turn_cancel_closure_authorizations: Mutex::new(HashMap::new()),
+            retired_turn_cancel_scopes,
             queued_work: Mutex::new(Vec::new()),
             queued_work_next_seq: Mutex::new(0),
             wake_redelivery_fences: Mutex::new(HashMap::new()),
@@ -383,6 +357,8 @@ impl InMemorySessionStore {
             commit_write_transaction_count: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit: Mutex::new(None),
+            #[cfg(any(test, feature = "testing"))]
+            inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             #[cfg(any(test, feature = "testing"))]
             fail_next_runtime_commit_after_first_mutation: Mutex::new(None),
             #[cfg(any(test, feature = "testing"))]
@@ -892,7 +868,7 @@ impl InMemorySessionStore {
 
 impl Default for InMemorySessionStore {
     fn default() -> Self {
-        warn_process_owner_death_degraded("InMemorySessionStore::default");
+        warnings::process_owner_death_degraded("InMemorySessionStore::default");
         Self::new()
     }
 }
@@ -1061,25 +1037,42 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         self.commit_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.ensure_session_not_deleted(&session_id)?;
-        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
-            // This check-then-act read is atomic under the coarse write lock;
-            // that serialization is intentional for the development backend.
-            self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
-        }
+        turn_cancel_closure::verify_pre_replay_fence(self, commit, transaction_now)?;
         #[cfg(any(test, feature = "testing"))]
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
         }
-        let session_meta_before_commit = self.session_meta.lock_recover().clone();
-        // The binding adjudication takes the head-row lock itself, so it runs
-        // before this transaction pins that lock for the rest of the commit.
-        self.ensure_session_metadata_for_commit(commit)?;
-        let mut meta = self.session_head_meta.lock_recover();
-        let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         #[cfg(any(test, feature = "testing"))]
-        self.fail_after_first_runtime_commit_mutation_if_requested(
-            session_meta_before_commit.clone(),
-        )?;
+        if let Some(request) = self
+            .inject_turn_cancel_before_next_runtime_commit
+            .lock_recover()
+            .take()
+        {
+            debug_assert_eq!(request.address.session_id, commit.session_id);
+            let mut requests = self.turn_cancel_requests.lock_recover();
+            match requests.get_mut(&request.address.turn_id) {
+                Some(stored) if request.mode.is_stronger_than(stored.record.request.mode) => {
+                    stored.intent_revision = crate::StoreError::checked_monotonic_increment(
+                        "turn_cancel_intent_revision",
+                        stored.intent_revision,
+                    )?;
+                }
+                Some(_) => {}
+                None => {
+                    requests.insert(
+                        request.address.turn_id.clone(),
+                        InMemoryTurnCancelRequest {
+                            record: crate::TurnCancelRequestRecord {
+                                request,
+                                outcome: None,
+                            },
+                            intent_revision: 1,
+                        },
+                    );
+                }
+            }
+        }
+        let session_meta_before_commit = self.session_meta.lock_recover().clone();
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
@@ -1096,8 +1089,31 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     self.release_session_execution_lease_in_memory(completion, false);
                 // FIG-884: ancillary stale release must never veto a replayed commit.
             }
+            turn_cancel_closure::consume(self, commit);
             return Ok(replay.into_result());
         }
+        turn_cancel_closure::validate_after_receipt_miss(self, commit)?;
+        if let (Some(turn_id), Some(observed)) = (
+            commit.interrupted_turn_input_turn_id.as_ref(),
+            commit.interrupted_turn_cancel_intent.as_ref(),
+        ) {
+            let requests = self.turn_cancel_requests.lock_recover();
+            if turn_input::snapshot(&requests, turn_id) != *observed {
+                return Err(crate::StoreError::TurnCancelIntentChanged {
+                    session_id: commit.session_id.clone(),
+                    turn_id: turn_id.clone(),
+                });
+            }
+        }
+        // Receipt replay and the cancellation predicate are adjudicated before
+        // even session binding metadata can be materialized by a fresh commit.
+        self.ensure_session_metadata_for_commit(commit)?;
+        let mut meta = self.session_head_meta.lock_recover();
+        let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
+        #[cfg(any(test, feature = "testing"))]
+        self.fail_after_first_runtime_commit_mutation_if_requested(
+            session_meta_before_commit.clone(),
+        )?;
         let hydrated_checkpoint =
             checkpoints::resolve_components(&self.checkpoint_component_blobs, &commit.checkpoint)?;
         let incoming_nodes = commit.graph.nodes.as_slice();
@@ -1219,7 +1235,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let queued = self.queued_work.lock_recover();
             for completed in &commit.completed_queue_claims {
-                if let Some((row_id, current)) = settlement_mismatch(
+                if let Some((row_id, current)) = turn_input::settlement_mismatch(
                     &queued,
                     &completed.batch_ids,
                     &completed.session_id,
@@ -1248,12 +1264,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         {
             let pending = self.pending_turn_inputs.lock_recover();
             for completed in &commit.completed_turn_input_claims {
-                if let Some((row_id, current)) = settlement_mismatch(
+                if let Some((row_id, current)) = turn_input::settlement_mismatch(
                     &pending,
                     &completed.input_ids,
                     &completed.session_id,
                     |entry| (&entry.input.session_id, &entry.input.input_id),
-                    |entry| turn_input_settlement_matches(entry, completed),
+                    |entry| turn_input::settlement_matches(entry, completed),
                 ) {
                     return Err(match completed.claim.as_ref() {
                         Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
@@ -1362,13 +1378,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             let mut outcome = crate::TurnCancelInputOutcome::default();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
-                    if turn_input_settlement_matches(entry, completed) {
+                    if turn_input::settlement_matches(entry, completed) {
                         entry.input.state = crate::TurnInputState::Completed;
                         entry.clear_claim();
                     }
                 }
             }
             if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+                let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
+                let disposition = cancellation
+                    .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+                        evidence.undelivered
+                    });
+                if let Some(evidence) = commit
+                    .turn_cancel_closure_settlement
+                    .as_ref()
+                    .and_then(crate::TurnCancelClosureSettlement::base_cancellation)
+                {
+                    turn_input::reconcile_authenticated_turn_cancel_winner(
+                        &mut requests,
+                        &crate::TurnAddress::new(&commit.session_id, turn_id),
+                        evidence,
+                    )?;
+                }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id
                         && entry.input.state == crate::TurnInputState::PendingActive
@@ -1378,11 +1410,6 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             .active_turn_id()
                             .is_some_and(|active| active == turn_id)
                     {
-                        let disposition = requests
-                            .get(turn_id)
-                            .map_or(crate::TurnCancelDisposition::Defer, |record| {
-                                record.request.undelivered
-                            });
                         let affected = crate::TurnCancelAffectedInput {
                             input_id: entry.input.input_id.clone(),
                             payload: entry.input.input.clone(),
@@ -1398,14 +1425,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             }
                         }
                         entry.claim.release();
-                        if let Some(record) = requests.get_mut(turn_id) {
+                        if cancellation.is_some()
+                            && let Some(record) = requests.get_mut(turn_id)
+                        {
                             record
+                                .record
                                 .outcome
                                 .get_or_insert_with(crate::TurnCancelInputOutcome::default)
                                 .affected_inputs
                                 .push(affected.clone());
                         }
-                        outcome.affected_inputs.push(affected);
+                        if cancellation.is_some() {
+                            outcome.affected_inputs.push(affected);
+                        }
                     }
                 }
             }
@@ -1546,6 +1578,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
         }
         drop(runtime_turn_commits);
+        turn_cancel_closure::consume(self, commit);
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);

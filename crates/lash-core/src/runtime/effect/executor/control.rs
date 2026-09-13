@@ -16,6 +16,7 @@ use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
 use super::super::group::{EffectGroupHandle, GroupSettlement, LoserPolicy, RuntimeEffectGroup};
 use super::await_event_support::await_event_scope_not_retirable;
 use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancelWait};
+use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation};
 
 // =============================================================================
 // Effect host + controller trait + scope + error
@@ -580,26 +581,6 @@ pub enum RuntimeEffectFailureDisposition {
     RecordTurnFailure,
 }
 
-/// Whether turn-control reads participate in a durable controller journal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnControlParticipation {
-    Local,
-    DurableJournaled,
-}
-
-/// How turn-control promises are addressed for one turn. Exhaustive: there is
-/// no third arrangement, and no field is optional.
-pub enum TurnControlBinding<'a> {
-    HostOwned {
-        resolver: &'a dyn AwaitEventResolver,
-        peek: ScopedEffectController<'a>,
-    },
-    RunScoped {
-        resolver: &'a dyn AwaitEventResolver,
-        durable_cancel_after_llm: bool,
-    },
-}
-
 /// Result of preparing an externally routable tool completion key.
 pub enum CompletionKeyPreparation {
     NotNeeded,
@@ -799,6 +780,7 @@ pub(crate) struct EffectTaskController {
     scope: ExecutionScope,
     supports_concurrent_effects: bool,
     owns_commit_backpressure: bool,
+    await_event_authority_binding_id: Option<String>,
 }
 
 impl EffectTaskController {
@@ -818,6 +800,7 @@ impl EffectTaskController {
             scope: scope.clone(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
+            await_event_authority_binding_id: controller.await_event_authority_binding_id(),
         };
         Ok((
             ScopedEffectController::shared(Arc::new(proxy), scope)?,
@@ -828,6 +811,10 @@ impl EffectTaskController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for EffectTaskController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.await_event_authority_binding_id.clone()
+    }
+
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn QueuedLaneProbe>,
@@ -1120,6 +1107,13 @@ pub(crate) async fn drive_effect_controller_task(
 /// [`RuntimeEffectController`] resolve AwaitEvents.
 #[async_trait::async_trait]
 pub trait AwaitEventResolver: Send + Sync {
+    /// Stable identity of the durable authority that minted keys accepted by
+    /// this resolver. Durable turn-control composition uses this to prevent a
+    /// host label from being paired with another owner's controller and keys.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     /// Acquire the authoritative session-execution lane a durable queued drain
     /// needs before it may claim work.
     ///
@@ -1392,6 +1386,15 @@ pub trait AwaitEventResolver: Send + Sync {
 /// Deployment-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
+    /// Stable identity of the physical authority that owns this host's reserved
+    /// turn-control promises. Implementors must preserve it across client or
+    /// handler recreation for as long as issued keys remain recoverable.
+    fn turn_control_binding_id(&self) -> String;
+    /// Declares the owner of reserved turn-control promises for this host.
+    fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
+        TurnControlAuthorityOwner::EffectHost
+    }
+
     /// List the registered, unresolved await-event keys owned by `session_id`.
     ///
     /// This is a deployment-administrative snapshot, not a replay-sensitive
@@ -1437,17 +1440,49 @@ pub trait EffectHost: AwaitEventResolver {
         &'a self,
         scoped: &'a ScopedEffectController<'_>,
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        // Local turn gates must share the host registry used by the live watcher
-        // and external cancellation requests. Durable observations remain journaled.
+        let binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+            &self.turn_control_binding_id(),
+            scoped.execution_scope(),
+        )?;
         match scoped.controller().turn_control_participation().await? {
-            TurnControlParticipation::Local => Ok(TurnControlBinding::HostOwned {
-                resolver: self.await_event_resolver(),
-                peek: self.scoped(scoped.execution_scope().clone())?,
-            }),
-            TurnControlParticipation::DurableJournaled => Ok(TurnControlBinding::RunScoped {
-                resolver: scoped.controller(),
-                durable_cancel_after_llm: true,
-            }),
+            TurnControlParticipation::Local => {
+                let resolver = self.await_event_resolver();
+                Ok(TurnControlBinding::host_owned(
+                    binding_id,
+                    resolver,
+                    self.scoped(scoped.execution_scope().clone())?,
+                    self.turn_attach(),
+                ))
+            }
+            TurnControlParticipation::DurableJournaled => {
+                let resolver = scoped.controller();
+                let Some(controller_authority_id) = resolver.await_event_authority_binding_id()
+                else {
+                    return Err(RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        "durable turn-control controller does not identify its await-event authority",
+                    ));
+                };
+                let controller_binding_id =
+                    super::turn_control_authority::turn_control_binding_id_for_scope(
+                        &controller_authority_id,
+                        scoped.execution_scope(),
+                    )?;
+                if controller_binding_id != binding_id {
+                    return Err(RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        format!(
+                            "turn-control host authority `{binding_id}` does not match controller authority `{controller_binding_id}`"
+                        ),
+                    ));
+                }
+                Ok(TurnControlBinding::run_scoped(
+                    binding_id,
+                    resolver,
+                    true,
+                    self.turn_attach(),
+                ))
+            }
         }
     }
 
@@ -1533,6 +1568,98 @@ pub trait EffectHost: AwaitEventResolver {
     /// on a registered process scope as stale. A host that never fences
     /// ignores the binding.
     fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
+
+    /// Register one durable session catalog as a lifetime participant in a
+    /// non-session scope. The owner serializes this with irreversible scope
+    /// retirement; an existing retirement fence refuses registration.
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        _participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            return Ok(());
+        }
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EffectJournalRetirementUnsupported,
+            "this effect host does not implement cancellation-closure lifecycle participation",
+        ))
+    }
+
+    /// Release a catalog's scope participant after that catalog has durably
+    /// fenced new authorizations and proved that no authorization remains.
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        _participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            return Ok(());
+        }
+        Err(RuntimeError::new(
+            RuntimeErrorCode::EffectJournalRetirementUnsupported,
+            "this effect host does not implement cancellation-closure lifecycle participation",
+        ))
+    }
+}
+
+/// A session catalog's stable registration at the physical promise owner.
+///
+/// Catalog authorization first registers this participant at the owner and
+/// then commits its local pin. Scope retirement reverses that order: it first
+/// fences and drains the catalog, then releases the participant. This ordering
+/// leaves only conservative retained participants across crashes, never an
+/// unprotected authorization.
+#[derive(Clone)]
+pub struct TurnCancelClosureOwnerBinding {
+    participant_id: Arc<str>,
+    owner: Arc<dyn EffectHost>,
+}
+
+impl std::fmt::Debug for TurnCancelClosureOwnerBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TurnCancelClosureOwnerBinding")
+            .field("participant_id", &self.participant_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TurnCancelClosureOwnerBinding {
+    pub fn new(participant_id: impl Into<Arc<str>>, owner: Arc<dyn EffectHost>) -> Self {
+        Self {
+            participant_id: participant_id.into(),
+            owner,
+        }
+    }
+
+    pub async fn register(
+        &self,
+        scope: &ExecutionScope,
+        admitted_binding_id: &str,
+    ) -> Result<(), RuntimeError> {
+        let owner_binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+            &self.owner.turn_control_binding_id(),
+            scope,
+        )?;
+        if owner_binding_id != admitted_binding_id {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "session catalog cancellation owner `{owner_binding_id}` does not match admitted authority `{admitted_binding_id}`"
+                ),
+            ));
+        }
+        self.owner
+            .register_turn_cancel_closure_participant(&self.participant_id, scope)
+            .await
+    }
+
+    pub async fn release(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+        self.owner
+            .release_turn_cancel_closure_participant(&self.participant_id, scope)
+            .await
+    }
 }
 
 /// Boundary for nondeterministic runtime work.

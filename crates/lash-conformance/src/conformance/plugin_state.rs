@@ -325,7 +325,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
         .state(id)
         .set("counter", serde_json::json!(11))
         .unwrap();
-    runtime.park().await.unwrap();
+    Box::pin(runtime.park()).await.unwrap();
     let state = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .unwrap()
@@ -375,7 +375,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
         generation + 1,
         "runtime assembly must preserve ready writes"
     );
-    runtime.park().await.unwrap();
+    Box::pin(runtime.park()).await.unwrap();
     let final_state = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .unwrap()

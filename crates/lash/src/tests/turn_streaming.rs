@@ -2,6 +2,7 @@ use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::RlmTurnBuilderExt as _;
 use futures_util::StreamExt as _;
+use lash_core::AwaitEventResolver as _;
 use lash_core::QueuedWorkStore as _;
 use lash_core::SessionExecutionLeaseStore as _;
 use lash_sansio::SessionId;
@@ -368,6 +369,26 @@ impl RecordingDurableEffectController {
 
 #[async_trait]
 impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.native.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.native.await_await_event(key, cancel, deadline).await
+    }
+
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("recording-durable-controller:{:p}", self))
+    }
+
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -578,6 +599,40 @@ impl DurableNoopEffectHost {
 
 #[async_trait]
 impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.controller.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.controller.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.controller.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.controller
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -592,6 +647,12 @@ impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
 
 #[async_trait]
 impl lash_core::EffectHost for DurableNoopEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.controller
+            .await_event_authority_binding_id()
+            .expect("controller authority")
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

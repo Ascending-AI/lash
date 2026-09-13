@@ -18,6 +18,7 @@ use crate::RuntimeError;
 /// In-process deployment effect host.
 #[derive(Clone)]
 pub struct NativeEffectHost {
+    turn_control_binding_id: Arc<str>,
     controller: Arc<dyn RuntimeEffectController>,
     /// Present for the built-in native controller. A host wrapping an
     /// arbitrary controller cannot inspect that controller's private registry
@@ -100,6 +101,7 @@ impl Drop for LiveScopeGuard {
 impl NativeEffectHost {
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             await_event_admin: None,
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
@@ -123,6 +125,7 @@ impl Default for NativeEffectHost {
         let controller = NativeRuntimeEffectController::default();
         let await_event_admin = Some(controller.await_event_registry());
         Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller: Arc::new(controller),
             await_event_admin,
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
@@ -243,6 +246,13 @@ impl AwaitEventResolver for NativeEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for NativeEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.turn_control_binding_id.to_string()
+    }
+    fn turn_control_authority_owner(&self) -> super::TurnControlAuthorityOwner {
+        super::TurnControlAuthorityOwner::SessionStore
+    }
+
     async fn list_outstanding_await_event_keys(
         &self,
         session_id: &SessionId,
@@ -369,6 +379,10 @@ impl FencedNativeController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for FencedNativeController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.host.controller.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,

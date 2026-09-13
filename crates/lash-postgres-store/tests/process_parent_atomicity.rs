@@ -217,6 +217,10 @@ impl lash_core::AwaitEventResolver for ParentEndFaultHost {
 
 #[async_trait::async_trait]
 impl EffectHost for ParentEndFaultHost {
+    fn turn_control_binding_id(&self) -> String {
+        "postgres-parent-end-fault-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

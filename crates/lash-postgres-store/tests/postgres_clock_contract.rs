@@ -132,7 +132,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
             "async fn claim_ready_queued_work_postgres_tx(",
-            "async fn defer_orphaned_active_turn_inputs_tx(",
+            "async fn orphaned_active_turn_ids_tx(",
         ),
         // The checkpoint probe is a free function below the store impl. Keep
         // its SQL decision on the PostgreSQL clock even though it has no
@@ -147,7 +147,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // must remain inside the same server-clock contract as its claim path.
         (
             RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn defer_orphaned_active_turn_inputs_tx(",
+            "async fn repair_orphaned_active_turn_inputs_tx(",
             "async fn claim_pending_turn_inputs_postgres_tx(",
         ),
         // The single transaction-scoped pending-input claim body. The public
@@ -642,7 +642,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     else {
         return;
     };
-    const INJECTED_COMMIT_MS: u64 = 1_234_567_890_000;
+    const INJECTED_COMMIT_MS: u64 = 1_234_567_900_000;
     let session_id = unique_id("clock-contract-final-commit");
     let clock = Arc::new(TestClock::new(INJECTED_COMMIT_MS));
     let factory = storage

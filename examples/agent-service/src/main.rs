@@ -179,6 +179,16 @@ async fn async_main() -> anyhow_like::Result<()> {
     #[cfg(feature = "restate")]
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    #[cfg(feature = "restate")]
+    let restate_authority_id = (durability == AgentServiceDurability::Restate)
+        .then(|| {
+            std::env::var("RESTATE_AUTHORITY_ID")
+                .map_err(|_| "RESTATE_AUTHORITY_ID is required for Restate durability".to_string())
+                .and_then(|value| {
+                    lash_restate::RestateAuthorityId::new(value).map_err(|error| error.to_string())
+                })
+        })
+        .transpose()?;
     #[cfg(not(feature = "restate"))]
     if durability == AgentServiceDurability::Restate {
         return Err(
@@ -325,13 +335,22 @@ async fn async_main() -> anyhow_like::Result<()> {
     let process_deployment = (durability == AgentServiceDurability::Restate).then(|| {
         RestateProcessDeployment::new(
             restate_ingress_url.clone(),
+            restate_authority_id
+                .clone()
+                .expect("Restate authority configured"),
             Arc::clone(&process_registry),
             process_continuations,
         )
     });
     #[cfg(feature = "restate")]
-    let turn_deployment = (durability == AgentServiceDurability::Restate)
-        .then(|| RestateTurnDeployment::new(restate_ingress_url.clone()));
+    let turn_deployment = (durability == AgentServiceDurability::Restate).then(|| {
+        RestateTurnDeployment::new(
+            restate_ingress_url.clone(),
+            restate_authority_id
+                .clone()
+                .expect("Restate authority configured"),
+        )
+    });
     let core = match durability {
         AgentServiceDurability::Local => core_builder
             .effect_host(Arc::new(
@@ -409,6 +428,9 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_ingress_url =
             (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
         #[cfg(feature = "restate")]
+        let restate_authority_id = (durability == AgentServiceDurability::Restate)
+            .then_some(restate_authority_id.expect("Restate authority configured"));
+        #[cfg(feature = "restate")]
         let state = AppStateData::from_shared_db(
             core,
             turn_work_driver,
@@ -421,6 +443,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             // literal here would serve Lashlang under a TypeScript label.
             crate::state::rlm_dialect_from_env()?,
             restate_ingress_url,
+            restate_authority_id,
         );
         #[cfg(not(feature = "restate"))]
         let state = AppStateData::new(

@@ -298,7 +298,8 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+                    if let Some(fence) = commit.session_execution_lease_fence.as_ref()
+                    {
                         ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
                     }
                     let existing =
@@ -380,9 +381,98 @@ impl SessionCommitStore for Store {
                                     // FIG-884: ancillary stale release must
                                     // never veto a replayed commit.
                                 }
+                                if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
+                        && settlement.authorization().session_id() == commit.session_id
+                        && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
+                        && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()
+                    {
+                                    let closure = settlement.authorization();
+                                    tx.execute("DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2 AND authorization_json = ?3",
+                                        params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
+                                    ).map_err(sqlite_error)?;
+                                }
                                 return Ok(replay.into_result());
                             }
                         }
+                    }
+                    if commit.interrupted_turn_cancel_intent.is_some()
+                        && commit.turn_cancel_closure_settlement.is_none()
+                    {
+                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                            session_id: commit.session_id.clone(),
+                            turn_id: commit
+                                .interrupted_turn_input_turn_id
+                                .clone()
+                                .unwrap_or_else(|| lash_core::TurnId::from("missing-turn-id")),
+                        });
+                    }
+                    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
+                        let closure = settlement.authorization();
+                        if commit.interrupted_turn_input_cancellation.as_ref()
+                            != settlement.effective_cancellation()
+                        {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: commit.session_id.clone(),
+                                turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                        if closure.session_id() != commit.session_id
+                            || commit.interrupted_turn_input_turn_id.as_ref()
+                                != Some(closure.turn_id())
+                        {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: commit.session_id.clone(),
+                                turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                        if closure.admitted_scope().session_id().is_none() {
+                            let scope_id = closure.admitted_scope().journal_identity()
+                                .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
+                            let retired = tx.query_row(
+                                "SELECT EXISTS(SELECT 1 FROM turn_cancel_retired_scopes WHERE scope_id = ?1)",
+                                params![scope_id], |row| row.get::<_, bool>(0),
+                            ).map_err(sqlite_error)?;
+                            if retired { return Err(StoreError::TurnCancelClosureScopeRetired { scope_id }); }
+                        }
+                        let final_key = lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
+                        let committed = tx.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                            params![closure.session_id().as_str(), final_key], |row| row.get::<_, bool>(0),
+                        ).map_err(sqlite_error)?;
+                        if committed {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: closure.session_id().clone(), turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                        let stored = tx
+                            .query_row(
+                                "SELECT authorization_json FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                                params![closure.session_id().as_str(), closure.turn_id().as_str()],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        let expected = encode_json(closure)?;
+                        if stored.as_deref() != Some(expected.as_str()) {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: closure.session_id().clone(),
+                                turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                    }
+                    if let (Some(turn_id), Some(observed)) = (
+                        commit.interrupted_turn_input_turn_id.as_ref(),
+                        commit.interrupted_turn_cancel_intent.as_ref(),
+                    ) && load_turn_cancel_intent_snapshot_conn(
+                        tx,
+                        &commit.session_id,
+                        turn_id,
+                    )? != *observed
+                    {
+                        return Err(StoreError::TurnCancelIntentChanged {
+                            session_id: commit.session_id.clone(),
+                            turn_id: turn_id.clone(),
+                        });
                     }
                     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
                     let old_leaf_node_id = existing
@@ -805,9 +895,32 @@ impl SessionCommitStore for Store {
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
-                        let disposition = load_turn_cancel_request_conn(tx, &commit.session_id, turn_id)?
-                            .map(|record| record.request.undelivered)
-                            .unwrap_or_default();
+                        let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
+                        let disposition = cancellation.map_or(
+                            lash_core::TurnCancelDisposition::Defer,
+                            |evidence| evidence.undelivered,
+                        );
+                        if let Some(evidence) = commit
+                            .turn_cancel_closure_settlement
+                            .as_ref()
+                            .and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+                        {
+                            let observed = commit.interrupted_turn_cancel_intent.as_ref().ok_or_else(|| {
+                                StoreError::Backend("interrupted turn commit omitted cancellation intent predicate".to_string())
+                            })?;
+                            if !reconcile_turn_cancel_winner_conn(
+                                tx,
+                                &commit.session_id,
+                                turn_id,
+                                observed,
+                                evidence,
+                            )? {
+                                return Err(StoreError::TurnCancelIntentChanged {
+                                    session_id: commit.session_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                });
+                            }
+                        }
                         let input_ids = {
                             let mut stmt = tx
                                 .prepare(
@@ -870,8 +983,10 @@ impl SessionCommitStore for Store {
                             ])
                             .map_err(sqlite_error)?;
                             let affected = lash_core::TurnCancelAffectedInput { input_id, payload, disposition };
-                            append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
-                            turn_cancel_input_outcome.affected_inputs.push(affected);
+                            if cancellation.is_some() {
+                                append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
+                                turn_cancel_input_outcome.affected_inputs.push(affected);
+                            }
                         }
                     }
                     crate::attachments::commit_attachment_refs_conn(
@@ -964,6 +1079,14 @@ impl SessionCommitStore for Store {
                                 .map_err(sqlite_error)?;
                             }
                         }
+                    }
+                    if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
+                        let closure = settlement.authorization();
+                        tx.execute(
+                            "DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2",
+                            params![closure.session_id().as_str(), closure.turn_id().as_str()],
+                        )
+                        .map_err(sqlite_error)?;
                     }
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         let _release_was_current =

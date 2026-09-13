@@ -279,7 +279,8 @@ impl SessionBuilder {
             ports.process.clone(),
             ports.queued_port(),
             resolved.catalog,
-        ));
+        )?);
+        env = binding.apply_owner(env);
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,
@@ -560,7 +561,7 @@ impl LashSession {
         runtime.unregister_plugin_session()?;
         // Reuse the core parking primitive to flush + release the lease,
         // discarding the returned handle: close does not resume.
-        runtime.park().await?;
+        Box::pin(runtime.park()).await?;
         Ok(())
     }
 
@@ -591,7 +592,7 @@ impl LashSession {
         // We now own the runtime exclusively; release the in-memory plugin
         // session registration before flushing and dropping it.
         runtime.unregister_plugin_session()?;
-        let parked = runtime.park().await?;
+        let parked = Box::pin(runtime.park()).await?;
         Ok(ParkedSession {
             inner: parked,
             binding,

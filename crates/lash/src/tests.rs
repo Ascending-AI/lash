@@ -86,6 +86,7 @@ fn session_completion_matches(
 
 #[derive(Default)]
 struct SnapshotStore {
+    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -147,6 +148,7 @@ impl SnapshotStore {
             );
         }
         Self {
+            turn_cancellation_authority: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,
@@ -719,184 +721,6 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     }
 }
 
-// SnapshotStore serves the pending turn-input lifecycle only as far as one
-// session's own turns need it: every turn is admitted before it is driven
-// (ADR 0069), so acceptance, claim, cancel, and release have to work. Rows are
-// held in memory in enqueue order and are settled by the turn's commit, which
-// this double records without inspecting.
-#[async_trait]
-impl lash_core::TurnInputStore for SnapshotStore {
-    async fn enqueue_pending_turn_input(
-        &self,
-        input: lash_core::PendingTurnInputDraft,
-    ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
-        let mut seq = self.pending_turn_input_seq.lock_recover();
-        *seq += 1;
-        let state = input.ingress.initial_state();
-        let stored = lash_core::PendingTurnInput {
-            input_id: input
-                .input_id
-                .unwrap_or_else(|| format!("snapshot-ti-{}", *seq)),
-            session_id: input.session_id,
-            enqueue_seq: *seq,
-            source_key: input.source_key,
-            ingress: input.ingress,
-            state,
-            enqueued_at_ms: now_epoch_ms(),
-            input: input.input,
-        };
-        self.pending_turn_inputs.lock_recover().push(stored.clone());
-        Ok(stored)
-    }
-
-    async fn list_pending_turn_inputs(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
-        Ok(self
-            .pending_turn_inputs
-            .lock_recover()
-            .iter()
-            .filter(|input| input.session_id == session_id)
-            .cloned()
-            .collect())
-    }
-
-    async fn cancel_pending_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> std::result::Result<
-        Vec<lash_core::PendingTurnInputCancelReceipt>,
-        lash_core::store::StoreError,
-    > {
-        let mut pending = self.pending_turn_inputs.lock_recover();
-        Ok(targets
-            .iter()
-            .map(|target| {
-                let found = pending.iter().position(|input| {
-                    input.session_id == session_id
-                        && match target {
-                            lash_core::PendingTurnInputCancelTarget::InputId(input_id) => {
-                                input.input_id == *input_id
-                            }
-                            lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => {
-                                input.source_key.as_deref() == Some(source_key.as_str())
-                            }
-                        }
-                });
-                let outcome = match found {
-                    Some(index) => {
-                        lash_core::PendingTurnInputCancelOutcome::Cancelled(pending.remove(index))
-                    }
-                    None => lash_core::PendingTurnInputCancelOutcome::NotFound,
-                };
-                lash_core::PendingTurnInputCancelReceipt {
-                    target: target.clone(),
-                    outcome,
-                }
-            })
-            .collect())
-    }
-
-    async fn cancel_pending_turn_input_suffix(
-        &self,
-        _session_id: &SessionId,
-        _anchor: &lash_core::PendingTurnInputCancelTarget,
-    ) -> std::result::Result<
-        lash_core::PendingTurnInputSuffixCancelOutcome,
-        lash_core::store::StoreError,
-    > {
-        unreachable!("SnapshotStore does not serve pending turn input")
-    }
-
-    // Turn checkpoints and idle dispatch probe the input queue on every
-    // turn; this store's queue is always empty, so claims find nothing.
-    async fn claim_active_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &lash_core::TurnId,
-        _checkpoint: lash_core::CheckpointKind,
-        _max_inputs: usize,
-    ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
-        Ok(None)
-    }
-
-    // The claim takes the rows out of the pending list and hands them to the
-    // caller; the turn's commit settles them, and an abandoned claim puts them
-    // back exactly where a real backend's cleared claim columns would.
-    async fn claim_next_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
-        let mut pending = self.pending_turn_inputs.lock_recover();
-        let mut claimed = Vec::new();
-        while claimed.len() < max_inputs {
-            let Some(index) = pending.iter().position(|input| {
-                input.session_id == session_id
-                    && input.state == lash_core::TurnInputState::DeferredNextTurn
-            }) else {
-                break;
-            };
-            let mut input = pending.remove(index);
-            input.state = lash_core::TurnInputState::Accepted;
-            claimed.push(input);
-        }
-        if claimed.is_empty() {
-            return Ok(None);
-        }
-        let generation = self
-            .session_execution_lease_generations
-            .lock_recover()
-            .get(session_id)
-            .copied()
-            .unwrap_or_default();
-        Ok(Some(lash_core::TurnInputClaim {
-            session_id: SessionId::from(session_id.to_string()),
-            claim_id: format!("snapshot-turn-input-claim-{}", claimed[0].enqueue_seq),
-            owner: owner.clone(),
-            lease_token: session_execution_lease.lease_token.clone(),
-            fencing_token: session_execution_lease.fencing_token,
-            session_lease_generation: generation,
-            data: lash_core::runtime::TurnInputClaimData {
-                mode: lash_core::TurnInputClaimMode::NextTurn,
-                inputs: claimed,
-                applications: Vec::new(),
-            },
-        }))
-    }
-
-    async fn abandon_turn_input_claim(
-        &self,
-        claim: &lash_core::TurnInputClaim,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        let mut pending = self.pending_turn_inputs.lock_recover();
-        for input in &claim.inputs {
-            let mut restored = input.clone();
-            restored.state = lash_core::TurnInputState::DeferredNextTurn;
-            pending.push(restored);
-        }
-        pending.sort_by_key(|input| input.enqueue_seq);
-        Ok(())
-    }
-
-    // Nothing here holds an input, so the orphan sweep the drain runs finds
-    // nothing to repair.
-    async fn defer_orphaned_active_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
-        Ok(Default::default())
-    }
-}
-
 #[async_trait]
 impl lash_core::StoreMaintenance for SnapshotStore {
     async fn vacuum(&self) -> lash_core::MaintenanceResult<lash_core::VacuumReport> {
@@ -938,6 +762,14 @@ impl lash_core::AttachmentRootSet for ReusableStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for ReusableStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         _request: &lash_core::SessionStoreCreateRequest,
@@ -962,6 +794,7 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 }
 
 struct BoundSessionStore {
+    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     session_id: SessionId,
 }
 
@@ -1091,84 +924,6 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
 // The reuse test fails before any turn runs, so this double serves neither
 // pending turn input nor queued work.
-#[async_trait]
-impl lash_core::TurnInputStore for BoundSessionStore {
-    async fn enqueue_pending_turn_input(
-        &self,
-        _input: lash_core::PendingTurnInputDraft,
-    ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
-        unreachable!("BoundSessionStore does not serve pending turn input")
-    }
-
-    async fn list_pending_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn cancel_pending_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> std::result::Result<
-        Vec<lash_core::PendingTurnInputCancelReceipt>,
-        lash_core::store::StoreError,
-    > {
-        unreachable!("BoundSessionStore does not serve pending turn input")
-    }
-
-    async fn cancel_pending_turn_input_suffix(
-        &self,
-        _session_id: &SessionId,
-        _anchor: &lash_core::PendingTurnInputCancelTarget,
-    ) -> std::result::Result<
-        lash_core::PendingTurnInputSuffixCancelOutcome,
-        lash_core::store::StoreError,
-    > {
-        unreachable!("BoundSessionStore does not serve pending turn input")
-    }
-
-    async fn claim_active_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &lash_core::TurnId,
-        _checkpoint: lash_core::CheckpointKind,
-        _max_inputs: usize,
-    ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
-        unreachable!("BoundSessionStore does not serve pending turn input")
-    }
-
-    async fn claim_next_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _max_inputs: usize,
-    ) -> std::result::Result<Option<lash_core::TurnInputClaim>, lash_core::store::StoreError> {
-        unreachable!("BoundSessionStore does not serve pending turn input")
-    }
-
-    async fn abandon_turn_input_claim(
-        &self,
-        _claim: &lash_core::TurnInputClaim,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
-    // Nothing here holds an input, so the orphan sweep the drain runs finds
-    // nothing to repair.
-    async fn defer_orphaned_active_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
-        _scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
-        Ok(Default::default())
-    }
-}
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for BoundSessionStore {
@@ -1349,6 +1104,14 @@ impl lash_core::AttachmentRootSet for RecordingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for RecordingStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
@@ -1416,6 +1179,14 @@ impl lash_core::AttachmentRootSet for DeletingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for DeletingStoreFactory {
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError>
+    {
+        Ok(Vec::new())
+    }
+
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
@@ -2320,58 +2091,13 @@ fn rlm_core_builder() -> crate::core::LashCoreBuilder {
     LashCore::rlm_builder(crate::TurnBudget::Unbounded, rlm_factory())
 }
 
-fn native_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {
-    lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        scope,
-    )
-    .expect("native execution scope")
-}
-
-fn turn_scope(session_id: &SessionId) -> lash_core::ScopedEffectController<'static> {
-    native_scope(lash_core::ExecutionScope::turn(
-        session_id,
-        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-            .0
-            .to_string(),
-    ))
-}
-
-fn runtime_operation_scope(
-    core: &LashCore,
-    scope_id: impl Into<String>,
-) -> lash_core::ScopedEffectController<'static> {
-    core.effect_host()
-        .scoped_static(lash_core::ExecutionScope::runtime_operation(scope_id))
-        .expect("runtime operation scope")
-        .expect("effect host supplies an owned runtime operation scope")
-}
-
-async fn delete_bound_session(
-    core: &LashCore,
-    session_id: impl AsRef<str>,
-) -> Result<crate::SessionDeleteReport> {
-    let administration = core.session_administration().await?;
-    let context = administration.delete_context(session_id.as_ref())?;
-    LashCore::delete_session(context).await
-}
-
-fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {
-    let id = "stored-message".to_string();
-    lash_core::Message {
-        id: id.clone(),
-        role,
-        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::text(
-            format!("{id}.p0"),
-            text.to_string(),
-            None,
-        )]),
-        origin: None,
-    }
-}
-
+mod scope_support;
+use scope_support::{
+    delete_bound_session, native_scope, runtime_operation_scope, text_message, turn_scope,
+};
 mod control_admin;
 mod core_session_builder;
+mod deployment_and_testing_facade;
 mod harness;
 use harness::{
     core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
@@ -2410,88 +2136,5 @@ async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     .await;
 }
 
-#[tokio::test]
-async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::memory()
-            .await
-            .expect("open in-memory process registry"),
-    );
-    let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(crate::TurnBudget::Unbounded)
-            .model(mock_model_spec())
-            .store_factory(Arc::new(
-                crate::persistence::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(registry.clone()),
-    )
-    .build(crate::testing::runtime_lease_owner())
-    .expect("build core with a process registry");
-    let process_id = "deployment-drain-status-waiting";
-    registry
-        .register_process(lash_core::ProcessRegistration::new(
-            process_id,
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        ))
-        .await
-        .expect("register waiting process");
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
-        "deployment-drain-status-waiting-run",
-    )
-    .bind_attempt(1);
-    let started = authority
-        .invocation_started()
-        .expect("attempt-bound invocation has a start fact");
-    registry
-        .record_first_started_with_authority(&ProcessId::from(process_id), started, &authority)
-        .await
-        .expect("record process start");
-    registry
-        .set_process_wait_with_authority(
-            &ProcessId::from(process_id),
-            lash_core::WaitState {
-                since_ms: 1,
-                kind: lash_core::WaitKind::Signal {
-                    name: "deployment-drain-status".to_string(),
-                    event_type: "deployment.drain_status".to_string(),
-                    key: "deployment-drain-status-waiting:signal".to_string(),
-                    ordinal: 1,
-                },
-            },
-            &authority,
-        )
-        .await
-        .expect("set process waiting");
-
-    let status = core
-        .drain_status(false)
-        .await
-        .expect("read deployment drain status");
-    assert_eq!(status.remaining_invocations, 1);
-    assert!(!status.drained);
-}
-
-#[tokio::test]
-async fn testing_facade_run_tool_executes_provider() {
-    let outcome = crate::testing::run_tool(
-        &AppTools,
-        "app_lookup",
-        &serde_json::json!({ "query": "weather" }),
-    )
-    .await;
-
-    assert!(outcome.is_success());
-    assert_eq!(
-        outcome.value_for_projection(),
-        serde_json::json!({ "ok": true })
-    );
-}
+#[path = "tests/turn_input_stores.rs"]
+mod turn_input_stores;

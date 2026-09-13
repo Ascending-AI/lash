@@ -1,3 +1,6 @@
+#[path = "conformance/turn_cancel_closure.rs"]
+mod turn_cancel_closure;
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -20,6 +23,8 @@ lash_conformance::attachment_adoption_tests!({
 });
 
 use std::future::Future;
+#[path = "conformance/attachment_catalog.rs"]
+mod attachment_catalog;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]

@@ -17,9 +17,6 @@ workspace = true
 # cargo-shear resolves `use` statements per crate directory and cannot see
 # `examples/shared/ndjson.rs`, which `src/main.rs` pulls in with `#[path]`;
 # that file is the only user of `bytes` here.
-[package.metadata.cargo-shear]
-ignored = ["bytes"]
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }

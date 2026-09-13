@@ -6,7 +6,8 @@ use lash_core::{
 };
 
 use crate::{
-    RestateConnection, RestateControllerContext, RestateEffectHost, RestateRuntimeEffectController,
+    RestateAuthorityId, RestateConnection, RestateControllerContext, RestateEffectHost,
+    RestateRuntimeEffectController,
 };
 
 /// Session administration installed for one Restate deployment.
@@ -19,16 +20,20 @@ use crate::{
 #[derive(Clone)]
 pub struct RestateSessionAdministration {
     administration: SessionAdministration,
+    authority_id: RestateAuthorityId,
 }
 
 impl RestateSessionAdministration {
     pub fn new(
         administration: SessionAdministration,
         connection: impl Into<RestateConnection>,
+        authority_id: RestateAuthorityId,
     ) -> Self {
-        let effect_host = Arc::new(RestateEffectHost::new(connection));
+        let connection = connection.into();
+        let effect_host = Arc::new(RestateEffectHost::new(connection, authority_id.clone()));
         Self {
             administration: administration.with_effect_host(effect_host),
+            authority_id,
         }
     }
 
@@ -42,7 +47,7 @@ impl RestateSessionAdministration {
     {
         RestateSessionDeleteExecution {
             administration: &self.administration,
-            controller: RestateRuntimeEffectController::new(context),
+            controller: RestateRuntimeEffectController::new(context, self.authority_id.clone()),
         }
     }
 }

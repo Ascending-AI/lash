@@ -142,7 +142,7 @@ async fn drive_scalar_lashlang_tool_attempt(
     );
     let effect_name = restate_effect_name(&envelope.invocation);
     let local_runs = Arc::new(AtomicUsize::new(0));
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let outcome = controller
         .execute_effect(
             envelope,

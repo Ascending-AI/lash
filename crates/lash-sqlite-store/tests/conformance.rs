@@ -93,6 +93,8 @@ mod await_event_discovery;
 mod claim_atomicity;
 #[path = "conformance/lineage.rs"]
 mod lineage;
+#[path = "conformance/turn_cancel_closure.rs"]
+mod turn_cancel_closure;
 
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -1143,7 +1145,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("supports schema version 20"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1151,12 +1153,12 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_retained_generation_17_schema_before_serving() {
-    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 17;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 18);
+async fn sqlite_effect_controller_rejects_retained_generation_19_schema_before_serving() {
+    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 19;
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 20);
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retained-generation-17-effects.db");
+    let path = dir.path().join("retained-generation-19-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
     conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
         .expect("stamp retained prior effect schema");
@@ -1171,8 +1173,8 @@ async fn sqlite_effect_controller_rejects_retained_generation_17_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
-    assert!(message.contains("database reports version 17"));
+    assert!(message.contains("supports schema version 20"));
+    assert!(message.contains("database reports version 19"));
 }
 
 #[tokio::test]

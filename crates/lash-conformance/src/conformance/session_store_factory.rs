@@ -21,6 +21,57 @@ mod config_commands;
 mod state_version;
 mod turn_cancel;
 
+/// Prove that an exact commit replay cannot consume a different pending
+/// cancellation-closure authorization on the same turn address.
+pub async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_exact_replay_preserves_different_pending_authorization(factory).await;
+}
+
+/// Prove that cancellation closure settlement is fenced and immutable.
+pub async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_closure_settlement_is_fenced_and_non_overwritable(factory).await;
+}
+
+/// Prove that cancellation closure scope retirement serializes with authorization.
+pub async fn turn_cancel_scope_retirement_serializes_with_authorization(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_scope_retirement_serializes_with_authorization(factory).await;
+}
+
+/// Prove that escalation advances intent without replacing the durable base.
+pub async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_request_escalation_advances_intent_without_replacing_base(factory)
+        .await;
+}
+
+/// Prove that repair retains the base cancellation across escalation and reopen.
+pub async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_repair_preserves_base_across_escalation_and_reopen(factory).await;
+}
+
+/// Prove that repair orders cancellation intent and ordinary redefer atomically.
+pub async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(factory).await;
+}
+
+/// Prove that final commit applies its cancellation-intent CAS atomically.
+pub async fn turn_cancel_final_commit_intent_cas_is_atomic(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(factory).await;
+}
+
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
@@ -56,7 +107,6 @@ pub async fn session_store_factory<F>(
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
-    turn_cancel::turn_cancel_request_escalation_upgrades_the_durable_record(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;
@@ -718,9 +768,10 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     );
 }
 
-/// Process-retention conformance: pruning a terminal process releases its
-/// attachment intents and removes both durable session stores owned by the
-/// process before the process row disappears.
+/// Process-retention conformance: a process-scoped cancellation closure first
+/// wins the prune race and retains the terminal process. Once the exact owner
+/// consumes that authorization, pruning releases attachment intents and
+/// removes both durable session stores before the process row disappears.
 pub async fn process_prune_deletes_owned_session_stores(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -775,6 +826,82 @@ pub async fn process_prune_deletes_owned_session_stores(
         requests.push(request);
     }
 
+    let pinned_request = &requests[0];
+    let pinned_store = factory
+        .open_existing_store(pinned_request)
+        .await
+        .expect("open process-owned session for closure pin")
+        .expect("process-owned session exists");
+    let lease = pinned_store
+        .try_claim_session_execution_lease(
+            &pinned_request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "process-prune-conformance-owner",
+                "process-prune-conformance-owner:incarnation",
+            ),
+            "process-prune-conformance-executor",
+            60_000,
+        )
+        .await
+        .expect("claim process-owned closure lane")
+        .acquired()
+        .expect("process-owned closure lane is free");
+    let authority = pinned_store
+        .turn_cancellation_authority()
+        .expect("persistent process-owned store exposes cancellation authority");
+    let physical_scope = crate::ExecutionScope::process(PROCESS_ID);
+    let binding_id =
+        crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)
+            .expect("bind process cancellation scope");
+    pinned_store
+        .validate_turn_cancellation_binding(
+            &pinned_request.session_id,
+            &lease.fence(),
+            &binding_id,
+            &physical_scope,
+        )
+        .await
+        .expect("bind process-owned cancellation authority");
+    let address = crate::TurnAddress::new(
+        &pinned_request.session_id,
+        crate::TurnId::from("process-prune-closure-turn"),
+    );
+    let resolver = authority.resolver();
+    let authorization = crate::TurnCancelClosureAuthorization::new(
+        address.clone(),
+        binding_id,
+        physical_scope,
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                crate::AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await
+            .expect("mint process-owned cancellation key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                crate::AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await
+            .expect("mint process-owned escalation key"),
+        resolver
+            .await_event_key(
+                &address.execution_scope(),
+                crate::AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await
+            .expect("mint process-owned terminal key"),
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        crate::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )
+    .expect("construct process-owned closure authorization");
+    pinned_store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("persist process-owned closure authorization");
+
     let terminal = registry
         .complete_process(
             &ProcessId::from(PROCESS_ID),
@@ -785,6 +912,44 @@ pub async fn process_prune_deletes_owned_session_stores(
         )
         .await
         .expect("complete process with owned stores");
+    let refusal = registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect_err("a process-scoped closure pin must win the prune race");
+    assert!(matches!(
+        refusal,
+        crate::PluginError::Session(ref message)
+            if message.contains(pinned_request.session_id.as_str())
+                && message.contains("pending turn cancellation closure pin(s)")
+    ));
+    assert!(
+        registry
+            .get_process(&ProcessId::from(PROCESS_ID))
+            .await
+            .expect("read process after refused prune")
+            .is_some(),
+        "the refused prune must retain the terminal process"
+    );
+    let settlement = authority
+        .settle_authorized_closure(&authorization)
+        .await
+        .expect("settle process-owned closure before consumption");
+    pinned_store
+        .repair_orphaned_active_turn_inputs(
+            &pinned_request.session_id,
+            &lease.fence(),
+            &address.turn_id,
+            &crate::TurnCancelIntentSnapshot::Absent,
+            Some(&settlement),
+        )
+        .await
+        .expect("consume process-owned closure authorization")
+        .into_applied()
+        .expect("no cancellation intent appeared during retirement race");
     let report = registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),

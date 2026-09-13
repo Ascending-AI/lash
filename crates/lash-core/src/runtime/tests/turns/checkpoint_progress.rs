@@ -159,7 +159,11 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
         .await
         .expect("plugin turn-budget mutation settles");
     assert_eq!(runtime.session_policy().turn_budget, persisted_budget);
-    drop(runtime.park().await.expect("park mutated session"));
+    drop(
+        Box::pin(runtime.park())
+            .await
+            .expect("park mutated session"),
+    );
 
     let reloaded_state = crate::load_persisted_session_state(runtime_store.as_ref())
         .await

@@ -1075,6 +1075,8 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
             .with_controller_owned_replay()
             .with_engine_paced_lane(),
     );
+    runtime.host.core.control.effect_host =
+        super::effect::controller_effect_host(controller.clone());
     let scope = crate::ScopedEffectController::shared(
         controller,
         crate::ExecutionScope::turn("root", "queued-failover-wake"),
@@ -1900,6 +1902,144 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
             .count(),
         1,
         "the intent survives the enclosing turn's failing CAS without duplication"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publication_without_stranding_turn()
+ {
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let mut predecessor_final = RuntimeSessionState {
+        session_id: SessionId::from("root"),
+        ..RuntimeSessionState::new(standard_test_policy())
+    };
+    append_message(
+        &mut predecessor_final,
+        Message {
+            id: "activated-overlap-predecessor-final".to_string(),
+            role: MessageRole::Assistant,
+            parts: vec![Part::text(
+                "activated-overlap-predecessor-final.p0".to_string(),
+                "predecessor publishes after successor activation".to_string(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        },
+    );
+    let predecessor_commit =
+        crate::RuntimeCommit::persisted_state_for_test(&predecessor_final, &[]);
+
+    let successor_transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: "stale successor publication".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let successor_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
+    let successor_clock: Arc<dyn crate::Clock> = clock.clone();
+    let successor_config = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_clock(successor_clock);
+    let mut successor_runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        successor_transport,
+        crate::EmbeddedRuntimeHost::new(successor_config),
+        successor_store,
+    )
+    .await;
+    let successor_prepared = Arc::new(AtomicBool::new(false));
+    let release_successor = Arc::new(AtomicBool::new(false));
+    successor_runtime.set_turn_phase_probe(Arc::new(PauseAtPreparedTurn {
+        entered: Arc::clone(&successor_prepared),
+        release: Arc::clone(&release_successor),
+    }));
+    let successor = crate::task::spawn(async move {
+        let result = successor_runtime
+            .run_turn_assembled(
+                TurnInput::text("activate before the predecessor publishes"),
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("activated-overlap-successor"),
+                ),
+            )
+            .await;
+        (successor_runtime, result)
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !successor_prepared.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("successor completes activation recovery and holds its lease before commit");
+
+    let commits_before_publication = *store.runtime_commit_count.lock_recover();
+    crate::store::SessionCommitStore::commit_runtime_state(store.as_ref(), predecessor_commit)
+        .await
+        .expect("the predecessor final publishes under its current-head CAS");
+    let commits_after_predecessor = *store.runtime_commit_count.lock_recover();
+    assert_eq!(commits_after_predecessor, commits_before_publication + 1);
+
+    release_successor.store(true, Ordering::SeqCst);
+    let (successor_runtime, successor_result) =
+        tokio::time::timeout(std::time::Duration::from_secs(5), successor)
+            .await
+            .expect("successor commit must resolve after the predecessor advances the head")
+            .expect("successor task");
+    let successor_error = successor_result
+        .expect_err("activated successor must lose the head CAS it loaded before publication");
+    assert_eq!(
+        successor_error.code,
+        crate::RuntimeErrorCode::StoreCommitSuperseded
+    );
+    assert!(
+        successor_error.message.contains("head revision conflict"),
+        "the authorization mismatch must retain typed HeadRevisionConflict diagnostics: {successor_error:?}"
+    );
+    assert_eq!(
+        *store.runtime_commit_count.lock_recover(),
+        commits_after_predecessor,
+        "the losing successor must not publish a second head"
+    );
+    drop(successor_runtime);
+
+    let pending_inputs = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        crate::store::TurnInputStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root"),
+        ),
+    )
+    .await
+    .expect("durable input read must not remain blocked after the successor exits")
+    .expect("read durable input after the successor loses the head CAS");
+    assert_eq!(
+        pending_inputs.len(),
+        1,
+        "only the rejected successor input remains unsettled"
+    );
+    let successor_input = &pending_inputs[0];
+    assert_eq!(
+        successor_input.state,
+        crate::TurnInputState::DeferredNextTurn,
+        "the CAS loser must return its input to the durable next-turn queue"
+    );
+    assert_eq!(successor_input.ingress, crate::TurnInputIngress::NextTurn);
+    assert!(
+        successor_input.accepted_input().is_some(),
+        "the CAS loser must retain canonical accepted-input evidence for redrive"
     );
 }
 

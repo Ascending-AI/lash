@@ -70,6 +70,10 @@ struct CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrashingEffectHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.inner.turn_control_binding_id())
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -124,6 +128,10 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for CrashingEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.inner.turn_control_binding_id()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }
@@ -205,6 +213,10 @@ struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.0.controller().await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -303,6 +315,10 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrossingController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,

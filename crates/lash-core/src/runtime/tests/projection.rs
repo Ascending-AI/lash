@@ -396,7 +396,7 @@ async fn park_returns_error_when_final_commit_fails() {
     .await
     .expect("runtime");
 
-    let err = match runtime.park().await {
+    let err = match Box::pin(runtime.park()).await {
         Ok(_) => panic!("park should fail when final persistence fails"),
         Err(err) => err,
     };
@@ -435,17 +435,18 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
 
-    let err = runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    let err = Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "append-rollback".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "rollback-test",
                 serde_json::json!({"value": 1}),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect_err("concurrent head movement must reject the append");
+        }),
+    )
+    .await
+    .expect_err("concurrent head movement must reject the append");
 
     assert!(err.to_string().contains("head revision conflict"));
     assert!(
@@ -489,17 +490,18 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
     restore_called.store(false, Ordering::SeqCst);
     let before = runtime.state.session_graph.clone();
 
-    let result = runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    let result = Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "storeless-stale-ancestor".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "storeless-stale-ancestor",
                 serde_json::json!({"value": 1}),
             )],
             requires_ancestor_node_id: Some("not-on-active-path".to_string()),
-        })
-        .await
-        .expect("storeless ancestor fence is a typed result");
+        }),
+    )
+    .await
+    .expect("storeless ancestor fence is a typed result");
 
     assert!(matches!(
         result,
@@ -557,17 +559,18 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     )
     .await
     .expect("runtime");
-    runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "retry-after-advance-seed".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "retry-test",
                 serde_json::json!({"value": 0}),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect("persist the initial frame before the retried operation");
+        }),
+    )
+    .await
+    .expect("persist the initial frame before the retried operation");
     let request = crate::AppendSessionNodesRequest {
         operation_id: "retry-after-advance".to_string(),
         nodes: vec![crate::SessionAppendNode::plugin(
@@ -577,8 +580,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         requires_ancestor_node_id: None,
     };
 
-    let first = runtime
-        .append_session_nodes(request.clone())
+    let first = Box::pin(runtime.append_session_nodes(request.clone()))
         .await
         .expect("first append");
     let crate::AppendSessionNodesOutcome::Appended {
@@ -591,23 +593,23 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     let persisted_node_id = first_node_ids.first().cloned().expect("persisted node id");
     // Model a response lost after the durable commit: the caller retains only
     // its request and retries after unrelated work has advanced the head.
-    runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "advance-head".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "retry-test",
                 serde_json::json!({"value": 2}),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect("head advance");
+        }),
+    )
+    .await
+    .expect("head advance");
     let state_after_advance = runtime.state.clone();
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
 
-    let replay = runtime
-        .append_session_nodes(request)
+    let replay = Box::pin(runtime.append_session_nodes(request))
         .await
         .expect("the lost-response retry must replay its durable receipt");
     let crate::AppendSessionNodesOutcome::Appended {
@@ -682,8 +684,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
         )],
         requires_ancestor_node_id: None,
     };
-    runtime
-        .append_session_nodes(request.clone())
+    Box::pin(runtime.append_session_nodes(request.clone()))
         .await
         .expect("first append");
     let state_before_retry = runtime.state.clone();
@@ -691,8 +692,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     restore_called.store(false, Ordering::SeqCst);
     store.fail_load_session_on_call(store.load_session_count() + 1);
 
-    let error = runtime
-        .append_session_nodes(request)
+    let error = Box::pin(runtime.append_session_nodes(request))
         .await
         .expect_err("post-replay refresh failure must reject and roll back");
 
@@ -749,17 +749,18 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
         session_id: SessionId::from(session_id.to_string()),
     });
 
-    let error = runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    let error = Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "typed-append-rollback".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "rollback-test",
                 serde_json::json!({"value": 1}),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect_err("the injected persistence and rollback failures must reject the append");
+        }),
+    )
+    .await
+    .expect_err("the injected persistence and rollback failures must reject the append");
 
     assert!(restore_called.load(Ordering::SeqCst));
     assert!(matches!(

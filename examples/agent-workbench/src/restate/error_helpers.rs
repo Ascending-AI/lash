@@ -2,6 +2,23 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
+pub(super) fn configured_restate_authority_id()
+-> Result<lash_restate::RestateAuthorityId, TerminalError> {
+    let value = std::env::var("RESTATE_AUTHORITY_ID")
+        .map_err(|_| TerminalError::new("RESTATE_AUTHORITY_ID is required"))?;
+    lash_restate::RestateAuthorityId::new(value).map_err(TerminalError::from_error)
+}
+
+impl super::WorkbenchCronJobImpl {
+    pub(super) fn authority_id(&self) -> Result<lash_restate::RestateAuthorityId, TerminalError> {
+        #[cfg(test)]
+        if let Some(authority_id) = &self.authority_id {
+            return Ok(authority_id.clone());
+        }
+        configured_restate_authority_id()
+    }
+}
+
 pub(super) fn record_turn_failure(
     state: &AppState,
     session_id: &SessionId,

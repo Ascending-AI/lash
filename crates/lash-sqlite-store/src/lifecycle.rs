@@ -16,6 +16,38 @@
 use super::*;
 use lash_sansio::SessionId;
 
+pub(super) fn canonical_catalog_identity(path: &Path) -> PathBuf {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut existing = absolute.as_path();
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            return absolute;
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = existing.parent() else {
+            return absolute;
+        };
+        existing = parent;
+    }
+    let mut canonical = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    for component in missing.into_iter().rev() {
+        canonical.push(component);
+    }
+    canonical
+}
+
+impl SqliteSessionStoreFactory {
+    pub(super) fn turn_cancel_closure_owner_binding(
+        &self,
+    ) -> Option<lash_core::TurnCancelClosureOwnerBinding> {
+        self.turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
 impl Store {
     pub(crate) async fn open_bound_with_options_clock_and_process_registry(
         path: &Path,
@@ -23,6 +55,7 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_with_options_clock_and_process_registry(
@@ -30,6 +63,7 @@ impl Store {
             options,
             clock,
             process_registry_path,
+            turn_cancel_closure_owner,
             #[cfg(feature = "testing")]
             fault_injector,
         )
@@ -96,6 +130,7 @@ impl Store {
             options,
             clock,
             None,
+            None,
             #[cfg(feature = "testing")]
             None,
         )
@@ -110,6 +145,7 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
         process_registry_path: Option<&Path>,
+        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -122,6 +158,28 @@ impl Store {
         #[cfg(not(feature = "testing"))]
         let conn = SqliteConnection::open_with_policy(path, options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        let signing_secret = conn
+            .call(|connection| {
+                connection.query_row(
+                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+            })
+            .await?;
+        let authority = lash_core::TurnCancellationAuthority::new(
+            format!("sqlite:{}", path.to_string_lossy()),
+            Arc::new(
+                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    crate::await_event::sqlite_await_events(
+                        conn.clone(),
+                        Arc::new(crate::scope_fence::RegistryAttachment::default()),
+                        signing_secret,
+                        Arc::clone(&clock),
+                    ),
+                ),
+            ),
+        );
         let process_registry_attached = if let Some(process_registry_path) = process_registry_path {
             attach_process_registry(&conn, process_registry_path, options.connection_policy)
                 .await?;
@@ -131,6 +189,8 @@ impl Store {
         };
         Ok(Self {
             conn,
+            turn_cancellation_authority: Some(authority),
+            turn_cancel_closure_owner,
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]
@@ -151,6 +211,8 @@ impl Store {
         let conn = SqliteConnection::open_readonly(path).await?;
         Ok(Self {
             conn,
+            turn_cancellation_authority: None,
+            turn_cancel_closure_owner: None,
             session_id: OnceLock::new(),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
@@ -226,9 +288,33 @@ impl Store {
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
+        let signing_secret = conn
+            .call(|connection| {
+                connection.query_row(
+                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Vec<u8>>(0),
+                )
+            })
+            .await?;
+        let authority = lash_core::TurnCancellationAuthority::new(
+            format!("sqlite-memory:{}", uuid::Uuid::new_v4()),
+            Arc::new(
+                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    crate::await_event::sqlite_await_events(
+                        conn.clone(),
+                        Arc::new(crate::scope_fence::RegistryAttachment::default()),
+                        signing_secret,
+                        Arc::clone(&clock),
+                    ),
+                ),
+            ),
+        );
         warn_process_registry_not_wired(constructor);
         Ok(Self {
             conn,
+            turn_cancellation_authority: Some(authority),
+            turn_cancel_closure_owner: None,
             session_id: OnceLock::new(),
             clock,
             #[cfg(feature = "lashlang")]

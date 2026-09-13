@@ -109,6 +109,22 @@ const TABLE_REGISTRY: &[TablePair] = &[
     ),
     pair("trigger_occurrences", "lash_trigger_occurrences"),
     pair("trigger_subscriptions", "lash_trigger_subscriptions"),
+    pair(
+        "turn_cancellation_bindings",
+        "lash_turn_cancellation_bindings",
+    ),
+    pair(
+        "turn_cancel_closure_authorizations",
+        "lash_turn_cancel_closure_authorizations",
+    ),
+    pair(
+        "turn_cancel_closure_participants",
+        "lash_turn_cancel_closure_participants",
+    ),
+    pair(
+        "turn_cancel_retired_scopes",
+        "lash_turn_cancel_retired_scopes",
+    ),
     TablePair {
         sqlite_table: Some("turn_cancel_requests"),
         postgres_table: Some("lash_turn_cancel_requests"),

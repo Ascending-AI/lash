@@ -1,4 +1,4 @@
-//! The ratified 2026-09-08 retention census (FIG-2503): 41 SQLite / 42 PostgreSQL.
+//! The ratified 2026-09-08 retention census (FIG-2503): 46 SQLite / 47 PostgreSQL.
 //! Like schema_congruence.rs, this ordinary integration test is discovered by
 //! the workspace nextest CI shards. Every new durable table needs a declaration.
 use std::collections::BTreeSet;
@@ -30,6 +30,30 @@ use RetentionClass::{Bounded, ClearedOnReput, KnownGap, LifecycleOwned, Permanen
 // Names are SQLite logical names. PostgreSQL aliases are explicit below.
 // A class describes eligibility, never an automatic background schedule.
 const CENSUS: &[(&str, RetentionClass)] = &[
+    (
+        "turn_cancellation_bindings",
+        LifecycleOwned {
+            scope: "session deletion",
+        },
+    ),
+    (
+        "turn_cancel_closure_authorizations",
+        LifecycleOwned {
+            scope: "exact closure settlement or session deletion after recovery",
+        },
+    ),
+    (
+        "turn_cancel_closure_participants",
+        LifecycleOwned {
+            scope: "catalog scope retirement after closure pins drain",
+        },
+    ),
+    (
+        "turn_cancel_retired_scopes",
+        PermanentlyExempt {
+            reason: "scope tombstones prevent stale cancellation authority resurrection",
+        },
+    ),
     (
         "blobs",
         Bounded {
@@ -323,7 +347,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 42, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 46, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

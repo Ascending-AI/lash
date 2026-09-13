@@ -35,6 +35,8 @@ pub(crate) struct AppStateData {
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
     #[cfg(feature = "restate")]
+    restate_authority_id: Option<lash_restate::RestateAuthorityId>,
+    #[cfg(feature = "restate")]
     restate_http: reqwest::Client,
 }
 
@@ -53,6 +55,7 @@ impl AppStateData {
         durability: AgentServiceDurability,
         rlm_dialect: lash::rlm::RlmDialect,
         restate_ingress_url: Option<String>,
+        restate_authority_id: Option<lash_restate::RestateAuthorityId>,
     ) -> Self {
         Self {
             core,
@@ -63,6 +66,7 @@ impl AppStateData {
             durability,
             rlm_dialect,
             restate_ingress_url,
+            restate_authority_id,
             restate_http: reqwest::Client::new(),
         }
     }
@@ -113,6 +117,11 @@ impl AppStateData {
     #[cfg(feature = "restate")]
     pub(crate) fn restate_ingress_url(&self) -> Option<&str> {
         self.restate_ingress_url.as_deref()
+    }
+
+    #[cfg(feature = "restate")]
+    pub(crate) fn restate_authority_id(&self) -> Option<&lash_restate::RestateAuthorityId> {
+        self.restate_authority_id.as_ref()
     }
 
     #[cfg(feature = "restate")]

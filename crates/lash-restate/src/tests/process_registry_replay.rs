@@ -3,11 +3,11 @@ use super::*;
 #[tokio::test]
 pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let process_id = "task-parent-flow-replay";
     let terminal = process_success(serde_json::json!({ "done": true }));
-    let suspend_key = restate_await_event_key(
+    let suspend_key = test_restate_await_event_key(
         &ExecutionScope::process(process_id),
         AwaitEventWaitIdentity::Custom {
             key: "parent-resume-input".to_string(),
@@ -50,7 +50,7 @@ pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend
 #[tokio::test]
 pub(super) async fn restate_controller_schedules_lashlang_process_with_serializable_input() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let module = lashlang::parse("process scan(root: str) { finish root }")
         .expect("lashlang process module");
@@ -159,7 +159,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
 #[tokio::test]
 pub(super) async fn restate_controller_lists_and_transfers_observers_through_process_effects() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let s1 = lash_core::SessionScope::new("s1");
     let s2 = lash_core::SessionScope::new("s2");
@@ -252,7 +252,8 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     let context = Arc::new(RecordingContext::default());
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
-    let host = RestateRuntimeEffectController::new(context.clone()).with_trace_sink(sink_dyn);
+    let host =
+        RestateRuntimeEffectController::new_for_test(context.clone()).with_trace_sink(sink_dyn);
     let registry = process_registry();
     let await_record = registry
         .register_process(external_registration("task-await-signal"))
@@ -347,7 +348,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     {
         let resolved = context.resolved_events.lock_recover();
         assert_eq!(resolved.len(), 1);
-        let expected_key = restate_await_event_key(
+        let expected_key = test_restate_await_event_key(
             &ExecutionScope::process("task-signal"),
             AwaitEventWaitIdentity::process_signal("task-signal", "notify", 1),
         )
@@ -386,7 +387,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
     };
     let resolved = context.resolved_events.lock_recover();
     assert_eq!(resolved.len(), 2);
-    let expected_key = restate_await_event_key(
+    let expected_key = test_restate_await_event_key(
         &ExecutionScope::process("task-signal"),
         AwaitEventWaitIdentity::process_signal("task-signal", "notify", 2),
     )
@@ -400,7 +401,7 @@ pub(super) async fn restate_controller_awaits_and_signals_through_process_effect
 #[tokio::test]
 pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
     let context = Arc::new(RecordingContext::default());
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let registration = external_registration("task-cancel");
     let record = registry
@@ -481,7 +482,7 @@ fn remove_outer_recorded_process_effect(
 #[tokio::test]
 pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_admission() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let record = registry
         .register_process(external_registration("restate-cancel-redrive"))
@@ -583,7 +584,7 @@ pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_ad
 #[tokio::test]
 pub(super) async fn restate_cancel_replay_refuses_journaled_command_identity_drift() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let first_record = registry
         .register_process(external_registration("restate-cancel-identity-a"))
@@ -649,7 +650,7 @@ pub(super) async fn restate_cancel_replay_refuses_journaled_command_identity_dri
 pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads() {
     for mutation in ["wrong-version", "unknown-field"] {
         let context = Arc::new(ReplayableRecordingContext::default());
-        let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
         let registry = process_registry();
         let process_id = format!("restate-cancel-payload-{mutation}");
         let record = registry
@@ -724,7 +725,7 @@ pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads(
 #[tokio::test]
 pub(super) async fn restate_parent_end_redrive_preserves_decision_and_delivery_journal_sequence() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let record = registry
         .register_process(external_registration("restate-parent-end-redrive"))
@@ -852,7 +853,7 @@ fn assert_parent_end_refusal_code(outcome: RuntimeEffectOutcome, expected: &str)
 #[tokio::test]
 pub(super) async fn restate_parent_end_replay_refuses_journaled_command_identity_drift() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let registry = process_registry();
     let first_record = registry
         .register_process(external_registration("restate-parent-end-identity-a"))
@@ -934,7 +935,7 @@ pub(super) async fn restate_parent_end_replay_refuses_journaled_command_identity
 pub(super) async fn restate_parent_end_replay_refuses_incompatible_journal_payloads() {
     for mutation in ["wrong-version", "unknown-field"] {
         let context = Arc::new(ReplayableRecordingContext::default());
-        let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
         let registry = process_registry();
         let process_id = format!("restate-parent-end-payload-{mutation}");
         let record = registry
@@ -1388,6 +1389,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         Arc::clone(&registry),
         continuation_store(),
         cancel_ingress,
+        test_restate_authority_id(),
     ));
     let registration = rerunnable_registration("prompt-cancel");
     registry
@@ -1616,6 +1618,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         Arc::clone(&registry),
         continuation_store(),
         RestateIngressClient::new(connection),
+        test_restate_authority_id(),
     );
     let registration = rerunnable_registration("ceiling-reissues");
     registry
@@ -1672,6 +1675,7 @@ pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
             "https://restate.invalid",
             Arc::new(BrokenCancelWatchTransport),
         )),
+        test_restate_authority_id(),
     );
 
     let error = workflow
@@ -1721,6 +1725,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
             "https://restate.invalid",
             Arc::new(UnregisteredCancelWatchTransport),
         )),
+        test_restate_authority_id(),
     );
 
     let error = workflow
@@ -1955,7 +1960,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
         .await
         .expect("register segmented process");
     let first_context = Arc::new(ReplayableRecordingContext::default());
-    let first_controller = RestateRuntimeEffectController::new(first_context.clone());
+    let first_controller = RestateRuntimeEffectController::new_for_test(first_context.clone());
 
     let first = workflow
         .run_registration(
@@ -1998,7 +2003,7 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
     let resumed = loaded.handover;
     first_context.start_replay();
     let successor_context = Arc::new(ReplayableRecordingContext::default());
-    let successor_controller = RestateRuntimeEffectController::new(successor_context);
+    let successor_controller = RestateRuntimeEffectController::new_for_test(successor_context);
     let second = workflow
         .run_registration(
             registration,
@@ -2102,7 +2107,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
 
         for ordinal in 0_u64..3 {
             let context = Arc::new(ReplayableRecordingContext::default());
-            let controller = RestateRuntimeEffectController::with_options(
+            let controller = RestateRuntimeEffectController::with_options_for_test(
                 Arc::clone(&context),
                 RestateEffectControllerOptions::default().segment_effect_budget(1),
             );

@@ -479,6 +479,10 @@ impl lash_core::AwaitEventResolver for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    fn turn_control_binding_id(&self) -> String {
+        "key-journal-controller".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }
@@ -575,6 +579,10 @@ impl lash_core::AwaitEventResolver for AdmissionCrashController {}
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    fn turn_control_binding_id(&self) -> String {
+        "admission-crash-controller".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }

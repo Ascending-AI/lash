@@ -432,7 +432,7 @@ async fn testing_set_persisted_replaces_resident_state_for_park_fixture() -> Res
     let resident = session.admin().state().export().await;
     assert_eq!(node_ids(&resident.session_graph.nodes), fixture_nodes);
     assert_eq!(
-        session.park().await?.session_id(),
+        Box::pin(session.park()).await?.session_id(),
         "testing-set-persisted-park"
     );
     Ok(())
@@ -489,13 +489,16 @@ async fn public_append_byte_budget_failure_is_typed_terminal_and_actionable() ->
     ))?;
     let session = core.session("append-byte-budget-surface").open().await?;
 
-    let error = session
-        .admin()
-        .state()
-        .append_messages(vec![lash_core::PluginMessage::text(
-            lash_core::MessageRole::User,
-            "x".repeat(CONFIGURED_BYTE_LIMIT * 4),
-        )])
+    let error =
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .append_messages(vec![lash_core::PluginMessage::text(
+                    lash_core::MessageRole::User,
+                    "x".repeat(CONFIGURED_BYTE_LIMIT * 4),
+                )]),
+        )
         .await
         .expect_err("the public append must reject its over-limit commit");
 
@@ -512,13 +515,16 @@ async fn public_append_node_budget_failure_is_typed_terminal_and_actionable() ->
     ))?;
     let session = core.session("append-node-budget-surface").open().await?;
 
-    let error = session
-        .admin()
-        .state()
-        .append_messages(vec![lash_core::PluginMessage::text(
-            lash_core::MessageRole::User,
-            "one appended message plus the initial frame exceeds one node",
-        )])
+    let error =
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .append_messages(vec![lash_core::PluginMessage::text(
+                    lash_core::MessageRole::User,
+                    "one appended message plus the initial frame exceeds one node",
+                )]),
+        )
         .await
         .expect_err("the public append must reject its over-limit commit");
 
@@ -543,7 +549,7 @@ async fn park_byte_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         ))
         .await?;
 
-    let error = match session.park().await {
+    let error = match Box::pin(session.park()).await {
         Ok(_) => panic!("park must reject its over-limit commit"),
         Err(error) => error,
     };
@@ -569,7 +575,7 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
         ))
         .await?;
 
-    let error = match session.park().await {
+    let error = match Box::pin(session.park()).await {
         Ok(_) => panic!("park must reject its over-limit commit"),
         Err(error) => error,
     };
@@ -658,17 +664,14 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         .prompt_contribution(PromptContribution::guidance("Turn", "turn guidance"))
         .run()
         .await?;
-    session
-        .admin()
-        .config()
-        .replace_prompt_slot(
-            PromptSlot::Guidance,
-            [PromptContribution::guidance(
-                "Replacement",
-                "replacement guidance",
-            )],
-        )
-        .await?;
+    Box::pin(session.admin().config().replace_prompt_slot(
+        PromptSlot::Guidance,
+        [PromptContribution::guidance(
+            "Replacement",
+            "replacement guidance",
+        )],
+    ))
+    .await?;
     session.turn(TurnInput::text("second")).run().await?;
     session
         .admin()
@@ -952,14 +955,11 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
         .require_finish()?
         .run()
         .await?;
-    session
-        .admin()
-        .state()
-        .append_messages(vec![
+    Box::pin(session.admin().state().append_messages(vec![
             lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, ANSWER)
                 .with_id("workbench-assistant:fig-461-turn-1"),
-        ])
-        .await?;
+        ]))
+    .await?;
     session
         .turn(TurnInput::text("second"))
         .require_finish()?
@@ -1056,14 +1056,11 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
             .require_finish()?
             .run()
             .await?;
-        session
-            .admin()
-            .state()
-            .append_messages(vec![
+        Box::pin(session.admin().state().append_messages(vec![
                 lash_core::PluginMessage::text(lash_core::MessageRole::Assistant, *answer)
                     .with_id(format!("workbench-assistant:few-shot-turn-{}", turn + 1)),
-            ])
-            .await?;
+            ]))
+        .await?;
     }
 
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 6);
@@ -1236,7 +1233,7 @@ async fn a_recorded_final_answer_format_survives_a_reopen_that_states_nothing() 
         .require_finish()?
         .run()
         .await?;
-    raw.close().await?;
+    Box::pin(raw.close()).await?;
     let reopened = core.session("rlm-format-survives-reopen").open().await?;
     reopened
         .turn(TurnInput::text("again"))
@@ -1457,7 +1454,7 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     );
 
     // Park flushes and drops the live runtime, returning a cheap handle.
-    let parked = session.park().await?;
+    let parked = Box::pin(session.park()).await?;
     assert_eq!(parked.session_id(), "parked");
 
     // Resume rebuilds a live session; the flushed transcript is visible again.
@@ -1501,7 +1498,7 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 
     let session = core.session("deleted-while-parked").open().await?;
     session.turn(TurnInput::text("hello")).run().await?;
-    let parked = session.park().await?;
+    let parked = Box::pin(session.park()).await?;
 
     delete_bound_session(&core, "deleted-while-parked").await?;
     assert!(
@@ -1543,7 +1540,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     // turn would: parking must refuse rather than silently flush a session that
     // something else is still driving.
     let live_clone = session.clone();
-    let err = match session.park().await {
+    let err = match Box::pin(session.park()).await {
         Ok(_) => panic!("park must not proceed while another handle is live"),
         Err(err) => err,
     };
@@ -1551,7 +1548,7 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
 
     // Once the other handle is gone, the sole remaining handle parks cleanly.
     drop(live_clone);
-    let parked = core.session("busy").open().await?.park().await?;
+    let parked = Box::pin(core.session("busy").open().await?.park()).await?;
     assert_eq!(parked.session_id(), "busy");
     Ok(())
 }
@@ -1870,24 +1867,23 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
             .await
             .expect("retire session before public state append");
 
-        let error = if append_plugin_body {
-            session
-                .admin()
-                .state()
-                .append_plugin_body("test-plugin", serde_json::json!({ "retired": true }))
+        let error =
+            if append_plugin_body {
+                Box::pin(
+                    session
+                        .admin()
+                        .state()
+                        .append_plugin_body("test-plugin", serde_json::json!({ "retired": true })),
+                )
                 .await
                 .expect_err("plugin-body append must preserve the retirement refusal")
-        } else {
-            session
-                .admin()
-                .state()
-                .append_messages(vec![lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    "must not append",
-                )])
+            } else {
+                Box::pin(session.admin().state().append_messages(vec![
+                    lash_core::PluginMessage::text(lash_core::MessageRole::User, "must not append"),
+                ]))
                 .await
                 .expect_err("message append must preserve the retirement refusal")
-        };
+            };
 
         assert!(matches!(
             &error,
@@ -2307,6 +2303,7 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
 #[tokio::test]
 async fn reused_exact_store_factory_reports_session_creation_guidance() -> Result<()> {
     let reused_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(BoundSessionStore {
+        turn_cancellation_authority: Default::default(),
         session_id: SessionId::from("root-store"),
     });
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

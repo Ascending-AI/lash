@@ -1,0 +1,11 @@
+{
+  "commit": "11f6b0eb40f61fa9397fb8437315f26f68642298",
+  "worktree": "/tmp/lash-cancel-main-witness-0913",
+  "remote_capture": "Compiled unmodified Envelope type, new method and protocol constant extracted from main using rustc and existing serde artifacts; capture stdout, never edit serialized bytes.",
+  "fixture_capture": "Copy main expected.json bytes directly.",
+  "sha256": {
+    "remote-envelope-v61.json": "0874bb5f61265ec7e37c27221141cbf1dcfc710f00b96890a3ac2f250c39df9a",
+    "sqlite-expected-v65.json": "344f51305680c9d7ebeb57344b39e02f7bf1510f858b58e51ec9dc5af8a42646",
+    "postgres-expected-v65.json": "76d4ff2e149dda12fa19dcdcc8d7c82f58a93e23538f0183bff26f8b68719a5c"
+  }
+}

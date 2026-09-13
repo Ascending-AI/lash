@@ -141,6 +141,56 @@ pub enum StoreError {
     },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
+    /// Cancellation intent changed after the runtime observed it and before
+    /// the same transaction could publish cancellation-dependent effects.
+    #[error(
+        "turn cancellation intent changed for session `{session_id}` turn `{turn_id}`; refresh cancellation authority and retry"
+    )]
+    TurnCancelIntentChanged {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// Session reopen selected a different cancellation authority than the one
+    /// durably admitted before work began.
+    #[error(
+        "turn cancellation authority mismatch for session `{session_id}`: expected `{expected}`, got `{presented}`"
+    )]
+    TurnCancelBindingMismatch {
+        session_id: SessionId,
+        expected: String,
+        presented: String,
+    },
+    /// A different exact closure operation already occupies this turn's
+    /// non-overwritable authorization slot.
+    #[error(
+        "turn cancellation closure authorization conflicts for turn `{turn_id}` in session `{session_id}`"
+    )]
+    TurnCancelClosureConflict {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// A commit or repair attempted to consume an absent or different closure
+    /// authorization.
+    #[error(
+        "turn cancellation closure authorization is missing or changed for turn `{turn_id}` in session `{session_id}`"
+    )]
+    TurnCancelClosureAuthorizationMismatch {
+        session_id: SessionId,
+        turn_id: crate::TurnId,
+    },
+    /// Destructive lifecycle cleanup was attempted while exact closure work is
+    /// still pinned. An execution-lane activation must drain it first.
+    #[error(
+        "session `{session_id}` has {pending_count} pending turn cancellation closure pin(s); activate and drain the session before deletion or scope retirement"
+    )]
+    TurnCancelClosureLifecyclePinned {
+        session_id: SessionId,
+        pending_count: usize,
+    },
+    /// The non-session physical owner was retired before this closure could be
+    /// admitted. The retirement tombstone is permanent for that scope.
+    #[error("turn cancellation closure scope `{scope_id}` is retired")]
+    TurnCancelClosureScopeRetired { scope_id: String },
     /// Stored-reference adoption found the durable byte-absence fact left by a
     /// completed attachment GC delete. The boundary commit publishes nothing;
     /// the caller may re-put the digest and retry.
@@ -575,6 +625,14 @@ impl StoreError {
             }
             Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
+            Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
+            Self::TurnCancelBindingMismatch { .. } => "TurnCancelBindingMismatch",
+            Self::TurnCancelClosureConflict { .. } => "TurnCancelClosureConflict",
+            Self::TurnCancelClosureAuthorizationMismatch { .. } => {
+                "TurnCancelClosureAuthorizationMismatch"
+            }
+            Self::TurnCancelClosureLifecyclePinned { .. } => "TurnCancelClosureLifecyclePinned",
+            Self::TurnCancelClosureScopeRetired { .. } => "TurnCancelClosureScopeRetired",
             Self::AttachmentBytesReclaimed { .. } => "AttachmentBytesReclaimed",
             Self::RuntimeTurnCommitConflict { .. } => "RuntimeTurnCommitConflict",
             Self::RuntimeCommitLeaseAuthorityConflict { .. } => {

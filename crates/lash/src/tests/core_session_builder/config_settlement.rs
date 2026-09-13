@@ -33,7 +33,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
         })
         .await?;
 
-    let parked = session.park().await?;
+    let parked = Box::pin(session.park()).await?;
     let resumed = Box::pin(core.resume(parked)).await?;
     let policy = resumed.policy_snapshot();
     assert_eq!(policy.model, expected_model);
@@ -78,7 +78,7 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
             ..SessionConfigPatch::default()
         })
         .await?;
-    session.close().await?;
+    Box::pin(session.close()).await?;
 
     let reopened = core.session("incidental-reopen").open().await?;
     let policy = reopened.policy_snapshot();

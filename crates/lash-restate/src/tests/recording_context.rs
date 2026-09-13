@@ -1,5 +1,8 @@
 use super::*;
 
+mod helpers;
+pub(super) use helpers::{runtime_invocation, test_turn_cancel_wait_request};
+
 #[test]
 pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
     let cases = vec![
@@ -326,10 +329,17 @@ pub(super) fn test_turn_cancel_wake_step(
     if escalated || wake != RestateTurnCancelWake::TurnCancelDeferred {
         return Ok(TestTurnCancelWakeStep::Unwind(wake));
     }
-    let escalation_key = restate_await_event_key(
-        &turn_cancel_key.scope,
-        AwaitEventWaitIdentity::TurnCancelEscalation,
-    )
+    let escalation_key = match crate::durable_wait::restate_authority_id_for_key(turn_cancel_key) {
+        Some(authority) => crate::durable_wait::restate_await_event_key_for_authority(
+            &authority,
+            &turn_cancel_key.scope,
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        ),
+        None => restate_await_event_key(
+            &turn_cancel_key.scope,
+            AwaitEventWaitIdentity::TurnCancelEscalation,
+        ),
+    }
     .map_err(TerminalError::from_error)?;
     match gate.register(escalation_key)? {
         TestTurnCancelRegistrationVerdict::Registered(registration) => {
@@ -567,6 +577,7 @@ pub(super) struct RecordingContext {
     process_terminal_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     session_waits: Mutex<HashMap<SessionId, Vec<AwaitEventKey>>>,
     revoked_sessions: Mutex<HashSet<SessionId>>,
+    pub(super) session_revocation_checks: AtomicUsize,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
 }
 
@@ -627,7 +638,8 @@ impl RecordingContext {
         process_id: &ProcessId,
         resolution: Resolution,
     ) {
-        let key = restate_process_terminal_await_key(process_id).expect("terminal await key");
+        let key = restate_process_terminal_await_key(&test_restate_authority_id(), process_id)
+            .expect("terminal await key");
         self.awaited_events
             .lock_recover()
             .insert(key.promise_key(), resolution);
@@ -963,7 +975,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             .push(format!("call:{process_id}"));
         let context = Arc::clone(self);
         Box::pin(async move {
-            let key = restate_process_terminal_await_key(&process_id)
+            let key = restate_process_terminal_await_key(&test_restate_authority_id(), &process_id)
                 .map_err(TerminalError::from_error)?;
             let notify = context.process_terminal_notify(&process_id);
             let resolution = loop {
@@ -1055,6 +1067,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     where
         'ctx: 'run,
     {
+        self.session_revocation_checks
+            .fetch_add(1, Ordering::SeqCst);
         let revoked = self.revoked_sessions.lock_recover().contains(&session_id);
         Box::pin(async move { Ok(revoked) })
     }
@@ -1140,7 +1154,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
         ctx: WorkflowContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<serde_json::Value>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
         let scope = ExecutionScope::turn(TOOL_INTENT_CORPUS_SESSION, TOOL_INTENT_CORPUS_TURN);
         let attempt = controller
             .execute_effect(
@@ -2289,33 +2303,50 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 return Err(TerminalError::new("process workflow start is unsupported"));
             };
             let process_id = registration.id.clone();
-            let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
-            let scoped_effect_controller = controller
-                .scoped_effect_controller(ExecutionScope::process(&process_id))
-                .map_err(TerminalError::from_error)?;
-            let cancellation = tokio_util::sync::CancellationToken::new();
-            let mut handover = None;
-            let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-                &process_id,
-                format!("test-workflow:{process_id}"),
-            );
-            let output = loop {
-                match worker
-                    .run_process_segment_with_scoped_effect_controller(
-                        registration.clone(),
-                        execution_context.clone(),
-                        execution_write_authority.clone(),
-                        scoped_effect_controller.clone(),
-                        cancellation.clone(),
-                        handover,
-                    )
-                    .await
-                    .map_err(TerminalError::from_error)?
-                {
-                    lash_core::ProcessRunOutcome::Terminal { output, .. } => {
-                        break *output;
+            let process_task_context = Arc::clone(&context);
+            let process_task_id = process_id.clone();
+            let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
+                let scoped_effect_controller = controller
+                    .scoped_effect_controller(ExecutionScope::process(&process_task_id))
+                    .map_err(TerminalError::from_error)?;
+                let cancellation = tokio_util::sync::CancellationToken::new();
+                let execution_write_authority =
+                    lash_core::ProcessExecutionWriteAuthority::invocation(
+                        &process_task_id,
+                        format!("test-workflow:{process_task_id}"),
+                    );
+                let mut handover = None;
+                loop {
+                    match worker
+                        .run_process_segment_with_scoped_effect_controller(
+                            registration.clone(),
+                            execution_context.clone(),
+                            execution_write_authority.clone(),
+                            scoped_effect_controller.clone(),
+                            cancellation.clone(),
+                            handover,
+                        )
+                        .await
+                    {
+                        Ok(lash_core::ProcessRunOutcome::Terminal { output, .. }) => {
+                            break Ok(*output);
+                        }
+                        Ok(lash_core::ProcessRunOutcome::SegmentBoundary(next)) => {
+                            handover = Some(next);
+                        }
+                        Err(error) => break Err(TerminalError::from_error(error)),
                     }
-                    lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
+                }
+            }));
+            let output = match process_task.await {
+                Ok(Ok(output)) => output,
+                Ok(Err(error)) => return Err(error),
+                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+                Err(error) => {
+                    return Err(TerminalError::new(format!(
+                        "test process workflow task failed: {error}"
+                    )));
                 }
             };
             context
@@ -2462,35 +2493,5 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         'ctx: 'run,
     {
         self.events.session_is_revoked(session_id)
-    }
-}
-
-pub(super) fn runtime_invocation(
-    kind: RuntimeEffectKind,
-    effect_id: &str,
-) -> lash_core::RuntimeEffectInvocation {
-    lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(
-            durable_turn_scope("session", "turn"),
-            format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
-        )
-        .expect("valid recording-context effect address"),
-        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
-        effect_id,
-    )
-}
-
-pub(super) fn test_turn_cancel_wait_request(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> RestateDurableWaitAwaitRequest {
-    let key = restate_await_event_key(
-        &durable_turn_scope(session_id, turn_id),
-        AwaitEventWaitIdentity::TurnCancelGate,
-    )
-    .expect("test turn cancellation gate key");
-    RestateDurableWaitAwaitRequest {
-        key,
-        deadline: None,
     }
 }

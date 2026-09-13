@@ -232,7 +232,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let admissions_before_resume = store
         .session_admission_count
         .load(std::sync::atomic::Ordering::SeqCst);
-    let parked = runtime.park().await.expect("park runtime");
+    let parked = Box::pin(runtime.park()).await.expect("park runtime");
     let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume runtime");
@@ -303,7 +303,9 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     .await
     .expect("initial authority runtime");
     runtime.stamp_live_plugin_state();
-    let parked = runtime.park().await.expect("persist authority runtime");
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("persist authority runtime");
 
     surface.replace(vec![visible, hidden.clone()]);
     let env = runtime_environment(plugin_host);
@@ -368,7 +370,9 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
 
     runtime.stamp_live_plugin_state();
     runtime.state.authority = Box::default();
-    let parked = runtime.park().await.expect("persist broader authority");
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("persist broader authority");
     let resumed = LashRuntime::resume(parked, &runtime_environment(plugin_host), owner)
         .await
         .expect("resume broader persisted authority");
@@ -427,8 +431,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let narrowed = crate::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    runtime
-        .set_tool_access(narrowed)
+    Box::pin(runtime.set_tool_access(narrowed))
         .await
         .expect("narrow persisted tool authority");
     runtime
@@ -443,8 +446,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .await
         .expect("run with narrowed authority");
 
-    runtime
-        .set_tool_access(crate::SessionToolAccess::ambient())
+    Box::pin(runtime.set_tool_access(crate::SessionToolAccess::ambient()))
         .await
         .expect("widen persisted tool authority");
     runtime
@@ -498,12 +500,13 @@ async fn updated_tool_access_survives_park_and_resume() {
     let narrowed = crate::SessionToolAccess::ambient()
         .with_hidden_tools([hidden.name])
         .expect("valid hidden tool");
-    runtime
-        .set_tool_access(narrowed.clone())
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
         .await
         .expect("settle updated authority");
 
-    let parked = runtime.park().await.expect("park updated authority");
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("park updated authority");
     let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume updated authority");
@@ -532,14 +535,12 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
     let narrowed = crate::SessionToolAccess::ambient()
         .with_hidden_tools(["hidden-after-reload"])
         .expect("valid hidden tool");
-    runtime
-        .set_tool_access(narrowed.clone())
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
         .await
         .expect("settle initial authority");
     let commits_after_change = *store.runtime_commit_count.lock_recover();
 
-    runtime
-        .set_tool_access(narrowed.clone())
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
         .await
         .expect("equal authority is accepted");
     assert_eq!(
@@ -550,8 +551,7 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
 
     runtime.state.authority.tool_access = crate::SessionToolAccess::ambient();
     runtime.invalidate_resident_session_state();
-    runtime
-        .set_tool_access(narrowed.clone())
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
         .await
         .expect("reload before comparing authority");
     assert_eq!(runtime.state.authority.tool_access, narrowed);
@@ -1279,7 +1279,9 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .tool_state()
         .expect("curated tool state")
         .generation();
-    let parked = runtime.park().await.expect("park initial runtime");
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("park initial runtime");
 
     surface.replace(vec![original.clone(), discovered.clone()]);
     let mut resumed = LashRuntime::resume(parked, &env, owner.clone())
@@ -1334,7 +1336,9 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         serde_json::to_value(&resumed_state).expect("serialize resumed tools")
     );
 
-    let parked = resumed.park().await.expect("park rebuilt runtime");
+    let parked = Box::pin(resumed.park())
+        .await
+        .expect("park rebuilt runtime");
     let resumed_again = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("second cold resume");
@@ -1664,7 +1668,11 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         "authority hiding must not become persisted curation"
     );
     runtime.stamp_live_plugin_state();
-    drop(runtime.park().await.expect("persist hidden child"));
+    drop(
+        Box::pin(runtime.park())
+            .await
+            .expect("persist hidden child"),
+    );
 
     surface.replace(vec![visible, discovered.clone(), hidden.clone()]);
     let state = crate::load_persisted_session_state(store.as_ref())
@@ -1734,7 +1742,9 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
         .await
         .expect("apply original opt-out");
     runtime.stamp_live_plugin_state();
-    let parked = runtime.park().await.expect("persist original source");
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("persist original source");
 
     surface.replace(Vec::new());
     let mut resumed = LashRuntime::resume(parked, &env, owner)

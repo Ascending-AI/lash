@@ -51,6 +51,14 @@ recording and receipt readback. Unknown or revoked gates return without a
 catalog lookup or cancellation row. An address outside an exact binding is
 refused before touching storage or controls.
 
+The binding also carries a stable control-owner identity and terminal-attach
+service. Store-backed admission persists that identity before work and refuses a
+different owner on reopen. Cancellation closure authorization records the same
+identity together with the admitted physical execution scope, so recovery never
+reconstructs authority from a session or turn id. Factory-level lifecycle
+inspection exposes pending closure pins for deletion and Process retirement;
+unsupported inspection fails closed.
+
 Catalog and administration capabilities are separate from an opened session.
 Catalog operations without a catalog return `SessionCatalogUnavailable`.
 Deletion consumes an owner-issued `SessionDeleteContext` containing the

@@ -175,7 +175,24 @@ pub(super) fn registered_payload_shapes() -> BTreeMap<(String, String), PayloadS
 }
 
 fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
-    BTreeMap::new()
+    let mut payloads = BTreeMap::new();
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_turn_cancellation_bindings",
+            "admitted_scope_json",
+        ),
+        PayloadRegistration::of::<lash_core::ExecutionScope>(),
+    );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_turn_cancel_closure_participants",
+            "scope_json",
+        ),
+        PayloadRegistration::of::<lash_core::ExecutionScope>(),
+    );
+    payloads
 }
 
 #[cfg(test)]
@@ -702,14 +719,20 @@ mod tests {
     }
 
     #[test]
-    fn denormalized_session_metadata_leaves_no_registered_json_carrier() {
+    fn cancellation_owner_scopes_are_the_registered_json_carriers() {
         let identities = registered_payloads()
             .keys()
             .copied()
             .map(PayloadCarrier::artifact_identity)
             .collect::<std::collections::BTreeSet<_>>();
 
-        assert!(identities.is_empty());
+        assert_eq!(
+            identities,
+            std::collections::BTreeSet::from([
+                String::from("postgres lash_turn_cancel_closure_participants.scope_json"),
+                String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
+            ])
+        );
 
         // Keep the dormant registration path covered while the durable stores
         // use structural columns instead of serialized metadata payloads.

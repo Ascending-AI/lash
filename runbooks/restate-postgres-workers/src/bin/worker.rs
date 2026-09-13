@@ -78,6 +78,7 @@ struct AppState {
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_work_driver: lash::process::ProcessWorkWiring,
     restate_ingress_url: String,
+    restate_authority_id: lash_restate::RestateAuthorityId,
     mock_provider_base_url: String,
     trace_dir: Option<PathBuf>,
     fail_once: bool,
@@ -94,6 +95,8 @@ impl AppState {
         let attachment_store =
             Arc::new(s3_store_from_env()?) as Arc<dyn lash::persistence::AttachmentStore>;
         let restate_ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
+        let restate_authority_id =
+            lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?;
         let mock_provider_base_url = env("MOCK_PROVIDER_BASE_URL", "http://mock-provider:18001");
         let trace_dir = std::env::var("LASH_E2E_TRACE_DIR").ok().map(PathBuf::from);
         if let Some(dir) = &trace_dir {
@@ -107,6 +110,7 @@ impl AppState {
             attachment_store,
             process_work_driver,
             restate_ingress_url,
+            restate_authority_id,
             mock_provider_base_url,
             trace_dir,
             fail_once,
@@ -120,6 +124,7 @@ impl AppState {
             attachment_store: Arc::clone(&self.attachment_store),
             process_work_driver: self.process_work_driver.clone(),
             restate_ingress_url: self.restate_ingress_url.clone(),
+            restate_authority_id: self.restate_authority_id.clone(),
             mock_provider_base_url: self.mock_provider_base_url.clone(),
             trace_dir: self.trace_dir.clone(),
             fail_once: self.fail_once,
@@ -141,7 +146,8 @@ impl AppState {
         )
         .await?;
 
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller =
+            RestateRuntimeEffectController::new(ctx, self.restate_authority_id.clone());
         let core = self.build_core().map_err(terminal_error)?;
         if request.scenario == TurnScenario::SignalProcess {
             return Box::pin(self.signal_process(&controller, &core, &request))
@@ -658,7 +664,7 @@ async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
 ) -> Result<AxumJson<DirectDurableWaitResolveResponse>, (StatusCode, String)> {
-    let outcome = RestateEffectHost::new(state.restate_ingress_url)
+    let outcome = RestateEffectHost::new(state.restate_ingress_url, state.restate_authority_id)
         .resolve_await_event(&request.key, request.resolution)
         .await
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -672,7 +678,7 @@ async fn direct_await_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitAwaitRequest>,
 ) -> Result<AxumJson<DirectDurableWaitAwaitResponse>, (StatusCode, String)> {
-    let resolution = RestateEffectHost::new(state.restate_ingress_url)
+    let resolution = RestateEffectHost::new(state.restate_ingress_url, state.restate_authority_id)
         .await_await_event(
             &request.key,
             tokio_util::sync::CancellationToken::new(),
@@ -936,6 +942,7 @@ async fn async_main() -> Result<()> {
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(&storage);
     let deployment = RestateProcessDeployment::new(
         env("RESTATE_INGRESS_URL", "http://restate:8080"),
+        lash_restate::RestateAuthorityId::new(required_env("RESTATE_AUTHORITY_ID")?)?,
         registry,
         continuations,
     );

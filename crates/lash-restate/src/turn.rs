@@ -13,22 +13,33 @@ use lash_core::{
 };
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, restate_await_event_key,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
+    restate_await_event_key_for_authority,
 };
 use crate::effect_host::RestateEffectHost;
-use crate::ingress::{RestateConnection, RestateIngressClient};
+use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 
 /// Restate ingress attachment to a turn's reserved terminal keyed promise.
 #[derive(Clone)]
 pub struct RestateTurnAttach {
     ingress: RestateIngressClient,
+    authority_id: RestateAuthorityId,
 }
 
 impl RestateTurnAttach {
-    pub fn new(connection: impl Into<RestateConnection>) -> Self {
+    pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
         Self {
             ingress: RestateIngressClient::new(connection),
+            authority_id,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(connection: impl Into<RestateConnection>) -> Self {
+        Self::new(
+            connection,
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+        )
     }
 }
 
@@ -36,7 +47,8 @@ impl RestateTurnAttach {
 impl TurnAttach for RestateTurnAttach {
     async fn await_terminal(&self, address: &TurnAddress) -> Result<TurnTerminal, RuntimeError> {
         address.execution_scope().validate()?;
-        let key = restate_await_event_key(
+        let key = restate_await_event_key_for_authority(
+            &self.authority_id,
             &address.execution_scope(),
             AwaitEventWaitIdentity::TurnTerminal,
         )?;
@@ -113,8 +125,8 @@ pub struct RestateTurnDeployment {
 }
 
 impl RestateTurnDeployment {
-    pub fn new(connection: impl Into<RestateConnection>) -> Self {
-        let effect_host = Arc::new(RestateEffectHost::new(connection));
+    pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
+        let effect_host = Arc::new(RestateEffectHost::new(connection, authority_id));
         Self { effect_host }
     }
 

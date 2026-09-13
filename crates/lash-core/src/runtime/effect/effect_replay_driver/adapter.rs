@@ -33,12 +33,22 @@ pub trait StoreReplayAdapter: Send + Sync {
     /// The driver this handle shares with every other handle the store minted
     /// over it: one owner id, one lease counter, one replay mode.
     fn replay_driver(&self) -> &Arc<StoreEffectReplayDriver<Self::Persistence, Self::AwaitEvents>>;
+
+    /// Stable await-event authority accepted by this handle, when it
+    /// participates in durable turn control.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Marks a store's deployment-level host: the type that mints scoped
 /// controllers. Gets [`EffectHost`] for free.
 #[doc(hidden)]
+#[async_trait]
 pub trait StoreReplayHost: StoreReplayAdapter {
+    /// Stable identity of the await-event deployment backing this host.
+    fn turn_control_binding_id(&self) -> String;
+
     /// See [`EffectHost::effect_scope_fence_database`]: the journal file a
     /// session-store factory attaches for the retention sweep, when the
     /// journal lives in a file of its own.
@@ -48,6 +58,36 @@ pub trait StoreReplayHost: StoreReplayAdapter {
 
     /// See [`EffectHost::bind_process_registry`].
     fn bind_process_registry(&self, _binding: crate::ProcessRegistryBinding) {}
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        _participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            Ok(())
+        } else {
+            Err(RuntimeError::new(
+                RuntimeErrorCode::EffectJournalRetirementUnsupported,
+                "store replay host does not implement cancellation-closure lifecycle participation",
+            ))
+        }
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        _participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        if scope.session_id().is_some() {
+            Ok(())
+        } else {
+            Err(RuntimeError::new(
+                RuntimeErrorCode::EffectJournalRetirementUnsupported,
+                "store replay host does not implement cancellation-closure lifecycle participation",
+            ))
+        }
+    }
 }
 
 /// Marks a store's scoped controller and names the scope it executes against.
@@ -63,6 +103,7 @@ pub trait StoreReplayController: StoreReplayAdapter {
 struct ScopedStoreReplayController<P, A> {
     driver: Arc<StoreEffectReplayDriver<P, A>>,
     scope: ExecutionScope,
+    authority_binding_id: String,
 }
 
 impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreReplayAdapter
@@ -72,6 +113,10 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreRep
     type AwaitEvents = A;
     fn replay_driver(&self) -> &Arc<StoreEffectReplayDriver<P, A>> {
         &self.driver
+    }
+
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.authority_binding_id.clone())
     }
 }
 
@@ -89,6 +134,10 @@ fn capabilities<T: StoreReplayAdapter + ?Sized>(adapter: &T) -> EffectReplayCapa
 
 #[async_trait]
 impl<T: StoreReplayAdapter> AwaitEventResolver for T {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        StoreReplayAdapter::await_event_authority_binding_id(self)
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -173,6 +222,10 @@ impl<T: StoreReplayAdapter> AwaitEventResolver for T {
 
 #[async_trait]
 impl<T: StoreReplayHost> EffectHost for T {
+    fn turn_control_binding_id(&self) -> String {
+        StoreReplayHost::turn_control_binding_id(self)
+    }
+
     async fn list_outstanding_await_event_keys(
         &self,
         session_id: &SessionId,
@@ -194,6 +247,7 @@ impl<T: StoreReplayHost> EffectHost for T {
         let controller = ScopedStoreReplayController {
             driver: Arc::clone(self.replay_driver()),
             scope: scope.clone(),
+            authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
         };
         ScopedEffectController::shared(Arc::new(controller), scope)
     }
@@ -206,6 +260,7 @@ impl<T: StoreReplayHost> EffectHost for T {
         let controller = ScopedStoreReplayController {
             driver: Arc::clone(self.replay_driver()),
             scope: scope.clone(),
+            authority_binding_id: StoreReplayHost::turn_control_binding_id(self),
         };
         Ok(Some(ScopedEffectController::shared(
             Arc::new(controller),
@@ -249,6 +304,22 @@ impl<T: StoreReplayHost> EffectHost for T {
 
     fn bind_process_registry(&self, binding: crate::ProcessRegistryBinding) {
         StoreReplayHost::bind_process_registry(self, binding);
+    }
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        StoreReplayHost::register_turn_cancel_closure_participant(self, participant_id, scope).await
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        StoreReplayHost::release_turn_cancel_closure_participant(self, participant_id, scope).await
     }
 }
 

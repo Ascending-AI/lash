@@ -817,6 +817,7 @@ async fn commit_cas_livelock(
             )
         };
         let loser = RuntimeCommit {
+            turn_cancel_closure_settlement: None,
             commit_budget: lash_core::store::CommitBudget::bounded(1024 * 1024, 512),
             session_id: state.session_id,
             expected_head_revision: state.head_revision,
@@ -838,6 +839,8 @@ async fn commit_cas_livelock(
             completed_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
         };

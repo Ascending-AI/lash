@@ -58,12 +58,15 @@ pub struct SqliteEffectReplayOptions {
 #[derive(Clone)]
 pub struct SqliteEffectHost {
     inner: Arc<SqliteEffectReplay>,
+    turn_control_binding_id: Arc<str>,
     /// The journal file, when the host is file-backed: a session-store
     /// factory attaches it for the retention sweep.
     fence_database: Option<PathBuf>,
     /// The bound process registry's file, attached to the journal connection
     /// so process-scope fences live beside the process rows (ADR 0049).
     registry: Arc<RegistryAttachment>,
+    closure_lifecycle: SqliteConnection,
+    closure_registry: Arc<RegistryAttachment>,
 }
 
 /// Scoped SQLite-backed runtime effect controller.
@@ -71,6 +74,7 @@ pub struct SqliteEffectHost {
 pub struct SqliteRuntimeEffectController {
     inner: Arc<SqliteEffectReplay>,
     scope: ExecutionScope,
+    turn_control_binding_id: Arc<str>,
 }
 
 // The `AwaitEventResolver` / `EffectHost` / `RuntimeEffectController` surface of
@@ -82,17 +86,102 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
     fn replay_driver(&self) -> &Arc<SqliteEffectReplay> {
         &self.inner
     }
+
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.turn_control_binding_id.to_string())
+    }
 }
 
+#[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.turn_control_binding_id.to_string()
+    }
+
     fn effect_scope_fence_database(&self) -> Option<PathBuf> {
         self.fence_database.clone()
     }
 
     fn bind_process_registry(&self, binding: lash_core::ProcessRegistryBinding) {
         if let Some(path) = binding.fence_database {
-            self.registry.request(path);
+            self.registry.request(path.clone());
+            self.closure_registry.request(path);
         }
+    }
+
+    async fn register_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let scope_json = serde_json::to_string(scope).map_err(|error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                error.to_string(),
+            )
+        })?;
+        let participant_id = participant_id.to_string();
+        let fences = self
+            .closure_registry
+            .ensure_attached(&self.closure_lifecycle)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })?;
+        self.closure_lifecycle
+            .write(move |tx| {
+                if fences.is_fenced(tx, &scope_id)? {
+                    return Ok(false);
+                }
+                tx.execute(
+                    "INSERT INTO turn_cancel_closure_participants (scope_id, participant_id, scope_json)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(scope_id, participant_id) DO NOTHING",
+                    params![scope_id, participant_id, scope_json],
+                )?;
+                Ok(true)
+            })
+            .await
+            .map_err(|error| RuntimeError::new(
+                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                error.to_string(),
+            ))?
+            .then_some(())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::EffectScopeRetired,
+                    format!(
+                        "effect scope `{}` has been retired and cannot admit a cancellation-closure participant",
+                        scope.journal_identity().expect("validated scope").key()
+                    ),
+                )
+            })
+    }
+
+    async fn release_turn_cancel_closure_participant(
+        &self,
+        participant_id: &str,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let participant_id = participant_id.to_string();
+        self.closure_lifecycle
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM turn_cancel_closure_participants WHERE scope_id = ?1 AND participant_id = ?2",
+                    params![scope_id, participant_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|error| RuntimeError::new(
+                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                error.to_string(),
+            ))
     }
 }
 
@@ -101,6 +190,10 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteRuntimeEffectController 
     type AwaitEvents = SqliteAwaitEventBackend;
     fn replay_driver(&self) -> &Arc<SqliteEffectReplay> {
         &self.inner
+    }
+
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.turn_control_binding_id.to_string())
     }
 }
 
@@ -141,17 +234,28 @@ impl SqliteEffectHost {
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
         let registry = Arc::new(RegistryAttachment::default());
+        let inner = open_effect_replay_driver(
+            path,
+            StoreBacking::File,
+            options,
+            clock,
+            Arc::clone(&registry),
+        )
+        .await?;
+        let closure_lifecycle = SqliteConnection::open(path).await?;
+        let closure_registry = Arc::new(RegistryAttachment::default());
+        // Opening creates the database before the host is returned, so the
+        // canonical path is a stable identity across relative paths and
+        // symlinked deployment configuration. Fall back only for platforms
+        // that cannot canonicalize an already-open file.
+        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         Ok(Self {
-            inner: open_effect_replay_driver(
-                path,
-                StoreBacking::File,
-                options,
-                clock,
-                Arc::clone(&registry),
-            )
-            .await?,
+            inner,
             fence_database: Some(path.to_path_buf()),
             registry,
+            closure_lifecycle,
+            closure_registry,
+            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
         })
     }
 
@@ -237,6 +341,12 @@ impl SqliteRuntimeEffectController {
             )
             .await?,
             scope,
+            turn_control_binding_id: Arc::from(format!(
+                "sqlite:{}",
+                std::fs::canonicalize(path)
+                    .unwrap_or_else(|_| path.to_path_buf())
+                    .display()
+            )),
         })
     }
 
@@ -276,6 +386,7 @@ impl SqliteRuntimeEffectController {
         Ok(Self {
             inner: open_effect_replay_memory_driver(options, clock).await?,
             scope,
+            turn_control_binding_id: Arc::from(format!("sqlite-memory:{}", uuid::Uuid::new_v4())),
         })
     }
 
@@ -867,6 +978,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             let scope_json = scope_json.clone();
             self.conn
                 .write(move |tx| {
+                    let closure_pinned =
+                        scope_has_turn_cancel_closure_participant(tx, JOURNAL_SCHEMA, &scope_id)?;
+                    if closure_pinned {
+                        return Ok(None);
+                    }
                     if when_quiescent
                         && !scope_is_quiescent(tx, JOURNAL_SCHEMA, &scope_id, &scope_json)?
                     {
@@ -963,6 +1079,26 @@ pub(crate) fn scope_is_quiescent(
         |row| row.get(0),
     )?;
     Ok(!live)
+}
+
+/// Whether any session catalog still owns an authorization lifetime in this
+/// physical promise-owner scope. Callers read this in the same write
+/// transaction that would insert the retirement fence.
+pub(crate) fn scope_has_turn_cancel_closure_participant(
+    tx: &rusqlite::Transaction<'_>,
+    schema: &str,
+    scope_id: &str,
+) -> rusqlite::Result<bool> {
+    tx.query_row(
+        &format!(
+            "SELECT EXISTS(
+                SELECT 1 FROM {schema}.turn_cancel_closure_participants
+                WHERE scope_id = ?1
+             )"
+        ),
+        params![scope_id],
+        |row| row.get(0),
+    )
 }
 
 /// Scope-exact retirement (N4) of one non-session scope whose fence shares

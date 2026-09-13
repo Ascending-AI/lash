@@ -226,6 +226,7 @@ impl LashRuntime {
             // not create new effect authority. Every frame in this admitted
             // run therefore keeps the controller's exact execution scope.
             let turn_effect_controller = scoped_effect_controller.clone();
+            let teardown_effect_controller = turn_effect_controller.clone();
             let frame_stopwatch = if turns.is_empty() {
                 stopwatch
             } else {
@@ -308,6 +309,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
+                        &teardown_effect_controller,
                     )
                     .await;
                     self.invalidate_resident_session_state();
@@ -320,6 +322,7 @@ impl LashRuntime {
                             .as_ref()
                             .map(|lease| lease.fence())
                             .as_ref(),
+                        &teardown_effect_controller,
                     )
                     .await;
                     self.record_follow_on_failure(&mut turns, err);

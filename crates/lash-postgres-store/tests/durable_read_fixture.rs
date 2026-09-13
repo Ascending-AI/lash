@@ -19,9 +19,13 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-67-02339d79/postgres-expected.json",
+];
+const PREVIOUS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/postgres-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-11f6b0eb/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-6a89236a/postgres-expected.json",
 ];
@@ -30,6 +34,8 @@ const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-25d7281b/postgres-expected.json",
 ];
 const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-fe2964c7/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-037d9999/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/postgres-expected.json",
@@ -113,7 +119,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 88);
+    assert_eq!(PostgresStorage::schema_version(), 89);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -195,6 +201,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("connect to refresh refusal fixture catalog");
     sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_turn_cancel_closure_authorizations;
+         DROP TABLE IF EXISTS lash_turn_cancellation_bindings;
+         DROP TABLE IF EXISTS lash_turn_cancel_retired_scopes;",
+    )
+    .execute(&pool)
+    .await
+    .expect("discard pre-cutover turn cancellation closure tables");
+    for table in [
+        "lash_turn_cancellation_bindings",
+        "lash_turn_cancel_closure_authorizations",
+        "lash_turn_cancel_retired_scopes",
+    ] {
+        sqlx::raw_sql(schema_table_ddl(table))
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("create {table} from authoritative DDL: {error}"));
+    }
+    sqlx::raw_sql(
         "UPDATE lash_process_events
             SET event_json = jsonb_set(
                 event_json::jsonb,
@@ -271,14 +295,34 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
          ALTER TABLE lash_turn_cancel_requests
-             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
+             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate',
+             ADD COLUMN IF NOT EXISTS intent_revision BIGINT NOT NULL DEFAULT 1;
+         ALTER TABLE lash_turn_cancel_requests
+             ALTER COLUMN intent_revision DROP DEFAULT;
          UPDATE lash_schema_versions
-            SET version = 88
+            SET version = 89
           WHERE component = 'lash-postgres-store';",
     )
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
+    // The enclosing catalog uses the current causal discriminator vocabulary;
+    // only the deliberately obsolete checkpoint component remains historical.
+    let causal_constraint =
+        lash_core::store_backend_support::required_constraints::POSTGRES_EXPECTED_CONSTRAINTS
+            .iter()
+            .find(|constraint| constraint.name == "ck_session_meta_caused_by_kind")
+            .expect("registered session causal discriminator constraint");
+    sqlx::raw_sql(&format!(
+        "ALTER TABLE {} DROP CONSTRAINT {}, ADD CONSTRAINT {} CHECK ({})",
+        causal_constraint.table,
+        causal_constraint.name,
+        causal_constraint.name,
+        causal_constraint.expression,
+    ))
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture causal vocabulary from the current schema contract");
     upgrade_prior_fixture_frame_identity(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
         .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())
@@ -473,7 +517,7 @@ fn assert_fixture_version() {
     assert_eq!(
         recorded, current,
         "declared Postgres durable schema version changed without fixture regeneration; run \
-         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-postgres-store --test \
+         LASH_REGENERATE_DURABLE_READ_FIXTURES=1 cargo test -p lash-internal-postgres-store --test \
          durable_read_fixture regenerate_postgres_durable_fixture -- --ignored --exact"
     );
 }

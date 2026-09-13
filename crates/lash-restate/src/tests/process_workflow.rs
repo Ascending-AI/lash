@@ -176,7 +176,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
         .await
         .expect("register terminal-failure child");
     let parent_context = Arc::new(RecordingContext::default());
-    let parent = RestateRuntimeEffectController::new(Arc::clone(&parent_context));
+    let parent = RestateRuntimeEffectController::new_for_test(Arc::clone(&parent_context));
     let parent_wait = parent.execute_effect(
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "await-terminal-child-failure"),
@@ -218,10 +218,12 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
     )
     .await
     .expect("terminal child workflow must complete through the Restate endpoint");
-    let promise_key =
-        restate_process_terminal_await_key(&ProcessId::from("terminal-child-failure"))
-            .expect("terminal promise key")
-            .promise_key();
+    let promise_key = restate_process_terminal_await_key(
+        &test_restate_authority_id(),
+        &ProcessId::from("terminal-child-failure"),
+    )
+    .expect("terminal promise key")
+    .promise_key();
     let resolution = restate_completed_promise(&endpoint_output, &promise_key)
         .expect("terminal child workflow must publish its process-terminal promise");
     let serde_json::Value::String(resolution) = resolution else {
@@ -518,7 +520,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         )
         .build();
     let context = Arc::new(RecordingContext::with_endpoint(endpoint));
-    let host = RestateRuntimeEffectController::new(context.clone());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registration = external_registration("task-smoke")
         .with_wake_session_id(Some(SessionId::from("wake-smoke")));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
@@ -1161,7 +1163,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
             ..ReplayableRecordingContext::default()
         });
         context.install_process_worker(worker.clone());
-        let controller = RestateRuntimeEffectController::with_options(
+        let controller = RestateRuntimeEffectController::with_options_for_test(
             Arc::clone(&context),
             RestateEffectControllerOptions::default().segment_effect_budget(1),
         );
@@ -1275,7 +1277,7 @@ pub(super) async fn process_parents_teardown_after_durable_end_across_segments_a
         let context = Arc::new(ReplayableRecordingContext::default());
         context.defer_process_workflows();
         let context_evidence = Arc::clone(&context);
-        let controller = RestateRuntimeEffectController::with_options(
+        let controller = RestateRuntimeEffectController::with_options_for_test(
             context,
             RestateEffectControllerOptions::default().segment_effect_budget(1),
         );
@@ -1669,7 +1671,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         )
         .build();
     let context_a = Arc::new(RecordingContext::with_endpoint(endpoint_a));
-    let host_a = RestateRuntimeEffectController::new(context_a);
+    let host_a = RestateRuntimeEffectController::new_for_test(context_a);
     let creator_scope = lash_core::SessionScope::new("root");
     let env_ref = persist_recovery_env_ref().await;
     let registration = ProcessRegistration::new(
@@ -1802,7 +1804,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         )
         .build();
     let context_b = Arc::new(RecordingContext::with_endpoint(endpoint_b));
-    let host_b = RestateRuntimeEffectController::new(context_b);
+    let host_b = RestateRuntimeEffectController::new_for_test(context_b);
     host_b
         .execute_effect(
             RuntimeEffectEnvelope::new(

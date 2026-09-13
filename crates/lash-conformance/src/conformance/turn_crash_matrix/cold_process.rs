@@ -20,6 +20,15 @@ pub(super) enum ColdProcessTurnAction {
     RecoverFinalCommitBoundary,
     PeerReclaim,
     Recover,
+    CancelAuthorizationBoundary,
+    CancelAuthorizationInsideCall,
+    CancelBaseBoundary,
+    CancelBaseInsideCall,
+    CancelEscalationBoundary,
+    CancelEscalationInsideCall,
+    CancelEffectsConsumeBoundary,
+    CancelEffectsConsumeInsideCall,
+    CancelRecover,
 }
 
 impl ColdProcessTurnAction {
@@ -29,6 +38,17 @@ impl ColdProcessTurnAction {
         Self::EffectAfterExternalBeforeOutcome,
         Self::FinalCommitBoundary,
         Self::FinalCommitInsideCall,
+    ];
+
+    pub(super) const CANCEL_CRASH_ACTIONS: [Self; 8] = [
+        Self::CancelAuthorizationBoundary,
+        Self::CancelAuthorizationInsideCall,
+        Self::CancelBaseBoundary,
+        Self::CancelBaseInsideCall,
+        Self::CancelEscalationBoundary,
+        Self::CancelEscalationInsideCall,
+        Self::CancelEffectsConsumeBoundary,
+        Self::CancelEffectsConsumeInsideCall,
     ];
 
     fn command(self) -> &'static str {
@@ -44,6 +64,15 @@ impl ColdProcessTurnAction {
             Self::RecoverFinalCommitBoundary => "turn_recover_final_commit_boundary",
             Self::PeerReclaim => "turn_peer_reclaim",
             Self::Recover => "turn_recover",
+            Self::CancelAuthorizationBoundary => "turn_cancel_authorization_boundary",
+            Self::CancelAuthorizationInsideCall => "turn_cancel_authorization_inside",
+            Self::CancelBaseBoundary => "turn_cancel_base_boundary",
+            Self::CancelBaseInsideCall => "turn_cancel_base_inside",
+            Self::CancelEscalationBoundary => "turn_cancel_escalation_boundary",
+            Self::CancelEscalationInsideCall => "turn_cancel_escalation_inside",
+            Self::CancelEffectsConsumeBoundary => "turn_cancel_effects_consume_boundary",
+            Self::CancelEffectsConsumeInsideCall => "turn_cancel_effects_consume_inside",
+            Self::CancelRecover => "turn_cancel_recover",
         }
     }
 
@@ -64,24 +93,75 @@ impl ColdProcessTurnAction {
                 placement: CrashPlacement::AfterExternalEffectBeforeOutcome,
             }),
             Self::FinalCommitBoundary | Self::RecoverFinalCommitBoundary => Some(TurnCrashPoint {
-                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                    settles_queue: true,
-                    settles_turn_input: true,
-                    releases_lease: true,
-                }),
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
                 placement: CrashPlacement::Boundary,
             }),
             Self::FinalCommitInsideCall => Some(TurnCrashPoint {
-                operation: TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                    settles_queue: true,
-                    settles_turn_input: true,
-                    releases_lease: true,
-                }),
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
                 placement: CrashPlacement::InsideCall,
             }),
             Self::CheckpointAfterExecuteBeforeOutcome | Self::PeerReclaim | Self::Recover => None,
+            Self::CancelAuthorizationBoundary => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
+                placement: CrashPlacement::Boundary,
+            }),
+            Self::CancelAuthorizationInsideCall => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
+                placement: CrashPlacement::InsideCall,
+            }),
+            Self::CancelBaseBoundary => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::TurnControl(TurnControlOperation::ResolveBase),
+                placement: CrashPlacement::Boundary,
+            }),
+            Self::CancelBaseInsideCall => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::TurnControl(TurnControlOperation::ResolveBase),
+                placement: CrashPlacement::InsideCall,
+            }),
+            Self::CancelEscalationBoundary => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::TurnControl(TurnControlOperation::ResolveEscalation),
+                placement: CrashPlacement::Boundary,
+            }),
+            Self::CancelEscalationInsideCall => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::TurnControl(TurnControlOperation::ResolveEscalation),
+                placement: CrashPlacement::InsideCall,
+            }),
+            Self::CancelEffectsConsumeBoundary => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
+                placement: CrashPlacement::Boundary,
+            }),
+            Self::CancelEffectsConsumeInsideCall => Some(TurnCrashPoint {
+                operation: TurnSeamOperation::Store(
+                    StoreOperation::ApplyTurnCancelEffectsAndConsume,
+                ),
+                placement: CrashPlacement::InsideCall,
+            }),
+            Self::CancelRecover => None,
         }
     }
+
+    fn is_cancel_crash(self) -> bool {
+        Self::CANCEL_CRASH_ACTIONS.contains(&self)
+    }
+
+    fn uses_store_owned_turn_control(self) -> bool {
+        self.is_cancel_crash() || self == Self::CancelRecover
+    }
+}
+
+/// The eight real-process cancellation closure cuts: immediately before and
+/// after authorization, base-gate settlement, escalation closure, and the
+/// atomic input-effects/authorization-consume transaction.
+pub fn cold_process_turn_cancel_actions() -> Vec<&'static str> {
+    ColdProcessTurnAction::CANCEL_CRASH_ACTIONS
+        .into_iter()
+        .map(ColdProcessTurnAction::command)
+        .collect()
 }
 
 /// Return each helper action's exact effect-count and durable-state oracle.
@@ -159,6 +239,181 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     crate::ExecutionScope::turn(identity.session_id, identity.turn_id)
 }
 
+async fn recover_turn_cancel_closure(
+    store: Arc<dyn RuntimePersistence>,
+    identity: &ReferenceIdentity,
+) {
+    super::super::bind_conformance_session(&store, &identity.session_id).await;
+    super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
+    let owner = LeaseOwnerIdentity::opaque(
+        "cold-process-cancel-recovery",
+        format!("{}:cancel-recovery", identity.turn_id),
+    );
+    let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
+        loop {
+            let outcome = store
+                .try_claim_session_execution_lease(
+                    &identity.session_id,
+                    &owner,
+                    "cold-process-cancel-recovery-executor",
+                    recovery_timings().ttl_ms(),
+                )
+                .await
+                .expect("claim cancellation recovery lane");
+            if let Some(lease) = outcome.acquired() {
+                break lease;
+            }
+            tokio::time::sleep(recovery_timings().renew_interval()).await;
+        }
+    })
+    .await
+    .expect("cancellation recovery lane becomes reclaimable");
+    let authority = store
+        .turn_cancellation_authority()
+        .expect("persistent backend exposes reopenable cancellation authority");
+    let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
+    store
+        .validate_turn_cancellation_binding(
+            &identity.session_id,
+            &lease.fence(),
+            authority.binding_id(),
+            &admitted_scope,
+        )
+        .await
+        .expect("successor adopts the selected cancellation binding");
+    let address = crate::TurnAddress::new(&identity.session_id, &identity.turn_id);
+    let committed = store
+        .turn_is_committed(&address)
+        .await
+        .expect("read cancellation commit receipt");
+    let already_applied = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read cancellation outcome before recovery")
+        .and_then(|record| record.outcome)
+        .is_some();
+    if !committed && !already_applied {
+        let resolver = authority.resolver();
+        let mut pending = store
+            .pending_turn_cancel_closures(
+                &identity.session_id,
+                &lease.fence(),
+                authority.binding_id(),
+                &admitted_scope,
+            )
+            .await
+            .expect("load pending closure authorization");
+        let authorization = if let Some(authorization) = pending.pop() {
+            assert!(pending.is_empty(), "one turn has one closure authorization");
+            authorization
+        } else {
+            let observed = store
+                .turn_cancel_request_intent(&address)
+                .await
+                .expect("read durable cancellation intent");
+            let request = observed
+                .request()
+                .expect("crashed cancellation turn retains its request");
+            let evidence = crate::TurnCancellationEvidence {
+                request_id: request.request_id.clone(),
+                origin: request.origin.clone(),
+                reason: request.reason.clone(),
+                undelivered: request.undelivered,
+                mode: request.mode,
+                honoured_after_step: None,
+            };
+            let authorization = crate::TurnCancelClosureAuthorization::new(
+                address.clone(),
+                authority.binding_id(),
+                address.execution_scope(),
+                resolver
+                    .await_event_key(
+                        &address.execution_scope(),
+                        crate::AwaitEventWaitIdentity::TurnCancelGate,
+                    )
+                    .await
+                    .expect("reopen cancellation key"),
+                resolver
+                    .await_event_key(
+                        &address.execution_scope(),
+                        crate::AwaitEventWaitIdentity::TurnCancelEscalation,
+                    )
+                    .await
+                    .expect("reopen escalation key"),
+                resolver
+                    .await_event_key(
+                        &address.execution_scope(),
+                        crate::AwaitEventWaitIdentity::TurnTerminal,
+                    )
+                    .await
+                    .expect("reopen terminal key"),
+                crate::TurnCancelClosureProposal::CancelRequested(evidence),
+                observed,
+                &lease.fence(),
+            )
+            .expect("reconstruct the exact unpersisted closure operation");
+            store
+                .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                .await
+                .expect("successor persists exact closure authorization");
+            authorization
+        };
+        let settlement = authority
+            .settle_authorized_closure(&authorization)
+            .await
+            .expect("successor settles the authorized promise pair");
+        assert!(settlement.effective_cancellation().is_some());
+        let outcome = store
+            .repair_orphaned_active_turn_inputs(
+                &identity.session_id,
+                &lease.fence(),
+                &identity.turn_id,
+                authorization.observed_intent(),
+                Some(&settlement),
+            )
+            .await
+            .expect("apply cancellation effects and consume authorization")
+            .into_applied()
+            .expect("cancellation intent remains unchanged");
+        assert!(
+            !outcome.affected_inputs.is_empty(),
+            "recovery applies the requested disposition to active-turn input"
+        );
+    }
+    let record = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read recovered cancellation record")
+        .expect("durable cancellation request survives owner crash");
+    let outcome = record
+        .outcome
+        .expect("recovered cancellation records its exact input effects");
+    assert!(
+        outcome
+            .affected_inputs
+            .iter()
+            .all(|input| input.disposition == crate::TurnCancelDisposition::Drop),
+        "recovered cancellation applies the requested Drop disposition"
+    );
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read recovered closure pins")
+            .is_empty(),
+        "input effects and closure consumption become durable together"
+    );
+    store
+        .release_session_execution_lease(&lease.completion())
+        .await
+        .expect("release cancellation recovery lane");
+    println!(
+        "turn_cancel_complete affected_inputs={} closure_pins=0 committed={}",
+        outcome.affected_inputs.len(),
+        usize::from(committed)
+    );
+}
+
 /// Drive or recover one full scripted turn inside a backend helper process.
 ///
 /// `action` accepts `turn_provider_mid_stream`,
@@ -190,8 +445,29 @@ pub async fn cold_process_real_turn_driver(
         "turn_recover_final_commit_boundary" => ColdProcessTurnAction::RecoverFinalCommitBoundary,
         "turn_peer_reclaim" => ColdProcessTurnAction::PeerReclaim,
         "turn_recover" => ColdProcessTurnAction::Recover,
+        "turn_cancel_authorization_boundary" => ColdProcessTurnAction::CancelAuthorizationBoundary,
+        "turn_cancel_authorization_inside" => ColdProcessTurnAction::CancelAuthorizationInsideCall,
+        "turn_cancel_base_boundary" => ColdProcessTurnAction::CancelBaseBoundary,
+        "turn_cancel_base_inside" => ColdProcessTurnAction::CancelBaseInsideCall,
+        "turn_cancel_escalation_boundary" => ColdProcessTurnAction::CancelEscalationBoundary,
+        "turn_cancel_escalation_inside" => ColdProcessTurnAction::CancelEscalationInsideCall,
+        "turn_cancel_effects_consume_boundary" => {
+            ColdProcessTurnAction::CancelEffectsConsumeBoundary
+        }
+        "turn_cancel_effects_consume_inside" => {
+            ColdProcessTurnAction::CancelEffectsConsumeInsideCall
+        }
+        "turn_cancel_recover" => ColdProcessTurnAction::CancelRecover,
         other => panic!("unknown cold-process real-turn action `{other}`"),
     };
+    let effect_controller: Arc<dyn RuntimeEffectController> =
+        if action.uses_store_owned_turn_control() {
+            Arc::new(StoreOwnedTurnControlController {
+                inner: effect_controller,
+            })
+        } else {
+            effect_controller
+        };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
     let recovers_existing_turn = matches!(
@@ -199,9 +475,38 @@ pub async fn cold_process_real_turn_driver(
         ColdProcessTurnAction::Recover
             | ColdProcessTurnAction::RecoverFinalCommitBoundary
             | ColdProcessTurnAction::PeerReclaim
+            | ColdProcessTurnAction::CancelRecover
     );
     if !recovers_existing_turn {
         seed_reference_ingress(&store, &identity, scenario).await;
+        if action.is_cancel_crash() {
+            let host: Arc<dyn crate::EffectHost> =
+                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller)));
+            let receipt = crate::TurnWorkDriver::for_session(
+                host,
+                identity.session_id.to_string(),
+                Arc::clone(&store),
+            )
+            .request_cancel(
+                crate::TurnCancelRequest::new(
+                    crate::TurnAddress::new(&identity.session_id, &identity.turn_id),
+                    format!("cold-process-turn-cancel:{scenario}"),
+                    Some("cold-process-conformance".to_string()),
+                )
+                .mode(crate::TurnCancelMode::AfterStep)
+                .undelivered(crate::TurnCancelDisposition::Drop),
+            )
+            .await
+            .expect("seed durable after-step cancellation before the owner runs");
+            assert!(matches!(
+                receipt.outcome,
+                crate::TurnCancelOutcome::Requested(_)
+                    | crate::TurnCancelOutcome::AlreadyRequested(_)
+            ));
+        }
+    } else if action == ColdProcessTurnAction::CancelRecover {
+        recover_turn_cancel_closure(store, &identity).await;
+        return;
     } else if action == ColdProcessTurnAction::PeerReclaim {
         let owner =
             LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
@@ -280,6 +585,17 @@ pub async fn cold_process_real_turn_driver(
                 if let Some(acquisition) = outcome.acquisition() {
                     if let Some(displaced) = acquisition.displaced.as_ref() {
                         assert_eq!(displaced.owner.owner_id, "lash-core-test-worker");
+                    } else if action == ColdProcessTurnAction::CancelRecover {
+                        assert!(
+                            store
+                                .turn_is_committed(&crate::TurnAddress::new(
+                                    &identity.session_id,
+                                    &identity.turn_id,
+                                ))
+                                .await
+                                .expect("read already-committed cancellation receipt"),
+                            "only an already-landed cancellation commit may leave recovery unheld"
+                        );
                     } else {
                         let terminal_count = crate::load_persisted_session_state(store.as_ref())
                             .await

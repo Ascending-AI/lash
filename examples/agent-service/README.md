@@ -94,6 +94,7 @@ OPENROUTER_API_KEY=... \
 AGENT_SERVICE_DURABILITY=restate \
 AGENT_SERVICE_RESTATE_ADDR=127.0.0.1:9080 \
 RESTATE_INGRESS_URL=http://127.0.0.1:8080 \
+RESTATE_AUTHORITY_ID=agent-service-local \
 cargo run -p agent-service --features restate -- --durability restate
 
 restate deployments register http://127.0.0.1:9080
@@ -124,7 +125,9 @@ local Docker networking needs different addresses.
 In Restate mode the Axum app still serves `AGENT_SERVICE_ADDR`, the same process
 also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and browser
 turns finish the app-specific `AgentServiceTurnWorkflow/{turn_id}/run/send`
-through `RESTATE_INGRESS_URL`. The endpoint also binds Lash's generic
+through `RESTATE_INGRESS_URL`. `RESTATE_AUTHORITY_ID` identifies the durable
+Restate state independently of that endpoint; preserve it across endpoint
+moves and choose a different value for every independent Restate state. The endpoint also binds Lash's generic
 `LashProcessWorkflow`, backed by `RestateCoreProcessRunner` and the same
 deployment-level `processes.db`, so background process starts from a turn are
 reconstructed from the SQLite durable-core catalog instead of running in the route

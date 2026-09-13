@@ -5,6 +5,17 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
+    /// Replace the standalone store's generated turn-cancellation authority
+    /// with the explicit authority owned by a low-level test fixture.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_turn_cancellation_authority_for_testing(
+        mut self,
+        authority: crate::TurnCancellationAuthority,
+    ) -> Self {
+        self.turn_cancellation_authority = Some(authority);
+        self
+    }
+
     #[cfg(any(test, feature = "testing"))]
     pub fn inject_graph_corruption_for_testing(
         &self,

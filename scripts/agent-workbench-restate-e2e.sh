@@ -379,6 +379,7 @@ PY
 set +e
 RESTATE_INGRESS_URL="$ingress_url" \
 RESTATE_ADMIN_URL="$admin_url" \
+RESTATE_AUTHORITY_ID="agent-workbench-e2e:${LASH_GATE_WORKTREE_SLUG}" \
 AGENT_WORKBENCH_E2E_ENDPOINT_BIND="$endpoint_bind" \
 AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND="$postgres_endpoint_bind" \
 AGENT_WORKBENCH_E2E_DATABASE_URL="$database_url" \

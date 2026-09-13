@@ -45,7 +45,7 @@ fn turn_effect_invocation(
 lash_conformance::turn_work_driver_tests!({
     let context = Arc::new(RecordingContext::default());
     let registration_context = Arc::clone(&context);
-    let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new(context));
+    let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new_for_test(context));
     ((), host, move |_host, session_id, key| async move {
         registration_context
             .wait_for_await_event_registration(&session_id, &key)
@@ -56,8 +56,9 @@ lash_conformance::turn_work_driver_tests!({
 pub(super) fn replayable_conformance_invocation(
     context: Arc<ReplayableRecordingContext>,
 ) -> lash_conformance::ConformanceInvocation {
-    let controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    let controller: Arc<dyn RuntimeEffectController> = Arc::new(
+        RestateRuntimeEffectController::new_for_test(Arc::clone(&context)),
+    );
     lash_conformance::ConformanceInvocation::new(
         controller,
         ExecutionScope::runtime_operation("restate-replay-conformance"),
@@ -65,8 +66,9 @@ pub(super) fn replayable_conformance_invocation(
         || {},
         move || {
             context.start_replay();
-            Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)))
-                as Arc<dyn RuntimeEffectController>
+            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+                &context,
+            ))) as Arc<dyn RuntimeEffectController>
         },
     )
 }
@@ -75,8 +77,9 @@ pub(super) fn crash_redrive_conformance_invocation(
     _scenario: &str,
 ) -> lash_conformance::ConformanceInvocation {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    let controller: Arc<dyn RuntimeEffectController> = Arc::new(
+        RestateRuntimeEffectController::new_for_test(Arc::clone(&context)),
+    );
     lash_conformance::ConformanceInvocation::new(
         controller,
         ExecutionScope::runtime_operation("restate-crash-redrive-conformance"),
@@ -84,8 +87,9 @@ pub(super) fn crash_redrive_conformance_invocation(
         || {},
         move || {
             context.start_replay_allowing_journal_extension();
-            Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)))
-                as Arc<dyn RuntimeEffectController>
+            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+                &context,
+            ))) as Arc<dyn RuntimeEffectController>
         },
     )
 }
@@ -226,12 +230,12 @@ lash_conformance::durable_queued_drain_wait_resolver_tests!({
     (
         (),
         || {
-            Arc::new(RestateRuntimeEffectController::new(Arc::new(
+            Arc::new(RestateRuntimeEffectController::new_for_test(Arc::new(
                 RecordingContext::default(),
             ))) as Arc<dyn lash_core::AwaitEventResolver>
         },
         || {
-            Arc::new(RestateEffectHost::new("http://127.0.0.1:8080"))
+            Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080"))
                 as Arc<dyn lash_core::AwaitEventResolver>
         },
     )
@@ -239,7 +243,8 @@ lash_conformance::durable_queued_drain_wait_resolver_tests!({
 
 lash_conformance::signal_intent_tests!({
     let context = Arc::new(RecordingContext::default());
-    let effect_host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new(context));
+    let effect_host: Arc<dyn EffectHost> =
+        Arc::new(RestateRuntimeEffectController::new_for_test(context));
     let registry =
         Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
@@ -428,7 +433,7 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
     let context = Arc::new(ReplayableRecordingContext::default());
     let sink = Arc::new(RecordingTraceSink::default());
     let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
-    let controller = RestateRuntimeEffectController::with_options(
+    let controller = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().segment_effect_budget(1),
     )
@@ -533,7 +538,7 @@ pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_co
 #[tokio::test]
 pub(super) async fn restate_handler_controller_journals_typed_trigger_execution() {
     let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let envelope = RuntimeEffectEnvelope::new(
         operation_effect_invocation(
             "restate-trigger-session",
@@ -620,7 +625,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
         .expect("trigger registration outcome");
 
     let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options(
+    let controller = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         // Sits above the poison substitute (envelope plus a fixed-length typed
         // message) and below the listed subscription record.
@@ -665,7 +670,7 @@ pub(super) async fn fig1464_unjournalable_effect_outcome_gives_up_with_a_typed_t
 #[tokio::test]
 pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_poison_entry() {
     let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options(
+    let controller = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     );
@@ -702,7 +707,7 @@ pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_pois
 #[tokio::test]
 pub(super) async fn fig1464_over_budget_tool_batch_gives_up_before_running_the_batch() {
     let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options(
+    let controller = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     );
@@ -757,7 +762,7 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
     let envelope =
         || fig1464_poison_list_envelope("restate-budget-flip-session", "restate-budget-flip");
 
-    let recorded = RestateRuntimeEffectController::with_options(
+    let recorded = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     )
@@ -774,7 +779,7 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
     );
 
     context.replaying.store(true, Ordering::SeqCst);
-    let replayed = RestateRuntimeEffectController::with_options(
+    let replayed = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         // The budget the redrive was configured with now clears the envelope, so
         // an un-journaled give-up would have journaled a record here.
@@ -822,7 +827,7 @@ pub(super) async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_
         })
     };
 
-    let recorded = RestateRuntimeEffectController::with_options(
+    let recorded = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     )
@@ -831,7 +836,7 @@ pub(super) async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_
     .expect_err("the over-budget batch must give up before running");
 
     context.replaying.store(true, Ordering::SeqCst);
-    let replayed = RestateRuntimeEffectController::with_options(
+    let replayed = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         // Big enough that a give-up re-decided from live config would proceed,
         // run the batch, and only then meet the journaled give-up.
@@ -864,7 +869,7 @@ pub(super) async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_
 #[tokio::test]
 pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options(
+    let controller = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
     );
@@ -1050,7 +1055,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         },
     );
 
-    let recorded_proc_err = RestateRuntimeEffectController::with_options(
+    let recorded_proc_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     )
@@ -1081,7 +1086,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         ran_proc.store(true, Ordering::SeqCst);
     });
 
-    let replayed_proc_err = RestateRuntimeEffectController::with_options(
+    let replayed_proc_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
     )
@@ -1118,7 +1123,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         },
     );
 
-    let recorded_batch_err = RestateRuntimeEffectController::with_options(
+    let recorded_batch_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     )
@@ -1141,7 +1146,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     let batch_executed = Arc::new(AtomicBool::new(false));
     let ran_batch = Arc::clone(&batch_executed);
 
-    let replayed_batch_err = RestateRuntimeEffectController::with_options(
+    let replayed_batch_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
     )
@@ -1178,7 +1183,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 #[tokio::test]
 pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let scope = durable_turn_scope("journaled-peek-session", "journaled-peek-turn");
     let key = controller
         .await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -1263,7 +1268,8 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
 
 #[test]
 pub(super) fn restate_handler_controller_disallows_concurrent_effect_calls() {
-    let controller = RestateRuntimeEffectController::new(Arc::new(RecordingContext::default()));
+    let controller =
+        RestateRuntimeEffectController::new_for_test(Arc::new(RecordingContext::default()));
 
     assert!(
         !controller.supports_concurrent_effects(),
@@ -1882,6 +1888,99 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::TurnInputStore for CommitRetryStore {
+    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+        self.inner.turn_cancellation_authority()
+    }
+
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner
+            .validate_turn_cancellation_binding(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        authorization: &lash_core::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
+        self.inner
+            .authorize_turn_cancel_closure(session_execution_lease, authorization)
+            .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &lash_core::ExecutionScope,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner
+            .pending_turn_cancel_closures(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, lash_core::StoreError> {
+        self.inner.pending_turn_cancel_closure_pins().await
+    }
+
+    async fn turn_is_committed(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner.turn_is_committed(address).await
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: lash_core::runtime::TurnCancelRequest,
+    ) -> Result<lash_core::TurnCancelRequestRecord, lash_core::StoreError> {
+        self.inner.record_turn_cancel_request(request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, lash_core::StoreError> {
+        self.inner.turn_cancel_request(address).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+    ) -> Result<lash_core::TurnCancelIntentSnapshot, lash_core::StoreError> {
+        self.inner.turn_cancel_request_intent(address).await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &lash_core::runtime::TurnAddress,
+        observed: &lash_core::TurnCancelIntentSnapshot,
+        evidence: &lash_core::runtime::TurnCancellationEvidence,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner
+            .reconcile_turn_cancel_winner(address, observed, evidence)
+            .await
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         input: lash_core::PendingTurnInputDraft,
@@ -1963,14 +2062,33 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         self.inner.abandon_turn_input_claim(claim).await
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<lash_core::TurnCancelInputOutcome, lash_core::StoreError> {
+    ) -> Result<Vec<lash_core::TurnId>, lash_core::StoreError> {
         self.inner
-            .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
+            .orphaned_active_turn_ids(session_id, session_execution_lease, scope)
+            .await
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        turn_id: &lash_core::TurnId,
+        observed: &lash_core::TurnCancelIntentSnapshot,
+        settlement: Option<&lash_core::TurnCancelClosureSettlement>,
+    ) -> Result<lash_core::TurnCancelRepairResult, lash_core::StoreError> {
+        self.inner
+            .repair_orphaned_active_turn_inputs(
+                session_id,
+                session_execution_lease,
+                turn_id,
+                observed,
+                settlement,
+            )
             .await
     }
 }

@@ -169,6 +169,8 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
+    turn_cancellation_authority: Option<lash_core::TurnCancellationAuthority>,
+    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
     session_id: OnceLock<SessionId>,
     clock: Arc<dyn lash_core::Clock>,
     #[cfg(feature = "lashlang")]
@@ -604,6 +606,8 @@ pub struct SqliteSessionStoreFactory {
     /// attaches it to retire quiescent operation scopes whose receipt this
     /// catalog holds (ADR 0067). Shared by every clone of the factory.
     effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
+    turn_cancel_closure_owner:
+        Arc<std::sync::Mutex<Option<lash_core::TurnCancelClosureOwnerBinding>>>,
 }
 
 impl SqliteSessionStoreFactory {
@@ -618,6 +622,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -632,6 +637,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -650,6 +656,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -666,6 +673,7 @@ impl SqliteSessionStoreFactory {
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -733,6 +741,7 @@ impl SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -794,6 +803,7 @@ impl SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -815,6 +825,19 @@ impl SqliteSessionStoreFactory {
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        let catalog = lifecycle::canonical_catalog_identity(&self.catalog_path());
+        *self
+            .turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
+            .turn_control_authority_owner()
+            == lash_core::TurnControlAuthorityOwner::EffectHost)
+            .then(|| {
+                lash_core::TurnCancelClosureOwnerBinding::new(
+                    format!("sqlite-catalog:{}", catalog.display()),
+                    Arc::clone(effect_host),
+                )
+            });
         if let Some(path) = effect_host.effect_scope_fence_database() {
             *self
                 .effect_journal_path
@@ -891,6 +914,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.options,
                 Arc::clone(&self.clock),
                 None,
+                self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -906,6 +930,83 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             return Ok(None);
         }
         Ok(Some(store as Arc<dyn RuntimePersistence>))
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        let Some(store) = self
+            .open_existing_store_by_id(session_id)
+            .await
+            .map_err(StoreError::Backend)?
+        else {
+            return Ok(Vec::new());
+        };
+        store.pending_turn_cancel_closure_pins().await
+    }
+
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        let scope = scope.clone();
+        let scope_id = scope
+            .journal_identity()
+            .map_err(|error| StoreError::Backend(error.to_string()))?
+            .key()
+            .to_string();
+        let store = self
+            .open_catalog_for_maintenance("turn cancellation scope retirement")
+            .await?;
+        let inspected_scope = scope.clone();
+        store
+            .conn
+            .write_flow(move |tx| {
+                let outcome: Result<(), StoreError> = (|| {
+                    let mut statement = tx
+                        .prepare("SELECT session_id, authorization_json FROM turn_cancel_closure_authorizations ORDER BY session_id, turn_id")
+                        .map_err(sqlite_error)?;
+                    let rows = statement
+                        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                        .map_err(sqlite_error)?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(sqlite_error)?;
+                    drop(statement);
+                    for (session_id, encoded) in rows {
+                        let authorization: lash_core::TurnCancelClosureAuthorization =
+                            serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
+                                record_kind: "TurnCancelClosureAuthorization",
+                                message: error.to_string(),
+                            })?;
+                        if authorization.admitted_scope() == &inspected_scope {
+                            return Err(StoreError::TurnCancelClosureLifecyclePinned {
+                                session_id: SessionId::from(session_id),
+                                pending_count: 1,
+                            });
+                        }
+                    }
+                    tx.execute(
+                        "INSERT OR IGNORE INTO turn_cancel_retired_scopes (scope_id) VALUES (?1)",
+                        params![scope_id],
+                    )
+                    .map_err(sqlite_error)?;
+                    Ok(())
+                })();
+                Ok(match outcome {
+                    Ok(()) => TxOutcome::Commit(Ok(())),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)??;
+        if let Some(owner) = self.turn_cancel_closure_owner_binding() {
+            owner
+                .release(&scope)
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
+        Ok(())
     }
 
     async fn has_claimable_queued_work(
@@ -1155,6 +1256,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
             self.options,
             Arc::clone(&self.clock),
             self.process_registry_path.as_deref(),
+            self.turn_cancel_closure_owner_binding(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )
@@ -1278,6 +1380,25 @@ async fn delete_session_from_catalog(
     conn.write_flow(move |tx| {
         let mut report = lash_core::SessionBlobReclaimReport::default();
         let outcome: Result<lash_core::SessionBlobReclaimReport, lash_core::StoreError> = (|| {
+            let pending_count = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM turn_cancel_closure_authorizations WHERE session_id = ?1",
+                    params![session_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(sqlite_error)?;
+            let pending_count = usize::try_from(pending_count).map_err(|_| {
+                lash_core::StoreError::StoredDataCorrupt {
+                    record_kind: "TurnCancelClosureAuthorization",
+                    message: "negative pending closure count".to_string(),
+                }
+            })?;
+            if pending_count != 0 {
+                return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+                    session_id: session_id.clone(),
+                    pending_count,
+                });
+            }
             let existed = tx
                 .query_row(
                     "SELECT 1 FROM session_meta WHERE session_id = ?1
@@ -1433,6 +1554,11 @@ async fn delete_session_from_catalog(
             for table in [
                 "pending_turn_inputs",
                 "turn_cancel_requests",
+                // Administration revokes the session's effect authority before
+                // entering store deletion. Only then may the pinned closure
+                // obligation and its selected-owner identity be retired.
+                "turn_cancel_closure_authorizations",
+                "turn_cancellation_bindings",
                 "session_execution_leases",
                 "session_meta",
             ] {

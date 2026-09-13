@@ -48,11 +48,9 @@ impl PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
-        sqlx::query("DELETE FROM lash_turn_cancel_requests WHERE session_id = $1")
-            .bind(self.session_id.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        // Cancellation rows include unresolved recovery intent. They remain
+        // until session deletion, which is the only safe reclamation boundary
+        // without terminal correlation.
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(VacuumReport {
             removed_node_count,

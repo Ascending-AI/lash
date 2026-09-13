@@ -220,6 +220,238 @@ pub struct TurnCancelInputOutcome {
     pub affected_inputs: Vec<TurnCancelAffectedInput>,
 }
 
+/// A durable cancellation request header together with its monotonic intent
+/// revision. The revision changes only when the request header changes, so it
+/// fences delayed projections without coupling them to outcome retention.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TurnCancelIntentSnapshot {
+    Absent,
+    Present {
+        request: TurnCancelRequest,
+        revision: u64,
+    },
+}
+
+/// The exact terminal one authorized cancellation-closure operation proposes
+/// for the base gate. This is durable operation intent, never a second winner:
+/// the keyed promise still decides which terminal was accepted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "cancellation", rename_all = "snake_case")]
+pub enum TurnCancelClosureProposal {
+    CancelRequested(TurnCancellationEvidence),
+    CompletionSealed,
+}
+
+/// Durable authorization to close one turn's cancellation gate pair.
+///
+/// Store implementations persist this value in a non-overwritable per-turn
+/// slot bound to its admitted execution scope. A successor may finish the exact
+/// promise operation after takeover. Final publication uses head CAS and durable
+/// cancellation facts, independent of advisory lease liveness or generation;
+/// activation's orphan repair retains its current execution fence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnCancelClosureAuthorization {
+    session_id: SessionId,
+    turn_id: TurnId,
+    binding_id: String,
+    admitted_scope: ExecutionScope,
+    cancel_key: AwaitEventKey,
+    escalation_key: AwaitEventKey,
+    terminal_key: AwaitEventKey,
+    proposed_base: TurnCancelClosureProposal,
+    observed_intent: TurnCancelIntentSnapshot,
+    authorizing_fencing_token: u64,
+}
+
+/// Authenticated terminal produced by the exact durable promise owner for one
+/// persisted cancellation-closure authorization.
+///
+/// Callers cannot construct this value. Stores accept it instead of a
+/// caller-supplied repair decision, so consuming an authorization necessarily
+/// follows successful settlement by the binding recorded in that
+/// authorization. `base_cancellation` is the immutable first policy acceptor;
+/// `effective_cancellation` may carry a later same-policy timing escalation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnCancelClosureSettlement {
+    authorization: TurnCancelClosureAuthorization,
+    base_cancellation: Option<TurnCancellationEvidence>,
+    effective_cancellation: Option<TurnCancellationEvidence>,
+}
+
+impl TurnCancelClosureSettlement {
+    pub fn authorization(&self) -> &TurnCancelClosureAuthorization {
+        &self.authorization
+    }
+
+    pub fn base_cancellation(&self) -> Option<&TurnCancellationEvidence> {
+        self.base_cancellation.as_ref()
+    }
+
+    pub fn effective_cancellation(&self) -> Option<&TurnCancellationEvidence> {
+        self.effective_cancellation.as_ref()
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn settled_for_test(
+        authorization: TurnCancelClosureAuthorization,
+        base_cancellation: Option<TurnCancellationEvidence>,
+        effective_cancellation: Option<TurnCancellationEvidence>,
+    ) -> Self {
+        Self {
+            authorization,
+            base_cancellation,
+            effective_cancellation,
+        }
+    }
+}
+
+impl TurnCancelClosureAuthorization {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        address: TurnAddress,
+        binding_id: impl Into<String>,
+        admitted_scope: ExecutionScope,
+        cancel_key: AwaitEventKey,
+        escalation_key: AwaitEventKey,
+        terminal_key: AwaitEventKey,
+        proposed_base: TurnCancelClosureProposal,
+        observed_intent: TurnCancelIntentSnapshot,
+        fence: &crate::SessionExecutionLeaseAuthority,
+    ) -> Result<Self, RuntimeError> {
+        address.validate()?;
+        admitted_scope.validate()?;
+        let binding_id = binding_id.into();
+        if binding_id.trim().is_empty() {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "turn cancellation closure requires a non-empty binding id",
+            ));
+        }
+        if fence.session_id != address.session_id {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+                "turn cancellation closure fence belongs to another session",
+            ));
+        }
+        let expected_scope = address.execution_scope();
+        if admitted_scope.session_id().is_some() && admitted_scope != expected_scope {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "session-scoped turn cancellation closure admission must name its exact turn",
+            ));
+        }
+        if cancel_key.scope != expected_scope
+            || escalation_key.scope != expected_scope
+            || terminal_key.scope != expected_scope
+            || cancel_key.wait != AwaitEventWaitIdentity::TurnCancelGate
+            || escalation_key.wait != AwaitEventWaitIdentity::TurnCancelEscalation
+            || terminal_key.wait != AwaitEventWaitIdentity::TurnTerminal
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "turn cancellation closure keys do not match the authorized turn",
+            ));
+        }
+        Ok(Self {
+            session_id: address.session_id,
+            turn_id: address.turn_id,
+            binding_id,
+            admitted_scope,
+            cancel_key,
+            escalation_key,
+            terminal_key,
+            proposed_base,
+            observed_intent,
+            authorizing_fencing_token: fence.fencing_token,
+        })
+    }
+
+    pub fn address(&self) -> TurnAddress {
+        TurnAddress::new(&self.session_id, &self.turn_id)
+    }
+
+    /// Revalidate a decoded authorization before a backend or resolver trusts it.
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        self.address().validate()?;
+        self.admitted_scope.validate()?;
+        let expected_scope = self.address().execution_scope();
+        if self.binding_id.trim().is_empty()
+            || !crate::runtime::effect::executor::binding_id_admits_scope(
+                &self.binding_id,
+                &self.admitted_scope,
+            )
+            || (self.admitted_scope.session_id().is_some() && self.admitted_scope != expected_scope)
+            || self.cancel_key.scope != expected_scope
+            || self.escalation_key.scope != expected_scope
+            || self.terminal_key.scope != expected_scope
+            || self.cancel_key.wait != AwaitEventWaitIdentity::TurnCancelGate
+            || self.escalation_key.wait != AwaitEventWaitIdentity::TurnCancelEscalation
+            || self.terminal_key.wait != AwaitEventWaitIdentity::TurnTerminal
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "turn cancellation closure authorization is structurally invalid",
+            ));
+        }
+        if let TurnCancelClosureProposal::CancelRequested(evidence) = &self.proposed_base
+            && evidence.request_id.trim().is_empty()
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "turn cancellation closure evidence requires a non-empty request id",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+    pub fn turn_id(&self) -> &TurnId {
+        &self.turn_id
+    }
+    pub fn binding_id(&self) -> &str {
+        &self.binding_id
+    }
+    pub fn admitted_scope(&self) -> &ExecutionScope {
+        &self.admitted_scope
+    }
+    pub fn cancel_key(&self) -> &AwaitEventKey {
+        &self.cancel_key
+    }
+    pub fn escalation_key(&self) -> &AwaitEventKey {
+        &self.escalation_key
+    }
+    pub fn terminal_key(&self) -> &AwaitEventKey {
+        &self.terminal_key
+    }
+    pub fn proposed_base(&self) -> &TurnCancelClosureProposal {
+        &self.proposed_base
+    }
+    pub fn observed_intent(&self) -> &TurnCancelIntentSnapshot {
+        &self.observed_intent
+    }
+    pub fn authorizing_fencing_token(&self) -> u64 {
+        self.authorizing_fencing_token
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnCancelClosureAuthorizationOutcome {
+    Authorized,
+    AdoptedExact,
+}
+
+impl TurnCancelIntentSnapshot {
+    pub fn request(&self) -> Option<&TurnCancelRequest> {
+        match self {
+            Self::Absent => None,
+            Self::Present { request, .. } => Some(request),
+        }
+    }
+}
+
 impl TurnCancelInputOutcome {
     /// Reports whether cancellation repair affected no active-turn input, so hosts can skip
     /// restore, re-enqueue, or audit work without inspecting the payload list.
@@ -300,7 +532,7 @@ impl TurnCancelRequest {
         Ok(())
     }
 
-    fn evidence(&self) -> TurnCancellationEvidence {
+    pub(crate) fn evidence(&self) -> TurnCancellationEvidence {
         TurnCancellationEvidence {
             request_id: self.request_id.clone(),
             origin: self.origin.clone(),
@@ -328,6 +560,15 @@ pub enum TurnCancelOutcome {
     /// The address already held a weaker durable request and this stronger
     /// one upgraded it. The evidence is the escalating request's.
     Escalated(TurnCancellationEvidence),
+    /// The turn already accepted a different undelivered-input policy.
+    ///
+    /// Cancellation policy belongs to the immutable base-gate winner. A
+    /// timing escalation may change when that cancellation is honoured, but
+    /// it never changes who accepted the policy or what that policy is.
+    PolicyConflict {
+        requested: TurnCancelDisposition,
+        accepted: TurnCancellationEvidence,
+    },
     CompletionWonRace,
     UnknownOrRevoked,
 }
@@ -376,6 +617,18 @@ pub enum TurnTerminal {
 #[async_trait::async_trait]
 pub trait TurnAttach: Send + Sync {
     async fn await_terminal(&self, address: &TurnAddress) -> Result<TurnTerminal, RuntimeError>;
+}
+
+pub(crate) async fn await_terminal_from_resolver(
+    resolver: &dyn AwaitEventResolver,
+    address: &TurnAddress,
+) -> Result<TurnTerminal, RuntimeError> {
+    address.validate()?;
+    let key = terminal_key(resolver, address).await?;
+    let resolution = resolver
+        .await_await_event(&key, CancellationToken::new(), None)
+        .await?;
+    decode_terminal(address, resolution)
 }
 
 /// Cooperative, exact-turn control compiled onto Lash's keyed-promise seam.
@@ -469,7 +722,32 @@ impl TurnWorkDriver {
     ) -> Result<TurnCancelReceipt, RuntimeError> {
         request.validate()?;
         self.validate_address(&request.address)?;
-        let key = match cancel_gate_key(self.effect_host.as_ref(), &request.address).await {
+        let store = self.store_for(&request.address).await?;
+        // A durable receipt is authoritative even when the promise namespace
+        // has since been revoked or its binding is unavailable.
+        if store
+            .turn_is_committed(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?
+        {
+            return Ok(TurnCancelReceipt {
+                outcome: TurnCancelOutcome::CompletionWonRace,
+                record: None,
+            });
+        }
+        let store_authority = (self.effect_host.turn_control_authority_owner()
+            == crate::TurnControlAuthorityOwner::SessionStore)
+            .then(|| store.turn_cancellation_authority())
+            .flatten();
+        let store_resolver = store_authority
+            .as_ref()
+            .map(|authority| authority.resolver());
+        let resolver: &dyn AwaitEventResolver = store_resolver
+            .as_ref()
+            .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());
+        let key = match cancel_gate_key(resolver, &request.address).await {
             Ok(key) => key,
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
                 return Ok(TurnCancelReceipt {
@@ -479,34 +757,131 @@ impl TurnWorkDriver {
             }
             Err(err) => return Err(err),
         };
-        let store = self.store_for(&request.address).await?;
-        let record = store
+        let terminal_key = match terminal_key(resolver, &request.address).await {
+            Ok(key) => key,
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::UnknownOrRevoked,
+                    record: None,
+                });
+            }
+            Err(err) => return Err(err),
+        };
+        match resolver.peek_await_event(&terminal_key).await {
+            Ok(Some(terminal)) => {
+                decode_terminal(&request.address, terminal)?;
+                return Ok(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::CompletionWonRace,
+                    record: None,
+                });
+            }
+            Ok(None) => {}
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::UnknownOrRevoked,
+                    record: None,
+                });
+            }
+            Err(err) => return Err(err),
+        }
+        let _recorded_intent = store
             .record_turn_cancel_request(request.clone())
             .await
             .map_err(|err| {
                 RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
             })?;
-        let evidence = record.request.evidence();
-        let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
-        let outcome = match self
-            .effect_host
-            .resolve_await_event(&key, resolution)
-            .await?
+        // The projection predicate must be observed after this caller's
+        // provisional intent write and before it consults either gate. A
+        // concurrent write in between is harmless: the snapshot then names
+        // the newer row that the later gate observation is allowed to
+        // reconcile, while any write after this read advances the revision
+        // and makes the store CAS refuse.
+        let mut observed = store
+            .turn_cancel_request_intent(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?;
+        // The record write and the final commit serialize on the store's
+        // session transaction authority. Recheck after it so a commit that won
+        // before this intent was eligible produces a typed no-op, including
+        // the gap before terminal promise publication.
+        if store
+            .turn_is_committed(&request.address)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+            })?
         {
-            ResolveOutcome::Accepted => Ok(TurnCancelOutcome::Requested(evidence)),
-            ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
-                TurnGateTerminal::CancelRequested(existing)
-                    if evidence.mode.is_stronger_than(existing.mode) =>
-                {
-                    self.escalate(&request.address, evidence, existing).await
-                }
-                TurnGateTerminal::CancelRequested(existing) => {
-                    Ok(TurnCancelOutcome::AlreadyRequested(existing))
-                }
-                TurnGateTerminal::CompletionSealed => Ok(TurnCancelOutcome::CompletionWonRace),
-            },
-            ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
-        }?;
+            return Ok(TurnCancelReceipt {
+                outcome: TurnCancelOutcome::CompletionWonRace,
+                record: None,
+            });
+        }
+        // The store row is durable intent, not arbitration authority. The
+        // incoming request is the candidate this caller presents to the gate;
+        // whichever candidate actually resolves the gate is the winner.
+        let evidence = request.evidence();
+        let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
+        let resolved: Result<(TurnCancelOutcome, Option<TurnCancellationEvidence>), RuntimeError> =
+            match resolver.resolve_await_event(&key, resolution).await? {
+                ResolveOutcome::Accepted => Ok((
+                    TurnCancelOutcome::Requested(evidence.clone()),
+                    Some(evidence),
+                )),
+                ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                    TurnGateTerminal::CancelRequested(existing)
+                        if evidence.undelivered != existing.undelivered =>
+                    {
+                        Ok((
+                            TurnCancelOutcome::PolicyConflict {
+                                requested: evidence.undelivered,
+                                accepted: existing.clone(),
+                            },
+                            Some(existing),
+                        ))
+                    }
+                    TurnGateTerminal::CancelRequested(existing)
+                        if evidence.mode.is_stronger_than(existing.mode) =>
+                    {
+                        let outcome = self
+                            .escalate(resolver, &request.address, evidence, existing.clone())
+                            .await?;
+                        Ok((outcome, Some(existing)))
+                    }
+                    TurnGateTerminal::CancelRequested(existing) => Ok((
+                        TurnCancelOutcome::AlreadyRequested(
+                            effective_cancel_evidence(resolver, &request.address, existing.clone())
+                                .await?,
+                        ),
+                        Some(existing),
+                    )),
+                    TurnGateTerminal::CompletionSealed => {
+                        Ok((TurnCancelOutcome::CompletionWonRace, None))
+                    }
+                },
+                ResolveOutcome::UnknownOrRevoked => Ok((TurnCancelOutcome::UnknownOrRevoked, None)),
+            };
+        let (outcome, mut base_winner) = resolved?;
+        while let Some(evidence) = base_winner.as_ref() {
+            if store
+                .reconcile_turn_cancel_winner(&request.address, &observed, evidence)
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?
+            {
+                break;
+            }
+            observed = store
+                .turn_cancel_request_intent(&request.address)
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?;
+            base_winner =
+                ActiveTurnControl::peek_base_cancel_evidence(resolver, &request.address).await?;
+        }
         let record = store
             .turn_cancel_request(&request.address)
             .await
@@ -562,18 +937,15 @@ impl TurnWorkDriver {
     /// request reports the escalation that already won.
     async fn escalate(
         &self,
+        resolver: &dyn AwaitEventResolver,
         address: &TurnAddress,
         evidence: TurnCancellationEvidence,
         existing: TurnCancellationEvidence,
     ) -> Result<TurnCancelOutcome, RuntimeError> {
-        let key = escalation_key(self.effect_host.as_ref(), address).await?;
+        let key = escalation_key(resolver, address).await?;
         let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
         Ok(
-            match self
-                .effect_host
-                .resolve_await_event(&key, resolution)
-                .await?
-            {
+            match resolver.resolve_await_event(&key, resolution).await? {
                 ResolveOutcome::Accepted => TurnCancelOutcome::Escalated(evidence),
                 ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
                     TurnGateTerminal::CancelRequested(escalated) => {
@@ -601,9 +973,19 @@ impl TurnWorkDriver {
         if let Some(attach) = self.effect_host.turn_attach() {
             return attach.await_terminal(address).await;
         }
-        let key = terminal_key(self.effect_host.as_ref(), address).await?;
-        let resolution = self
-            .effect_host
+        let store = self.store_for(address).await?;
+        let store_authority = (self.effect_host.turn_control_authority_owner()
+            == crate::TurnControlAuthorityOwner::SessionStore)
+            .then(|| store.turn_cancellation_authority())
+            .flatten();
+        let store_resolver = store_authority
+            .as_ref()
+            .map(|authority| authority.resolver());
+        let resolver: &dyn AwaitEventResolver = store_resolver
+            .as_ref()
+            .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());
+        let key = terminal_key(resolver, address).await?;
+        let resolution = resolver
             .await_await_event(&key, CancellationToken::new(), None)
             .await?;
         decode_terminal(address, resolution)
@@ -735,6 +1117,75 @@ async fn escalation_key(
         .await
 }
 
+/// Return the cancellation evidence that the immutable gate pair has accepted.
+///
+/// An after-step request owns the base gate. A later immediate request can own
+/// the escalation gate, so readers must inspect both before projecting the
+/// winner. Durable request rows are deliberately not consulted here: they are
+/// only a projection of this authority.
+async fn effective_cancel_evidence(
+    resolver: &dyn AwaitEventResolver,
+    address: &TurnAddress,
+    base: TurnCancellationEvidence,
+) -> Result<TurnCancellationEvidence, RuntimeError> {
+    if base.mode.is_immediate() {
+        return Ok(base);
+    }
+    let key = match escalation_key(resolver, address).await {
+        Ok(key) => key,
+        Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+            return Ok(base);
+        }
+        Err(err) => return Err(err),
+    };
+    let terminal = match resolver.peek_await_event(&key).await {
+        Ok(terminal) => terminal,
+        Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+            return Ok(base);
+        }
+        Err(err) => return Err(err),
+    };
+    match terminal.map(decode_gate).transpose()? {
+        Some(TurnGateTerminal::CancelRequested(escalated)) => Ok(escalated),
+        Some(TurnGateTerminal::CompletionSealed) | None => Ok(base),
+    }
+}
+
+/// Close escalation admission for a turn-ending decision and return the
+/// winner that was accepted before that closure.
+///
+/// The base gate remains the cancellation/completion authority. Its
+/// `AfterStep` winner deliberately leaves a second first-writer promise open
+/// while the turn is live so an `Immediate` request can escalate it. An
+/// irreversible final commit must close that promise: otherwise a same-header
+/// escalation can be accepted after the caller's row snapshot without
+/// advancing the row revision, and a weaker disposition can publish after the
+/// stronger request was acknowledged. Orphan repair cannot use this helper
+/// until promise closure can be fenced by its session-execution lease.
+async fn close_cancel_escalation(
+    resolver: &dyn AwaitEventResolver,
+    escalation_key: &AwaitEventKey,
+    base: TurnCancellationEvidence,
+) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+    if base.mode.is_immediate() {
+        return Ok(Some(base));
+    }
+    let outcome = resolver
+        .resolve_await_event(
+            escalation_key,
+            gate_resolution(TurnGateTerminal::CompletionSealed)?,
+        )
+        .await?;
+    match outcome {
+        ResolveOutcome::Accepted => Ok(Some(base)),
+        ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+            TurnGateTerminal::CancelRequested(escalated) => Ok(Some(escalated)),
+            TurnGateTerminal::CompletionSealed => Ok(Some(base)),
+        },
+        ResolveOutcome::UnknownOrRevoked => Ok(None),
+    }
+}
+
 /// Per-execution bridge between the durable gate and the turn's internal
 /// cancellation token.
 ///
@@ -755,6 +1206,205 @@ pub struct ActiveTurnControl {
 }
 
 impl ActiveTurnControl {
+    fn proposed_terminal(
+        &self,
+        locally_cancelled: bool,
+        assembled: Option<TurnCancellationEvidence>,
+    ) -> TurnGateTerminal {
+        let remembered = self.evidence();
+        let after_step_locally = self.local_cancel_origin.after_step_requested();
+        if let Some(evidence) = remembered {
+            TurnGateTerminal::CancelRequested(evidence)
+        } else if locally_cancelled || after_step_locally {
+            TurnGateTerminal::CancelRequested(match assembled {
+                Some(mut evidence) => {
+                    if evidence.origin.is_none() {
+                        evidence.origin = self.local_cancel_origin.get();
+                    }
+                    evidence
+                }
+                None if locally_cancelled => self.internal_evidence(),
+                None => TurnCancellationEvidence {
+                    mode: TurnCancelMode::AfterStep,
+                    ..self.internal_evidence()
+                },
+            })
+        } else {
+            TurnGateTerminal::CompletionSealed
+        }
+    }
+
+    /// Materialize the exact closure operation before any promise is resolved.
+    #[allow(clippy::too_many_arguments)]
+    pub fn closure_authorization(
+        &self,
+        binding_id: impl Into<String>,
+        admitted_scope: ExecutionScope,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        observed_intent: TurnCancelIntentSnapshot,
+        locally_cancelled: bool,
+        assembled: Option<TurnCancellationEvidence>,
+    ) -> Result<TurnCancelClosureAuthorization, RuntimeError> {
+        let proposed_base = match self.proposed_terminal(locally_cancelled, assembled) {
+            TurnGateTerminal::CancelRequested(evidence) => {
+                TurnCancelClosureProposal::CancelRequested(evidence)
+            }
+            TurnGateTerminal::CompletionSealed => TurnCancelClosureProposal::CompletionSealed,
+        };
+        TurnCancelClosureAuthorization::new(
+            self.address.clone(),
+            binding_id,
+            admitted_scope,
+            self.cancel_key.clone(),
+            self.escalation_key.clone(),
+            self.terminal_key.clone(),
+            proposed_base,
+            observed_intent,
+            fence,
+        )
+    }
+
+    /// Finish an exact operation already persisted by the store. The promise
+    /// outcomes remain authoritative, including a legitimate different winner.
+    pub async fn settle_authorized(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+        authorization: &TurnCancelClosureAuthorization,
+    ) -> Result<TurnCancelClosureSettlement, RuntimeError> {
+        authorization.validate()?;
+        if authorization.address() != self.address
+            || authorization.cancel_key() != &self.cancel_key
+            || authorization.escalation_key() != &self.escalation_key
+            || authorization.terminal_key() != &self.terminal_key
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                "pending turn cancellation closure does not match the active turn authority",
+            ));
+        }
+        let proposed = match authorization.proposed_base().clone() {
+            TurnCancelClosureProposal::CancelRequested(evidence) => {
+                TurnGateTerminal::CancelRequested(evidence)
+            }
+            TurnCancelClosureProposal::CompletionSealed => TurnGateTerminal::CompletionSealed,
+        };
+        let effective_cancellation = self.settle_proposed(resolver, proposed).await?;
+        let base_cancellation = self.read_settled_base_cancel_evidence(resolver).await?;
+        Ok(TurnCancelClosureSettlement {
+            authorization: authorization.clone(),
+            base_cancellation,
+            effective_cancellation,
+        })
+    }
+
+    async fn settle_proposed(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+        proposed: TurnGateTerminal,
+    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        let remembered = self.evidence();
+        let outcome = resolver
+            .resolve_await_event(&self.cancel_key, gate_resolution(proposed.clone())?)
+            .await?;
+        let terminal = match outcome {
+            ResolveOutcome::Accepted => proposed,
+            ResolveOutcome::AlreadyResolved { terminal } => decode_gate(terminal)?,
+            ResolveOutcome::UnknownOrRevoked => {
+                return Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                    format!(
+                        "turn `{}` in session `{}` was revoked before final commit",
+                        self.address.turn_id, self.address.session_id
+                    ),
+                ));
+            }
+        };
+        match terminal {
+            TurnGateTerminal::CancelRequested(evidence) => {
+                let Some(mut effective) =
+                    close_cancel_escalation(resolver, &self.escalation_key, evidence).await?
+                else {
+                    return Err(RuntimeError::new(
+                        crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                        format!(
+                            "turn `{}` in session `{}` was revoked while closing cancellation escalation before final commit",
+                            self.address.turn_id, self.address.session_id
+                        ),
+                    ));
+                };
+                if let Some(mut cached) = remembered {
+                    let honoured_after_step = cached.honoured_after_step.take();
+                    if cached == effective {
+                        effective.honoured_after_step = honoured_after_step;
+                    }
+                }
+                self.remember(effective.clone());
+                Ok(Some(effective))
+            }
+            TurnGateTerminal::CompletionSealed => Ok(None),
+        }
+    }
+
+    /// Observe only the immutable base cancellation winner.
+    ///
+    /// Durable row projection uses this value rather than the effective
+    /// (possibly escalated) cancellation so a delayed base projection can
+    /// never replace the original policy acceptor with an escalation request.
+    async fn peek_base_cancel_evidence(
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        let key = match cancel_gate_key(resolver, address).await {
+            Ok(key) => key,
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        };
+        match resolver.peek_await_event(&key).await {
+            Ok(Some(terminal)) => Ok(match decode_gate(terminal)? {
+                TurnGateTerminal::CancelRequested(evidence) => Some(evidence),
+                TurnGateTerminal::CompletionSealed => None,
+            }),
+            Ok(None) => Ok(None),
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Read the exact authorized base gate after settlement. Unlike the
+    /// permissive recovery probe, absence or revocation is a refusal: a
+    /// closure authorization cannot be consumed without an observable terminal
+    /// from its bound promise owner.
+    async fn read_settled_base_cancel_evidence(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        match resolver.peek_await_event(&self.cancel_key).await {
+            Ok(Some(terminal)) => Ok(match decode_gate(terminal)? {
+                TurnGateTerminal::CancelRequested(evidence) => Some(evidence),
+                TurnGateTerminal::CompletionSealed => None,
+            }),
+            Ok(None) => Err(RuntimeError::new(
+                crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                format!(
+                    "turn `{}` in session `{}` has no settled base cancellation terminal",
+                    self.address.turn_id, self.address.session_id
+                ),
+            )),
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                    format!(
+                        "turn `{}` in session `{}` lost its base cancellation terminal before closure settlement",
+                        self.address.turn_id, self.address.session_id
+                    ),
+                ))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     pub async fn new(
         resolver: &dyn AwaitEventResolver,
         address: TurnAddress,
@@ -774,6 +1424,54 @@ impl ActiveTurnControl {
     pub fn with_local_cancel_origin(mut self, origin: TurnCancelOriginHint) -> Self {
         self.local_cancel_origin = origin;
         self
+    }
+
+    /// Observe the current effective gate winner without closing escalation.
+    /// Ordinary request projection uses this after a row-CAS refusal while the
+    /// turn is still live and future `AfterStep` to `Immediate` escalation
+    /// remains valid.
+    async fn peek_effective_cancel_decision(
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
+        let key = match cancel_gate_key(resolver, address).await {
+            Ok(key) => key,
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        };
+        let resolution = match resolver.peek_await_event(&key).await {
+            Ok(resolution) => resolution,
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        };
+        let Some(terminal) = resolution.map(decode_gate).transpose()? else {
+            return Ok(Some(crate::TurnCancelRepairDecision::NoCancellationIntent));
+        };
+        Ok(Some(match terminal {
+            TurnGateTerminal::CancelRequested(evidence) => {
+                crate::TurnCancelRepairDecision::CancellationWon(
+                    effective_cancel_evidence(resolver, address, evidence).await?,
+                )
+            }
+            TurnGateTerminal::CompletionSealed => {
+                crate::TurnCancelRepairDecision::CancellationDidNotWin
+            }
+        }))
+    }
+
+    /// Observe the current gate pair for orphan-input repair without changing
+    /// either promise. The caller's store transaction supplies the lease and
+    /// intent fences; an expired repair owner must not close shared escalation
+    /// authority before that transaction can reject it.
+    pub(crate) async fn peek_orphan_repair_decision(
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
+        Self::peek_effective_cancel_decision(resolver, address).await
     }
 
     /// Live watch for a cancellation the turn must honour now.
@@ -929,69 +1627,24 @@ impl ActiveTurnControl {
         resolution.map(decode_gate).transpose()
     }
 
-    /// Settle the durable cancellation gate before the turn commits.
+    /// Settle the durable cancellation gate and close escalation before the
+    /// turn commits.
     ///
     /// `assembled` is the evidence the executed turn already carries, when it
     /// stopped cancelled. Sealing that value rather than minting a fresh one
     /// is what keeps a single cancellation to a single request id: the
     /// evidence a host saw on the streamed `TurnOutcome` is the evidence the
-    /// committed report carries.
+    /// committed report carries. Closing the escalation promise is the
+    /// authority boundary after which no later request can change the accepted
+    /// winner or its undelivered-input disposition.
     pub async fn settle_before_commit(
         &self,
         resolver: &dyn AwaitEventResolver,
         locally_cancelled: bool,
         assembled: Option<TurnCancellationEvidence>,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
-        if let Some(evidence) = self.evidence() {
-            return Ok(Some(evidence));
-        }
-        // A process-local after-step stop that found no further step boundary
-        // lands at the final commit: the last step ran to completion and the
-        // turn stops here without dropping anything it produced.
-        let after_step_locally = self.local_cancel_origin.after_step_requested();
-        let proposed = if locally_cancelled || after_step_locally {
-            TurnGateTerminal::CancelRequested(match assembled {
-                // A lash-originated stop already names itself. The
-                // process-local origin hint, when a host entry point supplied
-                // one, is the only fact the executing machine cannot know.
-                Some(mut evidence) => {
-                    if evidence.origin.is_none() {
-                        evidence.origin = self.local_cancel_origin.get();
-                    }
-                    evidence
-                }
-                None if locally_cancelled => self.internal_evidence(),
-                None => TurnCancellationEvidence {
-                    mode: TurnCancelMode::AfterStep,
-                    ..self.internal_evidence()
-                },
-            })
-        } else {
-            TurnGateTerminal::CompletionSealed
-        };
-        let outcome = resolver
-            .resolve_await_event(&self.cancel_key, gate_resolution(proposed.clone())?)
-            .await?;
-        let terminal = match outcome {
-            ResolveOutcome::Accepted => proposed,
-            ResolveOutcome::AlreadyResolved { terminal } => decode_gate(terminal)?,
-            ResolveOutcome::UnknownOrRevoked => {
-                return Err(RuntimeError::new(
-                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
-                    format!(
-                        "turn `{}` in session `{}` was revoked before final commit",
-                        self.address.turn_id, self.address.session_id
-                    ),
-                ));
-            }
-        };
-        match terminal {
-            TurnGateTerminal::CancelRequested(evidence) => {
-                self.remember(evidence.clone());
-                Ok(Some(evidence))
-            }
-            TurnGateTerminal::CompletionSealed => Ok(None),
-        }
+        let proposed = self.proposed_terminal(locally_cancelled, assembled);
+        self.settle_proposed(resolver, proposed).await
     }
 
     pub async fn publish_terminal(
@@ -1020,6 +1673,7 @@ impl ActiveTurnControl {
     }
 
     /// An observed after-step request still waiting for its step boundary.
+    #[allow(dead_code)]
     pub fn deferred_evidence(&self) -> Option<TurnCancellationEvidence> {
         self.deferred.lock_recover().clone()
     }

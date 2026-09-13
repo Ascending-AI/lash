@@ -243,6 +243,7 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    pub use crate::runtime::effect::bind_store_turn_control_authority;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
@@ -493,14 +494,22 @@ pub mod facade_support {
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
     pub use crate::runtime::TurnCancelAffectedInput;
+    pub use crate::runtime::TurnCancelClosureAuthorization;
+    pub use crate::runtime::TurnCancelClosureAuthorizationOutcome;
+    pub use crate::runtime::TurnCancelClosureProposal;
+    pub use crate::runtime::TurnCancelClosureSettlement;
     pub use crate::runtime::TurnCancelDisposition;
     pub use crate::runtime::TurnCancelInputOutcome;
+    pub use crate::runtime::TurnCancelIntentSnapshot;
     pub use crate::runtime::TurnCancelMode;
     pub use crate::runtime::TurnCancelOutcome;
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
     pub use crate::runtime::TurnCancelRequestRecord;
+    pub use crate::runtime::TurnCancellationAuthority;
     pub use crate::runtime::TurnCancellationEvidence;
+    pub use crate::runtime::TurnControlAttachment;
+    pub use crate::runtime::TurnControlAuthorityOwner;
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
@@ -538,6 +547,7 @@ pub mod facade_support {
     #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::trigger_delivery_reconcile_scope;
+    pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     #[doc(hidden)]
@@ -1214,17 +1224,21 @@ pub use runtime::{
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
-    TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
-    TurnCancelMode, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
-    TurnControlParticipation, TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput,
-    TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
+    TurnCancelClosureAuthorizationOutcome, TurnCancelClosureOwnerBinding,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelOriginHint,
+    TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
+    TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation, TurnEvent,
+    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
+    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt,
+    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
+    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{
     ProcessEngineRunGuard, ProcessEngineRuntimeContext, QueuedWorkEnqueueOutcome,
@@ -1276,8 +1290,9 @@ pub use store::{
     SessionExecutionLeaseDisplacement, SessionExecutionLeaseObservation,
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
     SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
-    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnInputStore,
-    VacuumReport, WorkClaim, WorkCompletion,
+    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    TurnCancelRepairDecision, TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim,
+    WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

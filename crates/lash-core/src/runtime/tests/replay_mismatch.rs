@@ -15,6 +15,10 @@ impl ProxyPumpingReplayMismatchController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for ProxyPumpingReplayMismatchController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.rejecting.await_event_authority_binding_id()
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,

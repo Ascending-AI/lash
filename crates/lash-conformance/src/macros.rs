@@ -1442,6 +1442,15 @@ macro_rules! session_store_factory_tests {
         $crate::session_store_factory_tests!(@catalogue $fixture; [
             (session_store_factory, "session-store-factory"),
         ]);
+        $crate::session_store_factory_tests!(@turn_cancel $fixture; [
+            (turn_cancel_exact_replay_preserves_different_pending_authorization, "turn-cancel-exact-replay"),
+            (turn_cancel_closure_settlement_is_fenced_and_non_overwritable, "turn-cancel-closure-settlement"),
+            (turn_cancel_scope_retirement_serializes_with_authorization, "turn-cancel-scope-retirement"),
+            (turn_cancel_request_escalation_advances_intent_without_replacing_base, "turn-cancel-escalation"),
+            (turn_cancel_repair_preserves_base_across_escalation_and_reopen, "turn-cancel-repair-reopen"),
+            (turn_cancel_repair_orders_intent_and_ordinary_redefer, "turn-cancel-repair-redefer"),
+            (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
+        ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
@@ -1450,6 +1459,19 @@ macro_rules! session_store_factory_tests {
                 let (_fixture_guard, backend, unbound, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(backend, unbound, make).await;
+            }
+        )*
+    };
+    (@turn_cancel $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, _backend, _unbound, make) = $fixture;
+                let _unbound: Option<
+                    ::std::sync::Arc<dyn lash_core::store::StoreMaintenance>,
+                > = _unbound;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make()).await;
             }
         )*
     };

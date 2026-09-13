@@ -356,10 +356,8 @@ fn identity_is_fenced(
     fences: FenceLocations,
     identity: &AwaitEventRowIdentity,
 ) -> rusqlite::Result<bool> {
-    if let Some(session_id) = identity.session_id.as_deref()
-        && session_is_revoked(connection, &SessionId::from(session_id))?
-    {
-        return Ok(true);
+    if let Some(session_id) = identity.session_id.as_deref() {
+        return session_is_revoked(connection, &SessionId::from(session_id));
     }
     fences.is_fenced(connection, &identity.scope_id)
 }

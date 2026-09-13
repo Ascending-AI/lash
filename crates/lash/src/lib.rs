@@ -62,8 +62,9 @@ pub use crate::turn::{
     TurnStream, message_role, message_text,
 };
 pub use lash_core::facade_support::{
-    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelMode,
-    TurnCancelRequestRecord,
+    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
@@ -76,9 +77,10 @@ pub use lash_core::{
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionId, SessionListFilter,
     SessionRelationKind, SessionStartPoint, SessionSummary, TurnActivity, TurnActivityId,
-    TurnBudget, TurnCancelOriginHint, TurnCause, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
-    facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
+    TurnBudget, TurnCancelOriginHint, TurnCancelRepairDecision, TurnCancelRepairResult, TurnCause,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
+    TurnInput, TurnInputApplication, facade_support::GenerationOverlay,
+    facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
     facade_support::SessionSpec, facade_support::TurnActivitySink, facade_support::TurnAddress,
     facade_support::TurnAttach, facade_support::TurnCancelOutcome,
@@ -755,11 +757,12 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, WorkerProcessWork, facade_support::DurableProcessWorker,
-        facade_support::DurableProcessWorkerConfig, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::NativeEffectHost,
-        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
-        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+        EffectHost, TurnCancellationAuthority, WorkerProcessWork,
+        facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
+        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::NativeEffectHost, facade_support::ProcessDrainReport,
+        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
+        facade_support::TerminationPolicy,
     };
 }
 

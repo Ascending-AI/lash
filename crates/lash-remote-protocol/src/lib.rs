@@ -34,6 +34,8 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 60: combine admitted effect identity with cancellation policy
+// conflicts. Both incompatible version-59 parents require exact negotiation.
 // Bumped to 59: runtime effects and causal references carry the admitted
 // execution scope with their replay key, attribution is independently
 // optional, and trigger causes retain complete subscription identity.
@@ -148,7 +150,8 @@ pub use usage_activity::*;
 // Window 62: FIG-2961 adds typed cancellation requests and cancellation origins.
 // Window 63: FIG-2886 removes the duplicate session spelling from trigger-subscription filters.
 // Window 64: FIG-2860 carries typed coherence state for process work-item observations.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 64;
+// Window 65: FIG-2875 carries durable turn-cancellation control envelopes.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 65;
 
 /// One versioned remote-protocol message.
 ///
