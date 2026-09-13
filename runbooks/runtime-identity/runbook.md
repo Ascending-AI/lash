@@ -72,7 +72,7 @@ For an owned PostgreSQL gate, export its fresh database URL and require the test
 than print its `LASH_POSTGRES_DATABASE_URL is not set` skip message:
 
 ```sh
-cargo test --workspace --all-targets postgres_runtime_effect_controller_satisfies_conformance_when_configured -- --nocapture
+cargo test -p lash-internal-postgres-store --locked --test conformance effect_controller_ -- --nocapture
 ```
 
 ## Phase 2 — Truthful attribution
