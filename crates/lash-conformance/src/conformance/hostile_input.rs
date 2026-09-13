@@ -151,7 +151,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
     }
 }
 
-pub(super) async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
         crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -191,7 +191,7 @@ pub(super) async fn process_environment_namespace(store: Arc<dyn crate::ProcessE
     }
 }
 
-pub(super) async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
+pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
     for raw in ["", " ", "nul\0process", "reserved#segment"] {
         assert!(
             registry

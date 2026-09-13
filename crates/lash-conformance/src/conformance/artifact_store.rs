@@ -23,22 +23,18 @@ fn execution_owner(id: &str) -> crate::ArtifactOwner {
     })
 }
 
-pub async fn process_execution_env_store<F>(make: F)
+pub async fn process_execution_env_store_fresh_instances<F>(make: &F)
 where
     F: Fn() -> Arc<dyn crate::ProcessExecutionEnvStore>,
 {
     let first = make();
     let second = make();
     assert_fresh_instances(&first, &second, "process_execution_env_store");
-    drop((first, second));
-    super::hostile_input::process_environment_namespace(make()).await;
-    process_env_owner_lifecycle(make()).await;
-    failed_registration_reclaims_process_env(make()).await;
-    process_env_transfer_and_fence(make()).await;
-    slow_process_env_writer_is_fenced(make()).await;
 }
 
-async fn failed_registration_reclaims_process_env(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn failed_registration_reclaims_process_env(
+    store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -60,15 +56,7 @@ async fn failed_registration_reclaims_process_env(store: Arc<dyn crate::ProcessE
     );
 }
 
-pub async fn process_execution_env_store_reopenable<F>(make: F)
-where
-    F: Fn() -> ReopenableProcessExecutionEnvStore,
-{
-    process_execution_env_store(|| make().open).await;
-    process_env_survives_reopen(make()).await;
-}
-
-async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -111,7 +99,7 @@ async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionEnvSt
         .expect("repeated release is idempotent");
 }
 
-async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -156,7 +144,7 @@ async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEn
     );
 }
 
-async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
+pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
@@ -181,7 +169,7 @@ async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutio
     );
 }
 
-async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
+pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
     let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
     let spec = sample_env_spec();

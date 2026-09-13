@@ -589,6 +589,28 @@ impl RecordingContext {
             .fetch_add(1, Ordering::SeqCst);
     }
 
+    pub(super) async fn wait_for_await_event_registration(
+        &self,
+        session_id: &SessionId,
+        key: &AwaitEventKey,
+    ) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if self
+                    .session_waits
+                    .lock_recover()
+                    .get(session_id)
+                    .is_some_and(|waits| waits.contains(key))
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the Restate durable waiter is registered before the sweep");
+    }
+
     pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {
         Self {
             endpoint: Some(endpoint),

@@ -1,44 +1,21 @@
 //! Cross-backend conformance for the durable process registry.
 
 use lash_sansio::ProcessId;
-mod event_replay;
-use caller_departure::caller_departed_rows_are_reclaimed_by_retention;
-use event_replay::{
-    canonical_process_event_payload_replay, long_cancellation_requester_replay_is_backend_safe,
-};
 mod caller_departure;
 mod cancellation;
+mod event_replay;
 mod lifecycle;
-mod status_filters;
-use status_filters::list_filters_match_extracted_and_json_fields;
+#[doc(hidden)]
+pub mod status_filters;
 
-use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
 use super::process_change_horizon::changes_after_full_relist_if_required;
-use super::process_event_append_arms::process_event_append_arms_are_ordered;
-use super::process_filters::{
-    list_processes_bounds_retired_rows_without_hiding_live_rows,
-    list_processes_filters_by_enriched_fields,
-};
-use super::process_references::{
-    ProcessCountConservation, assert_process_count_conservation,
-    live_reference_summary_tracks_non_terminal_reference_counts,
-};
+use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::{
     PluginError, ProcessObserverBy, ProcessRecord, ProcessRef, ProjectionWatermark,
     TestProcessRegistryWriteExt,
 };
 use pretty_assertions::assert_eq;
-
-// The shared registry fixture leaves 59 modeled registrations after its
-// compaction probes; the cold refold fixture below adds the 60th. The
-// incarnation-reuse contract contributes four registrations and two prunes
-// across its raw and watched modes;
-// three more registrations and two more prunes come from the append-arm
-// contract, whose two completed rows are terminal and prune-eligible by the
-// time retention runs.
-const REOPEN_BASELINE_SPAWNS: usize = 62;
-const REOPEN_BASELINE_PRUNED: usize = 8;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
@@ -60,49 +37,47 @@ fn settled_cancellation(message: &str) -> ProcessAwaitOutput {
     ))
 }
 
-/// Run the process-registry contract against a fresh backend.
-pub async fn process_registry<F>(make: F)
+/// The backend's maker hands every registry law its own registry handle rather
+/// than one shared instance.
+pub async fn process_registry_fresh_instances<F>(make: &F)
 where
-    F: Fn() -> Arc<dyn crate::ConformanceProcessRegistry>,
+    F: Fn(&str) -> Arc<dyn crate::ConformanceProcessRegistry>,
 {
-    let first = make();
-    let second = make();
+    let first = make("fresh-instance-probe");
+    let second = make("fresh-instance-probe");
     assert_fresh_instances(&first, &second, "process_registry");
-    drop((first, second));
-    lifecycle::registration_contract(make()).await;
-    lifecycle::empty_tool_call_identifiers_leave_no_row(make()).await;
-    let cancellation_registry = make();
-    Box::pin(cancellation::contract(
-        Arc::clone(&cancellation_registry),
-        cancellation_registry,
-    ))
-    .await;
-    super::hostile_input::process_namespace(make()).await;
-    process_registry_conformance(make()).await;
 }
 
-/// Run the process-registry contract and verify durable state through a reopen.
-pub async fn process_registry_reopenable<F>(make: F)
-where
-    F: Fn() -> ReopenableProcessRegistry,
-{
-    lifecycle::registration_contract(make().open).await;
-    lifecycle::empty_tool_call_identifiers_leave_no_row(make().open).await;
-    let cancellation_handles = make();
-    Box::pin(cancellation::contract(
-        cancellation_handles.open,
-        cancellation_handles.reopen,
-    ))
-    .await;
-    super::hostile_input::process_namespace(make().open).await;
-    let handles = make();
-    assert_fresh_instances(
-        &handles.open,
-        &handles.reopen,
-        "process_registry_reopenable",
-    );
-    process_registry_conformance(Arc::clone(&handles.open)).await;
-    reopen_conformance(handles).await;
+pub async fn process_registry_registration_contract(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    lifecycle::registration_contract(registry).await;
+}
+
+pub async fn empty_tool_call_identifiers_leave_no_row(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    lifecycle::empty_tool_call_identifiers_leave_no_row(registry).await;
+}
+
+pub async fn process_registry_cancellation_contract(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    Box::pin(cancellation::contract(Arc::clone(&registry), registry)).await;
+}
+
+pub async fn process_registry_cancellation_reopen_contract(handles: ReopenableProcessRegistry) {
+    Box::pin(cancellation::contract(handles.open, handles.reopen)).await;
+}
+
+pub async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
+    event_replay::canonical_process_event_payload_replay(registry).await;
+}
+
+pub async fn long_cancellation_requester_replay_is_backend_safe(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    event_replay::long_cancellation_requester_replay_is_backend_safe(registry).await;
 }
 
 /// Prove that leased terminal replay repairs a stale record projection from
@@ -466,48 +441,31 @@ pub(super) fn plain_event_type(name: &str) -> ProcessEventType {
     }
 }
 
-async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
-    let probe = Arc::clone(&registry);
-    let registry: Arc<dyn ProcessRegistry> = registry;
-    live_reference_summary_tracks_non_terminal_reference_counts(Arc::clone(&registry)).await;
-    registration_and_observers_are_atomic(Arc::clone(&registry)).await;
-    observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
-    generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
-    canonical_process_event_payload_replay(Arc::clone(&registry)).await;
-    long_cancellation_requester_replay_is_backend_safe(Arc::clone(&registry)).await;
-    wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
-    lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
-    producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
-    list_filters_match_extracted_and_json_fields(Arc::clone(&registry)).await;
-    process_registry_pagination(Arc::clone(&registry)).await;
-    waiting_processes_remain_in_the_recovery_worklist(Arc::clone(&registry)).await;
-    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    list_processes_filters_by_enriched_fields(Arc::clone(&registry)).await;
-    list_processes_bounds_retired_rows_without_hiding_live_rows(Arc::clone(&registry)).await;
-    process_change_feed_never_misses_concurrent_terminal_writers(Arc::clone(&registry)).await;
-    process_lease_fencing_contract(Arc::clone(&registry)).await;
-    process_lease_batch_read_matches_point_reads(Arc::clone(&registry)).await;
-    session_delete_preserves_process_bytes(Arc::clone(&registry)).await;
+pub async fn refolded_process_record_matches_hot_projection(registry: Arc<dyn ProcessRegistry>) {
     refolded_process_record_matches_stored_projection(
         Arc::clone(&registry),
-        Arc::clone(&registry),
+        registry,
         &ProcessId::from("process-refold-hot"),
     )
     .await;
-    process_attempt_budget_is_typed(Arc::clone(&registry)).await;
-    tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
-    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry), "raw").await;
-    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
-    reused_process_ids_refuse_superseded_incarnations(Arc::clone(watched.registry()), "watched")
-        .await;
-    lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
-    process_event_append_arms_are_ordered(probe).await;
-    caller_departure_state_machine(Arc::clone(&registry)).await;
-    caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
-    terminal_completion_atomically_retains_parent_end_plan(registry).await;
 }
 
-async fn reused_process_ids_refuse_superseded_incarnations(
+pub async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
+    reused_process_ids_refuse_superseded_incarnations_for(registry, "raw").await;
+}
+
+pub async fn watched_process_registry_reused_process_ids_refuse_superseded_incarnations(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    reused_process_ids_refuse_superseded_incarnations_for(
+        Arc::clone(watched.registry()),
+        "watched",
+    )
+    .await;
+}
+
+async fn reused_process_ids_refuse_superseded_incarnations_for(
     registry: Arc<dyn ProcessRegistry>,
     mode: &str,
 ) {
@@ -589,7 +547,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(
     }));
 }
 
-async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
     let process_ids = [
         ProcessId::from("lease-batch-leased"),
         ProcessId::from("lease-batch-unleased"),
@@ -649,7 +607,9 @@ async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessR
 /// Lifecycle refusals come from the shared process-event fold, so every
 /// registry backend must return the fold's exact answer for the same record
 /// and requested transition.
-async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn ProcessRegistry>) {
+pub async fn lifecycle_transition_refusals_are_backend_invariant(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     let abandon_id = "transition-refusal-abandon";
     registry
         .register_process(registration(abandon_id))
@@ -798,7 +758,7 @@ async fn process_registry_transition_refusals_are_backend_invariant() {
     .await;
 }
 
-async fn terminal_completion_atomically_retains_parent_end_plan(
+pub async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = ProcessId::from("process-parent-end-plan");
@@ -1290,7 +1250,7 @@ async fn assert_refold_matches_stored_projection(
     );
 }
 
-async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("process-attempt-budget");
     registry
         .register_process(
@@ -1382,7 +1342,7 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
         .expect("release exhausted-attempt lease");
 }
 
-async fn producer_terminal_status_must_match_materialized_outcome(
+pub async fn producer_terminal_status_must_match_materialized_outcome(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = ProcessId::from("producer-terminal-outcome-mismatch");
@@ -1446,7 +1406,7 @@ async fn producer_terminal_status_must_match_materialized_outcome(
     );
 }
 
-async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
+pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("reserved-edge-audit");
     registry
         .register_process(registration(&process_id))
@@ -1478,7 +1438,7 @@ async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn Pro
     );
 }
 
-async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
+pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("waiting-recovery-worklist");
     let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
     let env_ref = ProcessExecutionEnvRef::new("process-env:waiting-recovery-worklist");
@@ -1588,7 +1548,7 @@ async fn claim_after_expiry(
     }
 }
 
-async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     const SHORT_TTL_MS: u64 = 20;
 
     // A lease is authority over a retained registry row, so a claim for a
@@ -1835,7 +1795,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     );
 }
 
-async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry>) {
+pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry>) {
     let record = registry
         .register_process_with_observers(
             registration("observer-registration"),
@@ -1899,7 +1859,9 @@ async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry
     );
 }
 
-async fn observer_events_are_auditable_and_transfer_is_atomic(registry: Arc<dyn ProcessRegistry>) {
+pub async fn observer_events_are_auditable_and_transfer_is_atomic(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     let process_id = ProcessId::from("observer-transfer");
     registry
         .register_process_with_observers(
@@ -1965,7 +1927,7 @@ async fn observer_events_are_auditable_and_transfer_is_atomic(registry: Arc<dyn 
     );
 }
 
-async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn ProcessRegistry>) {
+pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("wake-retarget");
     registry
         .register_process(
@@ -2008,7 +1970,7 @@ async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Process
     );
 }
 
-async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
+pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("terminal-outcome");
     registry
         .register_process(registration(&process_id))
@@ -2027,7 +1989,7 @@ async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
     assert_eq!(terminal.outcome, Some(expected));
 }
 
-async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
+pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("session-delete-bytes");
     registry
         .register_process_with_observers(
@@ -2083,7 +2045,7 @@ async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistr
     );
 }
 
-async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn ProcessRegistry>) {
+pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("pruned-tombstone");
     registry
         .register_process(registration(&process_id))
@@ -2242,7 +2204,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     );
 }
 
-async fn reopen_conformance(handles: ReopenableProcessRegistry) {
+pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegistry) {
     let open: Arc<dyn ProcessRegistry> = handles.open.clone();
     let reopen: Arc<dyn ProcessRegistry> = handles.reopen.clone();
     refolded_process_record_matches_stored_projection(
@@ -2251,10 +2213,8 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
         &ProcessId::from("process-refold-cold"),
     )
     .await;
-    let mut conservation = ProcessCountConservation::from_modeled_totals(
-        REOPEN_BASELINE_SPAWNS,
-        REOPEN_BASELINE_PRUNED,
-    );
+    let mut conservation = ProcessCountConservation::default();
+    conservation.record_spawn();
     assert_process_count_conservation(&open, conservation)
         .await
         .expect("known refold registration conserves before reopen assertion");
@@ -2298,7 +2258,7 @@ async fn reopen_conformance(handles: ReopenableProcessRegistry) {
 /// the state is durable, reachable only from a running Externally-Owned row,
 /// idempotent, refused from every other source state and disposition, closable
 /// by external reconciliation, and never retracts a reconciled terminal state.
-async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
+pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("caller-departure-machine");
     let observer_session = "caller-departure-observer";
     let registered = registry
@@ -2487,4 +2447,8 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
         terminal_replay, closed,
         "a recorded outcome cannot be retracted into a caller departure"
     );
+}
+
+pub async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
+    caller_departure::caller_departed_rows_are_reclaimed_by_retention(registry).await;
 }

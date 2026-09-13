@@ -53,24 +53,23 @@ impl SessionExecutionLeaseRenewalZeroRowInjector
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_zero_row_session_execution_lease_renewal_is_refused_when_configured() {
+lash_conformance::session_execution_lease_renewal_tests!({
     let Some(database_url) = database_url() else {
         eprintln!("skipping Postgres zero-row renewal law: database URL is not set");
         return;
     };
-    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let database_lock = SharedDatabaseLock::acquire(&database_url).await;
     let storage = Arc::new(
         PostgresStorage::connect(&database_url)
             .await
             .expect("connect Postgres zero-row renewal store"),
     );
-    lash_conformance::session_execution_lease_zero_row_renewal_is_refused(
+    (
+        database_lock,
         SessionExecutionLeaseRenewalZeroRowHandles {
             store: Arc::new(storage.session_store("zero-row-session-lease-renewal"))
                 as Arc<dyn RuntimePersistence>,
             injector: Arc::new(PostgresSessionExecutionLeaseRenewalZeroRowInjector { storage }),
         },
     )
-    .await;
-}
+});

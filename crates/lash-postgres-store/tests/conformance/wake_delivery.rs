@@ -25,8 +25,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_wake_delivery_crash_matrix_when_configured() {
+lash_conformance::wake_delivery_crash_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake-delivery crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
@@ -53,18 +52,19 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    Box::pin(lash_conformance::wake_delivery_crash_matrix(
+    (
+        _database_lock,
         factory,
         registry,
         clock,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
-    ))
-    .await;
-}
+        || async {},
+        || async {},
+    )
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_wake_delivery_ordering_group_conformance_when_configured() {
+lash_conformance::wake_delivery_ordering_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres wake ordering-group conformance: \
@@ -77,13 +77,15 @@ async fn postgres_wake_delivery_ordering_group_conformance_when_configured() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    lash_conformance::wake_delivery_ordering_group_conformance(
+    (
+        _database_lock,
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
             pool: storage.pool().clone(),
         }),
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
+        || async {},
+        || async {},
     )
-    .await;
-}
+});

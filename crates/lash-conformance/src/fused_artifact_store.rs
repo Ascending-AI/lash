@@ -12,11 +12,9 @@
 
 use std::sync::Arc;
 
-use crate::{ReopenableProcessExecutionEnvStore, process_execution_env_store_reopenable};
+use crate::ReopenableProcessExecutionEnvStore;
 use lash_core::ProcessExecutionEnvStore;
-use lashlang::testing::conformance::{
-    ReopenableLashlangArtifactStore, lashlang_artifact_store_reopenable,
-};
+use lashlang::testing::conformance::ReopenableLashlangArtifactStore;
 use lashlang::{LashlangArtifactStore, ModuleArtifact, parse};
 use pretty_assertions::assert_eq;
 
@@ -39,37 +37,155 @@ fn sample_module_artifact(source: &str) -> ModuleArtifact {
     ModuleArtifact::from_program(program).expect("build sample module artifact")
 }
 
-/// Run the full durable artifact-store suite: both trait contracts (delegated
-/// to their owning crates' suites, including reopen), plus the 3-way
-/// cross-namespace isolation that a single fused store must uphold. `make` must
-/// return handles over a fresh, empty store on each call.
-pub async fn artifact_store_reopenable<F>(make: F)
+pub async fn lashlang_artifact_store_fresh_instances<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang_artifact_store_reopenable(|| {
-        let handles = make();
-        let reopen = Arc::clone(&handles.reopen);
-        ReopenableLashlangArtifactStore {
-            open: handles.open.artifacts,
-            reopen: Arc::new(move || (reopen)().artifacts),
-        }
+    let make_store = || make().open.artifacts;
+    lashlang::testing::conformance::lashlang_artifact_store_fresh_instances(&make_store).await;
+}
+
+pub async fn lashlang_artifact_store_reports_durable<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::lashlang_artifact_store_durability_tier(
+        make().open.artifacts,
+        lashlang::DurabilityTier::Durable,
+    )
+    .await;
+}
+
+pub async fn lashlang_artifact_owner_lifecycle<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::owner_lifecycle(make().open.artifacts).await;
+}
+
+pub async fn lashlang_failed_registration_reclaims_staging_owner<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::failed_registration_reclaims_staging_owner(
+        make().open.artifacts,
+    )
+    .await;
+}
+
+pub async fn lashlang_artifact_transfer_is_idempotent<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::transfer_is_idempotent(make().open.artifacts).await;
+}
+
+pub async fn lashlang_artifact_retirement_fences_late_publication<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::retirement_fences_late_publication(make().open.artifacts).await;
+}
+
+pub async fn lashlang_slow_writer_is_fenced_after_retirement<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::slow_writer_is_fenced_after_retirement(make().open.artifacts)
+        .await;
+}
+
+pub async fn lashlang_hostile_module_references_are_rejected<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::hostile_module_references_are_rejected(make().open.artifacts)
+        .await;
+}
+
+pub async fn lashlang_artifact_survives_reopen<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let handles = make();
+    let reopen = Arc::clone(&handles.reopen);
+    lashlang::testing::conformance::survives_reopen(ReopenableLashlangArtifactStore {
+        open: handles.open.artifacts,
+        reopen: Arc::new(move || (reopen)().artifacts),
     })
     .await;
-    process_execution_env_store_reopenable(|| {
-        let handles = make();
-        let reopen = Arc::clone(&handles.reopen);
+}
+
+pub async fn process_execution_env_store_fresh_instances<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let make_store = || make().open.process_env;
+    crate::registration_macro_support::process_execution_env_store_fresh_instances(&make_store)
+        .await;
+}
+
+pub async fn process_environment_namespace<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::process_environment_namespace(make().open.process_env).await;
+}
+
+pub async fn process_env_owner_lifecycle<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::process_env_owner_lifecycle(make().open.process_env).await;
+}
+
+pub async fn failed_registration_reclaims_process_env<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::failed_registration_reclaims_process_env(
+        make().open.process_env,
+    )
+    .await;
+}
+
+pub async fn process_env_transfer_and_fence<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::process_env_transfer_and_fence(make().open.process_env)
+        .await;
+}
+
+pub async fn slow_process_env_writer_is_fenced<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::registration_macro_support::slow_process_env_writer_is_fenced(make().open.process_env)
+        .await;
+}
+
+pub async fn process_env_survives_reopen<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let handles = make();
+    let reopen = Arc::clone(&handles.reopen);
+    crate::registration_macro_support::process_env_survives_reopen(
         ReopenableProcessExecutionEnvStore {
             open: handles.open.process_env,
             reopen: Arc::new(move || (reopen)().process_env),
-        }
-    })
+        },
+    )
     .await;
-    cross_namespace_isolation(make().open).await;
 }
 
 /// The two typed keyspaces multiplexed onto a durable backend stay disjoint.
-async fn cross_namespace_isolation(handles: ArtifactStoreHandles) {
+pub async fn artifact_store_cross_namespace_isolation<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let handles = make().open;
     let artifact = sample_module_artifact("process delta(root: str) -> str { finish root }");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),

@@ -29,8 +29,8 @@ fn execution_owner(id: &str) -> ArtifactOwner {
     })
 }
 
-/// Run the ownership contract against a fresh store.
-pub async fn lashlang_artifact_store<F>(make: F, expected_tier: DurabilityTier)
+/// Prove that a backend fixture returns independent store handles.
+pub async fn lashlang_artifact_store_fresh_instances<F>(make: &F)
 where
     F: Fn() -> Arc<dyn LashlangArtifactStore>,
 {
@@ -40,17 +40,17 @@ where
         !Arc::ptr_eq(&first, &second),
         "factory reused one store Arc"
     );
-    drop((first, second));
-    assert_eq!(make().durability_tier(), expected_tier);
-    owner_lifecycle(make()).await;
-    failed_registration_reclaims_staging_owner(make()).await;
-    transfer_is_idempotent(make()).await;
-    retirement_fences_late_publication(make()).await;
-    slow_writer_is_fenced_after_retirement(make()).await;
-    hostile_module_references_are_rejected(make()).await;
 }
 
-async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtifactStore>) {
+/// Prove that the store reports the backend's declared durability tier.
+pub async fn lashlang_artifact_store_durability_tier(
+    store: Arc<dyn LashlangArtifactStore>,
+    expected_tier: DurabilityTier,
+) {
+    assert_eq!(store.durability_tier(), expected_tier);
+}
+
+pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process failed(root: str) -> str { finish root }");
     let staged = execution_owner("failed-registration");
     store
@@ -70,16 +70,7 @@ async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtif
     );
 }
 
-/// Run the ownership contract plus persistence across a reopened handle.
-pub async fn lashlang_artifact_store_reopenable<F>(make: F)
-where
-    F: Fn() -> ReopenableLashlangArtifactStore,
-{
-    lashlang_artifact_store(|| make().open, DurabilityTier::Durable).await;
-    survives_reopen(make()).await;
-}
-
-async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process alpha(root: str) -> str { finish root }");
     let first = ArtifactOwner::host("host-a");
     let second = ArtifactOwner::host("host-b");
@@ -130,7 +121,7 @@ async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
         .expect("repeated release is idempotent");
 }
 
-async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process beta(root: str) -> str { finish root }");
     let staged = execution_owner("module-transfer");
     let process = ArtifactOwner::process(lash_core::ProcessRef::new(
@@ -162,7 +153,7 @@ async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
     );
 }
 
-async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process gamma(root: str) -> str { finish root }");
     let abandoned = execution_owner("abandoned-module-writer");
     store
@@ -189,7 +180,7 @@ async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore
     );
 }
 
-async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process slow(root: str) -> str { finish root }");
     let abandoned = execution_owner("slow-module-writer");
     let pause = store
@@ -216,7 +207,7 @@ async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactS
     );
 }
 
-async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
+pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
     let artifact = sample_module_artifact("process epsilon(root: str) -> str { finish root }");
@@ -262,7 +253,7 @@ async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     );
 }
 
-async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtifactStore>) {
     for raw in ["", "nul\0reference"] {
         let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
         assert!(store.get_module_artifact(&module_ref).await.is_err());
@@ -282,12 +273,47 @@ mod tests {
     use super::*;
     use crate::InMemoryLashlangArtifactStore;
 
+    fn make() -> Arc<dyn LashlangArtifactStore> {
+        Arc::new(InMemoryLashlangArtifactStore::new())
+    }
+
     #[tokio::test]
-    async fn in_memory_lashlang_artifact_store_satisfies_conformance() {
-        lashlang_artifact_store(
-            || Arc::new(InMemoryLashlangArtifactStore::new()) as Arc<dyn LashlangArtifactStore>,
-            DurabilityTier::Inline,
-        )
-        .await;
+    async fn in_memory_lashlang_artifact_store_returns_fresh_instances() {
+        lashlang_artifact_store_fresh_instances(&make).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_reports_inline_durability() {
+        lashlang_artifact_store_durability_tier(make(), DurabilityTier::Inline).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_satisfies_owner_lifecycle() {
+        owner_lifecycle(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_reclaims_failed_registration() {
+        failed_registration_reclaims_staging_owner(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_transfer_is_idempotent() {
+        transfer_is_idempotent(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_retirement_fences_late_publication() {
+        retirement_fences_late_publication(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_fences_slow_writer_after_retirement() {
+        slow_writer_is_fenced_after_retirement(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_rejects_hostile_module_references() {
+        hostile_module_references_are_rejected(make()).await;
     }
 }

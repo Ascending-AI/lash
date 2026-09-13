@@ -126,17 +126,4 @@ fn sqlite_lineage_handles() -> LineageConformanceHandles {
     }
 }
 
-#[tokio::test]
-async fn sqlite_fork_lineage_conformance() {
-    lash_conformance::fork_lineage_conformance(sqlite_lineage_handles()).await;
-}
-
-#[tokio::test]
-async fn sqlite_fork_lineage_no_carrier_law() {
-    lash_conformance::fork_lineage_no_carrier_law(sqlite_lineage_handles()).await;
-}
-
-#[tokio::test]
-async fn sqlite_fork_plan_matches_edge_walk_law() {
-    lash_conformance::fork_plan_matches_edge_walk_law(sqlite_lineage_handles()).await;
-}
+lash_conformance::lineage_tests!({ ((), sqlite_lineage_handles()) });
