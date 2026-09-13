@@ -319,12 +319,19 @@ pub(super) fn reentrant_worker_with_trigger_store(
 ) -> DurableProcessWorker {
     let (_driver_registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_process_env_store(process_env_store)
+            .with_process_engine_registration(
+                crate::ProcessEngineRegistration::accepting(Arc::new(
+                    crate::testing::FixtureProcessEngine,
+                )),
             ),
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::External(process_work),

@@ -1253,19 +1253,23 @@ async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key
             "shared-caller-key",
         ),
     });
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let mut context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
-        Arc::new(crate::TestLocalProcessRegistry::default()),
+        Arc::clone(&registry),
         crate::ToolIntents::v2(vec![declaration.clone(), declaration]),
         Arc::clone(&calls),
     );
-    context.trigger_router = Some(crate::TriggerRouter::new(
-        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
-        crate::testing::process_work_wiring_for_registry(Arc::new(
-            crate::TestLocalProcessRegistry::default(),
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    context.trigger_router = Some(
+        crate::TriggerRouter::new(
+            Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+            crate::testing::process_work_wiring_for_registry(
+                registry as Arc<dyn crate::ProcessRegistry>,
+            ),
         )
-            as Arc<dyn crate::ProcessRegistry>),
-    ));
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture()),
+    );
 
     let first = run_fixed_intent_attempt(&context).await;
     let replay_keys = first
