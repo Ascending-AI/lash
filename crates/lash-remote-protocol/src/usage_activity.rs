@@ -278,3 +278,37 @@ pub enum RemoteTurnEvent {
         message: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_cell_failure_refuses_an_empty_message_by_field_name() {
+        let activity = RemoteTurnActivity {
+            sequence: 1,
+            id: "activity-1".to_string(),
+            correlation_id: "correlation-1".to_string(),
+            event: RemoteTurnEvent::CodeBlockCompleted {
+                language: "lashlang".to_string(),
+                output: String::new(),
+                error: Some(RemoteCellFailure {
+                    kind: RemoteCellFailureKind::Host,
+                    message: "  ".to_string(),
+                }),
+                success: false,
+                duration_ms: 0,
+                tool_call_ids: Vec::new(),
+                graph_key: None,
+            },
+        };
+
+        assert!(matches!(
+            activity.validate(),
+            Err(RemoteProtocolError::MissingRequiredField {
+                type_name: "RemoteCellFailure",
+                field: "message",
+            })
+        ));
+    }
+}

@@ -1,6 +1,6 @@
 use super::*;
 
-struct FailingDeferredJournalController;
+pub(super) struct FailingDeferredJournalController;
 
 impl lash_core::AwaitEventResolver for FailingDeferredJournalController {}
 
