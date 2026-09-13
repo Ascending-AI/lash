@@ -755,10 +755,12 @@ mod tests {
 
     #[test]
     fn config_without_credentials_does_not_read_aws_environment() {
+        const CHILD_SENTINEL: &str = "credential-seep-child: assertions-passed";
         let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--ignored",
                 "--exact",
+                "--nocapture",
                 "tests::credential_seep_child_process",
             ])
             .env("AWS_ACCESS_KEY_ID", "ambient-access-key")
@@ -766,11 +768,17 @@ mod tests {
             .env("AWS_SESSION_TOKEN", "ambient-session-token")
             .output()
             .expect("run isolated credential-seep witness");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             output.status.success(),
             "credential-seep witness failed:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            stdout,
+            stderr
+        );
+        assert!(
+            stdout.lines().any(|line| line == CHILD_SENTINEL),
+            "credential-seep child did not run to completion:\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
 
@@ -793,6 +801,7 @@ mod tests {
             Some("true".to_string())
         );
         builder.build().expect("build unsigned S3 client");
+        println!("credential-seep-child: assertions-passed");
     }
 
     fn unique_case_suffix() -> String {
