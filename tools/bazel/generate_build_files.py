@@ -181,7 +181,16 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},\n"
             ")\n\n"
         )
-        inventory_targets.append({"kind": "custom-build", "label": f"//{package_dir}:build_script"})
+        inventory_targets.append({
+            # `cargo_build_script` wraps its binary and exposes no `CrateInfo`,
+            # so the clippy aspect cannot attach to this label. Cargo lints
+            # `build.rs` under `--all-targets`; keep that coverage with the
+            # Cargo command on untrusted events and record the gap here rather
+            # than dropping it silently.
+            "clippy_exempt": "cargo_build_script exposes no CrateInfo for the clippy aspect",
+            "kind": "custom-build",
+            "label": f"//{package_dir}:build_script",
+        })
 
     if library:
         extra_compile_data = []
@@ -266,7 +275,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             inventory_targets.append({
                 "kind": "doc-test",
                 "label": f"//{package_dir}:{primary_target}__doc_test",
-                "tags": ["cargo-authoritative-doctest", "manual"],
+                "tags": [],
             })
 
     for target in targets:
@@ -526,6 +535,17 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"]
             for target in labels
             if target["label"] is not None and target["kind"] != "doc-test"
+        ),
+        # Cargo lints libs, bins, examples, benches and test crates under
+        # `clippy --workspace --all-targets`. Build scripts are excluded here
+        # because `cargo_build_script` exposes no `CrateInfo` for the clippy
+        # aspect to consume; their `cargo-build-script-clippy` exception is
+        # recorded per label in `tools/bazel/target-inventory.json`.
+        "WORKSPACE_CLIPPY_TARGETS": sorted(
+            target["label"]
+            for target in labels
+            if target["label"] is not None
+            and target["kind"] not in ("custom-build", "doc-test")
         ),
         "WORKSPACE_DOCTEST_TARGETS": sorted(
             target["label"]

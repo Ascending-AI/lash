@@ -257,8 +257,11 @@ def lash_rust_integration_test(
     )
 
 def lash_rust_doc_test(name, crate):
+    # rustdoc executes these against the same pinned toolchain and the same
+    # declared dependency graph as the crate itself, with no service, network
+    # or Cargo-relative asset, so their results are cacheable like any other
+    # deterministic test action.
     rust_doc_test(
         name = name,
         crate = crate,
-        tags = ["cargo-authoritative-doctest", "manual"],
     )

@@ -45,6 +45,12 @@ kiln build
 # Run the generated cacheable test suite (87 test binaries).
 kiln test
 
+# Run the doctest partition (35 rustdoc binaries).
+kiln test //:workspace_doctests
+
+# Lint the `--workspace --all-targets` shape (170 clippy actions).
+kiln build //:workspace_clippy
+
 # Compile or run focused targets instead.
 kiln build //crates/lash-core:lash-core
 kiln test \
@@ -138,8 +144,6 @@ frontend binaries. Use the existing Cargo recipes for these correctness contract
   commands own feature-combination coverage. Cargo-required targets omitted
   from the resolved default graph are recorded with `cargo-feature-gate` in
   `tools/bazel/target-inventory.json`.
-- Cargo doctests remain authoritative for rustdoc behavior. Bazel doctest
-  labels provide inventory and focused iteration.
 - The `lash-runtime` `ui` target owns trybuild compile-fail fixtures and their
   nested Cargo target cache.
 - nextest profiles own workspace filtering, retries, and scheduling; the
@@ -154,24 +158,83 @@ frontend binaries. Use the existing Cargo recipes for these correctness contract
 
 Ignored live, regeneration, soak, and measurement tests remain ignored in the
 ordinary Bazel binaries exactly as they are in Cargo's ordinary workspace run;
-their named `--ignored` or live recipes remain authoritative. The 35 doctest
-labels stay manual because Cargo owns rustdoc execution, and the one target
+their named `--ignored` or live recipes remain authoritative. The one target
 whose required feature is outside the default graph remains recorded as a
 Cargo feature-gate target without a Bazel label.
+
+## Doctests
+
+`//:workspace_doctests` executes the 35 `rust_doc_test` labels — one per
+first-party library whose manifest leaves `doctest` enabled, which is exactly
+the set Cargo builds. rustdoc runs them against the pinned 1.98.1 toolchain and
+the crate's declared dependency graph; none reaches a service, the network, or a
+Cargo-relative asset, and none depends on the working directory, so their
+results are deterministic and cacheable under `--cache_test_results=yes` like
+any other Bazel test action. An input change produces a different action key,
+and a failed doctest is never reused as a success. On this tree the partition
+runs 25 cases and skips 4 ignored ones, the same counts `cargo test --doc
+--workspace --locked` reports across the same 35 rustdoc binaries.
+`scripts/test_bazel_test_contract.py` refuses any doctest label that
+reacquires `manual` or a `cargo_only` reason, so a label cannot leave the
+partition silently.
+
+## Clippy
+
+`//:workspace_clippy` is the `cargo clippy --workspace --all-targets` shape as
+one cached Bazel action per target: 170 labels, every first-party target of the
+resolved default graph except doctests and the one `cargo_build_script` label,
+whose exemption is recorded as `clippy_exempt` in
+`tools/bazel/target-inventory.json` because `cargo_build_script` exposes no
+`CrateInfo` for a clippy aspect to attach to.
+
+`tools/bazel/clippy.bzl` wraps the upstream `rules_rust` clippy action for two
+reasons, both about matching Cargo's effective lint set rather than an
+approximation of it:
+
+- Clippy resolves its configuration by walking up from each crate's manifest
+  directory and stopping at the first `clippy.toml`. This repository has two —
+  the workspace file and `crates/lash-core/clippy.toml`, which carries the
+  `disallowed-methods` list that `clippy::disallowed_methods` denies — while the
+  upstream aspect binds a single config for the whole build. The aspect here
+  selects the nearest declared config per target, so `lash-core` sees its own
+  list instead of an empty one.
+- The upstream action drops its `-D warnings` default as soon as a target
+  carries a `lint_config`, and every generated Lash target does. `-D warnings`
+  is appended after the `[workspace.lints]` flags, the same position Cargo's
+  trailing `-- -D warnings` occupies.
+
+`slack-clone`'s `e2e` feature is outside the resolved default workspace graph,
+so `cargo clippy -p slack-clone --all-targets --features e2e --no-deps` has no
+Bazel equivalent and stays a Cargo command on every event.
 
 The main CI workflow makes this a single authoritative partition. Trusted
 same-repository pull requests, merge-queue groups, `main` pushes, and manual CI
 dispatches run `//:workspace_tests` with the authenticated shared cache. On the
 same events the ordinary nextest job reads the generated
 `tools/bazel/cargo_owned_nextest_filter.txt`, so its `profile.ci` run executes
-only ordinary cases from the 22 Cargo-owned binaries. The existing doctest,
-trybuild, heavy, service, feature, fuzz, packaging, and release jobs keep their
-own Cargo commands and schedules. `CI conclusion` requires the Bazel job to
-succeed on every trusted event.
+only ordinary cases from the 22 Cargo-owned binaries. The `Lint` job builds
+`//:workspace_clippy` in place of the workspace `cargo clippy`, and the
+`Check workspace + doctests` job builds `//:workspace_compile` and runs
+`//:workspace_doctests` in place of `cargo check --workspace --all-targets` and
+`cargo test --doc --workspace`. `//:workspace_compile` compiles *and links*
+every label of the resolved default graph except doctests, including the
+unit- and integration-test crates that carry the `cfg(test)` shape and the
+members that are not `default-members`; it is generated from the same
+`cargo metadata --locked` resolution the Cargo command uses, so feature
+unification is identical, and the only Cargo target outside it,
+`slack-clone-live-e2e`, is one `cargo check --workspace --all-targets` skips for
+the same required-feature reason. Formatting, the Python and shell gates,
+actionlint, the versioned-surface bump check and the trunk-only perf smoke are
+cheap and stay exactly as they were. The remaining trybuild, heavy, service,
+feature, fuzz, packaging, and release jobs keep their own Cargo commands and
+schedules. `CI conclusion` requires the Bazel job to succeed on every trusted
+event.
 
 Fork and Dependabot pull requests never receive cache credentials: their Bazel
-job is intentionally skipped and their ordinary nextest job omits the generated
-filter, preserving the full workspace fallback. `CI conclusion` accepts that
+job is intentionally skipped, their ordinary nextest job omits the generated
+filter, and the `Lint` and `Check workspace + doctests` jobs run exactly the
+Cargo clippy, check and doctest commands that predate this cutover, preserving
+the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.
 
 GitHub-hosted actions execute locally, not in the shared executor's pinned

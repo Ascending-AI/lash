@@ -34,6 +34,17 @@ def generated_list(name: str) -> list[str]:
     return ast.literal_eval(match.group(1))
 
 
+def inventory_targets() -> list[dict[str, object]]:
+    inventory = json.loads(
+        (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
+    )
+    return [
+        target | {"package": package["package"]}
+        for package in inventory["packages"]
+        for target in package["targets"]
+    ]
+
+
 def test_targets() -> list[dict[str, object]]:
     inventory = json.loads(
         (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
@@ -332,6 +343,128 @@ class BazelTestContractTests(unittest.TestCase):
                     self.assertEqual(expected_filter, nextest[filter_index + 1])
                 else:
                     self.assertNotIn("-E", nextest)
+
+    def test_doctests_are_an_executable_cached_partition(self) -> None:
+        doctests = [
+            target for target in inventory_targets() if target["kind"] == "doc-test"
+        ]
+        self.assertEqual(35, len(doctests))
+        # rustdoc runs these against the pinned toolchain and the declared
+        # dependency graph, so nothing here is Cargo-owned any more. A label
+        # that reacquires `manual` or a `cargo_only` reason silently leaves the
+        # partition; both are refused here.
+        self.assertTrue(all(target["tags"] == [] for target in doctests))
+        self.assertTrue(all("cargo_only" not in target for target in doctests))
+        self.assertEqual(
+            {target["label"] for target in doctests},
+            set(generated_list("WORKSPACE_DOCTEST_TARGETS")),
+        )
+
+        root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn(
+            'test_suite(\n    name = "workspace_doctests",\n'
+            "    tests = WORKSPACE_DOCTEST_TARGETS,\n)",
+            root_build,
+        )
+
+    def test_clippy_partition_is_the_all_targets_shape(self) -> None:
+        targets = [
+            target for target in inventory_targets() if target["label"] is not None
+        ]
+        build_scripts = {
+            target["label"] for target in targets if target["kind"] == "custom-build"
+        }
+        doctests = {
+            target["label"] for target in targets if target["kind"] == "doc-test"
+        }
+        clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
+
+        # `cargo clippy --workspace --all-targets` lints every target of the
+        # resolved default graph. The Bazel partition is the same set minus the
+        # build scripts, each of which carries its own recorded exemption.
+        self.assertEqual(
+            set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
+            clippy,
+        )
+        self.assertEqual(170, len(clippy))
+        self.assertFalse(clippy & doctests)
+        self.assertTrue(
+            all(
+                target.get("clippy_exempt")
+                for target in targets
+                if target["label"] in build_scripts
+            )
+        )
+
+        root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
+        self.assertIn(
+            'lash_rust_clippy(\n    name = "workspace_clippy",\n'
+            "    testonly = True,\n    deps = WORKSPACE_CLIPPY_TARGETS,\n)",
+            root_build,
+        )
+
+    def test_lint_and_doc_jobs_branch_on_the_shared_trust_decision(self) -> None:
+        jobs = workflow()["jobs"]
+        trusted = "needs.plan.outputs.bazel_trusted == 'true'"
+        untrusted = "needs.plan.outputs.bazel_trusted != 'true'"
+
+        for job_id in ("lint", "test-doc"):
+            with self.subTest(job=job_id):
+                self.assertEqual("plan", jobs[job_id]["needs"])
+                self.assertEqual("build-cache", jobs[job_id]["environment"])
+
+        clippy_bazel = job_step(
+            jobs["lint"], "Clippy (workspace, all targets, shared cache)"
+        )
+        self.assertEqual(trusted, clippy_bazel["if"])
+        self.assertIn("//:workspace_clippy", clippy_bazel["run"])
+
+        clippy_cargo = job_step(jobs["lint"], "Clippy (workspace, all targets)")
+        self.assertEqual(untrusted, clippy_cargo["if"])
+        self.assertIn(
+            "cargo clippy --workspace --all-targets --locked "
+            "${LASH_CI_FEATURES} -- -D warnings",
+            clippy_cargo["run"],
+        )
+
+        # The `e2e` feature is outside the resolved default graph, so this
+        # command has no Bazel equivalent and runs on every event.
+        e2e = job_step(jobs["lint"], "Clippy (slack-clone e2e feature)")
+        self.assertNotIn("if", e2e)
+        self.assertIn(
+            "cargo clippy -p slack-clone --all-targets --features e2e "
+            "--locked --no-deps -- -D warnings",
+            e2e["run"],
+        )
+
+        doc_bazel = job_step(
+            jobs["test-doc"], "Check workspace and run doctests with shared cache"
+        )
+        self.assertEqual(f"matrix.lane == 'workspace' && {trusted}", doc_bazel["if"])
+        self.assertIn("//:workspace_compile //:workspace_doctests", doc_bazel["run"])
+
+        check_cargo = job_step(jobs["test-doc"], "Check workspace (all targets)")
+        self.assertEqual(f"matrix.lane == 'workspace' && {untrusted}", check_cargo["if"])
+        self.assertIn(
+            "cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}",
+            check_cargo["run"],
+        )
+
+        doctest_cargo = job_step(jobs["test-doc"], "Test workspace doctests")
+        self.assertEqual(
+            f"matrix.lane == 'workspace' && {untrusted}", doctest_cargo["if"]
+        )
+        self.assertIn(
+            "cargo test --doc --workspace --locked ${LASH_CI_FEATURES}",
+            doctest_cargo["run"],
+        )
+
+        for job_id in ("lint", "test-doc"):
+            with self.subTest(job=job_id):
+                setup = job_step(jobs[job_id], "Configure Bazel shared cache")
+                self.assertEqual(
+                    "./.github/actions/bazel-shared-cache", setup["uses"]
+                )
 
     def test_ci_policy_accepts_bazel_skip_only_for_untrusted_events(self) -> None:
         needs = {
