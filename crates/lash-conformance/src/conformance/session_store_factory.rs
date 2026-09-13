@@ -77,17 +77,17 @@ pub async fn session_store_factory<F>(
 }
 
 #[cfg(test)]
-pub(super) async fn session_config_settlement_timeout_is_typed() {
+pub(crate) async fn session_config_settlement_timeout_is_typed() {
     Box::pin(config_commands::session_config_settlement_timeout_is_typed()).await;
 }
 
 #[cfg(test)]
-pub(super) async fn cancelled_session_config_settlement_is_typed() {
+pub(crate) async fn cancelled_session_config_settlement_is_typed() {
     config_commands::cancelled_session_config_settlement_is_typed().await;
 }
 
 #[cfg(test)]
-pub(super) async fn superseded_config_settlement_adopts_the_newer_head() {
+pub(crate) async fn superseded_config_settlement_adopts_the_newer_head() {
     Box::pin(config_commands::superseded_config_settlement_adopts_the_newer_head()).await;
 }
 
