@@ -13,9 +13,7 @@ package(default_visibility = ["//visibility:public"])
 lash_rust_library(
     name = "lash-lashlang-runtime",
     build_script = None,
-    crate_features = [
-        "testing",
-    ],
+    crate_features = [],
     crate_name = "lash_lashlang_runtime",
     declared_features = [
         "testing",
@@ -29,9 +27,7 @@ lash_rust_library(
 lash_rust_unit_test(
     name = "lash-lashlang-runtime__unit_test",
     build_script = None,
-    crate_features = [
-        "testing",
-    ],
+    crate_features = [],
     crate_name = "lash_lashlang_runtime",
     crate_root = "src/lib.rs",
     declared_features = [

@@ -221,6 +221,19 @@ CREATE TABLE lash_durable_read_fixture.lash_node_anchors (
 
 
 --
+-- Name: lash_parent_end_plans; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_parent_end_plans (
+    parent_kind text NOT NULL,
+    parent_id text NOT NULL COLLATE pg_catalog."C",
+    ended_at_ms bigint NOT NULL,
+    settled_at_ms bigint,
+    CONSTRAINT ck_parent_end_plans_kind CHECK ((parent_kind = ANY (ARRAY['turn'::text, 'process'::text])))
+);
+
+
+--
 -- Name: lash_pending_turn_inputs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -328,16 +341,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_observers (
 
 
 --
--- Name: lash_process_parent_end_plans; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_process_parent_end_plans (
-    process_id text NOT NULL COLLATE pg_catalog."C",
-    actions_json text NOT NULL
-);
-
-
---
 -- Name: lash_process_segment_handovers; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -401,7 +404,14 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     last_event_sequence bigint NOT NULL,
     change_seq bigint NOT NULL,
     status text NOT NULL,
+    parent_scope_kind text NOT NULL,
+    parent_scope_id text COLLATE pg_catalog."C",
+    on_parent_end text NOT NULL,
+    cancel_requested boolean DEFAULT false NOT NULL,
     record_json text NOT NULL,
+    CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK ((parent_scope_kind = ANY (ARRAY['turn'::text, 'process'::text, 'host'::text]))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
@@ -958,6 +968,12 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_f6cedd50c7134
 
 
 --
+-- Data for Name: lash_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -991,12 +1007,6 @@ INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 0,
 
 --
 -- Data for Name: lash_process_observers; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_process_parent_end_plans; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1065,7 +1075,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 92);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 93);
 
 
 --
@@ -1334,6 +1344,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_node_anchors
 
 
 --
+-- Name: lash_parent_end_plans lash_parent_end_plans_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_parent_end_plans
+    ADD CONSTRAINT lash_parent_end_plans_pkey PRIMARY KEY (parent_kind, parent_id);
+
+
+--
 -- Name: lash_pending_turn_inputs lash_pending_turn_inputs_input_id_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1395,14 +1413,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
     ADD CONSTRAINT lash_process_observers_pkey PRIMARY KEY (session_id, process_id, process_incarnation);
-
-
---
--- Name: lash_process_parent_end_plans lash_process_parent_end_plans_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_process_parent_end_plans
-    ADD CONSTRAINT lash_process_parent_end_plans_pkey PRIMARY KEY (process_id);
 
 
 --
@@ -1742,6 +1752,13 @@ CREATE INDEX idx_lash_node_anchors_checkpoint_ref ON lash_durable_read_fixture.l
 
 
 --
+-- Name: idx_lash_parent_end_plans_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_parent_end_plans_pending ON lash_durable_read_fixture.lash_parent_end_plans USING btree (ended_at_ms, parent_kind, parent_id) WHERE (settled_at_ms IS NULL);
+
+
+--
 -- Name: idx_lash_pending_turn_input_order; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1816,6 +1833,20 @@ CREATE INDEX idx_lash_processes_live_worklist ON lash_durable_read_fixture.lash_
 --
 
 CREATE INDEX idx_lash_processes_originator ON lash_durable_read_fixture.lash_processes USING btree (originator_id);
+
+
+--
+-- Name: idx_lash_processes_parent_end_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id) WHERE ((on_parent_end = 'cancel'::text) AND (NOT cancel_requested) AND (status = ANY (ARRAY['running'::text, 'waiting'::text])));
+
+
+--
+-- Name: idx_lash_processes_parent_scope; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_parent_scope ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id);
 
 
 --
@@ -2047,14 +2078,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
     ADD CONSTRAINT lash_process_observers_process_id_process_incarnation_fkey FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_durable_read_fixture.lash_processes(process_id, incarnation) ON DELETE CASCADE;
-
-
---
--- Name: lash_process_parent_end_plans lash_process_parent_end_plans_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_process_parent_end_plans
-    ADD CONSTRAINT lash_process_parent_end_plans_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
 
 
 --

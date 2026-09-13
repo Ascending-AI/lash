@@ -18,6 +18,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-71-bb852f91/postgres-expected.json",
+];
 const IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-70-26d22e05/postgres-expected.json",
 ];
@@ -129,7 +132,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 92);
+    assert_eq!(PostgresStorage::schema_version(), 93);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -270,7 +273,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .expect("recreate the attachment condemnation table from the authoritative DDL");
     sqlx::raw_sql(
         "DROP TABLE IF EXISTS lash_process_artifact_cleanup;
-         DROP TABLE lash_process_parent_end_plans;
+         DROP TABLE lash_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
          DROP TABLE lash_process_leases;
          DROP TABLE lash_process_observers;

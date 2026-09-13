@@ -22,7 +22,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
         // language-specific runtimes into the kernel.
         match input.as_ref() {
             crate::ProcessInput::ToolCall { call } => {
-                let (output, actions) = Box::pin(
+                let output = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
                         registration,
                         call: call.clone(),
@@ -37,7 +37,6 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 .await;
                 Ok(crate::ProcessRunOutcome::Terminal {
                     output: Box::new(output),
-                    actions,
                 })
             }
             crate::ProcessInput::SessionTurn {
@@ -55,7 +54,6 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 .await?;
                 Ok(crate::ProcessRunOutcome::Terminal {
                     output: Box::new(output),
-                    actions: Vec::new(),
                 })
             }
             crate::ProcessInput::Engine { kind, payload } => {
@@ -87,30 +85,6 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
 }
 
 impl RuntimeSessionServices {
-    pub(crate) async fn finish_process_parent_end_actions(
-        &self,
-        scoped_effect_controller: crate::ScopedEffectController<'_>,
-        actions: &[crate::ToolIntentParentEndAction],
-    ) -> Result<(), crate::PluginError> {
-        if actions.is_empty() {
-            return Ok(());
-        }
-        let run_context = ProcessRunContext::builder(self)
-            .tool_surface(
-                self.current
-                    .plugins
-                    .pin_resolved_tool_surface(&self.current.session_id)?,
-            )
-            .scoped_effect_controller(scoped_effect_controller)
-            .build()?;
-        let dispatch = run_context.dispatch();
-        dispatch.recorded_intent_outcomes.restore(actions);
-        crate::tool_dispatch::execute_parent_end_actions(dispatch.as_ref()).await?;
-        drop(dispatch);
-        run_context.shutdown().await;
-        Ok(())
-    }
-
     fn process_engine_run_context<'run>(
         &self,
         registration: crate::ProcessRegistration,

@@ -66,12 +66,13 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // 59 qualifies process attachment owners by incarnation, 60 adds durable
     // cancellation authority, exact closure authorization, retired scopes and
     // the intent ABA fence, and 61 gates attachment adoption on recorded
-    // upload evidence.
+    // upload evidence, and 62 makes the parent scope a registration fact and
+    // settles child lifecycle from one scope-keyed parent-end ledger.
     // All are reject-and-recreate
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
-    assert_eq!(expected, 61, "the pinned durable-core target changed");
+    assert_eq!(expected, 62, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

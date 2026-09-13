@@ -2,6 +2,26 @@ use super::*;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
+    async fn committed_turn_exists(&self, turn_id: &lash_core::TurnId) -> Result<bool, StoreError> {
+        let key = lash_core::store_backend_support::turn_commit_receipt_storage_key(
+            &self.session_id,
+            turn_id,
+        )?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM lash_runtime_turn_commits
+                 WHERE session_id = $1 AND turn_id = $2
+             )",
+        )
+        .bind(self.session_id.as_str())
+        .bind(&key)
+        .fetch_one(connection.as_mut())
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(exists)
+    }
+
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;

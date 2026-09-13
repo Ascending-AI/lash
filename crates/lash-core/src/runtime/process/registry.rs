@@ -86,14 +86,23 @@ pub struct ProcessWorklistPage {
     pub continuation: Option<ProcessWorklistCursor>,
 }
 
-/// Durable teardown work committed atomically with one parent's terminal outcome.
+/// One durable ledger row recording that a parent scope has ended.
+///
+/// The row carries no action list. The work is a query: the children whose
+/// [`ParentScope`](crate::ParentScope) is this parent and whose
+/// [`OnParentEnd`](crate::OnParentEnd) is `Cancel`. A row is written by the
+/// scope's own end, for every parent kind alike, and is settled once that
+/// query returns nothing left to do.
+///
 /// **Integrator class 3: store and process-engine implementors.**
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProcessParentEndPlan {
-    /// Terminal parent whose completion made the plan executable.
-    pub process_id: ProcessId,
-    /// Ordered, replay-keyed actions retained for crash redrive.
-    pub actions: Vec<crate::ToolIntentParentEndAction>,
+pub struct ParentEndPlan {
+    /// Scope whose end made the plan executable.
+    pub parent: crate::ParentScope,
+    /// Registry-stamped instant at which the scope ended.
+    pub ended_at_ms: u64,
+    /// `None` while children remain to settle.
+    pub settled_at_ms: Option<u64>,
 }
 
 pub const DEFAULT_WAKE_DELIVERY_EXPIRY_MS: u64 = 7 * 24 * 60 * 60 * 1_000;

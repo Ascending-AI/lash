@@ -280,6 +280,11 @@ pub struct DurableProcessWorker {
     config: Arc<DurableProcessWorkerConfig>,
     execution_scheduler: Arc<ProcessExecutionScheduler>,
     lifetime: Option<Arc<ProcessWorkerLifetime>>,
+    /// Where the last parent-end recovery pass stopped reading candidates.
+    ///
+    /// Shared by every clone of one worker, so the passes a single worker runs
+    /// advance one cursor instead of each restarting at the lowest scope id.
+    parent_end_cursor: Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 impl Clone for DurableProcessWorker {
@@ -288,6 +293,7 @@ impl Clone for DurableProcessWorker {
             config: Arc::clone(&self.config),
             execution_scheduler: Arc::clone(&self.execution_scheduler),
             lifetime: self.lifetime.clone(),
+            parent_end_cursor: Arc::clone(&self.parent_end_cursor),
         }
     }
 }
@@ -464,6 +470,7 @@ impl DurableProcessWorker {
             config: Arc::new(config),
             execution_scheduler,
             lifetime: Some(lifetime),
+            parent_end_cursor: Arc::default(),
         })
     }
 
@@ -482,6 +489,7 @@ impl DurableProcessWorker {
             config,
             execution_scheduler,
             lifetime: Some(lifetime),
+            parent_end_cursor: Arc::default(),
         })
     }
 
@@ -490,6 +498,7 @@ impl DurableProcessWorker {
             config: Arc::clone(&self.config),
             execution_scheduler: Arc::clone(&self.execution_scheduler),
             lifetime: None,
+            parent_end_cursor: Arc::clone(&self.parent_end_cursor),
         }
     }
 
@@ -710,7 +719,8 @@ impl DurableProcessWorker {
     /// detected after claiming and skipped, so re-running a recovery sweep does
     /// not double-execute completed work.
     pub async fn drive_pending_processes(&self) -> Result<ProcessAdmissionReport, PluginError> {
-        self.drive_pending_parent_end_actions().await?;
+        self.redrive_missing_turn_parent_end_rows().await?;
+        self.drive_pending_parent_end_plans().await?;
         // Trigger-delivery reconcile can re-enter the work driver, and rows it
         // admits are this call's admissions. Absorbing its report keeps the
         // outer call from reporting its own just-admitted rows as somebody
@@ -1267,10 +1277,8 @@ impl DurableProcessWorker {
             {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
-                Ok(crate::ProcessRunOutcome::Terminal { output, actions }) => {
-                    return self
-                        .finish_terminal_run(&lease, &process_id, output, actions)
-                        .await;
+                Ok(crate::ProcessRunOutcome::Terminal { output }) => {
+                    return self.finish_terminal_run(&lease, &process_id, output).await;
                 }
                 Ok(crate::ProcessRunOutcome::SegmentBoundary(next)) => {
                     tracing::debug!(

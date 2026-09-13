@@ -2,7 +2,6 @@ use lash_core::{
     PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
     ToolIntentSubmissionRecord,
 };
-use lash_sansio::SessionId;
 use sqlx::{PgPool, Row};
 
 use crate::{plugin_sqlx_error, process_decode_error};
@@ -76,74 +75,6 @@ pub(super) async fn complete(
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
     Ok(submission)
-}
-
-pub(super) async fn pending_parent_end(
-    pool: &PgPool,
-    session_id: &SessionId,
-    execution_scope_id: &str,
-) -> Result<Vec<ToolIntentSubmissionRecord>, PluginError> {
-    let rows = sqlx::query(
-        "SELECT submission_json FROM lash_tool_intent_submissions
-         WHERE session_id = $1 AND execution_scope_id = $2
-         ORDER BY intent_index",
-    )
-    .bind(session_id.as_str())
-    .bind(execution_scope_id)
-    .fetch_all(pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    rows.into_iter()
-        .map(|row| decode(row.get(0)))
-        .filter_map(|decoded| match decoded {
-            Ok(submission)
-                if !submission.parent_end_settled
-                    && matches!(
-                        submission.outcome,
-                        Some(ToolIntentExecutionOutcome::Executed {
-                            parent_end: Some(_),
-                            ..
-                        })
-                    ) =>
-            {
-                Some(Ok(submission))
-            }
-            Ok(_) => None,
-            Err(error) => Some(Err(error)),
-        })
-        .collect()
-}
-
-pub(super) async fn complete_parent_end(
-    pool: &PgPool,
-    replay_key: &str,
-) -> Result<(), PluginError> {
-    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
-    let row = sqlx::query(
-        "SELECT submission_json FROM lash_tool_intent_submissions
-         WHERE replay_key = $1 FOR UPDATE",
-    )
-    .bind(replay_key)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    if let Some(row) = row {
-        let mut submission = decode(row.get(0))?;
-        if !submission.parent_end_settled {
-            submission.parent_end_settled = true;
-            let encoded = serde_json::to_string(&submission).map_err(process_decode_error)?;
-            sqlx::query(
-                "UPDATE lash_tool_intent_submissions SET submission_json = $2 WHERE replay_key = $1",
-            )
-            .bind(replay_key)
-            .bind(encoded)
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        }
-    }
-    tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(())
 }
 
 fn decode(encoded: String) -> Result<ToolIntentSubmissionRecord, PluginError> {

@@ -2227,7 +2227,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
- "lash-internal-lashlang-runtime",
  "lash-internal-tool-support",
  "serde_json",
  "tokio",
@@ -2265,7 +2264,6 @@ dependencies = [
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",
- "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
  "lash-internal-postgres-store",
  "lash-internal-protocol-standard",

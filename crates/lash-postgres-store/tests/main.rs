@@ -10,14 +10,14 @@ mod checkpoint_commit_delete_race;
 mod commit_size_benchmark;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
+#[path = "parent_end_registration_race.rs"]
+mod parent_end_registration_race;
 #[path = "postgres_clock_contract.rs"]
 mod postgres_clock_contract;
 #[path = "postgres_lease_multiconnection.rs"]
 mod postgres_lease_multiconnection;
 #[path = "pre_frame_key_cutover.rs"]
 mod pre_frame_key_cutover;
-#[path = "process_parent_atomicity.rs"]
-mod process_parent_atomicity;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
 #[path = "refcount_benchmark.rs"]

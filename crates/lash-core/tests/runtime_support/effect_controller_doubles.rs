@@ -422,7 +422,6 @@ pub struct RecordingEffectController {
     pub execute_code_locally: bool,
     pub fail_exec_after_local: Arc<std::sync::atomic::AtomicBool>,
     pub cancel_watch: CancelWatchBehavior,
-    pub fail_next_tool_parent_end: Arc<std::sync::atomic::AtomicBool>,
     pub fail_failure_disposition: Arc<std::sync::atomic::AtomicBool>,
     /// Model a host crash in the window between the journaled raw provider
     /// completion (phase 1) and hook post-processing (phase 2).
@@ -562,11 +561,6 @@ impl RecordingEffectController {
                 notified.await;
             },
         }
-    }
-
-    pub fn with_next_tool_parent_end_failure(self) -> Self {
-        self.fail_next_tool_parent_end.store(true, Ordering::SeqCst);
-        self
     }
 
     /// Fail the first assistant-response-hooks effect without executing it, so
@@ -764,17 +758,6 @@ impl RuntimeEffectController for RecordingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if matches!(
-            &envelope.command,
-            RuntimeEffectCommand::Process { command }
-                if matches!(command.as_ref(), lash_core::ProcessCommand::ParentEnd { .. })
-        ) && self.fail_next_tool_parent_end.swap(false, Ordering::SeqCst)
-        {
-            return Err(RuntimeEffectControllerError::foreign(
-                "test_parent_end_failure",
-                "forced parent-end failure",
-            ));
-        }
         let strict_replay = self.strict_replay.prepare(&envelope)?;
         if let Some(outcome) = self.strict_replay.replay(&strict_replay)? {
             return Ok(outcome);

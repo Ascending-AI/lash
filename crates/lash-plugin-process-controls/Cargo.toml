@@ -19,14 +19,13 @@ doctest = false
 
 [features]
 default = []
-lashlang = ["dep:lash-lashlang-runtime", "lash-tool-support/lashlang"]
+lashlang = ["lash-tool-support/lashlang"]
 
 [lints]
 workspace = true
 
 [dependencies]
 lash-core = { workspace = true }
-lash-lashlang-runtime = { workspace = true, optional = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }

@@ -279,24 +279,6 @@ macro_rules! delegate_process_lifecycle {
                 $event_hook
             }
 
-            async fn complete_process_with_parent_end(
-                &self,
-                process_id: &$crate::ProcessId,
-                await_output: $crate::ProcessAwaitOutput,
-                authority: $crate::ProcessCompletionAuthority,
-                actions: Vec<$crate::ToolIntentParentEndAction>,
-            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.complete_process_with_parent_end(
-                    process_id,
-                    await_output,
-                    authority,
-                    actions,
-                );
-                $event_hook
-            }
-
             async fn complete_process_with_lease(
                 &self,
                 lease: &$crate::ProcessLease,
@@ -308,41 +290,51 @@ macro_rules! delegate_process_lifecycle {
                 $event_hook
             }
 
-            async fn complete_process_with_lease_and_parent_end(
+            async fn record_parent_end(
                 &self,
-                lease: &$crate::ProcessLease,
-                await_output: $crate::ProcessAwaitOutput,
-                actions: Vec<$crate::ToolIntentParentEndAction>,
-            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
-                let $event_process_id = &lease.process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.complete_process_with_lease_and_parent_end(
-                    lease,
-                    await_output,
-                    actions,
-                );
-                $event_hook
+                parent: &$crate::ParentScope,
+            ) -> Result<(), $crate::PluginError> {
+                self.$inner.record_parent_end(parent).await
             }
 
             async fn list_pending_parent_end_plans(
                 &self,
                 limit: std::num::NonZeroUsize,
-            ) -> Result<Vec<$crate::ProcessParentEndPlan>, $crate::PluginError> {
+            ) -> Result<Vec<$crate::ParentEndPlan>, $crate::PluginError> {
                 self.$inner.list_pending_parent_end_plans(limit).await
             }
 
-            async fn get_pending_parent_end_plan(
+            async fn get_parent_end_plan(
                 &self,
-                process_id: &$crate::ProcessId,
-            ) -> Result<Option<$crate::ProcessParentEndPlan>, $crate::PluginError> {
-                self.$inner.get_pending_parent_end_plan(process_id).await
+                parent: &$crate::ParentScope,
+            ) -> Result<Option<$crate::ParentEndPlan>, $crate::PluginError> {
+                self.$inner.get_parent_end_plan(parent).await
             }
 
-            async fn complete_parent_end_plan(
+            async fn list_parent_end_children(
                 &self,
-                process_id: &$crate::ProcessId,
+                parent: &$crate::ParentScope,
+                after: Option<&$crate::ProcessId>,
+                limit: std::num::NonZeroUsize,
+            ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
+                self.$inner
+                    .list_parent_end_children(parent, after, limit)
+                    .await
+            }
+
+            async fn settle_parent_end_plan(
+                &self,
+                parent: &$crate::ParentScope,
             ) -> Result<(), $crate::PluginError> {
-                self.$inner.complete_parent_end_plan(process_id).await
+                self.$inner.settle_parent_end_plan(parent).await
+            }
+
+            async fn list_unrecorded_turn_parents(
+                &self,
+                after: Option<&str>,
+                limit: std::num::NonZeroUsize,
+            ) -> Result<Vec<$crate::ParentScope>, $crate::PluginError> {
+                self.$inner.list_unrecorded_turn_parents(after, limit).await
             }
 
             async fn record_first_started_with_authority(
@@ -544,25 +536,6 @@ macro_rules! delegate_process_tool_intents {
             ) -> Result<$crate::ToolIntentSubmissionRecord, $crate::PluginError> {
                 self.$inner
                     .complete_tool_intent_submission(replay_key, outcome)
-                    .await
-            }
-
-            async fn pending_tool_intent_parent_end(
-                &self,
-                session_id: &SessionId,
-                execution_scope_id: &str,
-            ) -> Result<Vec<$crate::ToolIntentSubmissionRecord>, $crate::PluginError> {
-                self.$inner
-                    .pending_tool_intent_parent_end(session_id, execution_scope_id)
-                    .await
-            }
-
-            async fn complete_tool_intent_parent_end(
-                &self,
-                replay_key: &str,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner
-                    .complete_tool_intent_parent_end(replay_key)
                     .await
             }
         }

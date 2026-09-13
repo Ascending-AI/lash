@@ -15,15 +15,9 @@ pub(crate) use attempt_coordinator::{
     BatchIntentDrainGate, IntentDrainGuard, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
 #[cfg(feature = "testing")]
-pub use context::{
-    CheckpointMessageBuffer, RecordedToolIntentOutcomeBuffer, ToolCallLaunch,
-    ToolTriggerOutcomeBuffer,
-};
+pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
-pub(crate) use context::{
-    CheckpointMessageBuffer, RecordedToolIntentOutcomeBuffer, ToolCallLaunch,
-    ToolTriggerOutcomeBuffer,
-};
+pub(crate) use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 pub(crate) use context::{PendingToolDispatchOutcome, ToolDispatchOutcome, ToolPreparationOutcome};
 #[cfg(any(test, feature = "testing"))]
 pub use execution::coordinate_prepared_tool_call_launch_with_execution_context;
@@ -35,7 +29,6 @@ pub(crate) use execution::{
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]
 pub(crate) use intent_executor::execute_final_tool_intents;
-pub(crate) use intent_executor::execute_parent_end_actions;
 #[cfg(test)]
 pub(crate) use preparation::dispatch_tool_call;
 #[cfg(test)]

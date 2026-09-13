@@ -31,12 +31,12 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             registration_fingerprint
                         )));
                     }
-                    // FIG-2963: ledger-based refusal replaces this
+                    // Late-registration fencing: a `Cancel` child whose parent
+                    // scope already has a ledger row can never be swept, so it
+                    // is refused here rather than left to outlive its parent.
                     if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
-                        && let lash_core::ParentScope::Process { process_id, incarnation } = &registration.lifecycle.parent
-                        && let Some(parent) = Self::load_process_conn(tx, process_id)?.as_ref()
-                        && parent.incarnation == *incarnation
-                        && parent.is_terminal()
+                        && !matches!(registration.lifecycle.parent, lash_core::ParentScope::Host)
+                        && super::parent_end::plan_exists_conn(tx, &registration.lifecycle.parent)?
                     {
                         return Err(lash_core::PluginError::ParentEnded {
                             process_id: registration.id.clone(),
@@ -56,9 +56,11 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                             identity_kind, identity_label,
                             created_at_ms, updated_at_ms, last_event_sequence,
-                            change_seq, status, record_json
+                            change_seq, status,
+                            parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested,
+                            record_json
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                         params![
                             record.id.as_str(),
                             record.incarnation.registration_sequence() as i64,
@@ -72,6 +74,10 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             record.last_event_sequence as i64,
                             change_seq as i64,
                             process_status_label(&record),
+                            record.lifecycle.parent.storage_kind(),
+                            record.lifecycle.parent.storage_id(),
+                            record.lifecycle.on_parent_end.storage_label(),
+                            i64::from(record.cancel_request.is_some()),
                             process_encode_json(&record)?,
                         ],
                     )

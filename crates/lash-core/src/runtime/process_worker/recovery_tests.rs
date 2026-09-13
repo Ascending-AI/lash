@@ -17,6 +17,7 @@ mod attachment_owner_tests;
 mod drain_report_tests;
 mod fault_surface_tests;
 mod pagination_tests;
+mod parent_end_redrive_tests;
 #[path = "recovery_disposition_tests.rs"]
 mod recovery_disposition_tests;
 mod session_store_factories;
@@ -661,7 +662,6 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
                 output: Box::new(ProcessAwaitOutput::from_tool_output(
                     crate::ToolCallOutput::success(serde_json::json!({ "segments": 2 })),
                 )),
-                actions: Vec::new(),
             })
         }
     }
@@ -707,7 +707,6 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
             output: Box::new(ProcessAwaitOutput::from_tool_output(
                 crate::ToolCallOutput::success(serde_json::json!({ "recorded": true })),
             )),
-            actions: Vec::new(),
         })
     }
 }
@@ -728,7 +727,6 @@ impl crate::ProcessEngine for NestedProcessEngine {
             output: Box::new(ProcessAwaitOutput::from_tool_output(
                 crate::ToolCallOutput::success(serde_json::json!({ "nested": "done" })),
             )),
-            actions: Vec::new(),
         })
     }
 }

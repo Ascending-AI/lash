@@ -39,11 +39,11 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
     );
     assert!(
         registry
-            .get_pending_parent_end_plan(&parent.id)
+            .get_parent_end_plan(&policy.parent)
             .await
-            .expect("read legacy plan")
-            .is_none(),
-        "the refusal must not depend on a pending action list"
+            .expect("read parent-end ledger row")
+            .is_some(),
+        "a terminal parent writes its ledger row with the terminal append"
     );
     assert_eq!(
         registry

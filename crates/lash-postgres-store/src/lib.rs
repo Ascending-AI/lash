@@ -344,7 +344,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // drops 'reclaimed'. Older components hold rows in a phase this schema forbids
 // and manifest rows carrying no evidence for bytes that are present, so they are
 // rejected and recreated rather than adopted without proof.
-const SCHEMA_VERSION: i32 = 92;
+// Version 93 makes the parent scope a registration fact and the end of a scope
+// one ledger row: `lash_processes` gains parent_scope_kind, parent_scope_id,
+// on_parent_end and cancel_requested under named CHECKs, and
+// `lash_process_parent_end_plans` is replaced by scope-keyed
+// `lash_parent_end_plans`. Component-92 stores carry children with no parent
+// scope and plans keyed by a process id, so they are rejected and recreated.
+const SCHEMA_VERSION: i32 = 93;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -196,22 +196,21 @@ pub mod tools {
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
-        PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
-        StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation,
-        ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
-        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
-        ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
-        ToolDispatchClient, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource,
-        ToolIntent, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-        ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
-        ToolIntentRefusalReason, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
-        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
-        derive_tool_intent_identity, facade_support::OrchestrationContext,
-        facade_support::ReconfigureError, facade_support::ToolRegistryFacadeOps,
-        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
+        PendingCompletion, PreparedToolCall, SignalProcessIntent, StartProcessIntent,
+        TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
+        TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy,
+        ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
+        ToolCallRecord, ToolCatalogEntry, ToolContext, ToolContract, ToolDefinition,
+        ToolDirectCompletionClient, ToolDiscovery, ToolDispatchClient, ToolExecutionGrant,
+        ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome,
+        ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, ToolManifest,
+        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProcessEventClient, ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin,
+        ToolSessionModel, ToolValue, derive_tool_intent_identity,
+        facade_support::OrchestrationContext, facade_support::ReconfigureError,
+        facade_support::ToolRegistryFacadeOps, facade_support::ToolSourceHandle,
+        facade_support::ToolStateFacadeOps, facade_support::ToolTriggerClient,
+        turn_outcome_from_tool_control,
     };
     pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
     /// Tool-execution request batches, replies, and child-process observation hooks.
@@ -680,12 +679,11 @@ pub mod process {
     pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
-        ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
+        ObserverInheritance, ParentEndPlan, ProcessChange, ProcessCompletionOutcome,
         ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
-        ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
-        ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-        WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-        WakeDiscardReason,
+        ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
+        WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+        WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, CausalRef,

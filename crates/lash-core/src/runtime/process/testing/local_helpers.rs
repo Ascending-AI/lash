@@ -53,15 +53,15 @@ impl TestLocalProcessRegistry {
                 registration.id, existing.record.registration_fingerprint, registration_fingerprint
             )));
         }
-        // FIG-2963: ledger-based refusal replaces this
+        // Late-registration fence. A `Cancel` child whose parent already has a
+        // ledger row is refused, so a child commits either before the row and
+        // is swept or after it and is refused. There is no third interleaving
+        // in which a child outlives a parent that declared Cancel.
         if registration.lifecycle.on_parent_end == crate::OnParentEnd::Cancel
-            && let crate::ParentScope::Process {
-                process_id,
-                incarnation,
-            } = &registration.lifecycle.parent
-            && let Some(parent) = managed.get(process_id).map(|managed| &managed.record)
-            && parent.incarnation == *incarnation
-            && parent.is_terminal()
+            && self
+                .parent_end_plan_for(&registration.lifecycle.parent)
+                .await
+                .is_some()
         {
             return Err(crate::PluginError::ParentEnded {
                 process_id: registration.id.clone(),
@@ -84,7 +84,6 @@ impl TestLocalProcessRegistry {
                 change_seq,
                 events: Vec::new(),
                 keyed_events: HashMap::new(),
-                parent_end_actions: None,
             },
         );
         if let Some(target) = wake_session_id {

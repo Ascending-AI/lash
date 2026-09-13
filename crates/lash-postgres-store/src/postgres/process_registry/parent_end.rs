@@ -1,39 +1,136 @@
-use lash_sansio::ProcessId;
-use std::num::NonZeroUsize;
+//! The parent-end ledger: one row per ended parent scope.
+//!
+//! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
+//! row. A turn-scoped parent has no process row, and a process-scoped parent's
+//! row may be pruned before its children settle, so a foreign key onto
+//! `lash_processes` cannot express the fact this table records.
 
-use lash_core::{PluginError, ProcessParentEndPlan, ToolIntentParentEndAction};
+use std::num::NonZeroUsize;
+use std::sync::LazyLock;
+
+use lash_core::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
+use lash_sansio::ProcessId;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
+use crate::process_lifecycle_sql::live_process_status;
 use crate::{plugin_sqlx_error, process_decode_error};
 
-pub(crate) async fn insert(
-    tx: &mut Transaction<'_, Postgres>,
-    process_id: &ProcessId,
-    actions: &[ToolIntentParentEndAction],
-) -> Result<(), PluginError> {
-    if actions.is_empty() {
-        return Ok(());
+/// The storage key for a parent scope, refusing `Host`.
+///
+/// `Host` never ends within a process's lifetime, so there is no ledger row to
+/// write and no sweep to run.
+fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginError> {
+    match parent.storage_id() {
+        Some(id) => Ok((parent.storage_kind(), id)),
+        None => Err(PluginError::Session(
+            "the host parent scope never ends and has no parent-end ledger row".to_string(),
+        )),
     }
+}
+
+fn decode_plan(
+    kind: String,
+    id: String,
+    ended_at_ms: i64,
+    settled_at_ms: Option<i64>,
+) -> Result<ParentEndPlan, PluginError> {
+    let parent = ParentScope::from_storage(&kind, Some(id.as_str())).ok_or_else(|| {
+        PluginError::Session(format!("unreadable parent-end ledger key `{kind}`/`{id}`"))
+    })?;
+    Ok(ParentEndPlan {
+        parent,
+        ended_at_ms: ended_at_ms.max(0) as u64,
+        settled_at_ms: settled_at_ms.map(|value| value.max(0) as u64),
+    })
+}
+
+/// Serialize every decision about one parent scope at a stable advisory-lock
+/// key, held for the caller's transaction.
+///
+/// PostgreSQL is the only tier where registration and the ledger write are
+/// concurrent: SQLite serializes both through one write flow and the in-memory
+/// registry through one transaction mutex. Without this lock the fence is a
+/// check-then-act under READ COMMITTED — a `Cancel` child reads "no row",
+/// the ledger row commits, the sweep pages children without seeing the
+/// uncommitted child, settles the row, and the child then commits live with an
+/// ended scope that no later pass revisits. Taking the lock in registration,
+/// in the ledger write and in settle orders those two writes: the child either
+/// commits before the row and is swept, or sees the row and is refused.
+pub(crate) async fn lock_parent_scope_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    parent: &ParentScope,
+) -> Result<(), PluginError> {
+    let (kind, id) = ledger_key(parent)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("lash-parent-end:{kind}:{id}"))
+        .execute(&mut **tx)
+        .await
+        .map(drop)
+        .map_err(plugin_sqlx_error)
+}
+
+pub(crate) async fn record_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    parent: &ParentScope,
+    ended_at_ms: u64,
+) -> Result<(), PluginError> {
+    lock_parent_scope_tx(tx, parent).await?;
+    let (kind, id) = ledger_key(parent)?;
     sqlx::query(
-        "INSERT INTO lash_process_parent_end_plans (process_id, actions_json)
-         VALUES ($1, $2)",
+        "INSERT INTO lash_parent_end_plans (parent_kind, parent_id, ended_at_ms)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (parent_kind, parent_id) DO NOTHING",
     )
-    .bind(process_id.as_str())
-    .bind(serde_json::to_string(actions).map_err(process_decode_error)?)
+    .bind(kind)
+    .bind(id)
+    .bind(ended_at_ms as i64)
     .execute(&mut **tx)
     .await
     .map(drop)
     .map_err(plugin_sqlx_error)
 }
 
-pub(super) async fn list(
+/// Whether a ledger row exists for this scope, settled or not.
+pub(crate) async fn plan_exists_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    parent: &ParentScope,
+) -> Result<bool, PluginError> {
+    let (kind, id) = ledger_key(parent)?;
+    let row = sqlx::query(
+        "SELECT 1 FROM lash_parent_end_plans WHERE parent_kind = $1 AND parent_id = $2",
+    )
+    .bind(kind)
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    Ok(row.is_some())
+}
+
+/// The standalone ledger write, which a turn takes after its own commit.
+///
+/// It runs in its own transaction so it can hold the parent-scope advisory
+/// lock: a registration deciding the same scope either commits its child
+/// before this row exists, or reads the row and refuses the child.
+pub(super) async fn record(
+    pool: &PgPool,
+    parent: &ParentScope,
+    ended_at_ms: u64,
+) -> Result<(), PluginError> {
+    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    record_tx(&mut tx, parent, ended_at_ms).await?;
+    tx.commit().await.map_err(plugin_sqlx_error)
+}
+
+pub(super) async fn list_pending(
     pool: &PgPool,
     limit: NonZeroUsize,
-) -> Result<Vec<ProcessParentEndPlan>, PluginError> {
+) -> Result<Vec<ParentEndPlan>, PluginError> {
     let rows = sqlx::query(
-        "SELECT process_id, actions_json
-         FROM lash_process_parent_end_plans
-         ORDER BY process_id
+        "SELECT parent_kind, parent_id, ended_at_ms, settled_at_ms
+         FROM lash_parent_end_plans
+         WHERE settled_at_ms IS NULL
+         ORDER BY ended_at_ms, parent_kind, parent_id
          LIMIT $1",
     )
     .bind(limit.get() as i64)
@@ -41,44 +138,144 @@ pub(super) async fn list(
     .await
     .map_err(plugin_sqlx_error)?;
     rows.into_iter()
-        .map(|row| {
-            let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
-            let actions_json: String = row.get(1);
-            let actions = serde_json::from_str(&actions_json).map_err(process_decode_error)?;
-            Ok(ProcessParentEndPlan {
-                process_id,
-                actions,
-            })
-        })
+        .map(|row| decode_plan(row.get(0), row.get(1), row.get(2), row.get(3)))
         .collect()
 }
 
 pub(super) async fn get(
     pool: &PgPool,
-    process_id: &ProcessId,
-) -> Result<Option<ProcessParentEndPlan>, PluginError> {
-    let row =
-        sqlx::query("SELECT actions_json FROM lash_process_parent_end_plans WHERE process_id = $1")
-            .bind(process_id.as_str())
-            .fetch_optional(pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-    row.map(|row| {
-        let actions_json: String = row.get(0);
-        let actions = serde_json::from_str(&actions_json).map_err(process_decode_error)?;
-        Ok(ProcessParentEndPlan {
-            process_id: ProcessId::from(process_id.to_string()),
-            actions,
-        })
-    })
-    .transpose()
+    parent: &ParentScope,
+) -> Result<Option<ParentEndPlan>, PluginError> {
+    let (kind, id) = ledger_key(parent)?;
+    let row = sqlx::query(
+        "SELECT ended_at_ms, settled_at_ms FROM lash_parent_end_plans
+         WHERE parent_kind = $1 AND parent_id = $2",
+    )
+    .bind(kind)
+    .bind(id.as_str())
+    .fetch_optional(pool)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    row.map(|row| decode_plan(kind.to_string(), id, row.get(0), row.get(1)))
+        .transpose()
 }
 
-pub(super) async fn complete(pool: &PgPool, process_id: &ProcessId) -> Result<(), PluginError> {
-    sqlx::query("DELETE FROM lash_process_parent_end_plans WHERE process_id = $1")
-        .bind(process_id.as_str())
-        .execute(pool)
+/// Turn scopes with live `Cancel` children and no ledger row yet.
+///
+/// A turn's ledger row is written right after the turn commit rather than
+/// inside it, so a crash in between leaves exactly this shape: children that
+/// still name a turn scope no row has ended. The recovery sweep confirms the
+/// turn actually committed before writing the row, so a turn interrupted
+/// mid-flight is reported here and then left alone for its redrive.
+///
+/// The predicate is the pending-cancel partial index, so a scope whose
+/// children are all terminal or already cancelled needs no row and is not
+/// reported.
+pub(crate) static UNRECORDED_TURN_PARENTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT DISTINCT child.parent_scope_id FROM lash_processes AS child
+         WHERE child.parent_scope_kind = 'turn'
+           AND child.on_parent_end = 'cancel'
+           AND NOT child.cancel_requested
+           AND {live}
+           AND NOT EXISTS (
+               SELECT 1 FROM lash_parent_end_plans AS plan
+               WHERE plan.parent_kind = 'turn'
+                 AND plan.parent_id = child.parent_scope_id
+           )
+           AND ($1::text IS NULL OR child.parent_scope_id > $1::text)
+         ORDER BY child.parent_scope_id
+         LIMIT $2",
+        live = live_process_status("child.status")
+    )
+});
+
+pub(super) async fn list_unrecorded_turn_parents(
+    pool: &PgPool,
+    after: Option<&str>,
+    limit: NonZeroUsize,
+) -> Result<Vec<ParentScope>, PluginError> {
+    let rows = sqlx::query(UNRECORDED_TURN_PARENTS_SQL.as_str())
+        .bind(after)
+        .bind(limit.get() as i64)
+        .fetch_all(pool)
         .await
-        .map(drop)
-        .map_err(plugin_sqlx_error)
+        .map_err(plugin_sqlx_error)?;
+    rows.into_iter()
+        .map(|row| {
+            let id: String = row.get(0);
+            ParentScope::from_storage("turn", Some(id.as_str()))
+                .ok_or_else(|| PluginError::Session(format!("unreadable turn parent scope `{id}`")))
+        })
+        .collect()
+}
+
+/// Children of one ended parent scope that still owe a cancel.
+///
+/// The predicate is exactly the pending-cancel partial index: Cancel policy,
+/// no cancel request yet, and a live status. `caller_departed` is excluded for
+/// the reason it is excluded from every other worklist — lash may never act on
+/// such a row nor assert an outcome for it, and a cancel request is both.
+pub(crate) static PARENT_END_CHILDREN_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT record_json FROM lash_processes
+         WHERE parent_scope_kind = $1
+           AND parent_scope_id = $2
+           AND on_parent_end = 'cancel'
+           AND NOT cancel_requested
+           AND {live}
+           AND ($3::text IS NULL OR process_id > $3::text)
+         ORDER BY process_id ASC
+         LIMIT $4",
+        live = live_process_status("status")
+    )
+});
+
+pub(super) async fn children(
+    pool: &PgPool,
+    parent: &ParentScope,
+    after: Option<&ProcessId>,
+    limit: NonZeroUsize,
+) -> Result<Vec<ProcessRecord>, PluginError> {
+    let (kind, id) = ledger_key(parent)?;
+    let rows = sqlx::query(PARENT_END_CHILDREN_SQL.as_str())
+        .bind(kind)
+        .bind(id)
+        .bind(after.map(|value| value.to_string()))
+        .bind(limit.get() as i64)
+        .fetch_all(pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+    rows.into_iter()
+        .map(|row| {
+            let json: String = row.get(0);
+            serde_json::from_str(&json).map_err(process_decode_error)
+        })
+        .collect()
+}
+
+/// Mark one ledger row settled, under the parent-scope advisory lock.
+///
+/// A registration that read "no row" and has not committed yet still holds the
+/// lock, so settle waits for it and the child it commits is already visible to
+/// the sweep that follows.
+pub(super) async fn settle(
+    pool: &PgPool,
+    parent: &ParentScope,
+    settled_at_ms: u64,
+) -> Result<(), PluginError> {
+    let (kind, id) = ledger_key(parent)?;
+    let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
+    lock_parent_scope_tx(&mut tx, parent).await?;
+    sqlx::query(
+        "UPDATE lash_parent_end_plans SET settled_at_ms = $3
+         WHERE parent_kind = $1 AND parent_id = $2 AND settled_at_ms IS NULL",
+    )
+    .bind(kind)
+    .bind(id)
+    .bind(settled_at_ms as i64)
+    .execute(&mut *tx)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    tx.commit().await.map_err(plugin_sqlx_error)
 }

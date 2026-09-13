@@ -170,6 +170,7 @@ pub(crate) fn prune_terminal_processes_conn(
     max_change_seq: Option<u64>,
 ) -> Result<ProcessPruneReport, lash_core::PluginError> {
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
+    crate::process_registry::parent_end::reclaim_settled_plans_conn(conn, cutoff)?;
     if prunable.is_empty() {
         return Ok(ProcessPruneReport {
             pruned_processes: 0,
@@ -313,10 +314,6 @@ pub(crate) static PRUNABLE_TERMINAL_PROCESS_SQL: std::sync::LazyLock<String> =
                    SELECT 1 FROM process_wake_deliveries AS delivery
                    WHERE delivery.process_id = processes.process_id
                      AND {undelivered}
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_parent_end_plans AS plan
-                   WHERE plan.process_id = processes.process_id
                )
              ORDER BY process_id ASC",
             retired = crate::process_lifecycle_sql::retired_process_status("status"),

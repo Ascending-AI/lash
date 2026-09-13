@@ -54,54 +54,6 @@ impl ToolIntentKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessParentEndPolicy {
-    Abandon,
-    #[default]
-    Cancel,
-}
-
-/// Recorded teardown metadata for a successfully started child process.
-///
-/// Parent-end handling depends on an in-memory buffer until FIG-2963 lands.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolIntentParentEnd {
-    pub process_id: ProcessId,
-    pub policy: ProcessParentEndPolicy,
-}
-
-/// Compact durable teardown action reconstructed from one recorded start intent.
-///
-/// Unlike [`ToolIntentExecutionOutcome`], this value omits the child start's
-/// result payload. Process lifecycle state only needs the stable identity and
-/// declared parent-end policy.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolIntentParentEndAction {
-    pub identity: ToolIntentIdentity,
-    pub parent_end: ToolIntentParentEnd,
-}
-
-/// Durable result of applying one recorded start intent's parent-end policy.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ToolIntentParentEndOutcome {
-    Abandoned {
-        identity: ToolIntentIdentity,
-        process_id: ProcessId,
-    },
-    Cancelled {
-        identity: ToolIntentIdentity,
-        process_id: ProcessId,
-    },
-    Refused {
-        identity: ToolIntentIdentity,
-        process_id: ProcessId,
-        code: String,
-        message: String,
-    },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {
     pub session_id: SessionId,
@@ -184,8 +136,6 @@ pub enum ToolIntentExecutionOutcome {
         identity: ToolIntentIdentity,
         kind: ToolIntentKind,
         result: Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_end: Option<ToolIntentParentEnd>,
     },
     Refused {
         #[serde(default, skip_serializing_if = "Option::is_none")]

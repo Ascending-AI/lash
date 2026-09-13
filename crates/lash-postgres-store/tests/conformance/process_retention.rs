@@ -188,15 +188,16 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     // FIG-2844 generated every query-site predicate from `ProcessStatus`, so
-    // the registry sources hold none: the only literal left is the partial
-    // process index in schema.sql, whose vocabulary FIG-2811 owns.
+    // the registry sources hold none: the only literals left are the two
+    // partial process indexes in schema.sql - the live worklist and the
+    // parent-end pending-cancel scan - whose vocabulary FIG-2811 owns.
     // `store_statements_never_retype_a_lifecycle_literal` (lash-sim) is the
     // gate that keeps a query-site literal from coming back; this count is the
     // inventory that keeps a new DDL literal from arriving unnoticed.
     assert_eq!(
-        live_sites, 1,
-        "expected exactly one live-status list literal site in the PostgreSQL backend, \
-         the partial process index in schema.sql; a query-site literal belongs in a \
+        live_sites, 2,
+        "expected exactly two live-status list literal sites in the PostgreSQL backend, \
+         both partial process indexes in schema.sql; a query-site literal belongs in a \
          generated fragment, not here"
     );
     assert_eq!(

@@ -633,11 +633,6 @@ pub enum ProcessCommand {
         requester: String,
         refusal: crate::PluginError,
     },
-    ParentEnd {
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-    },
     Signal {
         process_ref: crate::ProcessRef,
         signal_name: String,
@@ -690,11 +685,6 @@ enum ProcessCommandDecode {
         origin: crate::CancelOrigin,
         requester: String,
         refusal: crate::PluginError,
-    },
-    ParentEnd {
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
     },
     Signal {
         process_ref: crate::ProcessRef,
@@ -782,15 +772,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 requester,
                 refusal,
             },
-            ProcessCommandDecode::ParentEnd {
-                identity,
-                process_id,
-                policy,
-            } => Self::ParentEnd {
-                identity,
-                process_id,
-                policy,
-            },
             ProcessCommandDecode::Signal {
                 process_ref,
                 signal_name,
@@ -869,9 +850,6 @@ impl ProcessCommand {
             Self::CancelRefused { process_id, .. } => {
                 format!("process:cancel:{process_id}")
             }
-            Self::ParentEnd { identity, .. } => {
-                format!("process:parent-end:{}", identity.replay_key)
-            }
             Self::Signal {
                 process_ref,
                 signal_name,
@@ -925,9 +903,6 @@ pub enum ProcessEffectOutcome {
     },
     CancelRefused {
         refusal: crate::PluginError,
-    },
-    ParentEnd {
-        outcome: Box<crate::ToolIntentParentEndOutcome>,
     },
     Signal {
         // Boxed for the same reason as the record variants: a fat event should

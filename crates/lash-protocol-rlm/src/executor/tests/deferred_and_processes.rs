@@ -1571,19 +1571,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         ))
     }
 
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        _identity: lash_core::ToolIntentIdentity,
-        _process_id: ProcessId,
-        _policy: lash_core::ProcessParentEndPolicy,
-        _scope: lash_core::ProcessOpScope<'_>,
-    ) -> Result<lash_core::ToolIntentParentEndOutcome, lash_core::PluginError> {
-        Err(lash_core::PluginError::Session(
-            "recorded parent end is unavailable in this test".to_string(),
-        ))
-    }
-
     async fn signal_recorded_intent(
         &self,
         _session_id: &SessionId,

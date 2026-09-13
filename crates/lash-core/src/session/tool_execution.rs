@@ -559,9 +559,6 @@ impl RuntimeExecutionContext<'_> {
         outcome: ToolDispatchOutcome,
     ) -> CompletedProtocolToolCall {
         let tool_correlation_id = tool_activity_id(&call_id);
-        self.dispatch
-            .recorded_intent_outcomes
-            .record(&outcome.intent_outcomes);
         let attempts = outcome.attempts.clone();
         let output = outcome.record.output.clone();
         let projection_output = output.clone();

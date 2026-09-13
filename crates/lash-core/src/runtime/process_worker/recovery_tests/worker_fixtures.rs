@@ -204,6 +204,55 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     (worker, registry, run_handle, env_ref, test_registry)
 }
 
+/// A worker whose session stores come from `factory`, for the laws that read a
+/// committed turn back out of the store the turn committed to.
+pub(super) async fn worker_with_session_store_factory(
+    engine: Arc<dyn crate::ProcessEngine>,
+    factory: Arc<dyn SessionStoreFactory>,
+) -> (
+    DurableProcessWorker,
+    Arc<dyn ProcessRegistry>,
+    ProcessExecutionEnvRef,
+    Arc<TestLocalProcessRegistry>,
+) {
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let test_registry = Arc::new(TestLocalProcessRegistry::default());
+    let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
+    let (registry, _driver_hub, process_work) =
+        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(engine));
+    let policy = test_session_policy();
+    let env_ref = crate::publish_process_execution_env(
+        runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("parent-end-redrive-fixture"),
+        &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
+    )
+    .await
+    .expect("persist process env");
+    let config = DurableProcessWorkerConfig::new(
+        Arc::new(PluginHost::new(Vec::new())),
+        runtime_host,
+        factory,
+        crate::WorkerProcessWork::External(process_work),
+        Arc::new(crate::NoQueuedWork::new()),
+        local_owner("redrive-worker", "host-a", "redrive-start"),
+    )
+    .with_session_policy(policy)
+    .with_process_execution_concurrency(1)
+    .expect("valid test process execution concurrency");
+    let worker = DurableProcessWorker::new(config).expect("valid test native substrate config");
+    run_handle
+        .worker
+        .set(worker.clone())
+        .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
+    (worker, registry, env_ref, test_registry)
+}
+
 pub(super) fn engine_registration(
     id: impl Into<ProcessId>,
     kind: &str,

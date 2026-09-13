@@ -15,10 +15,6 @@ pub(crate) static PRUNABLE_TERMINAL_SELECT: std::sync::LazyLock<String> =
                WHERE delivery.process_id = lash_processes.process_id
                  AND {undelivered}
            )
-           AND NOT EXISTS (
-               SELECT 1 FROM lash_process_parent_end_plans AS plan
-               WHERE plan.process_id = lash_processes.process_id
-           )
          ORDER BY process_id ASC",
             retired = crate::process_lifecycle_sql::retired_process_status("status"),
             undelivered =
@@ -123,6 +119,51 @@ pub(super) async fn complete_process_artifact_cleanup(
     })
 }
 
+/// Settled ledger rows the retention horizon has passed and no live child
+/// still names.
+///
+/// The row has to outlive its scope — it is what refuses a late `Cancel`
+/// child — so it is reclaimed by retention rather than by the sweep that
+/// settles it. Past the same cutoff the process rows themselves are pruned
+/// under, a settled scope with no live child can no longer be the parent of
+/// anything lash will act on, so keeping the row would only grow the table by
+/// one row per committed turn forever. A `caller_departed` child is not live
+/// by construction: lash may never act on such a row, so it can never need a
+/// parent-end cancel.
+///
+/// Reclaiming a row lifts the fence it was: once it is gone, a `Cancel` child
+/// registering under that scope is admitted again rather than refused
+/// `ParentEnded`. That is the deliberate trade — past the retention horizon the
+/// scope is beyond anything lash reasons about, and a registration arriving
+/// there is a new fact, not a late one.
+pub(crate) static RECLAIMABLE_PARENT_END_PLANS_DELETE: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| {
+        format!(
+            "DELETE FROM lash_parent_end_plans AS plan
+         WHERE plan.settled_at_ms IS NOT NULL
+           AND plan.settled_at_ms < $1
+           AND NOT EXISTS (
+               SELECT 1 FROM lash_processes AS child
+               WHERE child.parent_scope_kind = plan.parent_kind
+                 AND child.parent_scope_id = plan.parent_id
+                 AND {live}
+           )",
+            live = crate::process_lifecycle_sql::live_process_status("child.status"),
+        )
+    });
+
+async fn reclaim_settled_parent_end_plans_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    cutoff: i64,
+) -> Result<u64, PluginError> {
+    sqlx::query(RECLAIMABLE_PARENT_END_PLANS_DELETE.as_str())
+        .bind(cutoff)
+        .execute(&mut **tx)
+        .await
+        .map(|done| done.rows_affected())
+        .map_err(plugin_sqlx_error)
+}
+
 pub(super) async fn prune_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
@@ -141,6 +182,14 @@ pub(super) async fn prune_terminal_processes(
         filter.as_ref(),
     )
     .await?;
+
+    let reclaimed_plans = reclaim_settled_parent_end_plans_tx(&mut tx, cutoff).await?;
+    if reclaimed_plans > 0 {
+        tracing::debug!(
+            reclaimed_plans,
+            "retention reclaimed settled parent-end ledger rows"
+        );
+    }
 
     if prunable.is_empty() {
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -175,53 +224,4 @@ pub(super) async fn prune_terminal_processes(
         "process prune reclaimed process-session checkpoint blobs"
     );
     Ok(report)
-}
-
-#[cfg(test)]
-mod planner_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn prune_parent_plan_anti_join_uses_index_order_without_sort() {
-        let Some(url) = crate::postgres_test_support::database_url() else {
-            return;
-        };
-        let _lock = crate::postgres_test_support::SharedDatabaseLock::acquire(&url).await;
-        let storage = crate::PostgresStorage::connect(&url)
-            .await
-            .expect("connect planner witness");
-        let mut tx = storage.pool().begin().await.expect("begin planner witness");
-        // As in the worklist planner witness, remove small-table cost preference.
-        // Disable alternative joins to prove the existing btrees can supply merge
-        // order directly; a collation mismatch still requires an explicit sort.
-        for setting in [
-            "SET LOCAL enable_seqscan = off",
-            "SET LOCAL enable_bitmapscan = off",
-            "SET LOCAL enable_hashjoin = off",
-            "SET LOCAL enable_nestloop = off",
-        ] {
-            sqlx::query(setting)
-                .execute(&mut *tx)
-                .await
-                .expect("set planner witness preference");
-        }
-        let plan = sqlx::query_scalar::<_, String>(&format!(
-            "EXPLAIN (COSTS OFF) {}",
-            prune_terminal_sql()
-        ))
-        .bind(i64::MAX)
-        .bind(None::<i64>)
-        .fetch_all(&mut *tx)
-        .await
-        .expect("explain process prune")
-        .join(" | ");
-        eprintln!("prune anti-join plan: {plan}");
-        assert!(
-            plan.contains("Merge Anti Join")
-                && plan.contains("lash_process_parent_end_plans_pkey")
-                && !plan.contains("Sort Key: plan.process_id"),
-            "prune parent-plan anti-join must inherit btree order without sorting: {plan}"
-        );
-        tx.rollback().await.expect("rollback planner witness");
-    }
 }

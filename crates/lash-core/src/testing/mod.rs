@@ -1523,30 +1523,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        match self
-            .execute(
-                scope,
-                crate::ProcessCommand::ParentEnd {
-                    identity,
-                    process_id,
-                    policy,
-                },
-            )
-            .await?
-        {
-            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
-            _ => unreachable!("parent-end command returns parent-end outcome"),
-        }
-    }
-
     async fn signal_possessed(
         &self,
         _session_id: &SessionId,
@@ -1885,19 +1861,6 @@ impl crate::ProcessService for MockSessionManager {
             )
             .await?;
         Ok(crate::ProcessHandleView::from_record(record))
-    }
-
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        _identity: crate::ToolIntentIdentity,
-        _process_id: ProcessId,
-        _policy: crate::ProcessParentEndPolicy,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
-        Err(PluginError::Session(
-            "recorded parent-end commands are unavailable in this mock".to_string(),
-        ))
     }
 
     async fn start(

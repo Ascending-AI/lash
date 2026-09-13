@@ -38,22 +38,16 @@ impl RuntimeSessionServices {
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_tool_call(
         &self,
         run: ProcessToolCallRun<'_>,
-    ) -> (
-        crate::ProcessAwaitOutput,
-        Vec<crate::ToolIntentParentEndAction>,
-    ) {
+    ) -> crate::ProcessAwaitOutput {
         let result = Box::pin(self.execute_process_tool_call(run)).await;
         match result {
-            Ok((output, actions)) => (crate::ProcessAwaitOutput::from_tool_output(output), actions),
-            Err(err) => (
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                    crate::ToolFailure::runtime(
-                        crate::ToolFailureClass::Internal,
-                        "process_tool_failed",
-                        err.to_string(),
-                    ),
+            Ok(output) => crate::ProcessAwaitOutput::from_tool_output(output),
+            Err(err) => crate::ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "process_tool_failed",
+                    err.to_string(),
                 )),
-                Vec::new(),
             ),
         }
     }
@@ -61,8 +55,7 @@ impl RuntimeSessionServices {
     async fn execute_process_tool_call(
         &self,
         run: ProcessToolCallRun<'_>,
-    ) -> Result<(crate::ToolCallOutput, Vec<crate::ToolIntentParentEndAction>), crate::PluginError>
-    {
+    ) -> Result<crate::ToolCallOutput, crate::PluginError> {
         let ProcessToolCallRun {
             registration,
             call,
@@ -114,7 +107,7 @@ impl RuntimeSessionServices {
                 tool_context,
             )
             .await;
-            return Ok((outcome.record.output, Vec::new()));
+            return Ok(outcome.record.output);
         }
         if dispatch.is_orchestrating_tool(&call.tool_id) {
             let outcome = crate::tool_dispatch::execute_orchestrating_tool(
@@ -123,7 +116,7 @@ impl RuntimeSessionServices {
                 tool_context,
             )
             .await;
-            return Ok((outcome.record.output, Vec::new()));
+            return Ok(outcome.record.output);
         }
         let retry_policy =
             crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch.as_ref(), &call.tool_id)
@@ -153,12 +146,7 @@ impl RuntimeSessionServices {
         drop(tool_context);
         let launch = coordinated.launch;
         let output = match launch {
-            crate::tool_dispatch::ToolCallLaunch::Done(outcome) => {
-                dispatch
-                    .recorded_intent_outcomes
-                    .record(&outcome.intent_outcomes);
-                outcome.record.output
-            }
+            crate::tool_dispatch::ToolCallLaunch::Done(outcome) => outcome.record.output,
             crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
                 let fallback;
                 let parent = if let Some(parent) = await_parent_invocation.as_ref() {
@@ -215,9 +203,8 @@ impl RuntimeSessionServices {
                 return Err(crate::PluginError::RuntimeEffectController(error));
             }
         };
-        let parent_end_actions = dispatch.recorded_intent_outcomes.snapshot();
         drop(dispatch);
         run_context.shutdown().await;
-        Ok((output, parent_end_actions))
+        Ok(output)
     }
 }

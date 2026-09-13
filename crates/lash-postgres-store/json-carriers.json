@@ -59,10 +59,6 @@
     "verdict": "deliberately-excluded",
     "reason": "ProcessSegmentHandover is part of the process execution protocol and must be enrolled with the process carrier family."
   },
-  "lash_process_parent_end_plans.actions_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "ToolIntentParentEndAction is a compact process-lifecycle plan validated by full replay identity; enroll with the complete ProcessRecord and segment-handover carrier family."
-  },
   "lash_tool_intent_submissions.submission_json": {
     "verdict": "deliberately-excluded",
     "reason": "ToolIntentSubmissionRecord is component-51 process-protocol state coupled to indexed identity, kind, and payload-hash columns; enroll it with the complete process carrier family."

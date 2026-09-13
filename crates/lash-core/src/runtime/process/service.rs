@@ -189,21 +189,6 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
-    /// Applies one recorded start intent's parent-end policy through the
-    /// implementation's replay-keyed typed command boundary.
-    ///
-    /// There is deliberately no default assembled from `cancel_recorded_intent`:
-    /// every implementation must choose an honest durable command path or
-    /// explicitly refuse the capability.
-    async fn finish_recorded_intent_parent(
-        &self,
-        session_id: &SessionId,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError>;
-
     async fn cancel_all_visible(
         &self,
         session_id: &SessionId,
@@ -293,19 +278,6 @@ impl ProcessService for UnavailableProcessService {
     ) -> Result<ProcessHandleView, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        _identity: crate::ToolIntentIdentity,
-        _process_id: ProcessId,
-        _policy: crate::ProcessParentEndPolicy,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
-        Err(PluginError::Session(
-            "recorded parent-end commands are unavailable in this runtime".to_string(),
         ))
     }
 
@@ -512,19 +484,6 @@ mod tests {
             _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessHandleView, PluginError> {
             Err(PluginError::Session("start not implemented".to_string()))
-        }
-
-        async fn finish_recorded_intent_parent(
-            &self,
-            _session_id: &SessionId,
-            _identity: crate::ToolIntentIdentity,
-            _process_id: ProcessId,
-            _policy: crate::ProcessParentEndPolicy,
-            _scope: ProcessOpScope<'_>,
-        ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
-            Err(PluginError::Session(
-                "recorded parent end not implemented".to_string(),
-            ))
         }
 
         async fn start(

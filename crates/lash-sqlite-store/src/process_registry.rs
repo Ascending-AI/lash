@@ -13,7 +13,7 @@ mod leases;
 #[cfg(test)]
 mod list_tests;
 #[path = "process_registry/parent_end.rs"]
-mod parent_end;
+pub(crate) mod parent_end;
 #[path = "process_registry/prune_api.rs"]
 mod prune_api;
 mod registration;
@@ -962,24 +962,6 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
             process_id,
             await_output,
             authority,
-            Vec::new(),
-        )
-        .await
-    }
-
-    async fn complete_process_with_parent_end(
-        &self,
-        process_id: &ProcessId,
-        await_output: ProcessAwaitOutput,
-        authority: lash_core::ProcessCompletionAuthority,
-        actions: Vec<lash_core::ToolIntentParentEndAction>,
-    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
-        super::process_registry_completion::complete_process(
-            self,
-            process_id,
-            await_output,
-            authority,
-            actions,
         )
         .await
     }
@@ -989,49 +971,53 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
     ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
-        super::process_registry_completion::complete_process_with_lease(
-            self,
-            lease,
-            await_output,
-            Vec::new(),
-        )
-        .await
+        super::process_registry_completion::complete_process_with_lease(self, lease, await_output)
+            .await
     }
 
-    async fn complete_process_with_lease_and_parent_end(
+    async fn record_parent_end(
         &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-        actions: Vec<lash_core::ToolIntentParentEndAction>,
-    ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
-        super::process_registry_completion::complete_process_with_lease(
-            self,
-            lease,
-            await_output,
-            actions,
-        )
-        .await
+        parent: &lash_core::ParentScope,
+    ) -> Result<(), lash_core::PluginError> {
+        parent_end::record(self, parent).await
     }
 
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core::ProcessParentEndPlan>, lash_core::PluginError> {
-        parent_end::list(self, limit).await
+    ) -> Result<Vec<lash_core::ParentEndPlan>, lash_core::PluginError> {
+        parent_end::list_pending(self, limit).await
     }
 
-    async fn get_pending_parent_end_plan(
+    async fn get_parent_end_plan(
         &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<lash_core::ProcessParentEndPlan>, lash_core::PluginError> {
-        parent_end::get(self, process_id).await
+        parent: &lash_core::ParentScope,
+    ) -> Result<Option<lash_core::ParentEndPlan>, lash_core::PluginError> {
+        parent_end::get(self, parent).await
     }
 
-    async fn complete_parent_end_plan(
+    async fn list_parent_end_children(
         &self,
-        process_id: &ProcessId,
+        parent: &lash_core::ParentScope,
+        after: Option<&ProcessId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ProcessRecord>, lash_core::PluginError> {
+        parent_end::children(self, parent, after, limit).await
+    }
+
+    async fn settle_parent_end_plan(
+        &self,
+        parent: &lash_core::ParentScope,
     ) -> Result<(), lash_core::PluginError> {
-        parent_end::complete(self, process_id).await
+        parent_end::settle(self, parent).await
+    }
+
+    async fn list_unrecorded_turn_parents(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ParentScope>, lash_core::PluginError> {
+        parent_end::list_unrecorded_turn_parents(self, after, limit).await
     }
 
     async fn record_first_started_with_authority(
@@ -1306,21 +1292,6 @@ impl lash_core::ProcessToolIntents for SqliteProcessRegistry {
         outcome: lash_core::ToolIntentExecutionOutcome,
     ) -> Result<lash_core::ToolIntentSubmissionRecord, lash_core::PluginError> {
         tool_intent_submission::complete(self, replay_key, outcome).await
-    }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &SessionId,
-        execution_scope_id: &str,
-    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, lash_core::PluginError> {
-        tool_intent_submission::pending_parent_end(self, session_id, execution_scope_id).await
-    }
-
-    async fn complete_tool_intent_parent_end(
-        &self,
-        replay_key: &str,
-    ) -> Result<(), lash_core::PluginError> {
-        tool_intent_submission::complete_parent_end(self, replay_key).await
     }
 }
 

@@ -120,25 +120,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn parent_end(
-        &self,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::ParentEnd {
-                identity,
-                process_id,
-                policy,
-            })
-            .await?
-        {
-            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
-            _ => Err(wrong_process_outcome("parent_end")),
-        }
-    }
-
     async fn signal(
         &self,
         process_ref: crate::ProcessRef,
@@ -739,19 +720,6 @@ impl ProcessCapability {
                 identity.replay_key.clone(),
                 Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
             )
-            .await
-    }
-
-    pub(in crate::runtime::session_manager) async fn finish_recorded_intent_parent(
-        &self,
-        current: &CurrentSessionCapability,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        self.command_runner(current, &scope)?
-            .parent_end(identity, process_id, policy)
             .await
     }
 

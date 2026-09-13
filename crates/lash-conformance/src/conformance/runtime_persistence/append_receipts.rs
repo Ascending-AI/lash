@@ -107,6 +107,58 @@ pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
     assert_eq!(durable.usage.input_tokens, 40);
 }
 
+/// The committed-turn fact the parent-end recovery sweep reads.
+///
+/// A turn's parent-end ledger row is written to the process registry right
+/// after the turn commit, not inside it, so recovery must be able to tell a
+/// turn that committed from one that was interrupted before its commit. This
+/// is that read, and it is answered from the receipt the final commit already
+/// writes: nothing new is persisted for it.
+pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let committed = crate::TurnId::from("parent-end-committed-turn");
+    let interrupted = crate::TurnId::from("parent-end-interrupted-turn");
+
+    assert!(
+        !store
+            .committed_turn_exists(&committed)
+            .await
+            .expect("read the committed-turn fact before any commit"),
+        "no turn has committed yet"
+    );
+
+    let state = RuntimeSessionState {
+        session_id: SessionId::from("root"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::turn(
+        "root",
+        committed.as_str(),
+        "final",
+    ));
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit the turn whose parent-end row a crash could swallow");
+
+    assert!(
+        store
+            .committed_turn_exists(&committed)
+            .await
+            .expect("read the committed-turn fact after the commit"),
+        "the committed turn is visible to the parent-end recovery sweep"
+    );
+    assert!(
+        !store
+            .committed_turn_exists(&interrupted)
+            .await
+            .expect("read the committed-turn fact for an uncommitted turn"),
+        "a turn interrupted before its commit is never reported as ended"
+    );
+}
+
 pub(super) fn append_request_commit(
     state: &mut RuntimeSessionState,
     operation_id: &str,

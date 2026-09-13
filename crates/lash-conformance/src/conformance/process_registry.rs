@@ -5,6 +5,7 @@ mod caller_departure;
 mod cancellation;
 mod event_replay;
 mod lifecycle;
+mod parent_end;
 #[doc(hidden)]
 pub mod status_filters;
 
@@ -758,136 +759,21 @@ async fn process_registry_transition_refusals_are_backend_invariant() {
     .await;
 }
 
+/// A terminal parent's ledger row survives the retention prune of its own
+/// process row: the ledger is keyed by scope, not by the parent row.
 pub async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("process-parent-end-plan");
-    let originator = SessionScope::new("parent-end-retention-session");
-    registry
-        .register_process(ProcessRegistration::new(
-            process_id.clone(),
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::Rerunnable,
-            ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        ))
-        .await
-        .expect("register parent-end-plan process");
-    let lease = registry
-        .claim_process_lease(
-            &process_id,
-            &crate::LeaseOwnerIdentity::opaque("parent-end-owner", "parent-end-owner:i"),
-            60_000,
-        )
-        .await
-        .expect("claim parent-end-plan process")
-        .acquired()
-        .expect("parent-end-plan lease acquired");
-    let action = crate::ToolIntentParentEndAction {
-        identity: crate::derive_tool_intent_identity(
-            &SessionId::from("parent-end-session"),
-            &process_id,
-            Some("parent-end-call"),
-            0,
-        )
-        .expect("parent-end identity"),
-        parent_end: crate::ToolIntentParentEnd {
-            process_id: ProcessId::from("parent-end-child"),
-            policy: crate::ProcessParentEndPolicy::Cancel,
-        },
-    };
-    let completion = registry
-        .complete_process_with_lease_and_parent_end(
-            &lease,
-            settled_success(serde_json::json!({"parent": "done"})),
-            vec![action.clone()],
-        )
-        .await
-        .expect("terminal write and parent-end plan commit atomically");
-    assert!(matches!(
-        completion,
-        crate::ProcessCompletionOutcome::Committed(_)
-    ));
-    let literal_plan = crate::ProcessParentEndPlan {
-        process_id: process_id.clone(),
-        actions: vec![action],
-    };
-    assert_eq!(
-        registry
-            .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
-            .await
-            .expect("list pending parent-end plan"),
-        vec![literal_plan.clone()]
-    );
+    parent_end::terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
 
-    let pending_prune = registry
-        .prune_terminal_processes(
-            u64::MAX,
-            Some(ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id.clone().to_string()),
-                ..ProcessListFilter::default()
-            }),
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune-eligible parent with a pending end plan");
-    assert_eq!(
-        pending_prune.pruned_processes, 0,
-        "retention must not prune a terminal process while its parent-end plan is pending"
-    );
-    assert_eq!(
-        registry
-            .get_pending_parent_end_plan(&process_id)
-            .await
-            .expect("read parent-end plan after retention prune"),
-        Some(literal_plan),
-        "the pending parent-end plan must survive retention prune literally"
-    );
-    assert!(
-        registry
-            .get_process(&process_id)
-            .await
-            .expect("read parent after retention prune")
-            .is_some(),
-        "the plan-owning terminal process must survive until the plan settles"
-    );
-    registry
-        .complete_parent_end_plan(&process_id)
-        .await
-        .expect("complete parent-end plan");
-    registry
-        .complete_parent_end_plan(&process_id)
-        .await
-        .expect("parent-end plan completion is idempotent");
-    assert!(
-        registry
-            .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
-            .await
-            .expect("parent-end plan cleared")
-            .is_empty()
-    );
-    let settled_prune = registry
-        .prune_terminal_processes(
-            u64::MAX,
-            Some(ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id.to_string()),
-                ..ProcessListFilter::default()
-            }),
-            crate::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune parent after its end plan settles");
-    assert_eq!(
-        settled_prune.pruned_processes, 1,
-        "the terminal process becomes prune-eligible only after the plan settles"
-    );
+/// Retention reclaims a settled parent-end ledger row once no live child
+/// names its scope, so the ledger does not grow by one row per ended scope
+/// forever.
+pub async fn settled_parent_end_plans_are_reclaimed_by_retention(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    parent_end::settled_parent_end_plans_are_reclaimed_by_retention(registry).await;
 }
 
 /// Prove bounded keyset pagination and its page-boundary completion contract.

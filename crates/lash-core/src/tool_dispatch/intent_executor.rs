@@ -45,13 +45,12 @@ pub async fn execute_final_tool_intents(
         let _entered = span.enter();
         let result = execute_one(context, intent, &identity, child_trace_hook).await;
         let outcome = match result {
-            Ok((result, parent_end)) => {
+            Ok(result) => {
                 record_executed_metric(intent.kind());
                 crate::ToolIntentExecutionOutcome::Executed {
                     identity,
                     kind: intent.kind(),
                     result,
-                    parent_end,
                 }
             }
             Err(crate::PluginError::RuntimeEffectController(error))
@@ -81,76 +80,6 @@ pub async fn execute_final_tool_intents(
         outcomes.push(outcome);
     }
     Ok(outcomes)
-}
-
-pub(crate) async fn execute_parent_end_actions(
-    context: &ToolDispatchContext<'_>,
-) -> Result<(), crate::PluginError> {
-    for action in context.recorded_intent_outcomes.snapshot() {
-        let crate::ToolIntentParentEndAction {
-            identity,
-            parent_end,
-        } = action;
-        let replay_key = format!("{}:parent-end", identity.replay_key);
-        let parent = crate::RuntimeInvocation::effect(
-            crate::EffectAddress::new(
-                context.effect_controller.scoped().execution_scope().clone(),
-                replay_key,
-            )
-            .expect("tool-intent parent end carries an admitted effect scope"),
-            crate::RuntimeAttribution::for_session(&identity.session_id),
-            format!("tool-intent-parent-end:{}", identity.intent_index),
-        )
-        .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
-            identity.clone(),
-        ));
-        let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
-            .with_parent_invocation(Some(parent))
-            .with_agent_frame_id(Some(context.agent_frame_id.clone()));
-        let session_id = identity.session_id.clone();
-        let trace_identity = identity.clone();
-        let trace_parent_end = parent_end.clone();
-        let outcome = context
-            .processes
-            .finish_recorded_intent_parent(
-                &session_id,
-                identity,
-                parent_end.process_id,
-                parent_end.policy,
-                scope,
-            )
-            .await?;
-        tracing::info!(
-            target: "lash::tool_intent",
-            session_id = %session_id,
-            execution_scope_id = %trace_identity.execution_scope_id,
-            tool_call_id = %trace_identity.tool_call_id,
-            intent_index = trace_identity.intent_index,
-            replay_key = %trace_identity.replay_key,
-            process_id = %trace_parent_end.process_id,
-            policy = ?trace_parent_end.policy,
-            outcome = ?outcome,
-            "applied recorded parent-end policy after durable parent completion"
-        );
-        if let crate::ToolIntentParentEndOutcome::Refused { code, message, .. } = outcome {
-            let _ = context
-                .event_tx
-                .send(crate::SessionStreamEvent::Error {
-                    message: message.clone(),
-                    envelope: Some(crate::ErrorEnvelope {
-                        kind: "tool_intent_parent_end".to_string(),
-                        code: Some(code),
-                        terminal_reason: None,
-                        user_message: message,
-                        raw: None,
-                        retryable: Some(false),
-                        provider_failure_kind: None,
-                    }),
-                })
-                .await;
-        }
-    }
-    Ok(())
 }
 
 fn admit_batch(
@@ -332,7 +261,7 @@ async fn execute_one(
     intent: &crate::ToolIntent,
     identity: &crate::ToolIntentIdentity,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<(serde_json::Value, Option<crate::ToolIntentParentEnd>), crate::PluginError> {
+) -> Result<serde_json::Value, crate::PluginError> {
     let parent = context.parent_invocation.clone().unwrap_or_else(|| {
         crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -365,17 +294,7 @@ async fn execute_one(
                     child_entry_name: None,
                 });
             }
-            let parent_end = crate::ToolIntentParentEnd {
-                process_id: summary.id.clone(),
-                policy: match intent.request.lifecycle.on_parent_end {
-                    crate::OnParentEnd::Abandon => crate::ProcessParentEndPolicy::Abandon,
-                    crate::OnParentEnd::Cancel => crate::ProcessParentEndPolicy::Cancel,
-                },
-            };
-            Ok((
-                serde_json::to_value(summary).unwrap_or(serde_json::Value::Null),
-                Some(parent_end),
-            ))
+            Ok(serde_json::to_value(summary).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::SignalProcess(intent) => {
             let event = context
@@ -389,10 +308,7 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok((
-                serde_json::to_value(event).unwrap_or(serde_json::Value::Null),
-                None,
-            ))
+            Ok(serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::CancelProcess(intent) => {
             let record = context
@@ -404,11 +320,10 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok((
+            Ok(
                 serde_json::to_value(crate::ProcessCancelReceipt::from_record(record)?)
                     .unwrap_or(serde_json::Value::Null),
-                None,
-            ))
+            )
         }
         crate::ToolIntent::EmitProcessEvent(intent) => {
             let event = context
@@ -422,10 +337,7 @@ async fn execute_one(
                     scope,
                 )
                 .await?;
-            Ok((
-                serde_json::to_value(event).unwrap_or(serde_json::Value::Null),
-                None,
-            ))
+            Ok(serde_json::to_value(event).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::EmitTrigger(intent) => {
             // The router owns the whole emission, but the durable declaration
@@ -448,10 +360,7 @@ async fn execute_one(
             let report =
                 Box::pin(router.emit_recorded(request, &context.effect_controller.scoped()))
                     .await?;
-            Ok((
-                serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
-                None,
-            ))
+            Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
         }
     }
 }
@@ -599,7 +508,6 @@ mod tests {
             },
             kind: crate::ToolIntentKind::CancelProcess,
             result: serde_json::json!({"cancelled": true}),
-            parent_end: None,
         };
         assert_eq!(
             executed.model_addendum(),

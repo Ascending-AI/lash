@@ -60,7 +60,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
     pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-    pub(super) recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer,
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseAuthority>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,

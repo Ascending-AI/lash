@@ -117,12 +117,62 @@ registry transaction. Registration reads the ledger in its own transaction, so
 a child commits before the end fact and is swept, or sees the fact afterward
 and is refused. Historical rows with pending old plans become Process + Cancel;
 all others become Host + Abandon, and `record_json` is rewritten to agree.
-Stored registration fingerprints are not recomputed. Pruning preserves a
-parent with an unsettled ledger row and reclaims settled ledger rows at the
-ordinary horizon. The in-memory registry keys the ledger by kind and id;
+Stored registration fingerprints are not recomputed. Because the ledger is
+keyed by parent scope rather than by process id, a ledger row no longer depends
+on the process row it was written for: retention prunes a terminal parent on
+the ordinary horizon whether or not its row is settled, the row outlives it,
+and the sweep still finds the children through their own Parent Scope column. The in-memory registry keys the ledger by kind and id;
 both it and Restate retain the Lifecycle Policy on the process record, and
 Restate journals the discriminated plan. `wake_session_id` deliberately remains
 column-only.
+
+#### Where the turn-parent row is written, and why fencing still holds
+
+A process parent's ledger row rides the same critical section as the process's
+own terminal append: the registry owns both facts, so there is no gap.
+
+A turn parent's row cannot ride the turn commit. The turn commits to the
+session store; the ledger lives in the process registry, and the two are
+separate stores on every tier — a separate attached database on SQLite, a
+separate `ProcessRegistry` handle in the runtime host, a separate service on
+Restate. A cross-store transaction would be a new contract every store
+implementor has to satisfy, which this change does not take on. The row is
+therefore written immediately after the turn commit succeeds, through one
+function (`record_parent_end`), keyed by `(turn, session_id/turn_id)` and
+idempotent. On Restate it is a journaled step right after the turn-commit step.
+
+That leaves one crash window: the turn is committed and the row is not yet
+written. It is closed by recovery, which re-derives the missing row, a bounded
+page per pass, with the same idempotent insert. Candidates come from the
+registry — turn scopes named by a live `Cancel` child and carrying no ledger
+row — and the committed fact comes from the session store that owns the turn:
+a narrow membership read of the receipt the final turn commit already writes,
+under the turn's own execution scope. The durable session head orders turns
+only by a `turn_index` ordinal and names no turn id anywhere, so it cannot
+answer this question; the receipt can, without persisting anything new.
+
+Only a committed candidate gets a row. A turn that crashed before its commit is
+interrupted, not ended: the stop-backtracks-to-checkpoint rule drops its
+uncommitted tail so the turn replays and re-registers exactly the children a
+sweep would have cancelled. Uncommitted candidates are therefore left alone and
+reconsidered on the next pass.
+
+A tier whose turn commit and ledger row are steps of one durable execution —
+Restate, whose row is a journaled step right after the commit step — has no
+window to re-derive: its substrate replays the second step. It reports no
+candidates and is never asked the committed-turn question.
+
+The window can only delay settlement, never defeat it:
+
+- a child that registered *before* the row exists is swept when the row
+  arrives, because the sweep selects children by Parent Scope and Cancel
+  policy, not by anything the turn recorded at exit;
+- a child that registers *after* the row exists is refused `ParentEnded` by
+  the registration-time read of the ledger;
+- a child that registers *during* the write commits either before or after the
+  row, which are the two cases above.
+
+No interleaving lets a Cancel child of an ended turn survive.
 
 #### Filters and observations
 
@@ -239,9 +289,9 @@ land, without feature flags or compatibility shims:
 
 | Gate | At acceptance | Required change |
 | --- | --- | --- |
-| PostgreSQL component schema | 86 | Advance once from main at landing; add a migration and `introduced_relations` entries for the new ledger and indexes |
-| SQLite process schema | 33 | Advance to 34, renumbering if main moved; do not move session or effect schema versions |
-| Schema congruence | `process_parent_end_plans` pair | Rename the pair; keep process tables identical only when both SQL tiers add the same columns |
+| PostgreSQL component schema | 86 | Landed at 93 as a destructive cutover: the new `lash_processes` columns are NOT NULL with no source but each row's `record_json`, and a ledger row keyed by a pruned process id cannot be rewritten into a parent-scope key, so a pre-93 store is refused at open and recreated. The catalog is retained as refusal-only and targets component 92 |
+| SQLite process schema | 33 | Landed at 37 (session schema 62), renumbered against main; effect and trigger schema versions unmoved |
+| Schema congruence | `process_parent_end_plans` pair | Renamed to the `parent_end_plans`/`lash_parent_end_plans` pair |
 | Tier acceptance | No lifecycle suite | Prove the closure/registration race, fresh-timestamp cancel retry, failed compensation write, segment-one recovery key, and historical pending-plan migration on every tier |
 | PostgreSQL schema witness | Literal shape listing | Update literal evidence for every added column and index |
 | Durable-read fixtures | PostgreSQL dump plus SQLite fixture | Regenerate both with surrogate-escape handling and prove no unrelated signature moved |

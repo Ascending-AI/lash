@@ -1930,10 +1930,6 @@ impl ReplayableRecordingContext {
         *self.process_worker.lock_recover() = Some(worker);
     }
 
-    pub(super) fn defer_process_workflows(&self) {
-        self.defer_process_workflows.store(true, Ordering::SeqCst);
-    }
-
     pub(super) fn replay_process_workflow_starts_from_journal(&self) {
         self.replay_process_workflow_starts_from_journal
             .store(true, Ordering::SeqCst);
@@ -1942,7 +1938,6 @@ impl ReplayableRecordingContext {
 
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
     effect_name.ends_with(".process-cancel-admission:v1")
-        || effect_name.ends_with(".parent-end-cancel-decision:v1")
 }
 
 #[derive(Default)]

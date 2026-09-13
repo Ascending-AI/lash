@@ -217,30 +217,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         ))
     }
 
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        match self
-            .execute(
-                scope,
-                crate::ProcessCommand::ParentEnd {
-                    identity,
-                    process_id,
-                    policy,
-                },
-            )
-            .await?
-        {
-            crate::ProcessEffectOutcome::ParentEnd { outcome } => Ok(*outcome),
-            _ => unreachable!("parent-end command returns parent-end outcome"),
-        }
-    }
-
     async fn start(
         &self,
         _session_id: &SessionId,
@@ -458,7 +434,6 @@ fn fig790_process_await_context(
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),

@@ -2,6 +2,30 @@ use super::*;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
+    async fn committed_turn_exists(&self, turn_id: &lash_core::TurnId) -> Result<bool, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(false);
+        };
+        let key = lash_core::store_backend_support::turn_commit_receipt_storage_key(
+            &session_id,
+            turn_id,
+        )?;
+        self.conn
+            .call(move |conn| {
+                let exists: bool = conn.query_row(
+                    "SELECT EXISTS(
+                         SELECT 1 FROM runtime_turn_commits
+                         WHERE session_id = ?1 AND turn_id = ?2
+                     )",
+                    params![session_id.as_str(), key],
+                    |row| row.get(0),
+                )?;
+                Ok(exists)
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(lash_core::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);

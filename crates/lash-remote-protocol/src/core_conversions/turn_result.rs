@@ -318,12 +318,10 @@ impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOu
                 identity,
                 kind,
                 result,
-                parent_end,
             } => Self::Executed {
                 identity: identity.into(),
                 kind: kind.into(),
                 result,
-                parent_end: parent_end.map(Into::into),
             },
             lash_core::ToolIntentExecutionOutcome::Refused {
                 identity,
@@ -341,24 +339,6 @@ impl From<lash_core::ToolIntentExecutionOutcome> for RemoteToolIntentExecutionOu
                     refusal: refusal.into(),
                 }
             }
-        }
-    }
-}
-
-impl From<lash_core::ProcessParentEndPolicy> for RemoteProcessParentEndPolicy {
-    fn from(value: lash_core::ProcessParentEndPolicy) -> Self {
-        match value {
-            lash_core::ProcessParentEndPolicy::Abandon => Self::Abandon,
-            lash_core::ProcessParentEndPolicy::Cancel => Self::Cancel,
-        }
-    }
-}
-
-impl From<lash_core::ToolIntentParentEnd> for RemoteToolIntentParentEnd {
-    fn from(value: lash_core::ToolIntentParentEnd) -> Self {
-        Self {
-            process_id: value.process_id,
-            policy: value.policy.into(),
         }
     }
 }

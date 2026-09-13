@@ -40,10 +40,7 @@ impl PersistedSegmentHandover {
 /// Result of one process invocation. A segment boundary is never terminal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
-    Terminal {
-        output: Box<ProcessAwaitOutput>,
-        actions: Vec<crate::ToolIntentParentEndAction>,
-    },
+    Terminal { output: Box<ProcessAwaitOutput> },
     SegmentBoundary(SegmentHandover),
 }
 
@@ -55,7 +52,7 @@ impl ProcessRunOutcome {
         matches!(self, Self::Terminal { .. })
     }
 
-    /// Borrow the terminal output without consuming engine-owned parent-end actions.
+    /// Borrow the terminal output.
     ///
     /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
@@ -106,7 +103,6 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     fn from(output: ProcessAwaitOutput) -> Self {
         Self::Terminal {
             output: Box::new(output),
-            actions: Vec::new(),
         }
     }
 }

@@ -969,6 +969,31 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         node_id: &str,
     ) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
 
+    /// Does this session hold a durable commit receipt for `turn_id`?
+    ///
+    /// The narrowest possible read of the committed-turn fact every backend
+    /// already writes with [`commit_runtime_state`](Self::commit_runtime_state):
+    /// true means that turn's commit is durable, false means it is not (yet).
+    /// It carries no ordering and no turn contents, so it stays a membership
+    /// test rather than a second history projection.
+    ///
+    /// The parent-end recovery sweep is its only caller. A turn's parent-end
+    /// ledger row is written to the process registry immediately after the
+    /// turn commit, and the two are separate stores, so a crash between them
+    /// leaves live children naming a turn that will never end again. Recovery
+    /// re-derives the row only for candidate turns this read confirms; an
+    /// uncommitted candidate is left alone, because a turn that crashed before
+    /// its commit is interrupted rather than ended and its redrive re-registers
+    /// exactly the children a sweep would have cancelled.
+    ///
+    /// The default refuses. Backends that report parent-end recovery candidates
+    /// must implement it; a backend that reports none is never asked.
+    async fn committed_turn_exists(&self, _turn_id: &crate::TurnId) -> Result<bool, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "committed_turn_exists",
+        })
+    }
+
     /// Atomically persist one settled runtime commit and its durable receipt.
     ///
     /// A commit carrying [`RuntimeCommit::session_execution_lease_fence`]

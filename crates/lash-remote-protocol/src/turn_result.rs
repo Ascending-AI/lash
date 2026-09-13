@@ -368,20 +368,6 @@ pub enum RemoteToolIntentKind {
     EmitTrigger,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteProcessParentEndPolicy {
-    Abandon,
-    #[default]
-    Cancel,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteToolIntentParentEnd {
-    pub process_id: ProcessId,
-    pub policy: RemoteProcessParentEndPolicy,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum RemoteToolIntentRefusalReason {
@@ -420,8 +406,6 @@ pub enum RemoteToolIntentExecutionOutcome {
         identity: RemoteToolIntentIdentity,
         kind: RemoteToolIntentKind,
         result: serde_json::Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent_end: Option<RemoteToolIntentParentEnd>,
     },
     Refused {
         #[serde(default, skip_serializing_if = "Option::is_none")]

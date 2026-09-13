@@ -40,6 +40,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) worklist_page_reads: Arc<Mutex<WorklistPageReads>>,
     pub(super) worklist_page_error_plan: Arc<Mutex<WorklistPageErrorPlan>>,
     pub(super) worklist_page_pause: Arc<std::sync::Mutex<Option<ExecutionWritePause>>>,
+    pub(super) parent_end_plans: Arc<Mutex<ParentEndLedger>>,
     pub(super) clock: Arc<dyn crate::Clock>,
     pub(super) scope_fence_hosts: super::super::ProcessScopeFenceHosts,
 }
@@ -61,6 +62,9 @@ pub struct RawProcessRegistryStateForTesting {
 }
 
 pub(super) type ManagedProcessMap = HashMap<ProcessId, ManagedProcessRecord>;
+/// Parent-end ledger keyed by the scope's storage kind and id, so a turn
+/// parent is representable alongside a process parent.
+pub(super) type ParentEndLedger = HashMap<(String, String), crate::ParentEndPlan>;
 pub(super) type ManagedLeaseMap = HashMap<ProcessId, ProcessLease>;
 type WorklistPageReads = Vec<(usize, Option<crate::ProcessWorklistCursor>)>;
 type WorklistPageErrorPlan = Option<(usize, VecDeque<PluginError>)>;
@@ -71,5 +75,4 @@ pub(super) struct ManagedProcessRecord {
     pub(super) change_seq: u64,
     pub(super) events: Vec<ProcessEvent>,
     pub(super) keyed_events: HashMap<String, ProcessEvent>,
-    pub(super) parent_end_actions: Option<Vec<crate::ToolIntentParentEndAction>>,
 }

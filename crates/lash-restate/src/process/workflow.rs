@@ -229,62 +229,14 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
-    async fn finish_terminal_with_parent_end(
-        &self,
-        process_id: &ProcessId,
-        output: Box<ProcessAwaitOutput>,
-        actions: Vec<lash_core::ToolIntentParentEndAction>,
-        parent_end_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessRunOutcome, HandlerError> {
-        let stored = self
-            .complete_with_stored_outcome_and_parent_end(
-                process_id,
-                (*output).clone(),
-                actions.clone(),
-            )
-            .await
-            .map_err(handler_error_from_plugin)?;
-        if !actions.is_empty() {
-            self.runner
-                .finish_process_parent_end(
-                    lash_core::ProcessParentEndPlan {
-                        process_id: ProcessId::from(process_id.to_string()),
-                        actions,
-                    },
-                    parent_end_controller,
-                )
-                .await
-                .map_err(handler_error_from_plugin)?;
-        }
-        Ok(lash_core::ProcessRunOutcome::Terminal {
-            output: Box::new(stored),
-            actions: Vec::new(),
-        })
-    }
-
     pub(crate) async fn complete_with_stored_outcome(
         &self,
         process_id: &ProcessId,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        self.complete_with_stored_outcome_and_parent_end(process_id, proposed, Vec::new())
-            .await
-    }
-
-    pub(crate) async fn complete_with_stored_outcome_and_parent_end(
-        &self,
-        process_id: &ProcessId,
-        proposed: ProcessAwaitOutput,
-        actions: Vec<lash_core::ToolIntentParentEndAction>,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
         let completion = self
             .registry
-            .complete_process_with_parent_end(
-                process_id,
-                proposed,
-                workflow_key_authority(process_id),
-                actions,
-            )
+            .complete_process(process_id, proposed, workflow_key_authority(process_id))
             .await?;
         let record = match completion {
             lash_core::ProcessCompletionOutcome::Committed(record) => record,
@@ -321,7 +273,6 @@ where
             lash_core::ProcessInput::SessionTurn { .. }
         );
         let cancellation = tokio_util::sync::CancellationToken::new();
-        let parent_end_controller = scoped_effect_controller.clone();
         let runner = self.runner.run_process_segment(
             registration,
             execution_context,
@@ -363,7 +314,6 @@ where
                             )),
                         ),
                     )),
-                    actions: Vec::new(),
                 })
             }
             outcome = &mut runner => outcome
@@ -388,14 +338,17 @@ where
             ))));
         }
         match outcome {
-            Ok(lash_core::ProcessRunOutcome::Terminal { output, actions }) => {
-                self.finish_terminal_with_parent_end(
-                    &process_id,
-                    output,
-                    actions,
-                    parent_end_controller,
-                )
-                .await
+            Ok(lash_core::ProcessRunOutcome::Terminal { output }) => {
+                // The terminal append writes the ended parent scope's ledger
+                // row in the same store transaction; the sweep, not this
+                // handler, cancels the children.
+                let stored = self
+                    .complete_with_stored_outcome(&process_id, (*output).clone())
+                    .await
+                    .map_err(handler_error_from_plugin)?;
+                Ok(lash_core::ProcessRunOutcome::Terminal {
+                    output: Box::new(stored),
+                })
             }
             Ok(boundary @ lash_core::ProcessRunOutcome::SegmentBoundary(_)) => Ok(boundary),
             Err(PluginError::ProcessAlreadyStarted { by, .. }) => {

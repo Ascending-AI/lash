@@ -415,12 +415,11 @@ impl ToolIntentIngress {
         let identity = key.identity;
         let submitted_intent = intent.clone();
         let (outcome, replayed) = match self.realize(&identity, intent).await {
-            Ok((result, parent_end, replayed)) => (
+            Ok((result, replayed)) => (
                 lash_core::ToolIntentExecutionOutcome::Executed {
                     identity: identity.clone(),
                     kind: result.0,
                     result: result.1,
-                    parent_end,
                 },
                 replayed,
             ),
@@ -514,62 +513,6 @@ impl ToolIntentIngress {
         }
     }
 
-    /// Apply and settle every durable parent-end action retained for this
-    /// ingress's owning scope.
-    ///
-    /// Hosts call this operation when the bound scope ends. Lash reconstructs
-    /// the same [`lash_core::ProcessParentEndPlan`] used by recorded process
-    /// completion, applies only the ratified `Abandon` or `Cancel` policy with
-    /// a replay-derived key, and marks each action settled after its typed
-    /// outcome is known. A crash may therefore repeat the call safely.
-    pub async fn settle_parent_end(
-        &self,
-    ) -> crate::Result<Vec<lash_core::ToolIntentParentEndOutcome>> {
-        let registry = self.process_registry()?;
-        let pending = registry
-            .pending_tool_intent_parent_end(&self.session_id, self.scope.id())
-            .await?;
-        let plan = lash_core::ProcessParentEndPlan {
-            process_id: lash_core::ProcessId::from(self.scope.id()),
-            actions: pending
-                .iter()
-                .filter_map(|submission| match submission.outcome.as_ref() {
-                    Some(lash_core::ToolIntentExecutionOutcome::Executed {
-                        identity,
-                        parent_end: Some(parent_end),
-                        ..
-                    }) => Some(lash_core::ToolIntentParentEndAction {
-                        identity: identity.clone(),
-                        parent_end: parent_end.clone(),
-                    }),
-                    _ => None,
-                })
-                .collect(),
-        };
-        let mut outcomes = Vec::with_capacity(plan.actions.len());
-        for action in plan.actions {
-            let replay_key = format!("{}:parent-end", action.identity.replay_key);
-            let command = lash_core::ProcessCommand::ParentEnd {
-                identity: action.identity.clone(),
-                process_id: action.parent_end.process_id.clone(),
-                policy: action.parent_end.policy,
-            };
-            let (outcome, _) = self
-                .run_command_with_replay_key(&action.identity, replay_key, command)
-                .await?;
-            let lash_core::ProcessEffectOutcome::ParentEnd { outcome } = outcome else {
-                return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "tool-intent ingress parent-end command returned the wrong outcome".to_string(),
-                )));
-            };
-            registry
-                .complete_tool_intent_parent_end(&action.identity.replay_key)
-                .await?;
-            outcomes.push(*outcome);
-        }
-        Ok(outcomes)
-    }
-
     fn validate(
         &self,
         key: &ToolIntentIngressKey,
@@ -635,11 +578,7 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
     ) -> std::result::Result<
-        (
-            (lash_core::ToolIntentKind, serde_json::Value),
-            Option<lash_core::ToolIntentParentEnd>,
-            bool,
-        ),
+        ((lash_core::ToolIntentKind, serde_json::Value), bool),
         RealizationFailure,
     > {
         let kind = intent.kind();
@@ -707,7 +646,7 @@ impl ToolIntentIngress {
                 }
             }
         };
-        let (result, parent_end_policy, replayed) = self
+        let (result, replayed) = self
             .realize_inner(identity, intent)
             .await
             .map_err(|error| RealizationFailure::Command(kind, error))?;
@@ -732,7 +671,6 @@ impl ToolIntentIngress {
                     identity: identity.clone(),
                     kind,
                     result: value.clone(),
-                    parent_end: None,
                 };
                 self.core
                     .env
@@ -747,7 +685,7 @@ impl ToolIntentIngress {
                             crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
                         )
                     })?;
-                return Ok(((kind, value), None, replayed));
+                return Ok(((kind, value), replayed));
             }
             RealizedIntent::Process(result) => result,
         };
@@ -779,9 +717,6 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::Await { .. } => {
                 return Err(Self::outside_protocol_outcome("await"));
             }
-            lash_core::ProcessEffectOutcome::ParentEnd { .. } => {
-                return Err(Self::outside_protocol_outcome("parent_end"));
-            }
         };
         if recorded_kind != kind {
             return Err(RealizationFailure::Refused(
@@ -791,51 +726,29 @@ impl ToolIntentIngress {
                 },
             ));
         }
-        let (value, parent_end) = match result {
+        let value = match result {
             lash_core::ProcessEffectOutcome::Start { record } => {
                 let summary = lash_core::ProcessHandleView::from_record(*record);
-                let Some(policy) = parent_end_policy else {
-                    return Err(RealizationFailure::Command(
-                        kind,
-                        crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                            "tool-intent ingress start outcome has no submitted parent-end policy"
-                                .to_string(),
-                        )),
-                    ));
-                };
-                let parent_end = lash_core::ToolIntentParentEnd {
-                    process_id: summary.id.clone(),
-                    policy,
-                };
-                let (value, parent_end) = (
-                    serde_json::to_value(summary).unwrap_or(serde_json::Value::Null),
-                    Some(parent_end),
-                );
-                (value, parent_end)
+                serde_json::to_value(summary).unwrap_or(serde_json::Value::Null)
             }
-            lash_core::ProcessEffectOutcome::Signal { event } => (
-                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null),
-                None,
-            ),
-            lash_core::ProcessEffectOutcome::Cancel { record } => (
-                serde_json::to_value(
-                    lash_core::ProcessCancelReceipt::from_record(*record).map_err(|error| {
-                        RealizationFailure::Command(kind, crate::EmbedError::Plugin(error))
-                    })?,
-                )
-                .unwrap_or(serde_json::Value::Null),
-                None,
-            ),
+            lash_core::ProcessEffectOutcome::Signal { event } => {
+                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
+            }
+            lash_core::ProcessEffectOutcome::Cancel { record } => serde_json::to_value(
+                lash_core::ProcessCancelReceipt::from_record(*record).map_err(|error| {
+                    RealizationFailure::Command(kind, crate::EmbedError::Plugin(error))
+                })?,
+            )
+            .unwrap_or(serde_json::Value::Null),
             lash_core::ProcessEffectOutcome::CancelRefused { refusal } => {
                 return Err(RealizationFailure::Command(
                     kind,
                     crate::EmbedError::Plugin(refusal),
                 ));
             }
-            lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => (
-                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null),
-                None,
-            ),
+            lash_core::ProcessEffectOutcome::EmitEvent { event, .. } => {
+                serde_json::to_value(*event).unwrap_or(serde_json::Value::Null)
+            }
             lash_core::ProcessEffectOutcome::List { .. } => {
                 return Err(Self::outside_protocol_outcome("list"));
             }
@@ -848,15 +761,11 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::Await { .. } => {
                 return Err(Self::outside_protocol_outcome("await"));
             }
-            lash_core::ProcessEffectOutcome::ParentEnd { .. } => {
-                return Err(Self::outside_protocol_outcome("parent_end"));
-            }
         };
         let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
             identity: identity.clone(),
             kind,
             result: value.clone(),
-            parent_end: parent_end.clone(),
         };
         self.core
             .env
@@ -871,7 +780,7 @@ impl ToolIntentIngress {
                     crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
                 )
             })?;
-        Ok(((kind, value), parent_end, replayed))
+        Ok(((kind, value), replayed))
     }
 
     fn outside_protocol_outcome(recorded: &str) -> RealizationFailure {
@@ -886,18 +795,9 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
-    ) -> crate::Result<(
-        RealizedIntent,
-        Option<lash_core::ProcessParentEndPolicy>,
-        bool,
-    )> {
-        let mut parent_end_policy = None;
+    ) -> crate::Result<(RealizedIntent, bool)> {
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {
-                parent_end_policy = Some(match intent.request.lifecycle.on_parent_end {
-                    lash_core::OnParentEnd::Abandon => lash_core::ProcessParentEndPolicy::Abandon,
-                    lash_core::OnParentEnd::Cancel => lash_core::ProcessParentEndPolicy::Cancel,
-                });
                 let mut request = intent.request;
                 // The replay key is the process id, so a re-submitted
                 // declaration starts the same process. One projection, shared
@@ -975,11 +875,11 @@ impl ToolIntentIngress {
                 // effect-journal key, is the dedupe point for a re-submitted
                 // trigger emission, so this route never reports a journal
                 // replay.
-                return Ok((RealizedIntent::Trigger(report), None, false));
+                return Ok((RealizedIntent::Trigger(report), false));
             }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
-        Ok((RealizedIntent::Process(result), parent_end_policy, replayed))
+        Ok((RealizedIntent::Process(result), replayed))
     }
 
     /// Emit one recorded trigger declaration through the same router the

@@ -233,7 +233,6 @@ fn probe_context_with_projector(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
-        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         tool_registry: None,
     };
     crate::RuntimeExecutionContext::new(
