@@ -829,6 +829,14 @@ fn differential_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
 
+/// Reusable process name and the registry-minted incarnation that qualifies it.
+const DIFFERENTIAL_PROCESS_OWNER_ID: &str = "differential-process-owner";
+const DIFFERENTIAL_PROCESS_OWNER_INCARNATION: u64 = 7;
+
+fn differential_process_attachment_id() -> AttachmentId {
+    AttachmentId::parse("differential-process-attachment").expect("valid attachment id")
+}
+
 // Row shapes for the SQL observation queries. Named because the tuples are wide
 // enough that clippy flags them inline, and a name reads better at the use site.
 type AttachmentRow = (
@@ -1518,6 +1526,26 @@ impl BackendRunner {
                     owner_kind: Some(AttachmentOwnerKind::Turn),
                     owner_id: Some(operation),
                     owner_incarnation: None,
+                })?;
+                // A second row under a process owner: the owner identity is
+                // `(process_id, incarnation)`, so the differential must show
+                // both backends persisting and reading back the incarnation,
+                // not just the turn shape that leaves the column NULL. This
+                // fixture wires no process registry, so the row stays an
+                // immortal root on every backend.
+                self.store().record_intent(AttachmentIntent {
+                    attachment_id: differential_process_attachment_id(),
+                    session_id: self.session_id.clone(),
+                    canonical_uri: "lash-attachment://blake3/differential-process-attachment"
+                        .to_string(),
+                    intent_at_epoch_ms: 1_000,
+                    owner_kind: Some(AttachmentOwnerKind::Process),
+                    owner_id: Some(DIFFERENTIAL_PROCESS_OWNER_ID.to_string()),
+                    owner_incarnation: Some(
+                        lash_core::ProcessIncarnation::from_registration_sequence(
+                            DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
+                        ),
+                    ),
                 })?;
                 Ok(None)
             }
