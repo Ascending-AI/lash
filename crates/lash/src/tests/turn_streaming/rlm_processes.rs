@@ -42,8 +42,8 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         const ROLLED_BACK_MARKER: &str = "must-not-survive-stale-append";
         let writer = session.runtime.writer();
         let mut runtime = writer.lock().await;
-        let result = runtime
-            .append_session_nodes(lash_core::AppendSessionNodesRequest {
+        let result = Box::pin(
+            runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
                 operation_id: "leaf-bearing-stale-append".to_string(),
                 nodes: vec![lash_core::SessionAppendNode::message(
                     lash_core::PluginMessage::text(
@@ -53,8 +53,9 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                     .with_id("leaf-bearing-stale-append-message"),
                 )],
                 requires_ancestor_node_id: Some("inactive-ancestor".to_string()),
-            })
-            .await?;
+            }),
+        )
+        .await?;
         assert!(matches!(
             result,
             lash_core::AppendSessionNodesOutcome::StaleBranch { ref required_node_id }
@@ -461,6 +462,10 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         dir.path().join("sessions"),
     ));
     let controller = Arc::new(RecordingDurableEffectController::default());
+    let effect_host = Arc::new(DurableNoopEffectHost {
+        controller: Arc::clone(&controller),
+        ..Default::default()
+    });
     let scoped_effect_controller = ScopedEffectController::borrowed(
         controller.as_ref(),
         lash_core::ExecutionScope::turn(session_id, root_turn_id),
@@ -475,9 +480,7 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
         )))
-        .effect_host(Arc::new(
-            lash_core::facade_support::NativeEffectHost::default(),
-        ))
+        .effect_host(effect_host)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
@@ -1271,4 +1274,169 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     assert!(result.tool_calls.is_empty(), "the response never arrived");
     assert_eq!(stopper.cancel_running_turns(), 0);
     Ok(())
+}
+
+/// Runs one TypeScript cell that starts processes and filters `processes.list`
+/// by a definition value, returning the cell's final value.
+///
+/// The first started run blocks in `app_lookup` until the turn releases it, so
+/// the `processes.list` calls in the cell observe live runs.
+#[cfg(feature = "rlm")]
+async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Value> {
+    let (entered_tx, entered_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+        crate::TurnBudget::Unbounded,
+        rlm_factory(),
+    ))
+    .provider(queued_text_provider(vec![format!(
+        "<typescript>\n{}\n</typescript>",
+        cell.trim()
+    )]))
+    .model(mock_model_spec())
+    .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
+    .store_factory(Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    ))
+    .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("rlm-process-definition-filter")
+        .plugin_option(
+            crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
+            crate::rlm::RlmCreateExtras {
+                dialect: Some(lash_rlm_types::RlmDialect::Typescript),
+                ..crate::rlm::RlmCreateExtras::default()
+            },
+        )
+        .expect("the typed RLM session options must serialize")
+        .open()
+        .await?;
+    let turn_session = session.clone();
+    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
+    let turn = tokio::spawn(async move {
+        turn_session
+            .turn(TurnInput::text("start tool"))
+            .advanced()
+            .run_with_scope(scoped_effect_controller)
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered_rx)
+        .await
+        .expect("tool process should start")
+        .expect("tool provider entered");
+    release_tx.send(()).expect("release tool provider");
+
+    let result = turn.await.expect("turn task")?;
+    Ok(result
+        .final_value()
+        .cloned()
+        .expect("definition-filter cell finishes with a value"))
+}
+
+/// A cell filtering by a definition it started sees exactly that run.
+///
+/// This is the FIG-2989 regression. The cell-side `lookup` value and the
+/// `ProcessIdentity.definition` the started run stores are one encoding now, so
+/// the equality in `ProcessListFilter::matches_record` holds. Before the codec
+/// cutover the stored definition was an unmarked record and `matched` was 0.
+/// Two runs are live, so a filter that matched everything would fail too.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn process_list_matches_the_definition_the_cell_started() -> Result<()> {
+    run_async_test_on_stack_budget("process-list-definition-match-test", || async {
+        let value = definition_filtered_process_list(
+            r#"
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => { return await tools.app_lookup({}); }
+});
+const probe = defineProcess({
+  name: "probe",
+  signals: {},
+  run: async () => { return await tools.app_lookup({}); }
+});
+const first = start(lookup, {});
+const second = start(probe, {});
+const matched = await processes.list({ definition: lookup, status: "any" });
+const every = await processes.list({ status: "any" });
+await first;
+await second;
+finish({
+  matched: matched.length,
+  every: every.length,
+  matched_ids: matched.map((row) => row.process_id),
+  every_ids: every.map((row) => row.process_id)
+});"#,
+        )
+        .await?;
+
+        assert_eq!(
+            value.get("every").and_then(serde_json::Value::as_u64),
+            Some(2),
+            "precondition: both started runs are visible unfiltered: {value}"
+        );
+        assert_eq!(
+            value.get("matched").and_then(serde_json::Value::as_u64),
+            Some(1),
+            "the definition filter must select exactly the `lookup` run: {value}"
+        );
+        let matched_ids = value
+            .get("matched_ids")
+            .and_then(serde_json::Value::as_array)
+            .expect("matched ids");
+        let every_ids = value
+            .get("every_ids")
+            .and_then(serde_json::Value::as_array)
+            .expect("every id");
+        assert!(
+            every_ids.contains(&matched_ids[0]),
+            "the matched row must be one of the started runs: {value}"
+        );
+        Ok(())
+    })
+}
+
+/// A definition the cell never started must match nothing.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn process_list_rejects_a_definition_that_was_not_started() -> Result<()> {
+    run_async_test_on_stack_budget("process-list-definition-mismatch-test", || async {
+        let value = definition_filtered_process_list(
+            r#"
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => { return await tools.app_lookup({}); }
+});
+const idle = defineProcess({
+  name: "idle",
+  signals: {},
+  run: async () => { return await tools.app_lookup({}); }
+});
+const handle = start(lookup, {});
+const matched = await processes.list({ definition: lookup, status: "any" });
+const other = await processes.list({ definition: idle, status: "any" });
+await handle;
+finish({ matched: matched.length, other: other.length });"#,
+        )
+        .await?;
+
+        assert_eq!(
+            value.get("matched").and_then(serde_json::Value::as_u64),
+            Some(1),
+            "precondition: the started definition still matches: {value}"
+        );
+        assert_eq!(
+            value.get("other").and_then(serde_json::Value::as_u64),
+            Some(0),
+            "a definition the cell never started must match nothing: {value}"
+        );
+        Ok(())
+    })
 }

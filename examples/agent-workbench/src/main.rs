@@ -91,10 +91,19 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 fn test_attachment_store() -> Arc<dyn lash::persistence::AttachmentStore> {
     Arc::new(lash::persistence::InMemoryAttachmentStore::new())
 }
+/// How long a cancel route stays attached waiting for a terminal before it
+/// reports the cancellation as recorded-but-pending.
+///
+/// Under test the budget is deliberately large rather than small. No test
+/// reaches it: every test that must observe the recorded-but-pending branch
+/// drives it deterministically through the `TurnAttach` seam
+/// (`with_test_attach`), so shortening this bound buys no suite time and only
+/// makes the tests that assert the *attached* branch decide on how loaded the
+/// machine is.
 #[cfg(not(test))]
 const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
-const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_millis(250);
+const TURN_TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[path = "main_sections/bootstrap.rs"]
 mod bootstrap;

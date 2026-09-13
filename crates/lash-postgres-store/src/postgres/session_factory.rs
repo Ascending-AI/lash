@@ -2,6 +2,8 @@ use crate::*;
 
 #[path = "session_factory/artifact_retirement.rs"]
 mod artifact_retirement;
+#[path = "session_factory/store.rs"]
+mod store;
 
 pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "enqueue_seq",
@@ -20,72 +22,16 @@ pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "claim_id",
 ];
 
-impl PostgresSessionStoreFactory {
-    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
-    /// gated conformance factory shares it.
-    pub(crate) async fn create_session_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<PostgresSessionStore>, StoreError> {
-        lash_core::store::validate_session_id(&request.session_id)?;
-        let store = self.store_for(request.session_id.clone());
-        let meta = SessionMeta {
-            session_id: request.session_id.clone(),
-            relation: request.relation.clone(),
-            pending_observer_intents: request.pending_observer_intents.clone(),
-        };
-        let created_at_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
-            .await?;
-        let deleted = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_deleted_sessions WHERE session_id = $1
-             )",
-        )
-        .bind(request.session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if deleted {
-            return Err(StoreError::SessionDeleted {
-                session_id: request.session_id.clone(),
-            });
-        }
-        crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &meta,
-            crate::session_meta::SessionMetaWrite::Insert,
-            created_at_ms,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Arc::new(store))
-    }
-
-    /// Concrete reopen behind [`SessionStoreFactory::open_existing_store`];
-    /// the gated conformance factory shares it.
-    pub(crate) async fn open_existing_session_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<PostgresSessionStore>>, String> {
-        let store = self.store_for(request.session_id.clone());
-        if store
-            .load_session_meta()
-            .await
-            .map_err(|err| err.to_string())?
-            .is_some()
-        {
-            Ok(Some(Arc::new(store)))
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        *self
+            .turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
+            .turn_control_authority_owner()
+            == lash_core::TurnControlAuthorityOwner::EffectHost)
+            .then(|| Arc::clone(effect_host));
         *self
             .effect_host
             .lock()
@@ -154,6 +100,27 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         }
     }
 
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        self.store_for(session_id.clone())
+            .pending_turn_cancel_closure_pins()
+            .await
+    }
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        crate::turn_cancel_closure::retire_scope(&self.pool, scope).await?;
+        if let Some(owner) = self.turn_cancel_closure_owner_binding() {
+            owner
+                .release(scope)
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+        }
+        Ok(())
+    }
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -784,6 +751,7 @@ pub(crate) async fn delete_session_tx(
     report: &mut lash_core::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
+    crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
     let materialized = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(
              SELECT 1 FROM lash_session_meta WHERE session_id = $1
@@ -909,6 +877,10 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1",
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
+        // Administration revokes the session's effect authority before store
+        // deletion, after which the pinned closure obligation may be retired.
+        "DELETE FROM lash_turn_cancel_closure_authorizations WHERE session_id = $1",
+        "DELETE FROM lash_turn_cancellation_bindings WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
         "DELETE FROM lash_fork_lineage WHERE session_id = $1",
         "DELETE FROM lash_session_meta WHERE session_id = $1",
@@ -948,14 +920,11 @@ pub(crate) async fn delete_process_sessions_tx(
     if session_ids.is_empty() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
-
     let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
     let mut report = lash_core::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
-        // Take every session-history mutation fence before deleting heads or
-        // deciding whether graph cleanup is required.
         crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
-
+        crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
         let checkpoint_refs = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT checkpoint_ref
          FROM lash_sessions
@@ -981,8 +950,7 @@ pub(crate) async fn delete_process_sessions_tx(
         .await?;
         report.enumerated_blob_count = candidates.len();
 
-        // Permanent identity evidence for every materialized id in the batch,
-        // recorded before the rows go away so the reclaim arm below can see it.
+        // Record permanent identity before deletion so reclaim can see it.
         sqlx::query(
             "INSERT INTO lash_deleted_sessions
          (session_id, created_at_ms, last_commit_at_ms, head_revision,
@@ -1121,6 +1089,16 @@ pub(crate) async fn delete_process_sessions_tx(
              WHERE session_id = ANY($1)
              RETURNING session_id
          ),
+         deleted_turn_cancel_closures AS (
+             DELETE FROM lash_turn_cancel_closure_authorizations
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancellation_bindings AS (
+             DELETE FROM lash_turn_cancellation_bindings
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
          deleted_session_execution_leases AS (
              DELETE FROM lash_session_execution_leases
              WHERE session_id = ANY($1)
@@ -1141,6 +1119,8 @@ pub(crate) async fn delete_process_sessions_tx(
               + (SELECT count(*) FROM deleted_wake_redelivery_fences)
               + (SELECT count(*) FROM deleted_wake_allocation_floors)
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
+              + (SELECT count(*) FROM deleted_turn_cancel_closures)
+              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
               + (SELECT count(*) FROM deleted_session_execution_leases)
               + (SELECT count(*) FROM deleted_fork_lineage)
               + (SELECT count(*) FROM deleted_session_meta)",

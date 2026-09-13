@@ -324,9 +324,13 @@ impl TurnBoundary {
         session: Option<&mut Session>,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         claim_settlement: TurnClaimSettlement,
-        current_session_lease_generation: Option<u64>,
+        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
+        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
+        interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+        turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
@@ -368,9 +372,13 @@ impl TurnBoundary {
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
                 claim_settlement,
-                current_session_lease_generation,
+                current_session_lease_fence,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
+                interrupted_turn_input_cancellation,
+                interrupted_turn_cancel_intent,
+                turn_cancel_closure_settlement,
+                turn_control_resolver,
                 recorded_attachment_intent_ids,
                 session_execution_lease_completion,
             })
@@ -446,9 +454,13 @@ impl TurnBoundary {
             failure_evidence,
             outcome,
             claim_settlement,
-            current_session_lease_generation,
+            current_session_lease_fence,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
+            interrupted_turn_input_cancellation,
+            interrupted_turn_cancel_intent,
+            turn_cancel_closure_settlement,
+            turn_control_resolver,
             recorded_attachment_intent_ids,
             session_execution_lease_completion,
         } = input;
@@ -509,9 +521,13 @@ impl TurnBoundary {
                 failure_evidence,
                 self.final_operation(),
                 claim_settlement,
-                current_session_lease_generation,
+                current_session_lease_fence,
                 enqueued_queue_batches,
                 interrupted_turn_input_turn_id,
+                interrupted_turn_input_cancellation,
+                interrupted_turn_cancel_intent,
+                turn_cancel_closure_settlement,
+                turn_control_resolver,
                 committed_attachment_ids,
                 adopted_intent_rows,
                 session_execution_lease_completion,
@@ -541,9 +557,13 @@ impl TurnBoundary {
         failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
         mut claim_settlement: TurnClaimSettlement,
-        current_session_lease_generation: Option<u64>,
+        current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
         interrupted_turn_input_turn_id: Option<TurnId>,
+        interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
+        interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
+        turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
+        _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
@@ -589,6 +609,12 @@ impl TurnBoundary {
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.adopted_intent_rows = adopted_intent_rows;
+        let current_session_lease_generation = current_session_lease_fence
+            .as_ref()
+            .map(|fence| fence.fencing_token);
+        // ADR 0029: final settlement is authorized by head CAS and durable
+        // cancellation facts, even after expiry or takeover. A retained lease
+        // is not a borrowed append-lane fence. Its release remains ancillary.
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
         }
@@ -596,53 +622,66 @@ impl TurnBoundary {
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.enqueued_queue_batches = enqueued_queue_batches;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
+        commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
+        commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;
+        commit.turn_cancel_closure_settlement = turn_cancel_closure_settlement;
         let can_retry_recovered_settlement =
             claim_settlement.has_recovered(current_session_lease_generation);
-        let result = if can_retry_recovered_settlement {
-            // Each retry can remove one stale row. Permit at most one retry
-            // per original row, followed by the final commit attempt.
-            let mut retry_budget = RecoveredSettlementBudget(
-                commit
-                    .completed_queue_claims
-                    .iter()
-                    .map(|claim| claim.batch_ids.len())
-                    .sum::<usize>()
-                    .saturating_add(
-                        commit
-                            .completed_turn_input_claims
-                            .iter()
-                            .map(|claim| claim.input_ids.len())
-                            .sum::<usize>(),
-                    ),
-            );
-            loop {
-                commit.validate_claim_settlement(
-                    claim_settlement.queued.originating(),
-                    claim_settlement.turn_inputs.originating(),
-                )?;
-                match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
-                    Ok(result) => break result,
-                    Err(err) => {
-                        if !retry_budget.consume() {
-                            return Err(err);
-                        }
-                        let dropped = claim_settlement
-                            .drop_superseded(&err, current_session_lease_generation);
-                        commit.completed_queue_claims = claim_settlement.queued.completions.clone();
-                        commit.completed_turn_input_claims =
-                            claim_settlement.turn_inputs.completions.clone();
-                        if !dropped {
-                            return Err(err);
-                        }
-                    }
-                }
-            }
-        } else {
+        // Recovered settlement retries are bounded by their original rows.
+        // Cancellation-intent retries are instead progress-fenced: every
+        // refusal proves a newer durable intent revision. Refresh only that
+        // snapshot: the settlement and materialized cancellation evidence are
+        // already authenticated and may contain live execution enrichment
+        // (such as the iteration that honoured an AfterStep request) which a
+        // raw promise peek cannot reconstruct.
+        let mut retry_budget = RecoveredSettlementBudget(
+            commit
+                .completed_queue_claims
+                .iter()
+                .map(|claim| claim.batch_ids.len())
+                .sum::<usize>()
+                .saturating_add(
+                    commit
+                        .completed_turn_input_claims
+                        .iter()
+                        .map(|claim| claim.input_ids.len())
+                        .sum::<usize>(),
+                ),
+        );
+        let result = loop {
             commit.validate_claim_settlement(
                 claim_settlement.queued.originating(),
                 claim_settlement.turn_inputs.originating(),
             )?;
-            crate::store::commit_runtime_state_verified(store, commit).await?
+            match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
+                Ok(result) => break result,
+                Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
+                    let turn_id =
+                        commit
+                            .interrupted_turn_input_turn_id
+                            .as_ref()
+                            .ok_or_else(|| {
+                                StoreError::Backend(
+                                    "cancellation intent CAS failed without an interrupted turn id"
+                                        .to_string(),
+                                )
+                            })?;
+                    let address = crate::TurnAddress::new(&session_id, turn_id);
+                    let observed = store.turn_cancel_request_intent(&address).await?;
+                    commit.interrupted_turn_cancel_intent = Some(observed);
+                }
+                Err(err) if can_retry_recovered_settlement && retry_budget.consume() => {
+                    let dropped =
+                        claim_settlement.drop_superseded(&err, current_session_lease_generation);
+                    if !dropped {
+                        return Err(err);
+                    }
+                    commit.completed_queue_claims = claim_settlement.queued.completions.clone();
+                    commit.completed_turn_input_claims =
+                        claim_settlement.turn_inputs.completions.clone();
+                }
+                Err(err) => return Err(err),
+            }
         };
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();

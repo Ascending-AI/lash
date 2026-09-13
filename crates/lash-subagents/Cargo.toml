@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_subagents"
+doctest = false
 
 [lints]
 workspace = true

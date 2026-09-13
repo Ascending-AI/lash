@@ -26,7 +26,7 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
         ctx: WorkflowContext<'_>,
         Json(()): Json<()>,
     ) -> HandlerResult<Json<serde_json::Value>> {
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let controller = RestateRuntimeEffectController::new(ctx, test_restate_authority_id());
         let scope =
             ExecutionScope::turn(TRIGGER_INTENT_CUTOVER_SESSION, TRIGGER_INTENT_CUTOVER_TURN);
         let attempt = controller

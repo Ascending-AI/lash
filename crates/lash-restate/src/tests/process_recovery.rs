@@ -534,7 +534,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming_e
             let context = Arc::clone(&context);
             let process_id = process_id.clone();
             tokio::spawn(async move {
-                let controller = RestateRuntimeEffectController::new(context);
+                let controller = RestateRuntimeEffectController::new_for_test(context);
                 workflow
                     .run_registration(
                         registration,
@@ -625,7 +625,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
         let registration = registration.clone();
         let execution_write_authority = execution_write_authority.clone();
         tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new(context);
+            let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
                 .run_registration(
                     registration,
@@ -685,7 +685,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     );
 
     context.start_replay();
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let retry = tokio::time::timeout(
         Duration::from_secs(5),
         workflow.run_registration(
@@ -754,7 +754,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         let registration = registration.clone();
         let execution_write_authority = execution_write_authority.clone();
         tokio::spawn(async move {
-            let controller = RestateRuntimeEffectController::new(context);
+            let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
                 .run_registration(
                     registration,
@@ -821,7 +821,7 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
     let runs_before_redelivery = context.runs();
     context.start_replay();
 
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let redelivery = workflow
         .run_registration(
             registration,
@@ -1314,7 +1314,7 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
 #[tokio::test]
 pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
     let registry = process_registry();
-    let deployment = RestateProcessDeployment::new(
+    let deployment = RestateProcessDeployment::new_for_test(
         "http://127.0.0.1:8080",
         Arc::clone(&registry),
         continuation_store(),

@@ -114,6 +114,10 @@ impl crate::AwaitEventResolver for RecordingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for RecordingEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        "conformance-recording-effect-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }
@@ -1013,6 +1017,10 @@ mod local_control_conformance_tests {
 
     #[async_trait::async_trait]
     impl EffectHost for ForeignResolverHost {
+        fn turn_control_binding_id(&self) -> String {
+            "conformance-foreign-resolver".to_string()
+        }
+
         fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
             &self.foreign
         }

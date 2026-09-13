@@ -49,6 +49,7 @@ struct DeclaredGuard {
     predicate: &'static str,
 }
 
+#[cfg(test)]
 const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_condemnations (
             attachment_id TEXT PRIMARY KEY,
             phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
@@ -61,38 +62,47 @@ const ATTACHMENT_CONDEMNATIONS_DDL: &str = r#"CREATE TABLE lash_attachment_conde
 /// process prune deletes an unreferenced root and cascades its edges in the same
 /// transaction. The component foreign key only prevents dangling edges; it is
 /// not a second reclaim trigger.
+#[cfg(test)]
 const CHECKPOINT_BLOB_REFS_DDL: &str = r#"CREATE TABLE lash_checkpoint_blob_refs (
             checkpoint_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE CASCADE,
             blob_ref TEXT NOT NULL REFERENCES lash_blobs(hash),
             PRIMARY KEY (checkpoint_ref, blob_ref)
         )"#;
 
+#[cfg(test)]
 const CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref
             ON lash_checkpoint_blob_refs(blob_ref, checkpoint_ref)"#;
 
+#[cfg(test)]
 const SESSIONS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_sessions_checkpoint_ref
             ON lash_sessions(checkpoint_ref)"#;
 
+#[cfg(test)]
 const NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_node_anchors_checkpoint_ref
             ON lash_node_anchors(checkpoint_ref)"#;
 
+#[cfg(test)]
 const SESSION_STATE_VERSION_DDL: &str =
     r#"ALTER TABLE lash_session_meta ADD COLUMN session_state_version INTEGER"#;
 
+#[cfg(test)]
 const PROCESS_UPDATED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
     ON lash_processes(updated_at_ms)"#;
 
 /// Supports bounded operational inventory by session-state generation and gives
 /// the schema migration gate a relation-shaped witness when a component-60
 /// catalog is paired with a rewound component-59 ledger.
+#[cfg(test)]
 const SESSION_STATE_VERSION_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_session_meta_state_version
             ON lash_session_meta(session_state_version, session_id)"#;
 
+#[cfg(test)]
 const PROCESS_PARENT_END_PLANS_DDL: &str = r#"CREATE TABLE lash_process_parent_end_plans (
             process_id TEXT PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
             actions_json TEXT NOT NULL
         )"#;
 
+#[cfg(test)]
 const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submissions (
             replay_key TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -104,6 +114,7 @@ const TOOL_INTENT_SUBMISSIONS_DDL: &str = r#"CREATE TABLE lash_tool_intent_submi
             submission_json TEXT NOT NULL
         )"#;
 
+#[cfg(test)]
 const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_intent_submissions_scope
             ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index)"#;
 
@@ -118,12 +129,15 @@ const TOOL_INTENT_SUBMISSIONS_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_tool_in
 /// duplicate-object error. The divergence probe over `introduced_relations` still
 /// refuses a stamp that already carries either index before any DDL runs; this
 /// is the second line, not a replacement for it.
+#[cfg(test)]
 const QUEUED_WORK_SESSION_COMMAND_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
             ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq)"#;
 
+#[cfg(test)]
 const PENDING_TURN_INPUT_ORDER_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
             ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq)"#;
 
+#[cfg(test)]
 const TURN_CANCEL_REQUESTS_DDL: &str = r#"CREATE TABLE lash_turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
@@ -142,6 +156,7 @@ const TURN_CANCEL_REQUESTS_DDL: &str = r#"CREATE TABLE lash_turn_cancel_requests
 /// The group row is the settlement-sequence allocator: a finalizing child bumps
 /// `next_seq` inside its own fenced transaction, which is the only allocation
 /// that cannot lose an update the way `MAX(settlement_seq) + 1` can.
+#[cfg(test)]
 const RUNTIME_EFFECT_GROUP_DDL: &str = r#"CREATE TABLE lash_runtime_effect_group (
             group_key TEXT PRIMARY KEY,
             scope_id TEXT NOT NULL,
@@ -153,21 +168,26 @@ const RUNTIME_EFFECT_GROUP_DDL: &str = r#"CREATE TABLE lash_runtime_effect_group
             created_at_ms BIGINT NOT NULL
         )"#;
 
+#[cfg(test)]
 const RUNTIME_EFFECT_GROUP_SESSION_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_session
             ON lash_runtime_effect_group(session_id)"#;
 
+#[cfg(test)]
 const RUNTIME_EFFECT_GROUP_SCOPE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
             ON lash_runtime_effect_group(scope_id)"#;
 
 /// Both columns are nullable with no default, so PostgreSQL adds them as catalog
 /// metadata: every already-journalled effect row survives the upgrade with its
 /// recorded `envelope_hash` — and therefore its lease fence — untouched.
+#[cfg(test)]
 const RUNTIME_EFFECT_REPLAY_GROUP_KEY_DDL: &str =
     r#"ALTER TABLE lash_runtime_effect_replay ADD COLUMN IF NOT EXISTS group_key TEXT"#;
 
+#[cfg(test)]
 const RUNTIME_EFFECT_REPLAY_SETTLEMENT_SEQ_DDL: &str =
     r#"ALTER TABLE lash_runtime_effect_replay ADD COLUMN IF NOT EXISTS settlement_seq BIGINT"#;
 
+#[cfg(test)]
 const RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL: &str = r#"CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_replay_group_seq
             ON lash_runtime_effect_replay(group_key, settlement_seq)
             WHERE group_key IS NOT NULL AND settlement_seq IS NOT NULL"#;
@@ -193,13 +213,16 @@ const RUNTIME_EFFECT_REPLAY_GROUP_SEQ_INDEX_DDL: &str = r#"CREATE UNIQUE INDEX I
 /// with a creation-only migration into it — and the asymmetry is a property of
 /// what each tier can do about an old database, not a disagreement about what
 /// the index is for.
+#[cfg(test)]
 const RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_group_unsettled
             ON lash_runtime_effect_replay(group_key, replay_key)
             WHERE group_key IS NOT NULL AND settlement_seq IS NULL"#;
 
+#[cfg(test)]
 const TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL: &str = r#"ALTER TABLE lash_trigger_occurrences
             ADD COLUMN IF NOT EXISTS reclaimable_at_ms BIGINT"#;
 
+#[cfg(test)]
 const TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL: &str = r#"UPDATE lash_trigger_occurrences AS occurrence
             SET reclaimable_at_ms = occurrence.occurred_at_ms
             WHERE occurrence.reclaimable_at_ms IS NULL
@@ -208,6 +231,7 @@ const TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL: &str = r#"UPDATE lash_trigger_occu
                   WHERE delivery.occurrence_id = occurrence.occurrence_id
               )"#;
 
+#[cfg(test)]
 const TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_trigger_occurrences_reclaimable
             ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
             WHERE reclaimable_at_ms IS NOT NULL"#;
@@ -285,6 +309,7 @@ const DROP_FORK_PENDING_OBSERVER_INTENTS_DDL: &str =
 const DROP_OBSERVER_INTENT_DEPTH_DDL: &str =
     r#"ALTER TABLE lash_session_meta DROP COLUMN observer_intent_depth"#;
 
+#[cfg(test)]
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
@@ -300,6 +325,12 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 mod migrations;
 
 use migrations::SCHEMA_MIGRATIONS;
+
+#[cfg(test)]
+#[path = "schema/historical_migrations.rs"]
+mod historical_migrations;
+#[cfg(test)]
+use historical_migrations::HISTORICAL_MIGRATIONS;
 /// How one open should treat the database's schema.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SchemaOpenOptions {

@@ -784,6 +784,19 @@ must_cover = [
   "CanonicalValue",
 ]
 
+# The canonical projected carrier is the one shape BOTH durable writers share,
+# so it is relocated out of state.rs into its own file and guarded by both
+# surfaces. A field added here changes the snapshot bytes and the continuation
+# JSON at once; neither fence may go blind to it.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/projected_wire.rs"]
+must_cover = [
+  "CanonicalProjectedValue",
+  "CanonicalJsonValue",
+  "CanonicalJsonField",
+]
+
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = [
@@ -817,6 +830,17 @@ must_cover = [
   "HeapObjectWire",
   "ValueWire",
   "VmHandlerContinuation",
+]
+
+# `ValueWire::Projected` carries the shape the snapshot also writes; see the
+# matching guard on the snapshot surface.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lashlang/src/runtime/projected_wire.rs"]
+must_cover = [
+  "CanonicalProjectedValue",
+  "CanonicalJsonValue",
+  "CanonicalJsonField",
 ]
 
 # A pending finally origin embeds this serialized error vocabulary.

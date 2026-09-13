@@ -199,7 +199,10 @@ impl ReadOnlyVariableDoc {
         let (descriptor_type, value) = match value {
             FlowValue::Projected(projected) => (
                 projected.type_name().to_string(),
-                serde_json::to_value(projected.materialize()).ok(),
+                projected
+                    .materialize()
+                    .ok()
+                    .and_then(|value| serde_json::to_value(value).ok()),
             ),
             other => (
                 flow_value_descriptor_type(other).to_string(),

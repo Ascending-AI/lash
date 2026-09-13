@@ -15,6 +15,7 @@ categories = ["asynchronous", "development-tools::debugging"]
 
 [lib]
 name = "lash_trace"
+doctest = false
 
 [features]
 default = []

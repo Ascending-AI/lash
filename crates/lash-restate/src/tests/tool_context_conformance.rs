@@ -191,12 +191,12 @@ impl ProductionToolCell {
     async fn run_once(
         &self,
         runtime: &mut lash_core::facade_support::LashRuntime,
-        controller: &dyn RuntimeEffectController,
+        effect_host: &dyn EffectHost,
     ) -> lash_core::facade_support::AssembledTurn {
         let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
-        let scoped_effect_controller =
-            lash_core::ScopedEffectController::borrowed(controller, turn_scope)
-                .expect("scope production tool cell");
+        let scoped_effect_controller = effect_host
+            .scoped(turn_scope)
+            .expect("scope production tool cell");
         runtime
             .stream_turn(
                 replay_test_input(&self.turn_id),
@@ -209,7 +209,7 @@ impl ProductionToolCell {
             .expect("run production tool cell")
     }
 
-    async fn run(&self, controller: &dyn RuntimeEffectController, start_replay: impl FnOnce()) {
+    async fn run(&self, effect_host: &dyn EffectHost, start_replay: impl FnOnce()) {
         let mut live = replay_test_runtime_with_plugins(
             &self.session_id,
             self.policy.clone(),
@@ -219,7 +219,7 @@ impl ProductionToolCell {
             self.plugin_factories.clone(),
         )
         .await;
-        let live_turn = self.run_once(&mut live, controller).await;
+        let live_turn = self.run_once(&mut live, effect_host).await;
         assert!(matches!(
             live_turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)
@@ -240,7 +240,7 @@ impl ProductionToolCell {
             self.plugin_factories.clone(),
         )
         .await;
-        let replay_turn = self.run_once(&mut replay, controller).await;
+        let replay_turn = self.run_once(&mut replay, effect_host).await;
         assert!(matches!(
             replay_turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)
@@ -271,7 +271,7 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     for manifest in manifests {
         let _ = args_for(&manifest.name);
 
-        let local_cell = ProductionToolCell::new(ControllerMode::Local, &manifest.name).await;
+        let mut local_cell = ProductionToolCell::new(ControllerMode::Local, &manifest.name).await;
         local_cell
             .runtime_store
             .admit_and_bind_session(&lash_core::SessionBinding::root(
@@ -279,18 +279,26 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
             ))
             .await
             .expect("bind local session");
-        let local = lash_sqlite_store::SqliteRuntimeEffectController::memory(ExecutionScope::turn(
-            &local_cell.session_id,
-            &local_cell.turn_id,
-        ))
-        .await
-        .expect("in-process production replay controller");
-        local_cell.run(&local, || local.start_replay()).await;
+        let local = Arc::new(
+            lash_sqlite_store::SqliteEffectHost::open(&local_cell._dir.path().join("effects.db"))
+                .await
+                .expect("in-process production replay host"),
+        );
+        local_cell.host.control.effect_host = Arc::clone(&local) as Arc<dyn EffectHost>;
+        local_cell
+            .run(local.as_ref(), || local.start_replay())
+            .await;
 
-        let durable_cell = ProductionToolCell::new(ControllerMode::Durable, &manifest.name).await;
+        let mut durable_cell =
+            ProductionToolCell::new(ControllerMode::Durable, &manifest.name).await;
         let context = Arc::new(ReplayableRecordingContext::default());
-        let durable = RestateRuntimeEffectController::new(Arc::clone(&context));
-        durable_cell.run(&durable, || context.start_replay()).await;
+        let durable = Arc::new(RestateRuntimeEffectController::new_for_test(Arc::clone(
+            &context,
+        )));
+        durable_cell.host.control.effect_host = Arc::clone(&durable) as Arc<dyn EffectHost>;
+        durable_cell
+            .run(durable.as_ref(), || context.start_replay())
+            .await;
         let tool_attempts = context
             .recorded_runtime_effect_envelopes()
             .into_iter()

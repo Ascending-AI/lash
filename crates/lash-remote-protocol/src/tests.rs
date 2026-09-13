@@ -15,13 +15,9 @@ mod reasoning_retention;
 
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
-#[derive(serde::Deserialize)]
-struct EmptyEnvelopeBody {}
-
-fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolError> {
-    let wire = serde_json::json!({ "protocol_version": protocol_version }).to_string();
-    Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
-}
+#[path = "tests/version_refusal.rs"]
+mod version_refusal_tests;
+use version_refusal_tests::decode_empty_envelope;
 
 /// Refusal witness (FIG-2985): the generation-67 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
@@ -1085,6 +1081,10 @@ fn remote_turn_cancel_envelopes_round_trip() {
         },
         RemoteTurnCancelOutcome::AlreadyRequested {
             cancellation: evidence.clone(),
+        },
+        RemoteTurnCancelOutcome::PolicyConflict {
+            requested: RemoteTurnCancelDisposition::Drop,
+            accepted: evidence.clone(),
         },
         RemoteTurnCancelOutcome::CompletionWonRace,
         RemoteTurnCancelOutcome::UnknownOrRevoked,

@@ -20,6 +20,7 @@ fi
 source "$repo/scripts/worktree-gate-env.sh"
 
 compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${LASH_GATE_WORKTREE_SLUG}}"
+export RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-restate-workers:${compose_project}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
 minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
 export LASH_E2E_MINIO_PORT="$minio_port"
@@ -138,7 +139,7 @@ while true; do
   sleep 1
 done
 
-if [ "$workflow_segment" != "2" ]; then
+if [ "$workflow_segment" != "2" ] && [ "${LASH_E2E_TURN_CONTROL_ONLY:-0}" != "1" ]; then
   LASH_MINIO_ENDPOINT="http://127.0.0.1:$minio_port" \
   LASH_MINIO_BUCKET="lash-attachments" \
   LASH_MINIO_REGION="us-east-1" \
@@ -152,7 +153,9 @@ fi
 "${compose[@]}" --profile runner run --rm runner 2>&1 | tee -a "$test_output" &
 runner_job=$!
 
-if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ] || [ "$workflow_segment" = "1" ]; then
+if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ] \
+  || [ "${LASH_E2E_TURN_CONTROL_ONLY:-0}" = "1" ] \
+  || [ "$workflow_segment" = "1" ]; then
   wait "$runner_job"
   if [ -n "$completed_manifest" ] && [ ! -s "$completed_manifest" ]; then
     echo "runner did not write completed-workflow manifest '$completed_manifest'" >&2

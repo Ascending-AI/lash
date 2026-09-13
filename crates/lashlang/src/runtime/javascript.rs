@@ -24,11 +24,14 @@ pub(crate) fn javascript_string_size_error(attempted: usize) -> super::RuntimeEr
     }
 }
 
-pub(crate) fn eval_javascript_unary(value: Value, op: JavaScriptUnaryOp) -> Value {
-    match op {
+pub(crate) fn eval_javascript_unary(
+    value: Value,
+    op: JavaScriptUnaryOp,
+) -> Result<Value, super::RuntimeError> {
+    Ok(match op {
         JavaScriptUnaryOp::Plus => Value::Number(javascript_to_number(&value)),
         JavaScriptUnaryOp::Negate => Value::Number(-javascript_to_number(&value)),
-        JavaScriptUnaryOp::Not => Value::Bool(!is_truthy(&value)),
+        JavaScriptUnaryOp::Not => Value::Bool(!is_truthy(&value)?),
         JavaScriptUnaryOp::TypeOf => Value::String(
             match value {
                 Value::Undefined => "undefined",
@@ -46,7 +49,7 @@ pub(crate) fn eval_javascript_unary(value: Value, op: JavaScriptUnaryOp) -> Valu
             }
             .into(),
         ),
-    }
+    })
 }
 
 pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right: Value) -> Value {
@@ -112,11 +115,25 @@ pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
     // what the host has behind it. Leaving the wrapper in place made every
     // comparison fall to `_ => false`, and made the loose ladder below recurse
     // on an object that never became a primitive.
+    // A restored placeholder has no value behind it, so it is equal to nothing
+    // but the same placeholder; `Value`'s own `PartialEq` makes the same call
+    // (FIG-2865).
+    if let (Value::Projected(left), Value::Projected(right)) = (left, right)
+        && (left.is_unavailable() || right.is_unavailable())
+    {
+        return left == right;
+    }
     if let Value::Projected(left) = left {
-        return javascript_strict_equal(&left.materialize(), right);
+        let Ok(left) = left.materialize() else {
+            return false;
+        };
+        return javascript_strict_equal(&left, right);
     }
     if let Value::Projected(right) = right {
-        return javascript_strict_equal(left, &right.materialize());
+        let Ok(right) = right.materialize() else {
+            return false;
+        };
+        return javascript_strict_equal(left, &right);
     }
     match (left, right) {
         (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
@@ -135,11 +152,22 @@ pub(crate) fn javascript_strict_equal(left: &Value, right: &Value) -> bool {
 }
 
 fn javascript_loose_equal(left: &Value, right: &Value) -> bool {
+    if let (Value::Projected(left), Value::Projected(right)) = (left, right)
+        && (left.is_unavailable() || right.is_unavailable())
+    {
+        return left == right;
+    }
     if let Value::Projected(left) = left {
-        return javascript_loose_equal(&left.materialize(), right);
+        let Ok(left) = left.materialize() else {
+            return false;
+        };
+        return javascript_loose_equal(&left, right);
     }
     if let Value::Projected(right) = right {
-        return javascript_loose_equal(left, &right.materialize());
+        let Ok(right) = right.materialize() else {
+            return false;
+        };
+        return javascript_loose_equal(left, &right);
     }
     if javascript_strict_equal(left, right) {
         return true;
@@ -200,9 +228,13 @@ pub(crate) fn javascript_to_primitive_string_or_number(value: &Value) -> Value {
         // JavaScript VM opcodes discover projections reachable through coercion
         // and use the async heap path before calling this synchronous fallback.
         // Other synchronous value helpers still materialize projected values.
-        Value::Projected(projected) => {
-            javascript_to_primitive_string_or_number(&projected.materialize())
-        }
+        // A restored placeholder cannot be coerced; the VM's async coercion path
+        // refuses it with a typed error before reaching this synchronous
+        // fallback, so the dialect's absent value stands in here rather than the
+        // host view that is missing (FIG-2865).
+        Value::Projected(projected) => javascript_to_primitive_string_or_number(
+            &projected.materialize().unwrap_or(Value::Undefined),
+        ),
         other => other.clone(),
     }
 }
@@ -297,7 +329,9 @@ pub(crate) fn javascript_to_string(value: &Value) -> String {
             debug_assert_exported_value("scalar JavaScript string coercion");
             "[object Object]".to_string()
         }
-        Value::Projected(projected) => javascript_to_string(&projected.materialize()),
+        Value::Projected(projected) => {
+            javascript_to_string(&projected.materialize().unwrap_or(Value::Undefined))
+        }
         value => match javascript_to_primitive_string_or_number(value) {
             Value::String(value) => value.to_string(),
             primitive => javascript_to_string(&primitive),

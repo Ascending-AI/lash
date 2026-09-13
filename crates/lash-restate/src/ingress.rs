@@ -18,6 +18,48 @@ use serde::{Serialize, de::DeserializeOwned};
 const DEFAULT_CONTROL_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_ATTACH_CEILING_MS: u64 = 6 * 60 * 60 * 1_000;
 
+/// Stable logical identity of one durable Restate authority.
+///
+/// Hosts provision the same value to every ingress client and handler that
+/// talks to the same Restate state, including after an endpoint move, and a
+/// different value for every independent Restate state. This is an
+/// operator-controlled trust-domain identifier: configuring the same value on
+/// two deployments deliberately tells Lash they are the same durable
+/// authority, so it must be distributed with the same care as the endpoints
+/// that can operate that state. Lash persists only its digest and includes
+/// that digest in every durable-wait address and cancellation binding.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RestateAuthorityId(Arc<str>);
+
+impl RestateAuthorityId {
+    /// Bind this process to a configured Restate trust domain.
+    ///
+    /// The value must remain stable across handler restarts and ingress URL
+    /// moves. It must change when the backing Restate state changes.
+    pub fn new(value: impl AsRef<str>) -> Result<Self, lash_core::RuntimeError> {
+        let value = value.as_ref().trim();
+        if value.is_empty() {
+            return Err(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateEffectController,
+                "Restate authority id must not be empty",
+            ));
+        }
+        use sha2::Digest;
+        let digest = sha2::Sha256::digest(value.as_bytes());
+        Ok(Self(Arc::from(format!("restate-authority-v1:{digest:x}"))))
+    }
+
+    pub(crate) fn from_binding_id(value: &str) -> Option<Self> {
+        let digest = value.strip_prefix("restate-authority-v1:")?;
+        (digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| Self(Arc::from(value)))
+    }
+
+    pub fn binding_id(&self) -> &str {
+        &self.0
+    }
+}
+
 const fn default_control_timeout_ms() -> u64 {
     DEFAULT_CONTROL_TIMEOUT_MS
 }

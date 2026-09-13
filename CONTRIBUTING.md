@@ -36,6 +36,7 @@ cd "$fork"
 . ./env.sh
 kiln build
 kiln test
+scripts/dev-test.sh   # path-plan like CI; never starts Postgres/S3/E2E
 ```
 
 Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
@@ -54,12 +55,20 @@ portable default-feature run.
 
 | Command | Coverage |
 | --- | --- |
-| `kiln test` | 87 deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `kiln test` | Deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `kiln test --service <pg14\|pg16\|pg18\|s3\|all>` | The PostgreSQL and MinIO suites, against a container this command starts and removes. |
+| `scripts/dev-test.sh` | Classifies the diff like CI and runs only those local families. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
-The Cargo-owned set comprises PostgreSQL and S3 stores; Restate and
-`lash-runtime` unit tests; nested and heavy suites; trybuild; TypeScript and
-frontend assets; doctests; feature matrices; Clippy; and formatting.
+`kiln test --service` runs the same `scripts/ci/store-tests.sh` suites the
+`Test Postgres store` and `Test S3 store` jobs run, on binaries built from the
+shared pool, and closes by printing the service-shaped cases it did **not**
+cover with the exact Cargo recipe for each. See
+[`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md).
+
+The remaining Cargo-owned set comprises Restate and `lash-runtime` unit tests;
+nested and heavy suites; trybuild; TypeScript and frontend assets; feature
+matrices; Clippy; and formatting.
 
 Install the repository's commit hook in each regular checkout with
 `prek install --hook-type pre-commit`; new warm forks install it automatically.
@@ -72,18 +81,19 @@ Keep local validation proportional to the change:
 
 - Run cheap formatting and static checks relevant to the files you changed.
 - For behavior changes, run the narrowest regression that proves the changed
-  behavior. `scripts/fast-test.sh` is an optional broader iteration aid when
-  reverse-dependency coverage is useful; high-fan-out crates can still select a
-  large part of the workspace.
+  behavior. `scripts/dev-test.sh` path-plans like CI. `scripts/fast-test.sh` is
+  an optional broader iteration aid when reverse-dependency coverage is useful;
+  high-fan-out crates can still select a large part of the workspace. Neither
+  starts Postgres, S3, or E2E.
 - Add a targeted live recipe only for a named durability or behavior risk that
   the current CI plan does not exercise. Merely touching `lash-core` or
-  `lash-restate` does not require running both durable geometries locally.
+  `lash-restate` does not require running both durable geometries locally. Implementer loops never run those live gates.
 
 For Rust compilation, target analysis, and focused unit or integration tests,
 use the checkout-independent Bazel workflow in
 [`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md). Its default
 entry point uses the shared local executor and cache; the named Cargo recipes
-retain feature-matrix, service, doctest, trybuild, fuzz, judged, packaging, and
+retain feature-matrix, service, trybuild, fuzz, judged, packaging, and
 release semantics.
 
 `just push-gate` and the `just confidence*` lanes remain available as explicit

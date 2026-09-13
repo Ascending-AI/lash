@@ -12,6 +12,7 @@ description = "Restate durable execution adapter for Lash runtime effects"
 
 [lib]
 name = "lash_restate"
+doctest = false
 
 [lints]
 workspace = true

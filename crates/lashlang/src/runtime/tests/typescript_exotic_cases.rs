@@ -606,7 +606,7 @@ async fn javascript_unary_plus_and_minus_use_exact_reference_to_number() {
 #[test]
 #[should_panic(expected = "heap references must be exported before truthiness")]
 fn scalar_truthiness_asserts_on_unexported_references() {
-    is_truthy(&Value::Ref(HeapId::from_counter(1)));
+    let _ = is_truthy(&Value::Ref(HeapId::from_counter(1)));
 }
 
 #[tokio::test(flavor = "current_thread")]

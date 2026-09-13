@@ -64,11 +64,13 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // addresses, 57 pairs pending-input claim ids with their tokens, 58
     // retains exact process artifact-cleanup evidence until acknowledgement,
     // and 59 qualifies process attachment owners by incarnation.
+    // Component 60 adds durable cancellation authority, exact closure
+    // authorization, retired scopes, and the intent ABA fence.
     // All are reject-and-recreate
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
-    assert_eq!(expected, 59, "the pinned durable-core target changed");
+    assert_eq!(expected, 60, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

@@ -1,8 +1,11 @@
 use super::*;
+use crate::EffectHost as _;
 use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
 use crate::store::SessionExecutionLeaseStore;
+use crate::store::TurnInputStore;
+use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
     shared_parts,
@@ -157,6 +160,179 @@ fn frame_key(material: &str) -> FrameKey {
 }
 fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFrameRequest {
     OpenAgentFrameRequest::new(frame_key, reason)
+}
+
+#[tokio::test]
+async fn final_commit_retry_preserves_honoured_after_step_settlement() {
+    let host = Arc::new(crate::NativeEffectHost::default());
+    let store = Arc::new(
+        RecordingStore::default().with_turn_cancellation_authority_for_testing(
+            crate::TurnCancellationAuthority::new(host.turn_control_binding_id(), host.clone()),
+        ),
+    );
+    let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
+    state.session_id = SessionId::from("final-cancel-cas");
+    state.ensure_agent_frame_initialized();
+    let turn_id = crate::TurnId::from("final-cancel-cas:turn");
+    let address = crate::TurnAddress::new(&state.session_id, &turn_id);
+    let pending = store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            &state.session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("after-step cancellation drops this input"),
+        ))
+        .await
+        .expect("enqueue active-turn input");
+    let base_request =
+        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:base", None)
+            .mode(crate::TurnCancelMode::AfterStep)
+            .undelivered(crate::TurnCancelDisposition::Drop);
+    let driver =
+        crate::TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    driver
+        .request_cancel(base_request.clone())
+        .await
+        .expect("accept after-step cancellation");
+    let control =
+        crate::runtime::turn_control::ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("create turn gate");
+    let scoped = host
+        .scoped(address.execution_scope())
+        .expect("scope final-cancel CAS controller");
+    let honoured = control
+        .observe_pending_cancel(
+            &scoped,
+            TurnCancelPeekIdentity::AfterStep {
+                protocol_iteration: 7,
+            },
+        )
+        .await
+        .expect("observe after-step gate")
+        .expect("after-step cancellation wins");
+    assert_eq!(honoured.honoured_after_step, Some(7));
+
+    let (mut pipeline, lease) = leased_boundary(store.as_ref(), state).await;
+    let observed = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot base intent");
+    let binding_id = host.turn_control_binding_id();
+    store
+        .validate_turn_cancellation_binding(
+            &address.session_id,
+            &lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("bind cancellation owner");
+    let authorization = control
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &lease.fence(),
+            observed.clone(),
+            false,
+            Some(honoured.clone()),
+        )
+        .expect("materialize exact closure");
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await
+        .expect("authorize exact closure");
+    let settlement = control
+        .settle_authorized(host.as_ref(), &authorization)
+        .await
+        .expect("settle exact closure");
+    assert_eq!(
+        settlement
+            .effective_cancellation()
+            .and_then(|evidence| evidence.honoured_after_step),
+        Some(7)
+    );
+    assert_eq!(settlement.effective_cancellation(), Some(&honoured));
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read authorized closure before commit"),
+        vec![authorization]
+    );
+
+    let later_request =
+        crate::TurnCancelRequest::new(address.clone(), "final-cancel-cas:later", None)
+            .undelivered(crate::TurnCancelDisposition::Drop);
+    store.inject_turn_cancel_before_next_runtime_commit(later_request);
+    pipeline
+        .prepared_checkpoint(
+            SessionPolicy::new(UNBOUNDED),
+            0,
+            &MessageSequence::default(),
+            None,
+        )
+        .await
+        .expect("prepare stable final state");
+    let returned_state = pipeline.export_state_for_assembly();
+    pipeline
+        .final_commit_with_snapshots(FinalCommitInput {
+            returned_state: &returned_state,
+            tool_calls: &[],
+            omitted: None,
+            plugins: None,
+            execution_state_update: ExecutionStateUpdate::Clean,
+            agent_frame_switch_materializes: false,
+            store: Some(store.as_ref()),
+            usage_deltas: &[],
+            failure_evidence: &[],
+            outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+                evidence: honoured.clone(),
+            }),
+            claim_settlement: TurnClaimSettlement::for_test(
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+            ),
+            current_session_lease_fence: None,
+            enqueued_queue_batches: Vec::new(),
+            interrupted_turn_input_turn_id: Some(turn_id.clone()),
+            interrupted_turn_input_cancellation: Some(honoured),
+            interrupted_turn_cancel_intent: Some(observed),
+            turn_cancel_closure_settlement: Some(settlement),
+            turn_control_resolver: Some(host.as_ref()),
+            recorded_attachment_intent_ids: Default::default(),
+            session_execution_lease_completion: Some(lease.completion()),
+        })
+        .await
+        .expect("refresh stale predicate without discarding execution enrichment");
+    assert_eq!(store.commit_write_transaction_count(), 2);
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
+    let durable = store
+        .turn_cancel_request(&address)
+        .await
+        .expect("read authenticated base request")
+        .expect("authenticated base remains retained");
+    assert_eq!(durable.request, base_request);
+    let affected = durable
+        .outcome
+        .expect("one logical commit records the affected input")
+        .affected_inputs;
+    assert_eq!(affected.len(), 1);
+    assert_eq!(affected[0].input_id, pending.input_id);
+    assert_eq!(affected[0].disposition, crate::TurnCancelDisposition::Drop);
+    assert!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read closure pins")
+            .is_empty()
+    );
 }
 async fn leased_boundary(
     store: &RecordingStore,
@@ -474,9 +650,13 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -543,9 +723,13 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -651,9 +835,13 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -765,9 +953,13 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -852,9 +1044,13 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -958,9 +1154,13 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1081,9 +1281,13 @@ async fn recovered_final_commit_drops_only_the_peer_superseded_queue_row() {
                 .collect(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: Some(recovery_lease.fencing_token),
+            current_session_lease_fence: Some(recovery_lease.fence()),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: Some(recovery_lease.completion()),
         })
@@ -1150,9 +1354,13 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1190,9 +1398,13 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })
@@ -1243,9 +1455,13 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
                 std::collections::HashMap::new(),
                 std::collections::HashMap::new(),
             ),
-            current_session_lease_generation: None,
+            current_session_lease_fence: None,
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
+            interrupted_turn_input_cancellation: None,
+            interrupted_turn_cancel_intent: None,
+            turn_cancel_closure_settlement: None,
+            turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
             session_execution_lease_completion: None,
         })

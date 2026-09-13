@@ -4,6 +4,11 @@
 
 Accepted.
 
+Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
+surface. Every reference to "Lashlang" below names the IR and VM: these bounds
+are the VM's, and they apply to every program the TypeScript dialect lowers into
+it. The bounds themselves are unchanged.
+
 ## Context
 
 Lashlang can execute in a foreground RLM block or as a durable process whose VM

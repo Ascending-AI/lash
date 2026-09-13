@@ -115,6 +115,9 @@ Configuration is read from `.env` or the process environment:
   `127.0.0.1:9081`. The `just agent-workbench` entrypoint starts Restate with
   host networking, so Restate can call this localhost endpoint directly.
 - `RESTATE_INGRESS_URL`: Restate ingress URL, default `http://127.0.0.1:8080`.
+- `RESTATE_AUTHORITY_ID`: required stable logical identity for the Restate state.
+  Keep it unchanged when the ingress endpoint moves; assign a different value
+  to every independent Restate state.
 - `AGENT_WORKBENCH_DATA_DIR`: persistence directory, default
   `.agent-workbench`.
 - `AGENT_WORKBENCH_DATABASE_URL`: use the `lash-postgres-store` session, process,

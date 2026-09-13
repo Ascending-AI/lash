@@ -67,7 +67,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
             self.stack.push(Value::Bool(false));
         } else {
-            self.stack.push(eval_javascript_unary(value, op));
+            self.stack.push(eval_javascript_unary(value, op)?);
         }
         Ok(())
     }
@@ -76,7 +76,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         op: JavaScriptUnaryOp,
     ) -> Result<VmStep, RuntimeError> {
-        let mut value = materialize_javascript_operand(self.pop_stack()?).await;
+        let mut value = materialize_javascript_operand(self.pop_stack()?).await?;
         if matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate) {
             value = self
                 .heap
@@ -131,8 +131,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         left: Value,
         right: Value,
     ) -> Result<(Value, Value), RuntimeError> {
-        let mut left = materialize_javascript_operand(left).await;
-        let mut right = materialize_javascript_operand(right).await;
+        let mut left = materialize_javascript_operand(left).await?;
+        let mut right = materialize_javascript_operand(right).await?;
         self.validate_javascript_binary_operands(op, &left, &right)?;
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left {
@@ -169,11 +169,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 }
 
-async fn materialize_javascript_operand(mut value: Value) -> Value {
+async fn materialize_javascript_operand(mut value: Value) -> Result<Value, RuntimeError> {
     while let Value::Projected(projected) = value {
-        value = projected.materialize_async().await;
+        value = projected.materialize_async().await?;
     }
-    value
+    Ok(value)
 }
 
 fn javascript_is_object(value: &Value) -> bool {

@@ -126,7 +126,13 @@ impl BudgetedJsonProjector {
                 Value::Resource(resource) => {
                     serde_json::to_string(resource).unwrap_or_else(|_| "null".to_string())
                 }
-                Value::Projected(projected) => projected.render().await,
+                // The prompt is a display channel, not a value channel: a
+                // placeholder restored without its host descriptor says so here
+                // instead of pretending to be `null` (FIG-2865).
+                Value::Projected(projected) => match projected.render().await {
+                    Ok(rendered) => rendered,
+                    Err(error) => json_string(&error.to_string()),
+                },
                 Value::Ref(_) => {
                     debug_assert_exported_value("projection rendering");
                     "null".to_string()

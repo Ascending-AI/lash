@@ -34,6 +34,8 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 60: combine admitted effect identity with cancellation policy
+// conflicts. Both incompatible version-59 parents require exact negotiation.
 // Bumped to 59: runtime effects and causal references carry the admitted
 // execution scope with their replay key, attribution is independently
 // optional, and trigger causes retain complete subscription identity.
@@ -149,12 +151,12 @@ pub use usage_activity::*;
 // Window 63: FIG-2886 removes the duplicate session spelling from trigger-subscription filters.
 // Window 64: FIG-2860 carries typed coherence state for process work-item observations.
 // Window 65: FIG-2866 redacts agent-frame seed bodies from tool-call observation controls.
+// Window 66: FIG-2875 carries durable turn-cancellation control envelopes.
 // Window 67: FIG-2985 refuses peer process records core validation rejects — a
 // blank prepared tool-call id or tool name, a zero attempt budget, duplicate
 // event types, an unstorable process id, and an execution env that contradicts
 // the input kind. A window-66 peer may still send those shapes; refusing them
-// narrows the accepted record set, so peers must adopt 67. (Window 66 is taken
-// by the queued turn-cancel work.)
+// narrows the accepted record set, so peers must adopt 67.
 pub const REMOTE_PROTOCOL_VERSION: u32 = 67;
 
 /// One versioned remote-protocol message.

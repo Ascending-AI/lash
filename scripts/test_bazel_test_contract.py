@@ -111,17 +111,25 @@ class BazelTestContractTests(unittest.TestCase):
         all_labels = {target["label"] for target in targets}
         bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
+        deferred_labels = set(generated_list("WORKSPACE_DEFERRED_TEST_TARGETS"))
 
         self.assertEqual(110, len(all_labels))
-        self.assertEqual(90, len(bazel_labels))
+        self.assertEqual(89, len(bazel_labels))
         self.assertEqual(20, len(cargo_labels))
+        self.assertEqual(1, len(deferred_labels))
         self.assertFalse(bazel_labels & cargo_labels)
-        self.assertEqual(all_labels, bazel_labels | cargo_labels)
+        self.assertFalse(bazel_labels & deferred_labels)
+        self.assertFalse(cargo_labels & deferred_labels)
+        self.assertEqual(all_labels, bazel_labels | cargo_labels | deferred_labels)
         self.assertEqual(all_labels, set(generated_list("WORKSPACE_TEST_TARGETS")))
 
         by_label = {target["label"]: target for target in targets}
         self.assertTrue(
-            all("manual" not in by_label[label]["tags"] for label in bazel_labels)
+            all(
+                "manual" not in by_label[label]["tags"]
+                and "pr-deferred" not in by_label[label]["tags"]
+                for label in bazel_labels
+            )
         )
         self.assertTrue(
             all(
@@ -149,9 +157,12 @@ class BazelTestContractTests(unittest.TestCase):
             dict(exception_classes),
         )
 
+        excluded = {"cargo-service-gate", "cargo-trybuild", "cargo-frontend-assets"}
         expected_nextest = set()
         for target in targets:
             if target["label"] not in cargo_labels:
+                continue
+            if excluded.intersection(target["tags"]):
                 continue
             kind = target["kind"]
             expected_nextest.add(
@@ -165,7 +176,7 @@ class BazelTestContractTests(unittest.TestCase):
                     None if kind == "unit-test" else target["cargo"],
                 )
             )
-        self.assertEqual(20, len(expected_nextest))
+        self.assertEqual(4, len(expected_nextest))
         self.assertEqual(expected_nextest, generated_nextest_terms())
 
     def test_workspace_suite_and_cli_default_to_the_generated_partition(self) -> None:
@@ -249,7 +260,10 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual("bazel-tests", bazel_steps[0][0])
         bazel_job = jobs["bazel-tests"]
         self.assertEqual("build-cache", bazel_job["environment"])
-        self.assertEqual("needs.plan.outputs.bazel_trusted == 'true'", bazel_job["if"])
+        self.assertEqual(
+            "github.event_name != 'push' && needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'",
+            bazel_job["if"],
+        )
         self.assertIn("bazel-tests", jobs["ci-conclusion"]["needs"])
         self.assertEqual(
             "${{ needs.plan.outputs.bazel_trusted }}",
@@ -442,8 +456,13 @@ class BazelTestContractTests(unittest.TestCase):
                     "LASH_CI_FEATURES": "",
                     "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
                 }
+                script_with_plan = script.replace(
+                    "${{ needs.plan.outputs.rust }}", "true"
+                ).replace(
+                    "${{ needs.plan.outputs.workbench }}", "false"
+                )
                 subprocess.run(
-                    ["bash", "-euo", "pipefail", "-c", script],
+                    ["bash", "-euo", "pipefail", "-c", script_with_plan],
                     cwd=ROOT,
                     env=environment,
                     check=True,
@@ -455,34 +474,57 @@ class BazelTestContractTests(unittest.TestCase):
                 self.assertEqual(2, len(invocations))
                 nextest = invocations[1]
                 self.assertEqual(["nextest", "run"], nextest[:2])
+                filter_index = nextest.index("-E")
                 if trusted:
-                    filter_index = nextest.index("-E")
                     self.assertEqual(expected_filter, nextest[filter_index + 1])
                 else:
-                    self.assertNotIn("-E", nextest)
+                    self.assertIn("not (", nextest[filter_index + 1])
+                    self.assertIn("lash-internal-postgres-store", nextest[filter_index + 1])
 
-    def test_doctests_are_an_executable_cached_partition(self) -> None:
-        doctests = [
-            target for target in inventory_targets() if target["kind"] == "doc-test"
-        ]
-        self.assertEqual(35, len(doctests))
-        # rustdoc runs these against the pinned toolchain and the declared
-        # dependency graph, so nothing here is Cargo-owned any more. A label
-        # that reacquires `manual` or a `cargo_only` reason silently leaves the
-        # partition; both are refused here.
-        self.assertTrue(all(target["tags"] == [] for target in doctests))
-        self.assertTrue(all("cargo_only" not in target for target in doctests))
+    def test_doctests_are_removed_from_bazel_and_from_cargo(self) -> None:
+        """Doctests were removed by ruling (2026-09-13), Bazel and Cargo alike.
+
+        A doc-test label reappearing in the inventory, a `rust_doc_test`
+        wrapper returning to the rule file, or a workspace library whose
+        manifest stops saying `doctest = false` would each silently restore a
+        gate the repository no longer runs, so all three are refused here.
+        """
         self.assertEqual(
-            {target["label"] for target in doctests},
-            set(generated_list("WORKSPACE_DOCTEST_TARGETS")),
+            [],
+            [
+                target
+                for target in inventory_targets()
+                if target["kind"] == "doc-test"
+            ],
         )
+        targets_bzl = (ROOT / "tools/bazel/workspace_targets.bzl").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("WORKSPACE_DOCTEST_TARGETS", targets_bzl)
 
         root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
-        self.assertIn(
-            'test_suite(\n    name = "workspace_doctests",\n'
-            "    tests = WORKSPACE_DOCTEST_TARGETS,\n)",
-            root_build,
+        self.assertNotIn("workspace_doctests", root_build)
+
+        rules = (ROOT / "tools/bazel/lash_rust.bzl").read_text(encoding="utf-8")
+        self.assertNotIn("rust_doc_test", rules)
+
+        generator = (ROOT / "tools/bazel/generate_build_files.py").read_text(
+            encoding="utf-8"
         )
+        self.assertNotIn("doc_test", generator)
+
+        # Cargo is the other half: `cargo test` must never compile a doc
+        # snippet again, which is a per-manifest `[lib] doctest = false`.
+        missing = [
+            str(manifest.relative_to(ROOT))
+            for manifest in sorted(ROOT.glob("crates/*/Cargo.toml"))
+            + sorted(ROOT.glob("examples/*/Cargo.toml"))
+            + sorted(ROOT.glob("runbooks/*/Cargo.toml"))
+            if (manifest.parent / "src/lib.rs").exists()
+            and "doctest = false"
+            not in manifest.read_text(encoding="utf-8")
+        ]
+        self.assertEqual([], missing)
 
     def test_clippy_partition_is_the_all_targets_shape(self) -> None:
         targets = [
@@ -490,9 +532,6 @@ class BazelTestContractTests(unittest.TestCase):
         ]
         build_scripts = {
             target["label"] for target in targets if target["kind"] == "custom-build"
-        }
-        doctests = {
-            target["label"] for target in targets if target["kind"] == "doc-test"
         }
         clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
 
@@ -504,7 +543,6 @@ class BazelTestContractTests(unittest.TestCase):
             clippy,
         )
         self.assertEqual(171, len(clippy))
-        self.assertFalse(clippy & doctests)
         self.assertTrue(
             all(
                 target.get("clippy_exempt")
@@ -530,9 +568,6 @@ class BazelTestContractTests(unittest.TestCase):
             target for target in inventory_targets() if target["label"] is not None
         ]
         clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
-        doctests = {
-            target["label"] for target in targets if target["kind"] == "doc-test"
-        }
         exempt = {
             target["label"]: target["clippy_exempt"]
             for target in targets
@@ -540,7 +575,7 @@ class BazelTestContractTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            {target["label"] for target in targets} - doctests,
+            {target["label"] for target in targets},
             clippy | set(exempt),
         )
         self.assertFalse(clippy & set(exempt))
@@ -590,11 +625,13 @@ class BazelTestContractTests(unittest.TestCase):
             e2e["run"],
         )
 
-        doc_bazel = job_step(
-            jobs["test-doc"], "Check workspace and run doctests with shared cache"
-        )
+        doc_bazel = job_step(jobs["test-doc"], "Check workspace with shared cache")
         self.assertEqual(f"matrix.lane == 'workspace' && {trusted}", doc_bazel["if"])
-        self.assertIn("//:workspace_compile //:workspace_doctests", doc_bazel["run"])
+        self.assertIn("//:workspace_compile", doc_bazel["run"])
+        self.assertNotIn("workspace_doctests", doc_bazel["run"])
+        # Nothing on this runner reads the compiled outputs; a compile error
+        # still fails the build, so the artifacts stay in the remote CAS.
+        self.assertIn("--remote_download_outputs=minimal", doc_bazel["run"])
 
         check_cargo = job_step(jobs["test-doc"], "Check workspace (all targets)")
         self.assertEqual(f"matrix.lane == 'workspace' && {untrusted}", check_cargo["if"])
@@ -603,14 +640,7 @@ class BazelTestContractTests(unittest.TestCase):
             check_cargo["run"],
         )
 
-        doctest_cargo = job_step(jobs["test-doc"], "Test workspace doctests")
-        self.assertEqual(
-            f"matrix.lane == 'workspace' && {untrusted}", doctest_cargo["if"]
-        )
-        self.assertIn(
-            "cargo test --doc --workspace --locked ${LASH_CI_FEATURES}",
-            doctest_cargo["run"],
-        )
+        self.assertNotIn("--doc", yaml.safe_dump(jobs["test-doc"]))
 
         for job_id in ("lint", "test-doc"):
             with self.subTest(job=job_id):

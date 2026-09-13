@@ -310,6 +310,18 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-lashlang-runtime/src/process.rs:LASHLANG_SEGMENT_STATE_VERSION": (
         "sha256:69b5d38f6c363f2cde541aa4500f5f31618b888826b44a4aa35cfe23a946bd1d"
     ),
+    # FIG-2865: the canonical projected encoding moved out of state/wire.rs
+    # into runtime/projected_wire.rs, which is now inside the snapshot guard's
+    # globs, so the guarded text reads as a shape change. The snapshot bytes
+    # are unchanged -- the relocated types serialize the same three fields in
+    # the same order, and the independent review verified byte identity on
+    # both sides -- so LASHLANG_SNAPSHOT_VERSION stays 7. The continuation
+    # wire did change shape and took its honest bump
+    # (BYTECODE_FORMAT_VERSION 13 -> 14, VM_CONTINUATION_FORMAT_VERSION
+    # 11 -> 12). Any further guarded-shape drift re-fails the gate.
+    "crates/lashlang/src/runtime/state.rs:LASHLANG_SNAPSHOT_VERSION": (
+        "sha256:294f7111ef9bfc2d934213f174516de111d8dde72413fd0be1163f5fbd78ccee"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

@@ -20,8 +20,7 @@ impl CurrentSessionCapability {
             registry.get(session_id).cloned()
         } {
             let mut writer = runtime.runtime.lock().await;
-            let result = writer
-                .append_session_nodes(request)
+            let result = Box::pin(writer.append_session_nodes(request))
                 .await
                 .map_err(plugin_error_from_session_append)?;
             runtime.publish_from(&writer);

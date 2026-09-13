@@ -17,7 +17,6 @@ LOAD = """load(
     "//tools/bazel:lash_rust.bzl",
     "lash_rust_binary",
     "lash_rust_build_script",
-    "lash_rust_doc_test",
     "lash_rust_integration_test",
     "lash_rust_library",
     "lash_rust_unit_test",
@@ -146,6 +145,12 @@ def cargo_test_policy(
         reasons.append(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
+        )
+    if package_name == "lash-regress" and target_name == "unicodesets":
+        tags.append("pr-deferred")
+        reasons.append(
+            "RGI Unicode suites are too slow for the PR Bazel partition; they"
+            " run on lash-regress diffs and on trunk"
         )
     reason = "; ".join(reasons) if reasons else None
     return sorted(set(tags)), reason
@@ -286,19 +291,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             if unit_cargo_reason:
                 unit_inventory["cargo_only"] = unit_cargo_reason
             inventory_targets.append(unit_inventory)
-        if library.get("doctest", False):
-            chunks.append(
-                "lash_rust_doc_test(\n"
-                f"    name = {quote(primary_target + '__doc_test')},\n"
-                f"    crate = {quote(':' + primary_target)},\n"
-                ")\n\n"
-            )
-            inventory_targets.append({
-                "kind": "doc-test",
-                "label": f"//{package_dir}:{primary_target}__doc_test",
-                "tags": [],
-            })
-
     for target in targets:
         kind = target["kind"][0]
         if kind == "lib":
@@ -553,9 +545,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     ]
     groups = {
         "WORKSPACE_COMPILE_TARGETS": sorted(
-            target["label"]
-            for target in labels
-            if target["label"] is not None and target["kind"] != "doc-test"
+            target["label"] for target in labels if target["label"] is not None
         ),
         # Cargo lints libs, bins, examples, benches and test crates under
         # `clippy --workspace --all-targets`. Build scripts are excluded here
@@ -566,12 +556,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"]
             for target in labels
             if target["label"] is not None
-            and target["kind"] not in ("custom-build", "doc-test")
-        ),
-        "WORKSPACE_DOCTEST_TARGETS": sorted(
-            target["label"]
-            for target in labels
-            if target["label"] is not None and target["kind"] == "doc-test"
+            and target["kind"] != "custom-build"
         ),
         "WORKSPACE_RUST_SOURCE_TARGETS": sorted(
             f"//{pathlib.PurePosixPath(package['manifest']).parent.as_posix()}:rust_sources"
@@ -580,7 +565,12 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         "WORKSPACE_BAZEL_TEST_TARGETS": sorted(
             target["label"]
             for target in executable_tests
-            if "manual" not in target["tags"]
+            if "manual" not in target["tags"] and "pr-deferred" not in target["tags"]
+        ),
+        "WORKSPACE_DEFERRED_TEST_TARGETS": sorted(
+            target["label"]
+            for target in executable_tests
+            if "pr-deferred" in target["tags"]
         ),
         "WORKSPACE_CARGO_TEST_TARGETS": sorted(
             target["label"] for target in executable_tests if "manual" in target["tags"]
@@ -593,16 +583,37 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     for name, values in groups.items():
         bzl.append(f"{name} = {string_list(values, indent=4)}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
-    cargo_nextest_terms = sorted(
+    def cargo_owned_terms(*exclude_tags: str) -> list[str]:
+        excluded = set(exclude_tags)
+        return sorted(
+            nextest_filter_term(package["package"], target)
+            for package in inventory
+            for target in package["targets"]
+            if target.get("label") is not None
+            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+            and "manual" in target["tags"]
+            and not excluded.intersection(target["tags"])
+        )
+
+    cargo_nextest_terms = cargo_owned_terms(
+        "cargo-service-gate",
+        "cargo-trybuild",
+        "cargo-frontend-assets",
+    )
+    outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
+        " + ".join(cargo_nextest_terms) + "\n"
+    )
+    workbench_terms = sorted(
         nextest_filter_term(package["package"], target)
         for package in inventory
+        if package["package"] == "agent-workbench"
         for target in package["targets"]
         if target.get("label") is not None
         and target["kind"] in ("bin-unit-test", "test", "unit-test")
         and "manual" in target["tags"]
     )
-    outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
-        " + ".join(cargo_nextest_terms) + "\n"
+    outputs[ROOT / "tools/bazel/workbench_nextest_filter.txt"] = (
+        " + ".join(workbench_terms) + "\n" if workbench_terms else "none()\n"
     )
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new

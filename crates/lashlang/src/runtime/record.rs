@@ -120,6 +120,10 @@ impl Record {
             .map(|entry| (entry.name.as_ref(), &entry.value))
     }
 
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+        self.entries.iter_mut().map(|entry| &mut entry.value)
+    }
+
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.entries.iter().map(|entry| entry.name.as_ref())
     }

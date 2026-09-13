@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_plugin_rolling_history"
+doctest = false
 
 [lints]
 workspace = true

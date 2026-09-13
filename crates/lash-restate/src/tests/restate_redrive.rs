@@ -65,7 +65,7 @@ async fn fig1128_deadline_wire_typed_refusal_and_no_deadline_shape() {
 #[tokio::test]
 pub(super) async fn fig1128_await_event_resolver_journals_deadline_at_production_entry_point() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let key = restate_await_event_key(
+    let key = test_restate_await_event_key(
         &durable_turn_scope("fig1128-resolver-session", "fig1128-resolver-turn"),
         AwaitEventWaitIdentity::tool_completion("fig1128-resolver"),
     )
@@ -78,7 +78,7 @@ pub(super) async fn fig1128_await_event_resolver_journals_deadline_at_production
             resolution: resolution.clone(),
         });
     let journal_name = format!("lash:durable-wait-deadline:v2:{}", key.key_id);
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
 
     let recorded = controller
         .await_await_event(
@@ -585,6 +585,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
                 Arc::clone(&registry),
                 continuation_store(),
                 cancel_ingress,
+                test_restate_authority_id(),
             )
             .serve(),
         )

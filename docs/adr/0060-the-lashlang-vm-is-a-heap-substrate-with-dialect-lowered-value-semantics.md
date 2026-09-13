@@ -4,6 +4,14 @@
 
 Accepted.
 
+Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
+surface and makes TypeScript the sole authoring language. This ADR's separation
+of machine from language stands and is what made the retirement cheap: "Lashlang"
+below names the IR and VM. The value semantics described here — the isolation
+copies, the durable-boundary validator, the heap size schedule — are the IR's
+semantics, produced by lowering, and are unchanged. What is gone is the second
+front end, not a second machine.
+
 ## Context
 
 RLM execution runs authored code in a durable VM. Until now that VM had exactly

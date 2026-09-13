@@ -229,20 +229,21 @@ impl SessionAdmin {
     }
 
     async fn append_messages(&self, messages: Vec<PluginMessage>) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .append_session_nodes(lash_core::AppendSessionNodesRequest {
+        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
+            Box::pin(
+                runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
                     operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: messages
                         .into_iter()
                         .map(lash_core::SessionAppendNode::message)
                         .collect(),
                     requires_ancestor_node_id: None,
-                })
-                .await
-                .map(|_| ())
-                .map_err(Into::into)
-        })
+                }),
+            )
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+        }))
         .await
     }
 
@@ -252,15 +253,16 @@ impl SessionAdmin {
         body: serde_json::Value,
     ) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .append_session_nodes(lash_core::AppendSessionNodesRequest {
+            Box::pin(
+                runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
                     operation_id: uuid::Uuid::new_v4().to_string(),
                     nodes: vec![lash_core::SessionAppendNode::plugin(plugin_type, body)],
                     requires_ancestor_node_id: None,
-                })
-                .await
-                .map(|_| ())
-                .map_err(Into::into)
+                }),
+            )
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
         })
         .await
     }
@@ -322,9 +324,11 @@ impl SessionAdmin {
     }
 
     async fn set_tool_access(&self, access: SessionToolAccess) -> Result<()> {
-        self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime.set_tool_access(access).await.map_err(Into::into)
-        })
+        Box::pin(self.with_writer(async |runtime: &mut LashRuntime| {
+            Box::pin(runtime.set_tool_access(access))
+                .await
+                .map_err(Into::into)
+        }))
         .await
     }
 
@@ -997,7 +1001,7 @@ impl SessionConfigAdmin {
     /// Replaces the session's persisted tool authority. The settled value
     /// controls the next model request and survives reopening the session.
     pub async fn set_tool_access(&self, access: SessionToolAccess) -> Result<()> {
-        self.control.set_tool_access(access).await
+        Box::pin(self.control.set_tool_access(access)).await
     }
 }
 
@@ -1378,7 +1382,7 @@ impl SessionStateAdmin {
 
     /// Appends protocol messages to the persisted session transcript.
     pub async fn append_messages(&self, messages: Vec<PluginMessage>) -> Result<()> {
-        self.control.append_messages(messages).await
+        Box::pin(self.control.append_messages(messages)).await
     }
 
     /// Appends a plugin-authored body to the persisted session transcript.

@@ -549,10 +549,6 @@ pub(super) fn validate_optional_value(
 
 pub(super) fn validate_value(value: &Value, location: &str) -> Result<(), ContinuationError> {
     match value {
-        Value::Projected(_) => Err(ContinuationError::UnserializableValue {
-            location: location.to_string(),
-            variant: "Projected",
-        }),
         Value::Tuple(values) | Value::List(values) => {
             for (index, value) in values.iter().enumerate() {
                 validate_value(value, &format!("{location}[{index}]"))?;
@@ -572,6 +568,8 @@ pub(super) fn validate_value(value: &Value, location: &str) -> Result<(), Contin
         | Value::String(_)
         | Value::Image(_)
         | Value::Resource(_)
-        | Value::Ref(_) => Ok(()),
+        | Value::Ref(_)
+        // Carried by identity on both durable wires (FIG-2865).
+        | Value::Projected(_) => Ok(()),
     }
 }

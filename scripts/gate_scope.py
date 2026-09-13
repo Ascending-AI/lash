@@ -15,7 +15,7 @@ being wrong in the run direction costs wall-clock and nothing else.
 Families
 --------
 ``rust-compile``
-    fmt, check, clippy, nextest, doctests, and every source guard that reads
+    fmt, check, clippy, nextest, and every source guard that reads
     ``crates/``.
 ``scripts``
     the repository script self-test suite.

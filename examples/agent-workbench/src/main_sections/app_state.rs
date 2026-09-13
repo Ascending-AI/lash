@@ -483,6 +483,14 @@ impl AppState {
                     )
                     .await?
                 }
+                lash::TurnCancelOutcome::PolicyConflict {
+                    requested,
+                    accepted,
+                } => TurnCancelReceipt::PolicyConflict {
+                    address: address.clone(),
+                    requested,
+                    accepted,
+                },
                 lash::TurnCancelOutcome::CompletionWonRace => {
                     TurnCancelReceipt::CompletionWonRace {
                         address: address.clone(),
@@ -524,7 +532,8 @@ impl AppState {
                     cancellation.evidence().request_id.as_str()
                 }
                 TurnCancelReceipt::CompletionWonRace { .. }
-                | TurnCancelReceipt::UnknownOrRevoked { .. } => request_id.as_str(),
+                | TurnCancelReceipt::UnknownOrRevoked { .. }
+                | TurnCancelReceipt::PolicyConflict { .. } => request_id.as_str(),
             };
             self.trace_for_session(
                 &address.session_id,

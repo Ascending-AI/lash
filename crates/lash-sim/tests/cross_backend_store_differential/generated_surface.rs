@@ -2285,10 +2285,30 @@ async fn generated_cross_backend_surface_differential_agrees() {
             let (operation_results, observations) =
                 apply_and_observe(&mut runners, operation).await;
             if !operation_results_agree(&operation_results) || !states_agree(&observations) {
+                let observed = SurfaceDivergence {
+                    step: step + 1,
+                    operation: operation.clone(),
+                    operation_results,
+                    observations,
+                };
                 let minimal = minimize_diverging_prefix(&storage, &operations[..=step]).await;
-                let minimal_divergence = first_divergence(&storage, &minimal)
-                    .await
-                    .expect("minimized sequence must retain a divergence");
+                // A prefix that stops reproducing is a harness defect, not a
+                // clean run: say which divergence was observed and then lost,
+                // so the report never hides behind a bare expect.
+                let Some(minimal_divergence) = first_divergence(&storage, &minimal).await else {
+                    let path = persist_counterexample(seed, &operations[..=step], &observed);
+                    panic!(
+                        "cross-backend surface state diverged, but replaying the same prefix \
+                         stopped diverging: the differential harness is not replay-deterministic. \
+                         Observed divergence persisted to {}\nseed={seed} step={} \
+                         operation={:?} operation_results={:#?} rows={:#?}",
+                        path.display(),
+                        observed.step,
+                        observed.operation,
+                        observed.operation_results,
+                        observed.observations,
+                    );
+                };
                 let divergence = format!(
                     "seed={seed} step={} operation={:?} operation_results={:#?} rows={:#?}",
                     minimal_divergence.step,
@@ -2323,13 +2343,28 @@ async fn attachment_blob_store_differential_agrees() {
     let memory = InMemoryAttachmentStore::new();
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
+    // The MinIO this runs against is not always on port 9000: the
+    // process-operations E2E driver and `kiln test --service s3` both publish
+    // it on a free ephemeral port. Read the same LASH_MINIO_* settings the
+    // lash-s3-store suite reads, with the same defaults, so a literal here
+    // cannot pin the endpoint to one deployment.
     let s3 = S3AttachmentStore::from_config(S3AttachmentStoreConfig {
-        endpoint_url: Some("http://127.0.0.1:9000".to_string()),
-        region: "us-east-1".to_string(),
-        bucket: "lash-attachments".to_string(),
+        endpoint_url: Some(
+            std::env::var("LASH_MINIO_ENDPOINT")
+                .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string()),
+        ),
+        region: std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+        bucket: std::env::var("LASH_MINIO_BUCKET")
+            .unwrap_or_else(|_| "lash-attachments".to_string()),
         prefix: Some(format!("cross-backend/{}", run_nonce())),
-        access_key_id: Some("minioadmin".to_string()),
-        secret_access_key: Some("minioadmin".into()),
+        access_key_id: Some(
+            std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+        ),
+        secret_access_key: Some(
+            std::env::var("LASH_MINIO_SECRET_KEY")
+                .unwrap_or_else(|_| "minioadmin".to_string())
+                .into(),
+        ),
         path_style: true,
     })
     .unwrap();

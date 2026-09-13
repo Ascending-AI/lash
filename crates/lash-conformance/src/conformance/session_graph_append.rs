@@ -49,7 +49,12 @@ async fn session_graph_append_tolerates_an_advanced_head(
     let mut runtime = append_conformance_runtime(&store, &request).await;
 
     // The base a derive-then-append caller reads and derives from.
-    let observed_base = append_conformance_plugin_node(&mut runtime, "observe-base", 0).await;
+    let observed_base = Box::pin(append_conformance_plugin_node(
+        &mut runtime,
+        "observe-base",
+        0,
+    ))
+    .await;
 
     // Another writer advances the durable head while the derivation runs.
     let advanced_leaf = advance_durable_head_behind_the_runtime(&store).await;
@@ -58,10 +63,11 @@ async fn session_graph_append_tolerates_an_advanced_head(
         "the scenario needs the head to have moved past the observed base"
     );
 
-    let result = runtime
-        .append_session_nodes(derived_append_request(&observed_base, "derived-append"))
-        .await
-        .expect("an ancestor base is a live branch, not a store error");
+    let result = Box::pin(
+        runtime.append_session_nodes(derived_append_request(&observed_base, "derived-append")),
+    )
+    .await
+    .expect("an ancestor base is a live branch, not a store error");
 
     let appended = assert_appended_onto_current_leaf(
         &store,
@@ -89,7 +95,12 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
         .await
         .expect("create service advanced-head session store");
     let mut runtime = append_conformance_runtime(&store, &request).await;
-    let observed_base = append_conformance_plugin_node(&mut runtime, "observe-base", 0).await;
+    let observed_base = Box::pin(append_conformance_plugin_node(
+        &mut runtime,
+        "observe-base",
+        0,
+    ))
+    .await;
 
     // Captured at the observed base, exactly as a plugin hook captures it
     // before spending seconds deriving something.
@@ -126,17 +137,16 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
 async fn session_graph_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
-    let scenario = abandoned_branch_scenario(factory, "append-abandoned").await;
+    let scenario = Box::pin(abandoned_branch_scenario(factory, "append-abandoned")).await;
     let mut runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
     let before = read_conformance_session(&scenario.branch).await;
 
-    let result = runtime
-        .append_session_nodes(derived_append_request(
-            &scenario.abandoned_base,
-            "abandoned-append",
-        ))
-        .await
-        .expect("an abandoned branch is a typed outcome, not a store error");
+    let result = Box::pin(runtime.append_session_nodes(derived_append_request(
+        &scenario.abandoned_base,
+        "abandoned-append",
+    )))
+    .await
+    .expect("an abandoned branch is a typed outcome, not a store error");
 
     assert_stale_branch_changed_nothing(
         &scenario.branch,
@@ -152,7 +162,11 @@ async fn session_graph_append_rejects_an_abandoned_branch(
 async fn session_graph_service_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
-    let scenario = abandoned_branch_scenario(factory, "service-append-abandoned").await;
+    let scenario = Box::pin(abandoned_branch_scenario(
+        factory,
+        "service-append-abandoned",
+    ))
+    .await;
     let runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
     let service = runtime
         .session_graph_service()
@@ -200,15 +214,24 @@ async fn abandoned_branch_scenario(
         .await
         .expect("create abandoned-branch source store");
     let mut source_runtime = append_conformance_runtime(&source, &source_request).await;
-    let fork_point = append_conformance_plugin_node(&mut source_runtime, "fork-point", 0).await;
+    let fork_point = Box::pin(append_conformance_plugin_node(
+        &mut source_runtime,
+        "fork-point",
+        0,
+    ))
+    .await;
     factory
         .pin(&fork_point)
         .await
         .expect("retain the rewind target");
     // The base the caller read and derived from, on the line that is about to
     // be abandoned.
-    let abandoned_base =
-        append_conformance_plugin_node(&mut source_runtime, "abandoned-base", 1).await;
+    let abandoned_base = Box::pin(append_conformance_plugin_node(
+        &mut source_runtime,
+        "abandoned-base",
+        1,
+    ))
+    .await;
 
     let branch_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
@@ -466,17 +489,18 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         crate::SessionRelation::Root,
     );
     let mut runtime = append_conformance_runtime(&store, &request).await;
-    runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: "old-format-append-receipt-seed".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "old-format-append-receipt-seed",
                 serde_json::json!({"seed": true}),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect("seed old-format fixture session");
+        }),
+    )
+    .await
+    .expect("seed old-format fixture session");
     let append = crate::AppendSessionNodesRequest {
         operation_id: "old-format-append-receipt".to_string(),
         nodes: vec![crate::SessionAppendNode::plugin(
@@ -485,13 +509,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         )],
         requires_ancestor_node_id: None,
     };
-    let first = runtime
-        .append_session_nodes(append.clone())
+    let first = Box::pin(runtime.append_session_nodes(append.clone()))
         .await
         .expect("first old-format fixture append");
     rewrite_receipt().await;
-    let replay = runtime
-        .append_session_nodes(append)
+    let replay = Box::pin(runtime.append_session_nodes(append))
         .await
         .expect("old-format fixture receipt replay");
     let (
@@ -522,17 +544,18 @@ async fn append_conformance_plugin_node(
     operation_id: &str,
     step: u64,
 ) -> String {
-    let result = runtime
-        .append_session_nodes(crate::AppendSessionNodesRequest {
+    let result = Box::pin(
+        runtime.append_session_nodes(crate::AppendSessionNodesRequest {
             operation_id: operation_id.to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
                 "append-fence-conformance",
                 serde_json::json!({ "step": step }),
             )],
             requires_ancestor_node_id: None,
-        })
-        .await
-        .expect("seed the append conformance graph");
+        }),
+    )
+    .await
+    .expect("seed the append conformance graph");
     match result {
         crate::AppendSessionNodesOutcome::Appended { node_ids, .. } => {
             node_ids.into_iter().next().expect("seeded node id")

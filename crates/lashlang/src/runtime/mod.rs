@@ -30,6 +30,8 @@ mod javascript;
 mod json;
 mod ops;
 pub(crate) use javascript::*;
+mod projected_refresh;
+mod projected_wire;
 mod projector;
 mod record;
 mod schema;

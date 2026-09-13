@@ -514,43 +514,9 @@ fn generated_cases() -> Vec<GeneratedCase> {
         },
         checkpoint_cases::bodies_then_ref_only(),
         checkpoint_cases::bodies_then_cleared(),
-        GeneratedCase {
-            name: CaseName::MissingCheckpointComponentRef,
-            operations: vec![StoreOperation::Commit {
-                label: "commit_ref_for_never_stored_execution_state",
-                expected_head_revision: 0,
-                graph: append(Vec::new(), None),
-                turn_commit: Some(TurnCommitSpec {
-                    turn_id: "missing-component",
-                }),
-                checkpoint: CheckpointSpec::MissingExecutionStateRef,
-                usage: false,
-                adopt_attachment: false,
-            }],
-        },
+        checkpoint_cases::missing_component_ref(),
         fork_cases::fence_precedence_case(),
-        GeneratedCase {
-            name: CaseName::PinForkUnpin,
-            operations: vec![
-                StoreOperation::Commit {
-                    label: "commit_forkable_leaf",
-                    expected_head_revision: 0,
-                    graph: append(
-                        vec![NodeSpec::new("active-frame", None, "forkable")],
-                        Some("active-frame"),
-                    ),
-                    turn_commit: Some(TurnCommitSpec {
-                        turn_id: "forkable-leaf",
-                    }),
-                    checkpoint: CheckpointSpec::Empty,
-                    usage: false,
-                    adopt_attachment: false,
-                },
-                StoreOperation::PinLeaf,
-                StoreOperation::ForkAtLeaf,
-                StoreOperation::UnpinLeaf,
-            ],
-        },
+        fork_cases::pin_fork_unpin(),
         fork_cases::foreign_lineage_case(),
         fork_cases::rewind_case(),
         GeneratedCase {
@@ -2512,7 +2478,11 @@ async fn cross_backend_store_differential_agrees() {
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
     );
-    fork_cases::cross_owner_attachment_adoption(sqlite_root.path(), &postgres).await;
+    Box::pin(fork_cases::cross_owner_attachment_adoption(
+        sqlite_root.path(),
+        &postgres,
+    ))
+    .await;
     assert_storage_failure_mappings_agree(sqlite_root.path(), &postgres).await;
     eprintln!(
         "PASSED cross-backend store differential; \

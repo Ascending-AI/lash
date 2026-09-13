@@ -386,8 +386,7 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
         )
         .await;
 
-        assert_eq!(response.error, None);
-        assert_eq!(response.terminal_finish, Some(serde_json::json!("kept")));
+        // Only the dead binding degrades: the healthy one still renders.
         assert_eq!(response.degraded_bindings.len(), 1);
         assert_eq!(response.degraded_bindings[0].name, "dead");
         assert!(
@@ -402,14 +401,23 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             .collect::<Vec<_>>()
             .join("\n");
         assert!(touched.contains("rendered tool text"), "{touched}");
+
+        // Touching the dead binding now fails the cell by name (FIG-2865).
+        // It used to render the unavailability sentence as the value, so
+        // `print dead` observed an English diagnostic where the host's view
+        // belonged and the turn finished as if nothing were missing.
+        let failure = response
+            .error
+            .expect("touching a dead projection must fail");
         assert!(
-            touched.contains("projected host descriptor `dead`"),
-            "{touched}"
+            failure.message.contains("projected host descriptor `dead`"),
+            "{failure:?}"
         );
         assert!(
-            touched.contains("unavailable after snapshot restore"),
-            "{touched}"
+            failure.message.contains("unavailable after restore"),
+            "{failure:?}"
         );
+        assert_eq!(response.terminal_finish, None);
     });
 }
 

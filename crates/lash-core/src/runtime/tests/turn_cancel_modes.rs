@@ -126,14 +126,23 @@ struct ModeHarness {
     driver: crate::TurnWorkDriver,
 }
 
+fn native_driver_store(host: &Arc<dyn crate::EffectHost>) -> Arc<dyn crate::RuntimePersistence> {
+    Arc::new(
+        RecordingStore::default().with_turn_cancellation_authority_for_testing(
+            crate::TurnCancellationAuthority::new(
+                host.turn_control_binding_id(),
+                Arc::clone(host) as Arc<dyn crate::AwaitEventResolver>,
+            ),
+        ),
+    )
+}
+
 async fn native_harness(
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
 ) -> ModeHarness {
-    let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
-        crate::NativeRuntimeEffectController::default(),
-    ));
-    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let config = test_runtime_host_config();
+    let driver_store = native_driver_store(&config.control.effect_host);
     crate::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &crate::SessionId::from("root"),
@@ -438,6 +447,179 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
 }
 
 #[tokio::test]
+async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_work() {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let tool = TokenWatchingTool::default();
+    tool.release();
+    let transport = gated_tool_calling_provider(
+        Arc::clone(&provider_calls),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(tokio::sync::Notify::new()),
+        Arc::new(AtomicBool::new(true)),
+    );
+    let clock = Arc::new(crate::testing::TestClock::new(1_000));
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let config = test_runtime_host_config().with_clock(host_clock);
+    let effect_host = Arc::clone(&config.control.effect_host);
+    let binding_id = effect_host.turn_control_binding_id();
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(
+        RecordingStore::with_clock(store_clock).with_turn_cancellation_authority_for_testing(
+            crate::TurnCancellationAuthority::new(
+                binding_id.clone(),
+                Arc::clone(&effect_host) as Arc<dyn crate::AwaitEventResolver>,
+            ),
+        ),
+    );
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let session_id = SessionId::from("root");
+    crate::testing::store_fixtures::bind_conformance_session(&runtime_store, &session_id).await;
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(tool.clone()),
+        transport,
+        EmbeddedRuntimeHost::new(config),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+
+    let turn_id = TurnId::from("native-unresolved-cancel-takeover");
+    let address = crate::TurnAddress::new(&session_id, &turn_id);
+    let retained_input = crate::store::TurnInputStore::enqueue_pending_turn_input(
+        store.as_ref(),
+        crate::PendingTurnInputDraft::new(
+            &session_id,
+            crate::TurnInputIngress::active_turn(
+                &turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            TurnInput::text("retained same-turn input"),
+        ),
+    )
+    .await
+    .expect("enqueue same-turn input");
+    let predecessor = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        &session_id,
+        &crate::LeaseOwnerIdentity::opaque("predecessor", "crashed-incarnation"),
+        "crashed-executor",
+        crate::LeaseTimings::default().ttl_ms(),
+    )
+    .await
+    .expect("claim predecessor lease")
+    .acquired()
+    .expect("predecessor owns lane");
+    let evidence = TurnCancellationEvidence {
+        request_id: "predecessor-local-cancel".to_string(),
+        origin: Some("predecessor".to_string()),
+        reason: Some("crash after authorization".to_string()),
+        undelivered: crate::TurnCancelDisposition::Drop,
+        mode: TurnCancelMode::Immediate,
+        honoured_after_step: None,
+    };
+    let control =
+        crate::runtime::turn_control::ActiveTurnControl::new(effect_host.as_ref(), address.clone())
+            .await
+            .expect("prepare predecessor turn control");
+    let authorization = control
+        .closure_authorization(
+            &binding_id,
+            address.execution_scope(),
+            &predecessor.fence(),
+            crate::TurnCancelIntentSnapshot::Absent,
+            true,
+            Some(evidence.clone()),
+        )
+        .expect("construct predecessor cancellation authorization");
+    crate::store::TurnInputStore::validate_turn_cancellation_binding(
+        store.as_ref(),
+        &session_id,
+        &predecessor.fence(),
+        &binding_id,
+        &address.execution_scope(),
+    )
+    .await
+    .expect("select predecessor cancellation binding");
+    assert!(
+        effect_host
+            .peek_await_event(authorization.cancel_key())
+            .await
+            .expect("inspect unresolved predecessor cancellation gate")
+            .is_none(),
+        "the takeover must settle a gate with no existing winner"
+    );
+    crate::store::TurnInputStore::authorize_turn_cancel_closure(
+        store.as_ref(),
+        &predecessor.fence(),
+        &authorization,
+    )
+    .await
+    .expect("persist predecessor authorization without settling its gate");
+    assert_eq!(
+        crate::store::TurnInputStore::pending_turn_cancel_closures(
+            store.as_ref(),
+            &session_id,
+            &predecessor.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("read predecessor closure pin"),
+        vec![authorization.clone()],
+    );
+    clock.advance(crate::LeaseTimings::default().ttl_ms() + 1);
+
+    let turn = runtime
+        .run_turn_assembled(
+            TurnInput::text("resume the authorized turn"),
+            CancellationToken::new(),
+            named_turn_scope(&session_id, &turn_id),
+        )
+        .await
+        .expect("successor completes the cancelled turn");
+    assert_eq!(cancelled_evidence(&turn), evidence);
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(tool.executions.load(Ordering::SeqCst), 0);
+    assert!(
+        crate::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+            .await
+            .expect("list post-cancellation input")
+            .into_iter()
+            .all(|input| input.input_id != retained_input.input_id),
+        "the exact Drop proposal applies to the retained same-turn input"
+    );
+
+    let audit_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        &session_id,
+        &crate::LeaseOwnerIdentity::opaque("audit", "post-commit"),
+        "audit-executor",
+        crate::LeaseTimings::default().ttl_ms(),
+    )
+    .await
+    .expect("claim post-commit audit lease")
+    .acquired()
+    .expect("final commit released the successor lane");
+    assert!(
+        audit_lease.fencing_token > authorization.authorizing_fencing_token(),
+        "final commit used a successor lane while consuming the predecessor authorization"
+    );
+    assert!(
+        crate::store::TurnInputStore::pending_turn_cancel_closures(
+            store.as_ref(),
+            &session_id,
+            &audit_lease.fence(),
+            &binding_id,
+            &address.execution_scope(),
+        )
+        .await
+        .expect("read post-commit closure pins")
+        .is_empty(),
+        "final commit consumes the exact retained authorization"
+    );
+}
+
+#[tokio::test]
 async fn undelivered_disposition_matrix_applies_for_both_modes() {
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
         for disposition in [
@@ -542,9 +724,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         );
         let store = Arc::new(RecordingStore::default());
         let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-        let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
-        ));
+        let config = test_runtime_host_config();
         let mut runtime = TestRuntime::new(transport)
             .plugins(Vec::new())
             .tools(Arc::new(tool.clone()))
@@ -754,11 +934,8 @@ async fn sleeping_retry_harness(
     provider_calls: Arc<AtomicUsize>,
 ) -> ModeHarness {
     let host_clock: Arc<dyn crate::Clock> = clock;
-    let config = super::effect::runtime_host_config_with_native_controller(Arc::new(
-        crate::NativeRuntimeEffectController::default(),
-    ))
-    .with_clock(host_clock);
-    let driver_store: Arc<dyn crate::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let config = test_runtime_host_config().with_clock(host_clock);
+    let driver_store = native_driver_store(&config.control.effect_host);
     crate::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &crate::SessionId::from("root"),

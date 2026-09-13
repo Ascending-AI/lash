@@ -4,6 +4,18 @@
 
 Accepted.
 
+Amended 2026-09-13 (FIG-2990): under [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) starting a process is an ordinary
+call node rather than a dedicated start effect kind, and a process literal in
+an argument projects as a process container node. The lens laws are unchanged;
+the workflow graph schema advances 8 to 9 and joins the durable-format
+manifest.
+
+Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
+surface, so "Lashlang" below names the IR and VM. The lens laws are unchanged
+and operate on the IR and the graph; a TypeScript canonical printer with the
+same exact-fixpoint round trip remains unbuilt and is separate future work with
+its own ADR.
+
 ## Context
 
 Hosts need to visualize and structurally edit Lashlang workflows and correlate

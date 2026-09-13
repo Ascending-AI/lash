@@ -3,8 +3,8 @@
 Lash uses Bazel 9.1.0 and rules_rs 0.0.110 for checkout-independent local
 compilation. Cargo manifests and `Cargo.lock` remain the source of truth. The
 generated BUILD files expose one Bazel action for each first-party library,
-binary, example, benchmark, unit-test crate, integration-test crate, doctest,
-and custom build script reachable in Cargo's resolved default workspace graph.
+binary, example, benchmark, unit-test crate, integration-test crate, and
+custom build script reachable in Cargo's resolved default workspace graph.
 The complete Cargo metadata inventory also records targets whose required
 features are outside that graph; their existing named Cargo feature recipes
 remain authoritative. Third-party crates are imported from the same lockfile.
@@ -18,7 +18,10 @@ remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
 lash <name>`.
 
 Use `kiln build` for the warm shared-cache compilation path and `kiln test` for
-the generated cacheable test partition:
+the generated cacheable test partition. Implementer loops do not run Postgres,
+S3, or E2E (`kiln test --service`, store recipes, Restate workers): CI owns
+those, and local live gates fight over ports (`KILN_GATE_ID`) and the
+single-box database.
 
 ```sh
 . ./env.sh
@@ -42,11 +45,12 @@ scripts/hermetic-build.sh analyze
 # Compile the complete Cargo --workspace --all-targets shape.
 kiln build
 
-# Run the generated cacheable test suite (87 test binaries).
+# Run the generated cacheable test suite (PR Bazel partition).
 kiln test
 
-# Run the doctest partition (35 rustdoc binaries).
-kiln test //:workspace_doctests
+# Path-plan like CI. Docs-only skips compile; workbench-only does not
+# compile lash-core or Postgres. Never starts Postgres, S3, or E2E.
+scripts/dev-test.sh
 
 # Lint the `--workspace --all-targets` shape (170 clippy actions).
 kiln build //:workspace_clippy
@@ -187,25 +191,19 @@ Cargo feature-gate target without a Bazel label.
 
 ## Doctests
 
-`//:workspace_doctests` executes the 35 `rust_doc_test` labels — one per
-first-party library whose manifest leaves `doctest` enabled, which is exactly
-the set Cargo builds. rustdoc runs them against the pinned 1.98.1 toolchain and
-the crate's declared dependency graph; none reaches a service, the network, or a
-Cargo-relative asset, and none depends on the working directory, so their
-results are deterministic and cacheable under `--cache_test_results=yes` like
-any other Bazel test action. An input change produces a different action key,
-and a failed doctest is never reused as a success. On this tree the partition
-runs 25 cases and skips 4 ignored ones, the same counts `cargo test --doc
---workspace --locked` reports across the same 35 rustdoc binaries.
-`scripts/test_bazel_test_contract.py` refuses any doctest label that
-reacquires `manual` or a `cargo_only` reason, so a label cannot leave the
-partition silently.
+There are none. Doctests were removed from the repository by ruling on
+2026-09-13: there is no `//:workspace_doctests` partition, no `rust_doc_test`
+wrapper, and every workspace library manifest sets `[lib] doctest = false`, so
+`cargo test` never compiles a doc snippet either. The doc comments and their
+fenced examples remain as prose; nothing compiles or executes them.
+`scripts/test_bazel_test_contract.py` refuses a doc-test label, a
+`rust_doc_test` load, or a library manifest that drops `doctest = false`.
 
 ## Clippy
 
 `//:workspace_clippy` is the `cargo clippy --workspace --all-targets` shape as
 one cached Bazel action per target: 170 labels, every first-party target of the
-resolved default graph except doctests and the one `cargo_build_script` label,
+resolved default graph except the one `cargo_build_script` label,
 whose exemption is recorded as `clippy_exempt` in
 `tools/bazel/target-inventory.json` because `cargo_build_script` exposes no
 `CrateInfo` for a clippy aspect to attach to.
@@ -251,6 +249,34 @@ jobs and dispatches on `BAZEL_TRUSTED`. Two properties hold on the Bazel path:
   Cargo's one-binary-at-a-time execution, which the suites that share one
   database and one bucket depend on.
 
+### Running them locally: `kiln test --service`
+
+`kiln test --service <pg14|pg16|pg18|s3|all>` runs those same suites on this
+box. It starts the CI image on a free ephemeral port, waits for readiness,
+runs `scripts/ci/store-tests.sh` for each suite the matching CI job runs, in
+the same order and with the same environment variable names, and removes the
+container on success, failure and Ctrl-C alike. It is the same script, not a
+second copy of the test selection: `tools/kiln/services.json` names only the
+image, the readiness probe, the environment and the suite list, and
+`scripts/test_kiln_service_manifest.py` fails if it drifts from `ci.yml`.
+
+Locally the run takes the trusted path, so the binaries are shared-cache hits
+and pool actions exactly as `kiln build`'s are; only the `TestRunner` spawn is
+pinned local (`--strategy=TestRunner=local`), because the container publishes
+its port on this host's loopback and a test action on a pool worker would
+reach nothing. Test results are never cached, on either side. Outside GitHub
+Actions `store-tests.sh` defaults `BAZEL_SHARED_CACHE_FLAGS` to that
+configuration; inside CI both shared-cache variables stay required, so a job
+that lost its credentials fails instead of quietly missing the cache.
+
+Every run closes by printing the service-shaped cases it did *not* cover and
+the exact recipe for each, so a green `kiln test --service all` is never
+mistaken for full service coverage. Those are the three Cargo-owned jobs
+below, the `slack-clone` `e2e` feature, and the process-operations E2E driver,
+which stands up its own MinIO. No `justfile` recipe was converted or removed:
+the store suites had none, and the `*-soak` recipes are separate opt-in
+property runs that keep their Cargo commands.
+
 Untrusted events receive no cache credentials, so every step runs exactly the
 Cargo command it ran before this cutover, including the Rust toolchain, mold,
 nextest and Swatinem cache steps, which are conditioned on the same trust
@@ -262,17 +288,17 @@ output:
 
 | Event | PG 14 (compatibility) | PG 16 (primary) | PG 18 (compatibility) |
 | --- | --- | --- | --- |
-| `pull_request` | not scheduled | runs | not scheduled |
-| `merge_group` | runs | runs | runs |
-| `push` to `main` | runs | runs | runs |
+| `pull_request` (rust) | schema diffs only | runs | schema diffs only |
+| `merge_group` (rust) | schema diffs only | runs | schema diffs only |
+| `push` to `main` | skipped (queue already witnessed the SHA) | skipped | skipped |
 | `workflow_dispatch` | runs | runs | runs |
 
 The compatibility lanes only compare the live catalog artifact and a focused
-version-stamp gate, so deferring them off the pull-request critical path costs
-no trunk protection: the merge queue runs the full matrix before anything
-lands, and so does every push to `main`. The lane is removed from the matrix
-rather than kept with its steps skipped -- a leg that ran no tests would be a
-hollow green.
+version-stamp gate. They run when the diff touches `lash-postgres-store` or
+`lash-sqlite-store`, or on the full-profile dispatch. Weekly confidence
+backends remain the compatibility witness for unrelated landings. The lane is
+removed from the matrix rather than kept with its steps skipped -- a leg that
+ran no tests would be a hollow green.
 
 Three jobs stay entirely Cargo-owned, and not for want of trying:
 
@@ -295,32 +321,36 @@ is recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`
 and keeps its Cargo recipe.
 
 The main CI workflow makes this a single authoritative partition. Trusted
-same-repository pull requests, merge-queue groups, `main` pushes, and manual CI
-dispatches run `//:workspace_tests` with the authenticated shared cache. On the
-same events the ordinary nextest job reads the generated
-`tools/bazel/cargo_owned_nextest_filter.txt`, so its `profile.ci` run executes
-only ordinary cases from the 22 Cargo-owned binaries. The `Lint` job builds
+same-repository pull requests and merge-queue groups run `//:workspace_tests`
+with the authenticated shared cache. `main` pushes skip that core board (the
+queue already witnessed the SHA) and keep breadth jobs. On rust PRs the
+ordinary nextest job reads the generated
+`tools/bazel/cargo_owned_nextest_filter.txt` (service-gated, trybuild, and
+workbench binaries excluded so they are not compiled just to self-skip).
+Workbench unit tests run only when `examples/agent-workbench/**` changed.
+The `Lint` job builds
 `//:workspace_clippy` in place of the workspace `cargo clippy`, and the
-`Check workspace + doctests` job builds `//:workspace_compile` and runs
-`//:workspace_doctests` in place of `cargo check --workspace --all-targets` and
-`cargo test --doc --workspace`. `//:workspace_compile` compiles *and links*
-every label of the resolved default graph except doctests, including the
+`Check workspace` job builds `//:workspace_compile` in place of
+`cargo check --workspace --all-targets`, with
+`--remote_download_outputs=minimal`: nothing on that runner consumes the
+outputs, and a compile or link error still fails the build.
+`//:workspace_compile` compiles *and links*
+every label of the resolved default graph, including the
 unit- and integration-test crates that carry the `cfg(test)` shape and the
 members that are not `default-members`; it is generated from the same
 `cargo metadata --locked` resolution the Cargo command uses, so feature
 unification is identical, and the only Cargo target outside it,
 `slack-clone-live-e2e`, is one `cargo check --workspace --all-targets` skips for
 the same required-feature reason. Formatting, the Python and shell gates,
-actionlint, the versioned-surface bump check and the trunk-only perf smoke are
-cheap and stay exactly as they were. The remaining trybuild, heavy, service,
+actionlint and the versioned-surface bump check stay as they were. The remaining trybuild, heavy, service,
 feature, fuzz, packaging, and release jobs keep their own Cargo commands and
 schedules. `CI conclusion` requires the Bazel job to succeed on every trusted
 event.
 
 Fork and Dependabot pull requests never receive cache credentials: their Bazel
 job is intentionally skipped, their ordinary nextest job omits the generated
-filter, the `Lint` and `Check workspace + doctests` jobs run exactly the
-Cargo clippy, check and doctest commands that predate this cutover, and the
+filter, the `Lint` and `Check workspace` jobs run exactly the
+Cargo clippy and check commands that predate this cutover, and the
 service jobs take the Cargo branch of `scripts/ci/store-tests.sh`, preserving
 the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.

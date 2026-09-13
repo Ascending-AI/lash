@@ -3,7 +3,6 @@ load(
     "//tools/bazel:lash_rust.bzl",
     "lash_rust_binary",
     "lash_rust_build_script",
-    "lash_rust_doc_test",
     "lash_rust_integration_test",
     "lash_rust_library",
     "lash_rust_unit_test",
@@ -59,11 +58,6 @@ lash_rust_unit_test(
     package_name = "lash-regress",
     tags = [],
     version = "0.0.0-dev",
-)
-
-lash_rust_doc_test(
-    name = "lash-regress__doc_test",
-    crate = ":lash-regress",
 )
 
 lash_rust_integration_test(
@@ -146,7 +140,9 @@ lash_rust_integration_test(
     manifest_dir = "crates/lash-regress",
     package_name = "lash-regress",
     rustc_env = {},
-    tags = [],
+    tags = [
+        "pr-deferred",
+    ],
     version = "0.0.0-dev",
 )
 

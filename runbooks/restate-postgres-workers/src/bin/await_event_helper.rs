@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use lash::SessionId;
 use lash_core::AwaitEventResolver as _;
 use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
-use lash_restate::RestateEffectHost;
+use lash_restate::{RestateAuthorityId, RestateEffectHost};
 use std::io::Write as _;
 
 #[tokio::main]
@@ -24,7 +24,10 @@ async fn main() -> Result<()> {
         "turn_cancel_gate" => AwaitEventWaitIdentity::TurnCancelGate,
         other => anyhow::bail!("unknown identity `{other}`"),
     };
-    let host = RestateEffectHost::new(ingress);
+    let authority_id = RestateAuthorityId::new(
+        std::env::var("RESTATE_AUTHORITY_ID").context("RESTATE_AUTHORITY_ID is required")?,
+    )?;
+    let host = RestateEffectHost::new(ingress, authority_id);
     let key = host
         .await_event_key(&scope, wait)
         .await

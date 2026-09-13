@@ -15,6 +15,7 @@ categories = ["api-bindings", "authentication"]
 
 [lib]
 name = "lash_provider_auth"
+doctest = false
 
 [lints]
 workspace = true

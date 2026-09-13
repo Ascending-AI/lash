@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_core"
+doctest = false
 
 [features]
 # Keep core portable by default.

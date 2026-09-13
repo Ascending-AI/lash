@@ -328,7 +328,7 @@ mod tests {
             .expect("resolve projected bindings");
         let value = projected.get("doc").expect("doc binding");
         assert_eq!(value.projection_ref(), Some(&serde_json::json!(reference)));
-        assert_eq!(value.render().await, "lazy");
+        assert_eq!(value.render().await.expect("render"), "lazy");
     }
 
     #[tokio::test]

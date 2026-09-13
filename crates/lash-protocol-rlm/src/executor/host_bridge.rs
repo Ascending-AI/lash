@@ -928,13 +928,11 @@ fn collect_printed_images_inner<'a>(
                 }
             }
             FlowValue::Projected(value) => {
-                collect_printed_images_inner(
-                    &value.materialize_async().await,
-                    attachment_store,
-                    seen,
-                    images,
-                )
-                .await?;
+                // A projection restored without its host descriptor has no value
+                // to scan; it carries no printed image either (FIG-2865).
+                if let Ok(value) = value.materialize_async().await {
+                    collect_printed_images_inner(&value, attachment_store, seen, images).await?;
+                }
             }
             FlowValue::Null
             | FlowValue::Undefined
