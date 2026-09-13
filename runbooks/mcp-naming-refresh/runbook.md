@@ -23,7 +23,7 @@ mkdir -p "$LASH_MCP_NAMING_EVIDENCE_DIR"
 Do:
 
 ```bash
-orb gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
   '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
   naming::tests -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-names.log"
@@ -48,7 +48,7 @@ fixed vector changes without an intentional naming-contract change.
 Do:
 
 ```bash
-orb gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
   '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
   deferred_call_ -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-refresh.log"
@@ -77,7 +77,7 @@ the bounded test timeout.
 Do:
 
 ```bash
-orb gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
+kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
   '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
   refuses_a_forced_ -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-collisions.log"

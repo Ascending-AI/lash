@@ -23,7 +23,7 @@ mkdir -p "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR"
 Do:
 
 ```bash
-orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
+kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   . ./env.sh
   heavy-slot cargo nextest run --workspace --locked -E "
     test(~effective_member_without_contract_is_refused_before_prepare) |
@@ -89,18 +89,18 @@ resident membership.
 ## Phase 2 — durable authority bytes
 
 Run the SQLite witness directly. Then run the PostgreSQL witness against a
-caller-owned disposable database inside `orb gate`; derive its container name
-from `ORB_GATE_ID` and let Docker allocate the host port. Remove the container
+caller-owned disposable database inside `kiln gate`; derive its container name
+from `KILN_GATE_ID` and let Docker allocate the host port. Remove the container
 on exit. Never point this phase at a shared database.
 
 ```bash
-orb gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
+kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   set -o pipefail
   . ./env.sh
   cargo nextest run -p lash-internal-sqlite-store \
     -E "test(explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse)"
 
-  container="lash-access-${ORB_GATE_ID//[^[:alnum:]_.-]/-}"
+  container="lash-access-${KILN_GATE_ID//[^[:alnum:]_.-]/-}"
   trap '\''docker rm -f "$container" >/dev/null 2>&1 || true'\'' EXIT
   docker run -d --rm --name "$container" \
     -e POSTGRES_USER=lash -e POSTGRES_PASSWORD=lash -e POSTGRES_DB=lash \
