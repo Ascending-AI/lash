@@ -140,6 +140,25 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "process_lifecycle_vocabulary__test",
+    crate_features = [],
+    crate_name = "process_lifecycle_vocabulary",
+    crate_root = "tests/process_lifecycle_vocabulary.rs",
+    declared_features = [],
+    extra_compile_data = [
+        "//crates/lash-postgres-store:package_files",
+        "//crates/lash-sqlite-store:package_files",
+    ],
+    library = ":lash-sim",
+    library_crate_name = "lash_sim",
+    manifest_dir = "crates/lash-sim",
+    package_name = "lash-sim",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "retention_classification__test",
     crate_features = [],
     crate_name = "retention_classification",

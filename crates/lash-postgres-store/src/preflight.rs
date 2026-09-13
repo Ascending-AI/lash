@@ -36,7 +36,7 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use crate::PostgresStorage;
 
-mod walk;
+pub(crate) mod walk;
 
 /// The operator-facing name of the single schema-carrying database a PostgreSQL
 /// deployment holds.
