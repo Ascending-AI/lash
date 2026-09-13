@@ -13,8 +13,12 @@ build:shared --remote_executor=grpc://127.0.0.1:45191
 build:shared --remote_cache=grpc://127.0.0.1:45191
 build:shared --remote_instance_name=orb
 build:shared --remote_default_exec_properties=orb_executor_runtime=orb-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
-build:shared --remote_default_exec_properties=cpu_count=1
-build:shared --remote_default_exec_properties=memory_kb=2097152
+# Rust compile and link actions are large and mostly single-invocation: on
+# one core the workspace test binaries take 20-30 minutes each and sit on the
+# serial tail of the graph. Four cores per action lets rustc parallelise
+# codegen and linking; the executor advertises 16, so four actions run at once.
+build:shared --remote_default_exec_properties=cpu_count=4
+build:shared --remote_default_exec_properties=memory_kb=4194304
 build:shared --remote_local_fallback=false
 build:shared --remote_upload_local_results=true
 test:shared --test_output=errors
