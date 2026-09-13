@@ -33,7 +33,8 @@ const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/turn_input.rs");
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/session_commit.rs");
-const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
+    include_str!("../src/postgres/process_registry/lifecycle.rs");
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
@@ -69,8 +70,7 @@ async fn configured_storage(test_name: &str) -> Option<(SharedDatabaseLock, Post
     Some((lock, storage))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_when_configured() {
+lash_conformance::backend_clock_queued_work_tests!({
     let Some((_lock, storage)) = configured_storage("PostgreSQL ready-gap law").await else {
         return;
     };
@@ -86,12 +86,12 @@ async fn postgres_queued_work_redrive_selects_claim_identity_across_ready_gap_wh
             .await
             .expect("reset ready-gap law rows");
     }
-    lash_conformance::queued_work_redrive_selects_claim_identity_across_ready_gap(
-        Arc::new(storage.session_store(session_id)),
-        &lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
+    (
+        _lock,
+        Arc::new(storage.session_store(session_id)) as Arc<dyn lash_core::RuntimePersistence>,
+        lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
-    .await;
-}
+});
 
 fn source_region<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start_index = source
@@ -195,7 +195,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "pub(crate) async fn read_session_execution_lease_unlocked(",
         ),
         (
-            PROCESS_REGISTRY_SOURCE,
+            PROCESS_REGISTRY_LIFECYCLE_SOURCE,
             "async fn complete_process_with_lease(",
             "async fn record_first_started_with_authority(",
         ),

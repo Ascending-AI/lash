@@ -29,7 +29,8 @@ fn stored_effect_corruption_is_non_retryable() {
     assert!(!error.code.is_retryable());
 }
 
-const SCOPE: &str = "session:s1";
+const SCOPE: &str =
+    r#"{"version":2,"kind":"turn","session_id":"s1","execution_id":"effect-group"}"#;
 const GROUP: &str = "session:s1/group-1";
 
 async fn row_store() -> SqliteEffectReplayRowStore {
@@ -382,6 +383,29 @@ async fn retirement_removes_a_group_and_its_children_together() {
         .await
         .expect("count group rows");
     assert_eq!(groups, 0, "the group row goes with its children");
+    let pending = store
+        .pending_artifact_owner_retirements()
+        .await
+        .expect("read session-scope artifact cleanup evidence");
+    assert_eq!(
+        pending.len(),
+        1,
+        "the deleted session scope stays recoverable"
+    );
+    let identity = pending[0]
+        .journal_identity()
+        .expect("durable scope identity");
+    store
+        .complete_artifact_owner_retirement(identity.key())
+        .await
+        .expect("ack artifact owner cleanup");
+    assert!(
+        store
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("read acknowledged cleanup")
+            .is_empty()
+    );
 }
 
 /// The unsettled read is the exact complement of the rank read: every child of

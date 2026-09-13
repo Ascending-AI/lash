@@ -151,31 +151,17 @@ const TURN_INPUT_SETTLEMENT_ASSIGNMENTS: &str = "state = ?3,
                                      claim_token = NULL,
                                      claim_session_lease_generation = 0";
 
-/// The lifecycle states an unclaimed settlement can never overwrite.
-///
-/// A cancelled or already-settled row is terminal: an unclaimed settlement that
-/// finds one lost the head CAS.
-const UNCLAIMED_TURN_INPUT_TERMINAL_STATES: [lash_core::TurnInputState; 2] = [
-    lash_core::TurnInputState::Completed,
-    lash_core::TurnInputState::Cancelled,
-];
-
 /// Whether an unclaimed row is still open for settlement.
 fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !UNCLAIMED_TURN_INPUT_TERMINAL_STATES
-        .iter()
-        .any(|terminal| terminal.as_str() == state)
+    !lash_core::TurnInputState::from_wire_str(state)
+        .is_some_and(lash_core::TurnInputState::is_terminal)
 }
 
 /// The same terminal set spelled as the body of a SQL `IN (...)` list, so the
 /// unclaimed settlement predicate and its Rust twin above cannot drift from
 /// the enum.
 fn unclaimed_turn_input_terminal_states_sql() -> String {
-    UNCLAIMED_TURN_INPUT_TERMINAL_STATES
-        .iter()
-        .map(|state| format!("'{}'", state.as_str()))
-        .collect::<Vec<_>>()
-        .join(", ")
+    lash_core::store_backend_support::terminal_turn_input_states_sql()
 }
 
 const SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = "session_id = ?1

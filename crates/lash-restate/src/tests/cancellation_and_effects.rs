@@ -378,7 +378,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record("call-fast", "fast_tool")),
-                            intents: lash_core::ToolIntents::v1(vec![
+                            intents: lash_core::ToolIntents::v2(vec![
                                 lash_core::ToolIntent::StartProcess(Box::new(
                                     lash_core::StartProcessIntent {
                                         session_id: SessionId::from("session"),
@@ -1244,7 +1244,7 @@ impl lash_core::ToolProvider for RestateParentEndIntentProvider {
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
-            lash_core::ToolIntents::v1(
+            lash_core::ToolIntents::v2(
                 ["first", "second"]
                     .into_iter()
                     .map(|child| {

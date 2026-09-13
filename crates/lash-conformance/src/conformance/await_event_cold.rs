@@ -56,7 +56,7 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     witness: W,
 ) where
     F: Fn() -> Arc<dyn EffectHost>,
-    W: FnOnce(Arc<dyn EffectHost>) -> WFut,
+    W: FnOnce(Arc<dyn EffectHost>, super::effect_host::ActiveWaitRetirementAssertion) -> WFut,
     WFut: std::future::Future<Output = ()>,
 {
     let first = make();
@@ -64,7 +64,11 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     assert_fresh_instances(&first, &second, "effect_host_await_events_cold_instance");
     drop((first, second));
     super::effect_host::effect_host_local_turn_control_resolves_on_minting_host(make()).await;
-    witness(make()).await;
+    witness(
+        make(),
+        super::effect_host::boxed_active_wait_retirement_assertion,
+    )
+    .await;
     super::effect_host::effect_host_when_quiescent_waits_for_executing_effects(make()).await;
     let prefix = format!("cold-await-{}", uuid::Uuid::new_v4());
     cold_mint_resolve_observe_all_identities(&make, &prefix).await;

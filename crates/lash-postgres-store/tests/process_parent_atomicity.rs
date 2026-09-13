@@ -12,8 +12,6 @@ use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, Postg
 
 use crate::support::{SharedDatabaseLock, database_url};
 
-const PARENT_END_REASON: &str = "recorded start intent parent ended with cancel policy";
-
 #[derive(Default)]
 struct ParentEndFaultState {
     crash_before_record_remaining: AtomicUsize,
@@ -327,7 +325,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .expect("literal process-parent emit");
         let intents = if emit {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
@@ -444,8 +442,9 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     let env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let env_ref = lash_core::runtime::persist_process_execution_env(
+    let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
+        &lash_core::ArtifactOwner::host("postgres-parent-atomicity"),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::empty(),
             lash_core::testing::mock_session_policy(),
@@ -597,10 +596,19 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
         .map(|event| event.payload)
         .collect::<Vec<_>>();
     assert_eq!(
-        cancellations,
-        vec![serde_json::json!({"reason": PARENT_END_REASON})],
+        cancellations.len(),
+        1,
         "two synchronized scanners must append exactly one literal cancellation"
     );
+    let cancellation: lash_core::CancelRequest = serde_json::from_value(
+        cancellations
+            .into_iter()
+            .next()
+            .expect("one retained cancellation"),
+    )
+    .expect("decode typed parent-end cancellation");
+    assert_eq!(cancellation.origin, lash_core::CancelOrigin::ParentEnded);
+    assert_eq!(cancellation.requester, r#"{"kind":"host"}"#);
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         0,

@@ -39,24 +39,33 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
     }
 }
 
-#[tokio::test]
-async fn sqlite_store_satisfies_the_maintenance_outcome_contract() {
+lash_conformance::store_maintenance_tests!({
+    let dirs = Arc::new(Mutex::new(Vec::new()));
+    let retained_dirs = Arc::clone(&dirs);
+    (retained_dirs, "sqlite", move || {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let factory =
+            Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
+        dirs.lock_recover().push(dir);
+        factory
+    })
+});
+
+lash_conformance::store_maintenance_fault_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let catalog = Arc::new(Mutex::new(None));
-    let injector_catalog = Arc::clone(&catalog);
-    lash_conformance::store_maintenance_outcome_contract(
+    let make_catalog = Arc::clone(&catalog);
+    (
+        Arc::clone(&dirs),
         "sqlite",
-        || {
+        move || {
             let dir = tempfile::tempdir().expect("tempdir");
-            *catalog.lock_recover() = Some(dir.path().join("durable-core.db"));
+            *make_catalog.lock_recover() = Some(dir.path().join("durable-core.db"));
             let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
                 as Arc<dyn SessionStoreFactory>;
             dirs.lock_recover().push(dir);
             factory
         },
-        Some(Arc::new(SqliteCorruptRootedManifest {
-            catalog: injector_catalog,
-        })),
+        Arc::new(SqliteCorruptRootedManifest { catalog }),
     )
-    .await;
-}
+});

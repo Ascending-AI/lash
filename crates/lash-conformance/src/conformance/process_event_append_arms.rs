@@ -21,7 +21,7 @@ use pretty_assertions::assert_eq;
 /// arm proper; the observable contract is the same either way, and asserting it
 /// per entry point is what catches a floor advance or an event row escaping
 /// onto a path that persisted nothing.
-pub(super) async fn process_event_append_arms_are_ordered(
+pub async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     let target_session_id = SessionId::from("append-arm-ordering-target");

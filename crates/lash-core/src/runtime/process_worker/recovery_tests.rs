@@ -91,10 +91,8 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
     registry
         .append_event(
             &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("cancel before crash".to_string()),
-            ),
+            crate::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:crash_replay_observes_durable_cancellation_before_rerunning_process", 11)),
         )
         .await
         .expect("persist cancellation before simulated crash");
@@ -208,14 +206,22 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     tokio::time::timeout(Duration::from_secs(5), watcher_ready.notified())
         .await
         .expect("cancel watcher reaches its durable wait before runner completion");
-    assert!(raw_registry.process_events_read_count_for_testing() >= 3);
+    // The ready hook explicitly polled the watcher to Pending. Check the durable
+    // precondition separately: cancellation has not yet been committed.
+    assert!(
+        raw_registry
+            .get_process(&ProcessId::from(process_id))
+            .await
+            .expect("read before racing cancellation")
+            .expect("retained running target")
+            .cancel_request
+            .is_none()
+    );
     raw_registry
         .append_event(
             &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("commit cancellation behind the parked watcher".to_string()),
-            ),
+            crate::ProcessEventAppendRequest::cancel_requested(&raw_registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:committed_session_turn_cancellation_fences_a_successful_runner_terminal", 11)),
         )
         .await
         .expect("append cancellation without notifying the parked watcher");
@@ -519,16 +525,17 @@ async fn seed_reserved_trigger_delivery(
 }
 
 fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscriptionDraft {
+    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
     crate::TriggerSubscriptionDraft::for_process(
         "recovery-test",
-        crate::ProcessExecutionEnvRef::new("process-env:test"),
+        process_env_ref,
         "ui.button.pressed",
         source_key,
         ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({ "target": "reconcile" }),
         },
-        crate::ProcessIdentity::new("test-engine"),
+        crate::ProcessIdentity::new("testing-fixture"),
     )
     .with_payload_schema(crate::LashSchema::any())
 }
@@ -1283,8 +1290,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("boundary-recovery-test"),
         &env_spec,
     )
     .await
@@ -1414,8 +1422,9 @@ async fn snapshot_recovery_fixture(
         })),
     );
     let policy = test_session_policy();
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("snapshot-recovery-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
     )
     .await

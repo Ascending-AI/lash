@@ -4,6 +4,12 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ToolBindingError {
+    /// A durable deferred-resolution journal replayed an ambient catalog failure.
+    ///
+    /// The controller error retains the failure's typed runtime code and
+    /// display message, but not the process-local catalog error value.
+    #[error("{message}")]
+    JournaledAmbient { message: String },
     /// A tool manifest omits the binding required by a dialect.
     #[error("tool `{tool}` is missing an explicit `{binding_key}` binding")]
     MissingBinding {

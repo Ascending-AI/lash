@@ -11,7 +11,7 @@ pub(crate) async fn execute_final_tool_intents(
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
-    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V1 {
+    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V2 {
         return Ok(Vec::new());
     }
     if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
@@ -92,7 +92,6 @@ pub(crate) async fn execute_parent_end_actions(
             identity,
             parent_end,
         } = action;
-        let reason = "recorded start intent parent ended with cancel policy";
         let replay_key = format!("{}:parent-end", identity.replay_key);
         let parent = crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -119,7 +118,6 @@ pub(crate) async fn execute_parent_end_actions(
                 identity,
                 parent_end.process_id,
                 parent_end.policy,
-                reason.to_string(),
                 scope,
             )
             .await?;
@@ -161,7 +159,7 @@ fn admit_batch(
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
-    if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V1 {
+    if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V2 {
         return Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion {
             recorded: intents.protocol_version,
         });
@@ -403,12 +401,12 @@ async fn execute_one(
                 .cancel_recorded_intent(
                     &intent.session_id,
                     &intent.process_id,
-                    intent.reason.clone(),
+                    identity.clone(),
                     scope,
                 )
                 .await?;
             Ok((
-                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record))
+                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record)?)
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ))
@@ -431,11 +429,12 @@ async fn execute_one(
             ))
         }
         crate::ToolIntent::EmitTrigger(intent) => {
-            // Unlike the process commands above, the router owns the whole
-            // emission: the occurrence's idempotency key is the store-side
-            // dedupe point and each reserved delivery starts under its own
-            // deterministic journal key, so a redrive of this declaration
-            // re-ingests the same occurrence and re-plays the same starts.
+            // The router owns the whole emission, but the durable declaration
+            // owns its occurrence identity. Stamp the request with that
+            // declaration's replay key so two declarations cannot collapse
+            // merely because their callers reused a key. A redrive retains the
+            // same replay key, so it still re-ingests the same occurrence and
+            // replays the same deterministic delivery starts.
             // `emit_recorded` settles the report those two dedupe points make
             // replay-varying, so the recorded `Executed` result is byte-stable.
             let router = context.trigger_router.as_ref().ok_or_else(|| {
@@ -445,10 +444,11 @@ async fn execute_one(
             })?;
             // Boxed because the drain future is already near the coordinator's
             // large-future budget and emission adds a delivery-start frame.
-            let report = Box::pin(
-                router.emit_recorded(intent.request.clone(), &context.effect_controller.scoped()),
-            )
-            .await?;
+            let mut request = intent.request.clone();
+            request.idempotency_key = identity.replay_key.clone();
+            let report =
+                Box::pin(router.emit_recorded(request, &context.effect_controller.scoped()))
+                    .await?;
             Ok((
                 serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
                 None,
@@ -463,6 +463,7 @@ fn error_code(error: &crate::PluginError) -> String {
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
         crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
+        crate::PluginError::ProcessCancelConflict { .. } => "process_cancel_conflict".to_string(),
         crate::PluginError::ProcessNoLongerRetained { .. } => {
             "process_no_longer_retained".to_string()
         }
@@ -491,8 +492,8 @@ mod tests {
     }
 
     #[test]
-    fn protocol_dispatch_refuses_fabricated_v0_and_v2_records() {
-        for recorded in [0, 2] {
+    fn protocol_dispatch_refuses_predecessor_and_unknown_records() {
+        for recorded in [0, 1, 3] {
             let intents = crate::ToolIntents {
                 protocol_version: recorded,
                 intents: vec![signal(
@@ -509,7 +510,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_total_count_overflow() {
-        let intents = crate::ToolIntents::v1(
+        let intents = crate::ToolIntents::v2(
             (0..=crate::TOOL_INTENT_MAX_COUNT)
                 .map(|index| {
                     signal(
@@ -530,7 +531,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
-        let intents = crate::ToolIntents::v1(
+        let intents = crate::ToolIntents::v2(
             (0..=crate::TOOL_INTENT_MAX_PER_KIND)
                 .map(|index| {
                     signal(
@@ -552,7 +553,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_canonical_byte_overflow() {
-        let intents = crate::ToolIntents::v1(vec![signal(
+        let intents = crate::ToolIntents::v2(vec![signal(
             &SessionId::from("session"),
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
         )]);
@@ -569,7 +570,7 @@ mod tests {
 
     #[test]
     fn admission_refuses_the_entire_batch_on_session_mismatch() {
-        let intents = crate::ToolIntents::v1(vec![
+        let intents = crate::ToolIntents::v2(vec![
             signal(&SessionId::from("session"), serde_json::json!({"index": 0})),
             signal(
                 &SessionId::from("other-session"),
@@ -609,7 +610,7 @@ mod tests {
             identity: None,
             intent_index: 0,
             kind: crate::ToolIntentKind::StartProcess,
-            refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 2 },
+            refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 1 },
         };
         assert_eq!(
             refused.model_addendum(),

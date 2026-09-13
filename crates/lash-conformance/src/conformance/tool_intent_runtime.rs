@@ -40,7 +40,7 @@ impl crate::ToolProvider for SignalIntentProvider {
         assert_eq!(call.context.session_id(), self.session_id);
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"signalled": true})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
                 crate::SignalProcessIntent {
                     session_id: self.session_id.clone(),
                     process_id: self.process_id.clone(),

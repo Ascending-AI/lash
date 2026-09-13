@@ -10,7 +10,9 @@ use lash_rlm_types::RlmGlobalsPatchPluginBody;
 pub(crate) use lashlang::{LashlangDialect, LashlangDialectServices};
 pub(crate) use typescript::TypescriptDialect;
 
-use crate::executor::{RlmExecutionState, execute_code_with_dialect_and_bounds};
+use crate::executor::{
+    RlmExecutionState, execute_code_with_dialect_and_bounds_with_trigger_resolver,
+};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
 /// The source dialect a cell is written in.
@@ -249,13 +251,14 @@ impl RlmDialectSession for DialectSession {
         self.state
             .prepare_runtime_code_execution()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let response = execute_code_with_dialect_and_bounds(
+        let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
             &mut self.state,
             ctx,
             request,
             Arc::clone(&self.services.artifact_store),
             self.surface.clone(),
             self.services.deferred_tool_resolver.clone(),
+            self.services.deferred_trigger_resolver.clone(),
             session_projected_bindings,
             Arc::clone(&self.services.projection_resolver),
             self.services.execution_trace_config.clone(),
@@ -707,6 +710,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -767,6 +771,7 @@ pub(crate) fn test_dialect_services() -> LashlangDialectServices {
         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
         artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
         deferred_tool_resolver: None,
+        deferred_trigger_resolver: None,
         execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         channel: crate::plugin::RlmChannel::Cell,

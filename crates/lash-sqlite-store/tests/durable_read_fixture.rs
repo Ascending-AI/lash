@@ -14,15 +14,30 @@ use serde::{Deserialize, Serialize};
 mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-68-9680a9bd/sqlite-expected.json",
+];
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-67-02339d79/sqlite-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/sqlite-expected.json",
+];
+const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-6a89236a/sqlite-expected.json",
+];
+const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-41ad1609/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-25d7281b/sqlite-expected.json",
+];
+const EARLIER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/sqlite-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/sqlite-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/sqlite-expected.json",
 ];
-const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+const EARLIEST_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-7861e438/sqlite-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-ee717fab/sqlite-expected.json",
 ];
@@ -121,7 +136,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 57"),
+        message.contains("supports schema version 59"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -146,7 +161,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 57"),
+        message.contains("supports schema version 59"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(

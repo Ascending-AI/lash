@@ -1564,7 +1564,7 @@ async fn pinned_source_preserves_provider_by_id_overrides() {
         ) -> crate::ToolAttemptOutcome {
             crate::ToolAttemptOutcome::done(
                 crate::ToolOutcomeDone::ok(json!("id-attempt-route")),
-                crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+                crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
                     crate::EmitProcessEventIntent {
                         session_id: SessionId::from("registry-test"),
                         process_id: crate::ProcessId::from("override-target"),

@@ -82,37 +82,18 @@ impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentio
     }
 }
 
-#[tokio::test]
-async fn sqlite_trigger_occurrence_retention_failure_is_not_laundered() {
+lash_conformance::trigger_retention_fault_tests!({
     let dir = tempfile::tempdir().expect("SQLite trigger retention tempdir");
     let path = dir.path().join("trigger-retention.db");
     let store = super::open_trigger_store(&path);
-    let fault = SqliteTriggerOccurrenceRetentionFaultInjector { path };
-    lash_conformance::trigger_occurrence_retention_failure_law(store, &fault).await;
-}
+    let legacy = Arc::new(SqliteLegacyTriggerMutationReceiptInjector { path: path.clone() });
+    let fault = Arc::new(SqliteTriggerOccurrenceRetentionFaultInjector { path });
+    (dir, store, legacy, fault)
+});
 
-#[tokio::test]
-async fn sqlite_trigger_retention_reconciliation_is_transactional() {
-    let dir = tempfile::tempdir().expect("SQLite trigger retention tempdir");
-    let path = dir.path().join("trigger-reconciliation.db");
-    let store = super::open_trigger_store(&path);
-    let fault = SqliteTriggerOccurrenceRetentionFaultInjector { path };
-    lash_conformance::trigger_retention_reconciliation_failure_law(store, &fault).await;
-}
-
-#[tokio::test]
-async fn sqlite_legacy_ownerless_trigger_receipt_is_retained() {
-    let dir = tempfile::tempdir().expect("SQLite legacy trigger receipt tempdir");
-    let path = dir.path().join("legacy-trigger-receipt.db");
-    let store = super::open_trigger_store(&path);
-    let injector = SqliteLegacyTriggerMutationReceiptInjector { path };
-    lash_conformance::legacy_ownerless_trigger_receipt_is_retained_law(store, &injector).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_process_trigger_retention_satisfies_conformance() {
+lash_conformance::process_trigger_retention_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    lash_conformance::process_trigger_retention(move || {
+    ((), move || {
         let dirs = Arc::clone(&dirs);
         async move {
             let dir = tempfile::tempdir().expect("process-trigger retention tempdir");
@@ -140,5 +121,4 @@ async fn sqlite_process_trigger_retention_satisfies_conformance() {
             }
         }
     })
-    .await;
-}
+});

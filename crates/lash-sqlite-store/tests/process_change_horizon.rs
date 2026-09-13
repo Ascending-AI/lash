@@ -3,8 +3,7 @@ use std::sync::Arc;
 use lash_core::ProcessRegistry;
 use lash_sqlite_store::SqliteProcessRegistry;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_change_feed_refuses_cursor_below_tombstone_compaction_horizon() {
+lash_conformance::process_change_horizon_tests!({
     let dir = tempfile::tempdir().expect("prune-horizon tempdir");
     let registry = Arc::new(
         SqliteProcessRegistry::open(
@@ -14,6 +13,5 @@ async fn sqlite_change_feed_refuses_cursor_below_tombstone_compaction_horizon() 
         .await
         .expect("open prune-horizon registry"),
     ) as Arc<dyn ProcessRegistry>;
-    lash_conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused(registry)
-        .await;
-}
+    (dir, registry)
+});

@@ -9,85 +9,17 @@ use lash_core::store::RuntimePersistence;
 
 use super::{reset, storage};
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_direct_turn_accepts_before_driving_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::direct_turn_acceptance_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres direct-turn acceptance conformance: database is not configured"
         );
         return;
     };
     reset(&storage).await;
-    Box::pin(lash_conformance::direct_turn_accepts_before_driving(
+    (
+        database_lock,
         "postgres",
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-    ))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_orphaned_direct_turn_input_is_drivable_by_another_worker_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres direct-turn recovery conformance: database is not configured");
-        return;
-    };
-    reset(&storage).await;
-    Box::pin(
-        lash_conformance::orphaned_direct_turn_input_is_drivable_by_another_worker(
-            "postgres",
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        ),
     )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_direct_turn_acceptance_mints_no_idempotency_key_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres direct-turn identity conformance: database is not configured");
-        return;
-    };
-    reset(&storage).await;
-    Box::pin(
-        lash_conformance::direct_turn_acceptance_mints_no_idempotency_key(
-            "postgres",
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        ),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_unclaimed_turn_input_settlement_is_a_conditional_write_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres unclaimed-settlement conformance: database is not configured");
-        return;
-    };
-    reset(&storage).await;
-    Box::pin(
-        lash_conformance::unclaimed_turn_input_settlement_is_a_conditional_write(
-            "postgres",
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        ),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_busy_execution_lane_refuses_direct_turn_before_acceptance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres unclaimed-settlement stand-down conformance: database is not \
-             configured"
-        );
-        return;
-    };
-    reset(&storage).await;
-    Box::pin(
-        lash_conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
-            "postgres",
-            Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        ),
-    )
-    .await;
-}
+});

@@ -178,8 +178,8 @@ type GroupHostFactory =
 pub(super) struct LiveConformanceHarness {
     ingress_url: String,
     executors: Arc<ConformanceExecutors>,
-    shutdown_tx: tokio::sync::oneshot::Sender<()>,
-    server: tokio::task::JoinHandle<()>,
+    shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LiveConformanceHarness {
@@ -222,8 +222,8 @@ impl LiveConformanceHarness {
         Self {
             ingress_url,
             executors,
-            shutdown_tx,
-            server,
+            shutdown_tx: tokio::sync::Mutex::new(Some(shutdown_tx)),
+            server: tokio::sync::Mutex::new(Some(server)),
         }
     }
 
@@ -250,11 +250,16 @@ impl LiveConformanceHarness {
         })
     }
 
-    pub(super) async fn finish(self) {
-        let _ = self.shutdown_tx.send(());
-        self.server
-            .await
-            .expect("Restate effect-group endpoint task");
+    /// Shuts the endpoint task down. Takes `&self` so a harness shared across
+    /// a registration fixture's maker, witness and teardown can still be torn
+    /// down exactly once; a second call is a no-op.
+    pub(super) async fn finish(&self) {
+        if let Some(shutdown_tx) = self.shutdown_tx.lock().await.take() {
+            let _ = shutdown_tx.send(());
+        }
+        if let Some(server) = self.server.lock().await.take() {
+            server.await.expect("Restate effect-group endpoint task");
+        }
     }
 
     pub(super) async fn run_design_witnesses(&self) {
@@ -341,6 +346,7 @@ impl LiveConformanceHarness {
     pub(super) async fn run_active_wait_registration_witnesses(
         &self,
         host: Arc<dyn lash_core::EffectHost>,
+        assert_retirement: lash_conformance::ActiveWaitRetirementAssertion,
     ) {
         let suffix = nonce();
         let scope =
@@ -370,13 +376,7 @@ impl LiveConformanceHarness {
             "the workflow registered an unresolved wait before retirement"
         );
 
-        lash_conformance::effect_host_registered_wait_rejects_quiescent_retirement(
-            Arc::clone(&host),
-            scope,
-            key,
-            waiter,
-        )
-        .await;
+        assert_retirement(Arc::clone(&host), scope, key, waiter).await;
 
         // The opposite legal ordering: retirement fences an empty scope, then
         // the real wait workflow reaches the same index and observes Revoked.

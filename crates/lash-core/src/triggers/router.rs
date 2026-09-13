@@ -486,6 +486,8 @@ fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
     process_work: crate::ProcessWorkWiring,
+    process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
+    process_engines: Option<crate::ProcessEngineRegistry>,
 }
 
 impl TriggerRouter {
@@ -493,7 +495,21 @@ impl TriggerRouter {
         Self {
             store,
             process_work,
+            process_env_store: None,
+            process_engines: None,
         }
+    }
+
+    /// Bind the exact artifact stores used by the runtime that will execute
+    /// trigger-started processes.
+    pub fn with_process_artifacts(
+        mut self,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_engines: crate::ProcessEngineRegistry,
+    ) -> Self {
+        self.process_env_store = Some(process_env_store);
+        self.process_engines = Some(process_engines);
+        self
     }
 
     pub(crate) fn store(&self) -> Arc<dyn TriggerStore> {
@@ -705,10 +721,19 @@ impl TriggerRouter {
                     invocation,
                     crate::RuntimeEffectCommand::process(command),
                 ),
-                crate::RuntimeEffectLocalExecutor::processes(
-                    process_registry,
-                    Arc::clone(self.process_work.port()),
-                ),
+                {
+                    let mut executor = crate::RuntimeEffectLocalExecutor::processes(
+                        process_registry,
+                        Arc::clone(self.process_work.port()),
+                    );
+                    if let Some(store) = self.process_env_store.as_ref() {
+                        executor = executor.with_process_env_store(Arc::clone(store));
+                    }
+                    if let Some(engines) = self.process_engines.as_ref() {
+                        executor = executor.with_process_engines(engines.clone());
+                    }
+                    executor
+                },
             )
             .await?;
         match outcome {
@@ -1182,7 +1207,6 @@ mod tests {
                 owner_scope: owner.clone(),
                 filter: TriggerSubscriptionFilter {
                     registrant_scope_id: Some("r".to_string()),
-                    session_id: None,
                     subscription_key: Some("s".to_string()),
                     name: None,
                     source_type: Some("t".to_string()),
@@ -1195,7 +1219,6 @@ mod tests {
                 owner_scope: TriggerOwnerScope::Platform,
                 filter: TriggerSubscriptionFilter {
                     registrant_scope_id: None,
-                    session_id: None,
                     subscription_key: None,
                     name: None,
                     source_type: None,
@@ -1257,12 +1280,12 @@ mod tests {
                 "trigger-command:v2:blake3:e7768d867c7d29aca05aefc3bf91a1ea5b340294ea10bdc0b2b25c4428492e60",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64020100000000000000056f776e657201000000000000000172000100000000000000017300010000000000000001740001000000000000000c7b22746172676574223a307d0100",
-                "trigger-command:v2:blake3:ecd559b72d7f06eb74ac8c41bf06430f5316861a17786ef5687a8f558c23d440",
+                "6c6173682d737461626c652d6964656e74697479020500000000000000146c6173682e747269676765722d636f6d6d616e64020100000000000000056f776e657201000000000000000172000100000000000000017300010000000000000001740001000000000000000c7b22746172676574223a307d0100",
+                "trigger-command:v5:blake3:37624f473a2296417fe3c15d2c0f6c96fc8243f8f505211f02630fc1ecb5368b",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e640203000000000000000101",
-                "trigger-command:v2:blake3:9adb8336246675d8170037321dfa30e38a867e7aa8f2fd15675f1169ce266b2a",
+                "6c6173682d737461626c652d6964656e74697479020500000000000000146c6173682e747269676765722d636f6d6d616e640203000000000000000101",
+                "trigger-command:v5:blake3:3beb265c709d5dfedeeb95ed0e2f9df98f603a0ff49cbcc1e00e8c575258aefb",
             ),
             (
                 "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64030100000000000000056f776e6572010100000000000000056163746f72000000000000000373756200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d04000000000000000e7b226d65746164617461223a307d00000000000000046b696e64000000000000000000000000000000000000000000000000000000",
@@ -1325,17 +1348,21 @@ mod tests {
         crate::LashSchema::any()
     }
 
-    fn trigger_process_draft(source_key: &str, process_name: &str) -> TriggerSubscriptionDraft {
+    fn trigger_process_draft(
+        source_key: &str,
+        process_name: &str,
+        env_ref: crate::ProcessExecutionEnvRef,
+    ) -> TriggerSubscriptionDraft {
         TriggerSubscriptionDraft::for_process(
             format!("test/{process_name}"),
-            crate::ProcessExecutionEnvRef::new(format!("process-env:{process_name}")),
+            env_ref,
             "ui.button.pressed",
             source_key,
             crate::ProcessInput::Engine {
-                kind: "test-engine".to_string(),
+                kind: "testing-fixture".to_string(),
                 payload: serde_json::json!({ "process": process_name }),
             },
-            crate::ProcessIdentity::new("test-engine").with_label(Some(process_name)),
+            crate::ProcessIdentity::new("testing-fixture").with_label(Some(process_name)),
         )
         .with_payload_schema(crate::LashSchema::any())
     }
@@ -1458,17 +1485,19 @@ mod tests {
         let store = Arc::new(InMemoryTriggerStore::default());
         let registry: Arc<dyn crate::ProcessRegistry> =
             Arc::new(crate::TestLocalProcessRegistry::default());
+        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
         let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
         let subscription = register(
             store.as_ref(),
             "started-register",
-            trigger_process_draft(&source_key, "started"),
+            trigger_process_draft(&source_key, "started", env_ref),
         )
         .await;
         let router = TriggerRouter::new(
             store,
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
-        );
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_controller = crate::ScopedEffectController::borrowed(
             &controller,
@@ -1522,12 +1551,13 @@ mod tests {
     async fn session_trigger_process_is_observed_by_its_registrant() {
         let store = Arc::new(InMemoryTriggerStore::default());
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
         let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
         register_for_session(
             store.as_ref(),
             "session-register",
             &SessionId::from("session-owner"),
-            trigger_process_draft(&source_key, "session-owned"),
+            trigger_process_draft(&source_key, "session-owned", env_ref),
         )
         .await;
         let router = TriggerRouter::new(
@@ -1535,7 +1565,8 @@ mod tests {
             crate::testing::process_work_wiring_for_registry(
                 Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
             ),
-        );
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
         let controller = crate::NativeRuntimeEffectController::default();
         let scoped_controller = crate::ScopedEffectController::borrowed(
             &controller,

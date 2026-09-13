@@ -417,6 +417,8 @@ pub enum RemoteProcessToolRetryStatus {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessToolCancellation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<lash_sansio::CancelOrigin>,
     pub message: String,
     pub source: RemoteProcessToolFailureSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -570,6 +572,8 @@ pub struct RemoteProcessRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandon_request: Option<RemoteAbandonRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<lash_sansio::CancelRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<RemoteProcessWaitState>,
     #[serde(default)]
     pub status: RemoteProcessStatus,
@@ -665,8 +669,19 @@ pub struct RemoteProcessWorkItem {
     #[serde(default)]
     pub events: Vec<RemoteObservedProcessEvent>,
     pub event_tail_sequence: u64,
+    pub state: RemoteObservedWorkItemState,
     pub kind: String,
     pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteObservedWorkItemState {
+    Coherent,
+    EventTailMismatch {
+        record_sequence: u64,
+        event_tail_sequence: u64,
+    },
 }
 
 impl RemoteProcessWorkItem {
@@ -684,6 +699,34 @@ impl RemoteProcessWorkItem {
                     self.event_tail_sequence
                 ),
             });
+        }
+        match self.state {
+            RemoteObservedWorkItemState::Coherent => {
+                if self.process.last_event_sequence != self.event_tail_sequence {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: format!(
+                            "coherent work-item record sequence {} contradicts event-tail sequence {}",
+                            self.process.last_event_sequence, self.event_tail_sequence
+                        ),
+                    });
+                }
+            }
+            RemoteObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => {
+                if record_sequence != self.process.last_event_sequence
+                    || event_tail_sequence != self.event_tail_sequence
+                    || record_sequence == event_tail_sequence
+                {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: "work-item mismatch state contradicts its record and event-tail sequences"
+                            .to_string(),
+                    });
+                }
+            }
         }
         require_non_empty(type_name, "kind", &self.kind)?;
         if self.kind != self.process.identity.kind {
@@ -739,6 +782,8 @@ pub struct RemoteObservedProcess {
     pub lease_expires_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandon_request: Option<RemoteAbandonRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<lash_sansio::CancelRequest>,
     pub input: RemoteProcessInput,
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]

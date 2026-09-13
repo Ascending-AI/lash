@@ -287,11 +287,13 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
             }
             lash_core::ToolCallOutcome::Cancelled(cancellation) => {
                 let lash_core::ToolCancellation {
+                    origin,
                     message,
                     source,
                     raw,
                 } = cancellation;
                 RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                    origin,
                     message,
                     source: source.into(),
                     raw: raw
@@ -354,11 +356,13 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
             }
             RemoteProcessToolCallOutcome::Cancelled(cancellation) => {
                 let RemoteProcessToolCancellation {
+                    origin,
                     message,
                     source,
                     raw,
                 } = cancellation;
                 lash_core::ToolCallOutcome::Cancelled(lash_core::ToolCancellation {
+                    origin,
                     message,
                     source: source.into(),
                     raw: raw

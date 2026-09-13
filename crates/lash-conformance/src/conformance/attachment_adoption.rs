@@ -541,6 +541,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionS
         intent_at_epoch_ms: 1,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     };
     for digest in [&restoring_condemned, &restoring_reclaimed] {
         assert!(matches!(
@@ -1290,6 +1291,7 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
                 intent_at_epoch_ms: 0,
                 owner_kind: Some(AttachmentOwnerKind::Turn),
                 owner_id: Some(turn_id.to_string()),
+                owner_incarnation: None,
             };
             let permit = match store
                 .begin_attachment_write(intent.clone())
@@ -1429,6 +1431,7 @@ async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn Ses
         intent_at_epoch_ms: 0,
         owner_kind: Some(AttachmentOwnerKind::Turn),
         owner_id: Some(turn_id.to_string()),
+        owner_incarnation: None,
     };
     let permit = match store
         .begin_attachment_write(intent.clone())
@@ -1483,6 +1486,7 @@ fn write_intent(session_id: &SessionId, attachment_id: &AttachmentId) -> Attachm
         intent_at_epoch_ms: 0,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     }
 }
 

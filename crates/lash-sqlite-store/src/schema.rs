@@ -355,7 +355,8 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
     committed_at_ms  INTEGER,
     owner_kind       TEXT CHECK (owner_kind IN ('turn', 'process')),
     owner_id         TEXT,
-    CHECK ((owner_kind IS NULL) = (owner_id IS NULL)),
+    owner_incarnation INTEGER,
+    CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
     PRIMARY KEY (session_id, attachment_id)
 );
 
@@ -378,15 +379,36 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
     PRIMARY KEY (namespace, artifact_ref)
 );
 
+-- Exact owner edges for immutable artifacts. The edge is the liveness fact;
+-- no maintained count or last-operation field exists on shared bytes.
+CREATE TABLE IF NOT EXISTS artifact_owners (
+    namespace    TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    owner_kind   TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_id     TEXT NOT NULL,
+    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+);
+
+-- Execution-owner retirement is a permanent publication fence. Host and
+-- process releases are ordinary exact-edge severance and never enter here.
+CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
+    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_id   TEXT NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
     ON attachment_manifest(session_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
     ON attachment_manifest(committed_at_ms)
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
-    ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
+    ON attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
+CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
+    ON artifact_owners(owner_kind, owner_id);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -555,7 +577,12 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 56 persists full effect addresses in session causal metadata.
 /// Version 57 also requires pending-input claim identity and token to be either
 /// both NULL or both populated; both version-56 parent catalogs are recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 57;
+/// Version 58 adds exact owner edges and permanent execution-owner publication
+/// fences. Version-57 catalogs are rejected and recreated.
+/// Version 59 qualifies process-owned attachment intents with the registry-minted
+/// incarnation. Version-58 catalogs are rejected so a bare process id is never
+/// reinterpreted as the current incarnation with the same reusable name.
+pub(crate) const SCHEMA_VERSION: i32 = 59;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -636,7 +663,8 @@ CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
 -- identity, the same key the bound effect journal's rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
@@ -732,6 +760,14 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
+
+CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
+    process_id       TEXT NOT NULL,
+    incarnation      INTEGER NOT NULL,
+    cleanup_json     TEXT NOT NULL,
+    PRIMARY KEY (process_id, incarnation),
+    FOREIGN KEY (process_id, incarnation) REFERENCES process_tombstones(process_id, incarnation) ON DELETE RESTRICT
+);
 
 CREATE TABLE IF NOT EXISTS process_leases (
     process_id       TEXT PRIMARY KEY,
@@ -829,7 +865,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// rejected rather than fabricating an execution scope or session owner.
 /// Version 34 requires the host-declared lifecycle policy in every process record.
 /// Earlier process registries are rejected rather than inventing a policy.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 34;
+/// Version 35 replaces prose cancellation events with a typed, record-folded fact.
+/// Earlier registries are rejected so an accepted cancellation is never lost.
+/// Version 36 makes Process Prune retain exact artifact-release evidence until
+/// every configured artifact store acknowledges owner severance. Version-35
+/// registries are rejected rather than inventing cleanup acknowledgements.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 36;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1004,7 +1045,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 -- Keyed by the scope's journal identity, the same key its effect rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 ";
 
@@ -1061,7 +1103,11 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // Version 18 persists the admitted execution scope with every replay key.
 // Pre-18 journals are rejected because their keys cannot identify the scope
 // whose authority admitted the effect.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 18;
+// Version 19 rejects the retired trigger-list envelope shape. Older journals
+// are recreated rather than replayed across this encoding cutover.
+// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
+// Pre-20 effect databases are rejected rather than migrated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

@@ -231,7 +231,7 @@ use std::sync::Arc;
 
 use lash_core::runtime::{
     QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload, load_process_execution_env,
-    persist_process_execution_env, process_wake_batch_draft,
+    process_wake_batch_draft, publish_process_execution_env,
 };
 use lash_core::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey, AwaitEventWaitIdentity,
@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 65;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 69;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -323,18 +323,34 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
     // current predecessor to remain adjacent to this build's generation.
     for (paths, predecessor_version, successor_version) in [
         (
-            crate::OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            crate::EARLIEST_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             62,
             63,
         ),
         (
-            crate::HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            crate::EARLIER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             63,
             64,
         ),
         (
-            crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            crate::ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             64,
+            65,
+        ),
+        (
+            crate::OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            65,
+            66,
+        ),
+        (
+            crate::HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            66,
+            67,
+        ),
+        (crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS, 67, 68),
+        (
+            crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            68,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -399,6 +415,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             intent_at_epoch_ms: 100,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         })
         .expect("record fixture attachment intent");
 
@@ -531,10 +548,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("enqueue fixture pending turn input");
 
     let process_env = fixture_process_env();
-    let process_env_ref =
-        persist_process_execution_env(handles.process_envs.as_ref(), &process_env)
-            .await
-            .expect("persist fixture process execution environment");
+    let process_env_ref = publish_process_execution_env(
+        handles.process_envs.as_ref(),
+        &lash_core::ArtifactOwner::host("durable-read-fixture"),
+        &process_env,
+    )
+    .await
+    .expect("persist fixture process execution environment");
     let registration = waiting_process_registration(process_env_ref.clone());
     handles
         .processes

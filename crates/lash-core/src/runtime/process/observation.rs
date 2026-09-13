@@ -1,4 +1,5 @@
 use crate::SessionId;
+use lash_sansio::CancelRequest;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -33,8 +34,22 @@ pub struct ObservedWorkItem {
     /// tail. Comparing this with `process.last_event_sequence` reveals a
     /// non-transactionally mis-paired record/event snapshot.
     pub event_tail_sequence: u64,
+    /// Whether the independently read process record and event tail describe
+    /// one coherent event position. Consumers must not present lifecycle state
+    /// from an item carrying [`ObservedWorkItemState::EventTailMismatch`].
+    pub state: ObservedWorkItemState,
     pub kind: String,
     pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ObservedWorkItemState {
+    Coherent,
+    EventTailMismatch {
+        record_sequence: u64,
+        event_tail_sequence: u64,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -68,6 +83,9 @@ pub struct ObservedProcess {
     /// Pending Abandon Request the sweep reconciles once the lease lapses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandon_request: Option<AbandonRequest>,
+    /// The first accepted process cancellation request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<CancelRequest>,
     pub input: ProcessInput,
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,11 +110,10 @@ pub struct ObservedProcessEvent {
 }
 
 impl ObservedWorkItem {
-    /// Reports whether the independently read record and event tail came from
-    /// different process-event positions. Callers should retry the observation
-    /// instead of treating a mismatched item as a coherent snapshot.
+    /// Reports whether the bounded observer retry still left independently
+    /// read record and event-tail positions mis-paired.
     pub fn has_mispaired_event_tail(&self) -> bool {
-        self.process.last_event_sequence != self.event_tail_sequence
+        matches!(self.state, ObservedWorkItemState::EventTailMismatch { .. })
     }
 }
 
@@ -105,6 +122,7 @@ impl ObservedWorkItem {
 /// process's full event history; detail views page through `events_after`
 /// with a cursor.
 pub const SNAPSHOT_EVENT_TAIL: usize = 32;
+const SNAPSHOT_READ_ATTEMPTS: usize = 2;
 
 impl ProcessWorkObserver {
     pub fn new(registry: Arc<dyn ProcessRegistry>) -> Self {
@@ -183,31 +201,51 @@ impl ProcessWorkObserver {
 
     async fn work_item_from_record(
         &self,
-        record: ProcessRecord,
+        mut record: ProcessRecord,
     ) -> Result<ObservedWorkItem, PluginError> {
-        let events: Vec<_> = self
-            .registry
-            .recent_events(&record.id, SNAPSHOT_EVENT_TAIL)
-            .await?
-            .into_iter()
-            .map(ObservedProcessEvent::from)
-            .collect();
-        let event_tail_sequence = events.last().map_or(0, |event| event.sequence);
-        let lease = self.registry.get_process_lease(&record.id).await?;
-        let process = ObservedProcess::from_record(record, lease);
-        let kind = process.identity.kind.clone();
-        let label = process
-            .identity
-            .label
-            .clone()
-            .unwrap_or_else(|| kind.clone());
-        Ok(ObservedWorkItem {
-            process,
-            events,
-            event_tail_sequence,
-            kind,
-            label,
-        })
+        for attempt in 0..SNAPSHOT_READ_ATTEMPTS {
+            let process_id = record.id.clone();
+            let events: Vec<_> = self
+                .registry
+                .recent_events(&process_id, SNAPSHOT_EVENT_TAIL)
+                .await?
+                .into_iter()
+                .map(ObservedProcessEvent::from)
+                .collect();
+            let event_tail_sequence = events.last().map_or(0, |event| event.sequence);
+            let lease = self.registry.get_process_lease(&process_id).await?;
+            let process = ObservedProcess::from_record(record, lease);
+            let kind = process.identity.kind.clone();
+            let label = process
+                .identity
+                .label
+                .clone()
+                .unwrap_or_else(|| kind.clone());
+            let state = if process.last_event_sequence == event_tail_sequence {
+                ObservedWorkItemState::Coherent
+            } else {
+                ObservedWorkItemState::EventTailMismatch {
+                    record_sequence: process.last_event_sequence,
+                    event_tail_sequence,
+                }
+            };
+            let item = ObservedWorkItem {
+                process,
+                events,
+                event_tail_sequence,
+                state,
+                kind,
+                label,
+            };
+            if !item.has_mispaired_event_tail() || attempt + 1 == SNAPSHOT_READ_ATTEMPTS {
+                return Ok(item);
+            }
+            let Some(refreshed) = self.registry.get_process(&process_id).await? else {
+                return Ok(item);
+            };
+            record = refreshed;
+        }
+        unreachable!("snapshot read attempt bound is non-zero")
     }
 
     pub async fn process(
@@ -338,6 +376,7 @@ impl ObservedProcess {
             lease_holder,
             lease_expires_at_ms,
             abandon_request: record.abandon_request.map(|request| *request),
+            cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
@@ -395,7 +434,9 @@ fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> b
 
 #[cfg(test)]
 mod tests {
-    use crate::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
+    use crate::{
+        ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+    };
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -469,8 +510,17 @@ mod tests {
         registry
             .append_event(
                 &ProcessId::from("visible-process"),
-                ProcessEventAppendRequest::new("process.cancel_requested", json!({"why": "test"}))
-                    .with_replay_key("visible-process:cancel-requested"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("visible-process"))
+                        .await
+                        .expect("retained observed target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:observation-test",
+                        11,
+                    ),
+                ),
             )
             .await
             .expect("append event");
@@ -502,6 +552,15 @@ mod tests {
                 .any(|event| event.event_type == "process.observer_added"),
             "observer membership changes are part of the durable audit tail"
         );
+        assert_eq!(
+            snapshot.items[0].process.cancel_request,
+            Some(crate::CancelRequest::new(
+                crate::CancelOrigin::OperatorRequested,
+                "actor:observation-test",
+                11
+            )),
+            "the observation carries the accepted cancellation fact"
+        );
         let cancelled = snapshot.items[0]
             .events
             .iter()
@@ -514,28 +573,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observation_sequence_stamps_reveal_a_deliberately_mispaired_snapshot() {
-        let registry =
-            Arc::new(super::super::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-        let scope = SessionScope::new("mispaired");
-        register_visible(
-            &registry,
-            &scope,
-            external_registration(&ProcessId::from("mispaired-process"), "Mispaired"),
-        )
-        .await;
-        let mut item = observer(registry)
-            .snapshot_for_session("mispaired")
+    async fn work_item_retry_converges_after_a_record_event_tail_disagreement() {
+        let registry = Arc::new(super::super::TestLocalProcessRegistry::default());
+        let process_id = ProcessId::from("retry-converges");
+        registry
+            .register_process(external_registration(&process_id, "Retry converges"))
             .await
-            .expect("snapshot")
-            .items
-            .pop()
-            .expect("observed work item");
+            .expect("register process");
+        let stale_record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read stale record")
+            .expect("retained process");
+        registry
+            .complete_process(
+                &process_id,
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete process between record and event-tail reads");
 
-        item.event_tail_sequence = item.event_tail_sequence.saturating_add(1);
-        assert!(
-            item.has_mispaired_event_tail(),
-            "different record and event-tail positions must be detectable"
+        let item = observer(Arc::clone(&registry) as Arc<dyn ProcessRegistry>)
+            .work_item_from_record(stale_record)
+            .await
+            .expect("retry observation");
+
+        assert_eq!(item.state, ObservedWorkItemState::Coherent);
+        assert_eq!(
+            item.process.last_event_sequence, item.event_tail_sequence,
+            "the retry must pair the refreshed terminal record with its event tail"
+        );
+        assert!(item.process.terminal);
+    }
+
+    #[tokio::test]
+    async fn work_item_retry_surfaces_typed_mismatch_when_bound_is_exhausted() {
+        let registry = Arc::new(super::super::TestLocalProcessRegistry::default());
+        let process_id = ProcessId::from("retry-exhausted");
+        registry
+            .register_process(external_registration(&process_id, "Retry exhausted"))
+            .await
+            .expect("register process");
+        let stale_record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read stale record")
+            .expect("retained process");
+        registry
+            .complete_process(
+                &process_id,
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete process between record and event-tail reads");
+        registry
+            .set_process_read_override(stale_record.clone())
+            .await;
+
+        let item = observer(Arc::clone(&registry) as Arc<dyn ProcessRegistry>)
+            .work_item_from_record(stale_record.clone())
+            .await
+            .expect("bounded observation");
+
+        assert_eq!(
+            item.state,
+            ObservedWorkItemState::EventTailMismatch {
+                record_sequence: stale_record.last_event_sequence,
+                event_tail_sequence: item.event_tail_sequence,
+            }
+        );
+        assert!(item.has_mispaired_event_tail());
+        assert_ne!(
+            item.process.last_event_sequence, item.event_tail_sequence,
+            "the exhausted retry must expose rather than hide the torn snapshot"
         );
     }
 
@@ -655,8 +767,17 @@ mod tests {
         registry
             .append_event(
                 &ProcessId::from("older"),
-                ProcessEventAppendRequest::new("process.cancel_requested", json!({}))
-                    .with_replay_key("older:cancel-requested"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("older"))
+                        .await
+                        .expect("retained observed target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:observation-test",
+                        11,
+                    ),
+                ),
             )
             .await
             .expect("update older process");

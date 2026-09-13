@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -379,13 +380,56 @@ impl LashlangSurface {
         &self,
         catalog: &lash_core::ToolCatalog,
     ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        self.host_environment_masking(catalog, &BTreeSet::new())
+    }
+
+    /// Builds the link-time environment while excluding exact ambient call
+    /// paths already decided by the deferred-resolution journal.
+    ///
+    /// Filtering happens before the flat Tool Catalog and contributed surface
+    /// resources are merged and validated. Thus a recorded authority can mask
+    /// every later ambient claimant for its path, while unrelated collisions
+    /// and malformed definitions retain their normal failures.
+    pub fn host_environment_masking(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        masked_call_paths: &BTreeSet<String>,
+    ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        let mut resources = self.resources.clone();
+        for path in masked_call_paths {
+            if let Some((module_path, operation)) = path.rsplit_once('.') {
+                resources.mask_module_operation(module_path, operation);
+            }
+        }
         lashlang_host_environment_from_tool_catalog(
-            catalog,
+            &filtered_tool_catalog(catalog, masked_call_paths),
             self.abilities,
             self.language_features,
-            self.resources.clone(),
+            resources,
         )
     }
+}
+
+fn filtered_tool_catalog(
+    catalog: &lash_core::ToolCatalog,
+    masked_call_paths: &BTreeSet<String>,
+) -> lash_core::ToolCatalog {
+    if masked_call_paths.is_empty() {
+        return catalog.clone();
+    }
+    let mut filtered = catalog.clone();
+    filtered.tools.retain(|entry| {
+        let Ok(binding) = required_tool_lashlang_executable(&entry.manifest) else {
+            // Preserve ordinary validation for malformed unrelated entries.
+            return true;
+        };
+        !masked_call_paths.contains(&format!(
+            "{}.{}",
+            binding.module_path.join("."),
+            binding.operation
+        ))
+    });
+    filtered
 }
 
 pub fn lashlang_host_environment_from_tool_catalog(
@@ -1174,6 +1218,59 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         ))
         .await
     }
+
+    async fn protect_start_artifacts(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .retain_module_artifact(owner, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn transfer_start_artifacts(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .transfer_module_artifact(from, to, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn release_artifacts(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        payload: &serde_json::Value,
+    ) -> Result<(), lash_core::PluginError> {
+        let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|error| {
+            lash_core::PluginError::Session(format!("invalid lashlang process payload: {error}"))
+        })?;
+        self.artifact_store
+            .release_module_artifact(owner, &input.module_ref)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn retire_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lash_core::PluginError> {
+        self.artifact_store
+            .retire_module_artifact_owner(owner)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
 }
 
 pub fn admit_lashlang_process(
@@ -1202,6 +1299,7 @@ mod bridge;
 mod catalog_tests;
 mod catalogue_preview;
 mod deferred;
+mod deferred_triggers;
 mod process;
 mod typed_output;
 
@@ -1219,9 +1317,16 @@ pub use catalogue_preview::{
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
 pub use deferred::{
-    DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver, Resolution,
+    DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+    DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
     SharedDeferredToolResolver, ToolGrant, link_with_deferred_resolution,
+    resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
+};
+pub use deferred_triggers::{
+    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
+    DeferredTriggerResolutionRecord, DeferredTriggerResolver, SharedDeferredTriggerResolver,
+    TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
 };
 pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,

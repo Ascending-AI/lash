@@ -270,7 +270,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .cancel(&self.session_id, process_id, self.process_scope())
             .await
-            .map(crate::ProcessCancelReceipt::from_record)
+            .and_then(crate::ProcessCancelReceipt::from_record)
     }
 
     /// Signal a process visible to this internal process body.

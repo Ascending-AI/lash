@@ -102,3 +102,76 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         turn_policy
     );
 }
+
+pub(super) async fn empty_tool_call_identifiers_leave_no_row(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    let cases = [
+        (
+            "empty-call-id",
+            "",
+            "tool",
+            "process `empty-call-id` tool call must carry a call id",
+        ),
+        (
+            "whitespace-call-id",
+            "  ",
+            "tool",
+            "process `whitespace-call-id` tool call must carry a call id",
+        ),
+        (
+            "empty-tool-name",
+            "call",
+            "",
+            "process `empty-tool-name` tool call must carry a tool name",
+        ),
+        (
+            "whitespace-tool-name",
+            "call",
+            "\t",
+            "process `whitespace-tool-name` tool call must carry a tool name",
+        ),
+    ];
+
+    for (process_id, call_id, tool_name, expected) in cases {
+        let process_id = ProcessId::from(process_id);
+        let registration = ProcessRegistration::new(
+            &process_id,
+            ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    call_id,
+                    crate::ToolId::new("tool-id"),
+                    tool_name,
+                    serde_json::json!({}),
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::host(),
+            ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        )
+        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+            "process-env:{process_id}"
+        ))));
+
+        assert_session_refusal(registry.register_process(registration).await, expected);
+        assert!(
+            registry
+                .get_process(&process_id)
+                .await
+                .expect("read refused tool-call process")
+                .is_none(),
+            "a refused tool-call registration must not leave a point-readable row"
+        );
+        assert!(
+            !registry
+                .list_processes(&ProcessListFilter::default())
+                .await
+                .expect("list after refused tool-call registration")
+                .iter()
+                .any(|record| record.id == process_id),
+            "a refused tool-call registration must not leave a listed row"
+        );
+    }
+}

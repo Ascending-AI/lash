@@ -80,8 +80,15 @@ pub(super) async fn cancel_redrives_successor_engine() {
         .append_event(
             &ProcessId::from("cancel-between-segments"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("cancel-between-segments"),
-                Some("stop".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("cancel-between-segments"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:cancel_redrives_successor_engine",
+                    11,
+                ),
             ),
         )
         .await
@@ -588,37 +595,53 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     );
 
     let process_ref = lash_core::ProcessRef::from_record(&record);
+    let live = registry
+        .get_process_ref(&process_ref)
+        .await
+        .expect("read cancel target")
+        .expect("retained target");
+    assert!(!live.is_terminal());
+    assert!(live.cancel_request.is_none());
 
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-smoke-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_ref,
-                    reason: Some("stop-smoke".to_string()),
-                    replay: None,
+                    process_ref: process_ref.clone(),
+                    origin: lash_core::CancelOrigin::OperatorRequested,
+                    requester: "actor:smoke".to_string(),
+                    attribution: None,
                 }),
             ),
             registry_local_executor(registry),
         )
         .await
         .expect("cancel through endpoint smoke");
-    assert!(matches!(
-        outcome,
-        RuntimeEffectOutcome::Process {
-            result: ProcessEffectOutcome::Cancel { .. }
-        }
-    ));
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Cancel { record },
+    } = outcome
+    else {
+        panic!("expected cancellation outcome");
+    };
+    assert_eq!(lash_core::ProcessRef::from_record(&record), process_ref);
+    let request = record
+        .cancel_request
+        .as_deref()
+        .expect("folded cancellation");
+    assert_eq!(request.origin, lash_core::CancelOrigin::OperatorRequested);
+    assert_eq!(request.requester, "actor:smoke");
+    let expected = RestateProcessCancelRequest {
+        process_ref,
+        request: request.clone(),
+    };
     assert_eq!(
         context.cancelled.lock_recover().as_slice(),
-        &[("task-smoke".to_string(), Some("stop-smoke".to_string()))]
+        std::slice::from_ref(&expected)
     );
     assert_eq!(
         runner.cancelled.lock_recover().as_slice(),
-        &[RestateProcessCancelRequest {
-            process_id: ProcessId::from("task-smoke"),
-            reason: Some("stop-smoke".to_string()),
-        }]
+        std::slice::from_ref(&expected)
     );
 }
 
@@ -690,7 +713,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         });
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "echo": line })),
-            lash_core::ToolIntents::v1(vec![intent]),
+            lash_core::ToolIntents::v2(vec![intent]),
         )
     }
 }
@@ -886,7 +909,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
@@ -1014,8 +1037,9 @@ pub(super) async fn process_parent_lashlang_registration(
         ),
     )
     .expect("link segmented process-parent law");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
     .await
@@ -1070,8 +1094,9 @@ pub(super) async fn segmented_child_await_registration(
         ),
     )
     .expect("link segmented child-await law");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
     .await
@@ -1510,9 +1535,13 @@ pub(super) async fn persist_recovery_env_ref() -> lash_core::ProcessExecutionEnv
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
     );
-    lash_core::runtime::persist_process_execution_env(RECOVERY_PROCESS_ENV_STORE.as_ref(), &spec)
-        .await
-        .expect("persist recovery process execution env")
+    lash_core::runtime::publish_process_execution_env(
+        RECOVERY_PROCESS_ENV_STORE.as_ref(),
+        &lash_core::ArtifactOwner::host("restate-recovery-env"),
+        &spec,
+    )
+    .await
+    .expect("persist recovery process execution env")
 }
 
 pub(super) async fn persist_snapshot_recovery_env_ref(
@@ -1522,9 +1551,13 @@ pub(super) async fn persist_snapshot_recovery_env_ref(
         snapshot_recovery_tool_options(snapshot_ref),
         recovery_session_policy(),
     );
-    lash_core::runtime::persist_process_execution_env(RECOVERY_PROCESS_ENV_STORE.as_ref(), &spec)
-        .await
-        .expect("persist snapshot recovery process execution env")
+    lash_core::runtime::publish_process_execution_env(
+        RECOVERY_PROCESS_ENV_STORE.as_ref(),
+        &lash_core::ArtifactOwner::host("restate-snapshot-recovery-env"),
+        &spec,
+    )
+    .await
+    .expect("persist snapshot recovery process execution env")
 }
 
 pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
@@ -1579,8 +1612,9 @@ pub(super) async fn snapshot_lashlang_registration(
         ),
     )
     .expect("link snapshot lashlang module");
-    lashlang::LashlangArtifactStore::put_module_artifact(
+    lashlang::LashlangArtifactStore::publish_module_artifact(
         lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked_module.artifact,
     )
     .await
@@ -1683,10 +1717,27 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            registry_local_executor(Arc::clone(&registry_a)),
+            registry_local_executor(Arc::clone(&registry_a))
+                .with_process_env_store(RECOVERY_PROCESS_ENV_STORE.clone()
+                    as Arc<dyn lash_core::ProcessExecutionEnvStore>),
         )
         .await
         .expect("schedule and run process through Restate endpoint");
+    registry_a
+        .register_process(ProcessRegistration::new(
+            "recover-cancel",
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register nonterminal cancellation target before reopen");
     drop(host_a);
     drop(registry_a);
 
@@ -1710,7 +1761,13 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .expect("list reopened observations");
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].id, "recover-tool");
-    let recovered_process_ref = lash_core::ProcessRef::from_record(&observed[0]);
+    let recovered_process_ref = lash_core::ProcessRef::from_record(
+        &registry_b
+            .get_process(&ProcessId::from("recover-cancel"))
+            .await
+            .expect("read reopened cancellation target")
+            .expect("reopened cancellation target remains registered"),
+    );
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&ProcessId::from("recover-tool"))
@@ -1765,8 +1822,9 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                 runtime_invocation(RuntimeEffectKind::Process, "recovery-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_ref: recovered_process_ref,
-                    reason: Some("post-rebuild cancel probe".to_string()),
-                    replay: None,
+                    origin: lash_core::CancelOrigin::OperatorRequested,
+                    requester: "actor:post-rebuild".to_string(),
+                    attribution: None,
                 }),
             ),
             registry_local_executor(Arc::clone(&registry_b)),
@@ -1775,7 +1833,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .expect("cancel through reopened process workflow");
     assert!(
         registry_b
-            .events_after(&ProcessId::from("recover-tool"), 0)
+            .events_after(&ProcessId::from("recover-cancel"), 0)
             .await
             .expect("events after cancel")
             .iter()

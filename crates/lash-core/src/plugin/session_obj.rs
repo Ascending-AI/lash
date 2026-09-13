@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use lash_sansio::sync::MutexExt;
+use lash_sansio::sync::{MutexExt, RwLockExt};
 
 use super::*;
 
@@ -189,7 +189,7 @@ pub struct PluginSession {
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
-    pub(super) tool_access: SessionToolAccess,
+    pub(super) tool_access: Arc<std::sync::RwLock<SessionToolAccess>>,
     pub(super) subagent: Option<SubagentSessionContext>,
     pub(super) extensions: PluginExtensions,
     pub(super) triggers: crate::TriggerEventCatalog,
@@ -200,8 +200,20 @@ impl PluginSession {
         &self.session_id
     }
 
-    pub fn tool_access(&self) -> &SessionToolAccess {
-        &self.tool_access
+    /// Returns a snapshot of the session's current resident tool authority.
+    pub fn tool_access(&self) -> SessionToolAccess {
+        self.tool_access.read_recover().clone()
+    }
+
+    /// Replaces resident tool authority after the corresponding durable state
+    /// has been adopted. Returns whether the live value changed.
+    pub(crate) fn replace_tool_access(&self, access: SessionToolAccess) -> bool {
+        let mut current = self.tool_access.write_recover();
+        if *current == access {
+            return false;
+        }
+        *current = access;
+        true
     }
 
     pub fn subagent_context(&self) -> Option<&SubagentSessionContext> {

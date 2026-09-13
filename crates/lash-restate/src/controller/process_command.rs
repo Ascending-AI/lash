@@ -1,4 +1,115 @@
 use super::*;
+use restate_sdk::serde::Json;
+
+const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledCancelCommandIdentity {
+    process_ref: lash_core::ProcessRef,
+    origin: lash_core::CancelOrigin,
+    requester: String,
+    attribution: Option<lash_core::RuntimeReplayAttribution>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledCancelAdmission {
+    version: u32,
+    identity: JournaledCancelCommandIdentity,
+    result: Result<Box<ProcessRecord>, PluginError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledParentEndCommandIdentity {
+    process_id: lash_core::ProcessId,
+    tool_intent_identity: lash_core::ToolIntentIdentity,
+    policy: lash_core::ProcessParentEndPolicy,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledParentEndCancelPayload {
+    version: u32,
+    identity: JournaledParentEndCommandIdentity,
+    result: Result<JournaledParentEndCancelDecision, PluginError>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum JournaledParentEndCancelDecision {
+    Issued { record: Box<ProcessRecord> },
+    AlreadyStanding { record: Box<ProcessRecord> },
+    Terminal,
+}
+
+fn process_command_journal_name(invocation: &RuntimeEffectInvocation, operation: &str) -> String {
+    format!("{}.{operation}:v1", restate_effect_name(invocation))
+}
+
+fn process_command_journal_error(
+    operation: &str,
+    error: TerminalError,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateEffectController,
+        format!("Restate process {operation} journaling failed: {error}"),
+    )
+}
+
+fn encode_process_command_journal_payload<T: serde::Serialize>(
+    operation: &str,
+    payload: T,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(payload).map_err(|error| {
+        PluginError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::RecordEncodingFailed,
+            format!("failed to encode Restate process {operation} journal payload: {error}"),
+        ))
+    })
+}
+
+fn decode_process_command_journal_payload<T: serde::de::DeserializeOwned>(
+    operation: &str,
+    value: serde_json::Value,
+) -> Result<T, RuntimeEffectControllerError> {
+    serde_json::from_value(value).map_err(|error| {
+        RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+            format!("incompatible Restate process {operation} journal payload: {error}"),
+        )
+    })
+}
+
+fn validate_process_command_journal_payload_version(
+    operation: &str,
+    version: u32,
+) -> Result<(), RuntimeEffectControllerError> {
+    if version == PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+        format!(
+            "incompatible Restate process {operation} journal payload version {version}; expected {PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION}"
+        ),
+    ))
+}
+
+fn validate_process_command_journal_identity<T: PartialEq>(
+    operation: &str,
+    recorded: &T,
+    current: &T,
+) -> Result<(), RuntimeEffectControllerError> {
+    if recorded == current {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        format!("Restate process {operation} journal identity differs from the current command"),
+    ))
+}
 
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
@@ -16,6 +127,7 @@ where
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
+    let process_engines = execution.process_engines;
     let turn_cancellation = execution.turn_cancellation;
     let outcome = match command {
         ProcessCommand::Start {
@@ -24,26 +136,142 @@ where
             env_spec,
             execution_context,
         } => {
-            if let Some(env_spec) = env_spec.as_ref() {
+            let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
+            let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
                         "process_env_store_unavailable",
                         "admitted Restate process start carries an execution environment but the executor has no environment store",
                     )
                 })?;
-                let env_ref =
-                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
-                        .await?;
-                registration = registration.with_execution_env_ref(Some(env_ref));
-            }
-            let record = schedule_restate_process(
-                registry,
+                let expected_ref = env_spec.stable_ref().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?;
+                let bytes = env_spec.to_store_bytes().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?;
+                let (env_ref, staged) = match lash_core::runtime::publish_process_execution_env(
+                    env_store.as_ref(),
+                    &staging_owner,
+                    env_spec,
+                )
+                .await
+                {
+                    Ok(env_ref) => (env_ref, true),
+                    Err(publish_error) if artifact_owner_is_permanently_retired(&publish_error) => {
+                        (expected_ref, false)
+                    }
+                    Err(publish_error) => return Err(publish_error.into()),
+                };
+                registration = registration.with_execution_env_ref(Some(env_ref.clone()));
+                Some((env_ref, bytes, staged))
+            } else if let Some(env_ref) = registration.env_ref.as_ref() {
+                let env_store = process_env_store.as_ref().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_env_store_unavailable",
+                        "admitted Restate process start references an execution environment but the executor has no environment store",
+                    )
+                })?;
+                let bytes = env_store
+                    .get_process_execution_env(env_ref)
+                    .await?
+                    .ok_or_else(|| {
+                        lash_core::PluginError::Session(format!(
+                            "missing process execution env `{env_ref}`"
+                        ))
+                    })?;
+                let staged = if let Err(publish_error) = env_store
+                    .publish_process_execution_env(&staging_owner, env_ref, &bytes)
+                    .await
+                {
+                    if artifact_owner_is_permanently_retired(&publish_error) {
+                        false
+                    } else {
+                        return Err(publish_error.into());
+                    }
+                } else {
+                    true
+                };
+                Some((env_ref.clone(), bytes, staged))
+            } else {
+                None
+            };
+            let engine_artifacts = match registration.input.as_ref() {
+                lash_core::ProcessInput::Engine { kind, payload } => {
+                    let process_engines = process_engines.as_ref().ok_or_else(|| {
+                        RuntimeEffectControllerError::foreign(
+                            "process_engine_registry_unavailable",
+                            "admitted Restate process start requires an engine but the executor has no process-engine registry",
+                        )
+                    })?;
+                    let engine = process_engines.require(kind)?;
+                    let staged = if let Err(protect_error) = engine
+                        .protect_start_artifacts(&staging_owner, payload)
+                        .await
+                    {
+                        if artifact_owner_is_permanently_retired(&protect_error) {
+                            false
+                        } else {
+                            return Err(protect_error.into());
+                        }
+                    } else {
+                        true
+                    };
+                    Some((engine, payload.clone(), staged))
+                }
+                _ => None,
+            };
+            let record = match schedule_restate_process(
+                Arc::clone(&registry),
                 registration,
                 observers,
                 *execution_context,
                 context,
             )
-            .await?;
+            .await
+            {
+                Ok(record) => record,
+                // Registration, workflow submission, and external-ref persistence are
+                // separate durable authorities. An error after any one of them is an
+                // unknown/retriable start, not proof that the process was abandoned.
+                // Keep the staging edges so an exact redrive can finish the transfer;
+                // authoritative process retirement owns their eventual permanent fence.
+                Err(error) => return Err(error.into()),
+            };
+            let process_owner =
+                lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&record));
+            if let (Some(store), Some((env_ref, bytes, staged))) =
+                (process_env_store.as_ref(), env_artifacts.as_ref())
+            {
+                if *staged {
+                    store
+                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                        .await?;
+                    store
+                        .retire_process_execution_env_owner(&staging_owner)
+                        .await?;
+                } else {
+                    store
+                        .publish_process_execution_env(&process_owner, env_ref, bytes)
+                        .await?;
+                }
+            }
+            if let Some((engine, payload, staged)) = engine_artifacts {
+                if staged {
+                    engine
+                        .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
+                        .await?;
+                    engine.retire_artifact_owner(&staging_owner).await?;
+                } else {
+                    engine
+                        .protect_start_artifacts(&process_owner, &payload)
+                        .await?;
+                }
+            }
             Ok(ProcessEffectOutcome::Start {
                 record: Box::new(record),
             })
@@ -93,7 +321,7 @@ where
         }
         ProcessCommand::Await { process_ref } => {
             registry.get_process_ref(&process_ref).await?;
-            let process_id = process_ref.process_id;
+            let process_id = process_ref.process_id.clone();
             // Replay-determinism class inventory: PR #166 removed the process
             // start gate. FIG-788 always redrives the process runner, retains
             // ordinal handovers until terminal delivery resolves, and schedules
@@ -163,11 +391,23 @@ where
                         ));
                     };
                     turn_cancellation.cancellation.cancel();
+                    let record = registry
+                        .request_process_cancel(
+                            &process_ref,
+                            lash_core::CancelOrigin::TurnStopped,
+                            serde_json::to_string(&turn_cancellation.scope).map_err(|error| {
+                                PluginError::Runtime(RuntimeError::new(
+                                    RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                ))
+                            })?,
+                            None,
+                        )
+                        .await?;
                     context
-                        .request_process_workflow_cancel(RestateProcessCancelRequest {
-                            process_id: process_id.clone(),
-                            reason: Some("turn cancelled while awaiting process".to_string()),
-                        })
+                        .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(
+                            &record,
+                        )?)
                         .await
                         .map_err(|err| {
                             PluginError::Runtime(RuntimeError::new(
@@ -210,36 +450,68 @@ where
         }
         ProcessCommand::Cancel {
             process_ref,
-            reason,
-            replay,
+            origin,
+            requester,
+            attribution,
         } => {
-            let record = registry
-                .get_process_ref(&process_ref)
-                .await?
-                .ok_or_else(|| {
-                    lash_core::runtime::registry_transitions::unknown_process(
-                        &process_ref.process_id,
-                    )
-                })?;
-            let mut request = lash_core::ProcessEventAppendRequest::cancel_requested(
-                &process_ref.process_id,
-                reason.clone(),
-            );
-            if let Some(replay) = replay {
-                request = request.with_optional_replay(Some(replay));
-            }
-            registry.append_event_ref(&process_ref, request).await?;
+            let command_identity = JournaledCancelCommandIdentity {
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            };
+            let admission_registry = Arc::clone(&registry);
+            let admitted_identity = command_identity.clone();
+            let admission_process_ref = command_identity.process_ref.clone();
+            let admission_requester = command_identity.requester.clone();
+            let admission_attribution = command_identity.attribution.clone();
+            let Json(admission_value) = context
+                .run_json_send(
+                    process_command_journal_name(invocation, "process-cancel-admission"),
+                    None,
+                    async move {
+                        let result = admission_registry
+                            .request_process_cancel(
+                                &admission_process_ref,
+                                origin,
+                                admission_requester,
+                                admission_attribution,
+                            )
+                            .await
+                            .map(Box::new);
+                        encode_process_command_journal_payload(
+                            "cancel admission",
+                            JournaledCancelAdmission {
+                                version: PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+                                identity: admitted_identity,
+                                result,
+                            },
+                        )
+                    },
+                )
+                .await
+                .map_err(|error| process_command_journal_error("cancel admission", error))?;
+            let admission_value = admission_value?;
+            let admission: JournaledCancelAdmission =
+                decode_process_command_journal_payload("cancel admission", admission_value)?;
+            validate_process_command_journal_payload_version(
+                "cancel admission",
+                admission.version,
+            )?;
+            validate_process_command_journal_identity(
+                "cancel admission",
+                &admission.identity,
+                &command_identity,
+            )?;
+            let record = *admission.result?;
             context
-                .request_process_workflow_cancel(RestateProcessCancelRequest {
-                    process_id: process_ref.process_id,
-                    reason,
-                })
+                .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
                 .await
                 .map_err(|err| {
-                    PluginError::Runtime(RuntimeError::new(
+                    RuntimeEffectControllerError::new(
                         RuntimeErrorCode::RestateProcessCancel,
                         format!("Restate process cancellation failed: {err}"),
-                    ))
+                    )
                 })?;
             Ok(ProcessEffectOutcome::Cancel {
                 record: Box::new(record),
@@ -252,8 +524,12 @@ where
             identity,
             process_id,
             policy,
-            reason,
         } => {
+            let command_identity = JournaledParentEndCommandIdentity {
+                process_id: process_id.clone(),
+                tool_intent_identity: identity.clone(),
+                policy,
+            };
             let outcome = match policy {
                 lash_core::ProcessParentEndPolicy::Abandon => {
                     lash_core::ToolIntentParentEndOutcome::Abandoned {
@@ -262,48 +538,126 @@ where
                     }
                 }
                 lash_core::ProcessParentEndPolicy::Cancel => {
-                    let result: Result<(), lash_core::PluginError> = async {
-                        registry.get_process(&process_id).await?.ok_or_else(|| {
-                            lash_core::runtime::registry_transitions::unknown_process(&process_id)
-                        })?;
-                        registry
-                            .append_event(
-                                &process_id,
-                                lash_core::ProcessEventAppendRequest::cancel_requested(
-                                    &process_id,
-                                    Some(reason.clone()),
-                                ),
-                            )
-                            .await?;
-                        context
-                            .request_process_workflow_cancel(RestateProcessCancelRequest {
-                                process_id: process_id.clone(),
-                                reason: Some(reason),
-                            })
-                            .await
-                            .map_err(|err| {
-                                PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::RestateProcessCancel,
-                                    format!("Restate process cancellation failed: {err}"),
-                                ))
-                            })?;
-                        Ok(())
-                    }
-                    .await;
+                    let decision_registry = Arc::clone(&registry);
+                    let admitted_identity = command_identity.clone();
+                    let decision_process_id = admitted_identity.process_id.clone();
+                    let decision_identity = admitted_identity.tool_intent_identity.clone();
+                    let decision = context
+                        .run_json_send(
+                            process_command_journal_name(
+                                invocation,
+                                "parent-end-cancel-decision",
+                            ),
+                            None,
+                            async move {
+                                let result: Result<JournaledParentEndCancelDecision, PluginError> = async {
+                                    let process_ref = decision_registry
+                                        .resolve_process_ref(&decision_process_id)
+                                        .await?;
+                                    let record = decision_registry
+                                        .get_process_ref(&process_ref)
+                                        .await?
+                                        .ok_or_else(|| {
+                                            lash_core::runtime::registry_transitions::unknown_process(
+                                                &decision_process_id,
+                                            )
+                                        })?;
+                                    if record.is_terminal() {
+                                        return Ok(JournaledParentEndCancelDecision::Terminal);
+                                    }
+                                    if record.cancel_request.is_some() {
+                                        return Ok(
+                                            JournaledParentEndCancelDecision::AlreadyStanding {
+                                                record: Box::new(record),
+                                            },
+                                        );
+                                    }
+                                    let requester = serde_json::to_string(&record.lifecycle.parent)
+                                        .map_err(|error| {
+                                            PluginError::Runtime(RuntimeError::new(
+                                                RuntimeErrorCode::RecordEncodingFailed,
+                                                error.to_string(),
+                                            ))
+                                        })?;
+                                    let record = decision_registry
+                                        .request_process_cancel(
+                                            &process_ref,
+                                            lash_core::CancelOrigin::ParentEnded,
+                                            requester,
+                                            Some(
+                                                lash_core::RuntimeReplayAttribution::ToolIntent(
+                                                    decision_identity,
+                                                ),
+                                            ),
+                                        )
+                                        .await?;
+                                    Ok(JournaledParentEndCancelDecision::Issued {
+                                        record: Box::new(record),
+                                    })
+                                }
+                                .await;
+                                encode_process_command_journal_payload(
+                                    "parent-end decision",
+                                    JournaledParentEndCancelPayload {
+                                        version: PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+                                        identity: admitted_identity,
+                                        result,
+                                    },
+                                )
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            process_command_journal_error("parent-end decision", error)
+                        })
+                        .and_then(|Json(value)| value.map_err(Into::into))
+                        .and_then(|value| {
+                            decode_process_command_journal_payload::<
+                                JournaledParentEndCancelPayload,
+                            >("parent-end decision", value)
+                        })
+                        .and_then(|payload| {
+                            validate_process_command_journal_payload_version(
+                                "parent-end decision",
+                                payload.version,
+                            )?;
+                            validate_process_command_journal_identity(
+                                "parent-end decision",
+                                &payload.identity,
+                                &command_identity,
+                            )?;
+                            payload.result.map_err(Into::into)
+                        });
+                    let result: Result<(), RuntimeEffectControllerError> = match decision {
+                        Ok(JournaledParentEndCancelDecision::Issued { record })
+                        | Ok(JournaledParentEndCancelDecision::AlreadyStanding { record }) => {
+                            match RestateProcessCancelRequest::from_record(&record) {
+                                Ok(request) => context
+                                    .request_process_workflow_cancel(request)
+                                    .await
+                                    .map_err(|err| {
+                                        RuntimeEffectControllerError::new(
+                                            RuntimeErrorCode::RestateProcessCancel,
+                                            format!("Restate process cancellation failed: {err}"),
+                                        )
+                                    }),
+                                Err(error) => Err(error.into()),
+                            }
+                        }
+                        Ok(JournaledParentEndCancelDecision::Terminal) => Ok(()),
+                        Err(error) => Err(error),
+                    };
                     match result {
                         Ok(()) => lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity,
                             process_id,
                         },
-                        Err(error) => {
-                            let error = RuntimeEffectControllerError::from(error);
-                            lash_core::ToolIntentParentEndOutcome::Refused {
-                                identity,
-                                process_id,
-                                code: error.code.as_str().to_string(),
-                                message: error.message,
-                            }
-                        }
+                        Err(error) => lash_core::ToolIntentParentEndOutcome::Refused {
+                            identity,
+                            process_id,
+                            code: error.code.as_str().to_string(),
+                            message: error.message,
+                        },
                     }
                 }
             };
@@ -365,4 +719,12 @@ where
         observer(outcome);
     }
     outcome
+}
+
+fn artifact_owner_is_permanently_retired(error: &lash_core::PluginError) -> bool {
+    matches!(
+        error,
+        lash_core::PluginError::Session(message)
+            if message.contains("artifact owner has been permanently retired")
+    )
 }

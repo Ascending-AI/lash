@@ -1032,7 +1032,7 @@ mod tests {
         internal_executed: Arc<AtomicUsize>,
     }
 
-    fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
+    pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             format!("tool:{name}"),
             name,
@@ -1096,7 +1096,7 @@ mod tests {
     type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
 
     #[derive(Clone, Default)]
-    struct CountingEffectController {
+    pub(super) struct CountingEffectController {
         frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
     }
 
@@ -1179,12 +1179,43 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessExecutionEnvStore for DurableMemoryProcessEnvStore {
-        async fn put_process_execution_env(
+        async fn publish_process_execution_env(
             &self,
+            owner: &lash_core::ArtifactOwner,
             env_ref: &lash_core::ProcessExecutionEnvRef,
             bytes: &[u8],
         ) -> Result<(), lash_core::PluginError> {
-            self.inner.put_process_execution_env(env_ref, bytes).await
+            self.inner
+                .publish_process_execution_env(owner, env_ref, bytes)
+                .await
+        }
+
+        async fn transfer_process_execution_env(
+            &self,
+            from: &lash_core::ArtifactOwner,
+            to: &lash_core::ArtifactOwner,
+            env_ref: &lash_core::ProcessExecutionEnvRef,
+        ) -> Result<(), lash_core::PluginError> {
+            self.inner
+                .transfer_process_execution_env(from, to, env_ref)
+                .await
+        }
+
+        async fn release_process_execution_env(
+            &self,
+            owner: &lash_core::ArtifactOwner,
+            env_ref: &lash_core::ProcessExecutionEnvRef,
+        ) -> Result<(), lash_core::PluginError> {
+            self.inner
+                .release_process_execution_env(owner, env_ref)
+                .await
+        }
+
+        async fn retire_process_execution_env_owner(
+            &self,
+            owner: &lash_core::ArtifactOwner,
+        ) -> Result<(), lash_core::PluginError> {
+            self.inner.retire_process_execution_env_owner(owner).await
         }
 
         async fn get_process_execution_env(
@@ -1500,3 +1531,6 @@ mod tests {
 
 #[cfg(test)]
 mod discovery_tests;
+
+#[cfg(test)]
+mod provider_part_persistence_tests;

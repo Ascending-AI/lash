@@ -57,6 +57,12 @@ const fn sqlite_constraint(
 pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     sqlite_constraint(
         SqliteConstraintDatabase::DurableCore,
+        "attachment_manifest",
+        "ck_attachment_manifest_owner_identity",
+        "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::DurableCore,
         "pending_turn_inputs",
         "ck_pending_turn_inputs_state",
         "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
@@ -155,6 +161,11 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
 
 /// Named `CHECK`s required from the published PostgreSQL schema.
 pub const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_attachment_manifest",
+        "ck_lash_attachment_manifest_owner_identity",
+        "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+    ),
     expected_constraint(
         "lash_pending_turn_inputs",
         "ck_pending_turn_inputs_state",

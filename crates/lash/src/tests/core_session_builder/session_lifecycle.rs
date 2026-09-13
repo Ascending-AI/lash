@@ -1158,15 +1158,21 @@ finish value
                 ),
             ),
         )
-        .await
         .expect("compile module through the RLM factory");
+    factory
+        .publish_lashlang_module(
+            &lash_core::ArtifactOwner::host("compile-module-test"),
+            &compiled.artifact,
+        )
+        .await
+        .expect("publish compiled module");
     assert!(
         artifact_store
             .get_module_artifact(&compiled.module_ref)
             .await
             .expect("load persisted module artifact")
             .is_some(),
-        "compile_lashlang_module should persist through the configured artifact store"
+        "explicit publication should persist through the configured artifact store"
     );
     Ok(())
 }

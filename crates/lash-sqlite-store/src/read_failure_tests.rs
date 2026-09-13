@@ -1,5 +1,5 @@
 use super::*;
-use crate::attachments::RAW_ARTIFACT_NAMESPACE;
+use crate::attachments::MODULE_ARTIFACT_NAMESPACE;
 use lashlang::LashlangArtifactStore;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::instrument::WithSubscriber as _;
@@ -394,6 +394,41 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
 }
 
 #[tokio::test]
+async fn bare_process_attachment_owner_refuses_with_canonical_typed_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("bare-process-attachment-owner.db");
+    let store = Store::open(&path).await.expect("open store");
+    store
+        .bind_session(&SessionId::from("bare-process-attachment-owner"))
+        .expect("bind store");
+    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+    raw.pragma_update(None, "ignore_check_constraints", true)
+        .expect("allow predecessor owner injection");
+    raw.execute(
+        "INSERT INTO attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms,
+          committed_at_ms, owner_kind, owner_id, owner_incarnation)
+         VALUES ('bare-process-owner', 'bare-process-attachment-owner',
+                 'lash-attachment://bare-process', 0, NULL, 'process', 'process-1', NULL)",
+        [],
+    )
+    .expect("insert bare process owner");
+
+    let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+        .expect_err("bare SQLite process attachment owner must refuse");
+    assert!(
+        matches!(
+            error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentManifest owner",
+                ref message,
+            } if message == "process attachment owner `process-1` has no incarnation; bare process-owner identities are unsupported"
+        ),
+        "SQLite must return the canonical bare-process-owner refusal, got {error:?}"
+    );
+}
+
+#[tokio::test]
 async fn malformed_durable_rows_surface_typed_corruption() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("corrupt.db");
@@ -493,11 +528,13 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     raw.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
          VALUES (?1, 'dangling-artifact', 'missing-artifact-blob')",
-        params![RAW_ARTIFACT_NAMESPACE],
+        params![MODULE_ARTIFACT_NAMESPACE],
     )
     .expect("insert dangling artifact reference");
+    let dangling_ref: lashlang::ModuleRef =
+        serde_json::from_value(serde_json::json!("dangling-artifact")).unwrap();
     let artifact_error = store
-        .get_artifact_bytes("dangling-artifact")
+        .get_module_artifact(&dangling_ref)
         .await
         .expect_err("dangling artifact reference must fail");
     assert!(
@@ -667,9 +704,15 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     );
 
     assert_artifact_storage_failure(
-        "put_artifact_ref_blob",
+        "publish_module_artifact",
         store
-            .put_artifact_bytes("readonly-artifact", "generic", b"artifact-ref")
+            .publish_module_artifact(
+                &lash_core::ArtifactOwner::host("readonly-test"),
+                &lashlang::ModuleArtifact::from_program(
+                    lashlang::parse("finish true").expect("parse module"),
+                )
+                .expect("build module"),
+            )
             .await,
     );
 

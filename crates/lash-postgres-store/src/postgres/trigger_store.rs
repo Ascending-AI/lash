@@ -205,28 +205,7 @@ impl TriggerStore for PostgresTriggerStore {
         &self,
         filter: TriggerSubscriptionFilter,
     ) -> Result<Vec<TriggerSubscriptionRecord>, PluginError> {
-        let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-            "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
-             WHERE tombstoned = FALSE",
-        );
-        if let Some(owner_scope) = filter.effective_registrant_scope_id() {
-            query.push(" AND owner_scope = ").push_bind(owner_scope);
-        }
-        if let Some(subscription_key) = filter.subscription_key.as_ref() {
-            query
-                .push(" AND subscription_key = ")
-                .push_bind(subscription_key);
-        }
-        if let Some(source_type) = filter.source_type.as_ref() {
-            query.push(" AND source_type = ").push_bind(source_type);
-        }
-        if let Some(source_key) = filter.source_key.as_ref() {
-            query.push(" AND source_key = ").push_bind(source_key);
-        }
-        if let Some(enabled) = filter.enabled {
-            query.push(" AND enabled = ").push_bind(enabled);
-        }
-        query.push(" ORDER BY owner_scope ASC, subscription_key ASC");
+        let mut query = list_subscriptions_query(&filter);
         let rows = query
             .build()
             .fetch_all(&self.pool)
@@ -895,6 +874,40 @@ impl TriggerStore for PostgresTriggerStore {
         .map_err(plugin_sqlx_error)?
         .rows_affected() as usize)
     }
+}
+
+pub(crate) fn list_subscriptions_query(
+    filter: &TriggerSubscriptionFilter,
+) -> sqlx::QueryBuilder<'static, sqlx::Postgres> {
+    let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+        "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
+         WHERE tombstoned = FALSE",
+    );
+    if let Some(owner_scope) = filter.registrant_scope_id.as_ref() {
+        query
+            .push(" AND owner_scope = ")
+            .push_bind(owner_scope.clone());
+    }
+    if let Some(subscription_key) = filter.subscription_key.as_ref() {
+        query
+            .push(" AND subscription_key = ")
+            .push_bind(subscription_key.clone());
+    }
+    if let Some(source_type) = filter.source_type.as_ref() {
+        query
+            .push(" AND source_type = ")
+            .push_bind(source_type.clone());
+    }
+    if let Some(source_key) = filter.source_key.as_ref() {
+        query
+            .push(" AND source_key = ")
+            .push_bind(source_key.clone());
+    }
+    if let Some(enabled) = filter.enabled {
+        query.push(" AND enabled = ").push_bind(enabled);
+    }
+    query.push(" ORDER BY owner_scope ASC, subscription_key ASC");
+    query
 }
 
 async fn reserve_postgres_deliveries(

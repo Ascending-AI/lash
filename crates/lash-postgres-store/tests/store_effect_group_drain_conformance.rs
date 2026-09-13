@@ -50,9 +50,8 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
     }
 }
 
-/// The durable PostgreSQL tier answers the loser-drain contract (FIG-1536).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_effect_host_satisfies_the_loser_drain_contract_when_configured() {
+// The durable PostgreSQL tier answers the loser-drain contract (FIG-1536).
+lash_conformance::store_effect_group_drain_tests!({
     let Some(url) = database_url() else {
         eprintln!(
             "skipping Postgres loser-drain conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -64,6 +63,5 @@ async fn postgres_effect_host_satisfies_the_loser_drain_contract_when_configured
         let url = url.clone();
         Box::pin(async move { world(url, spec).await })
     });
-    lash_conformance::store_effect_group_drain_conformance(make).await;
-    drop(database_lock);
-}
+    (database_lock, make)
+});

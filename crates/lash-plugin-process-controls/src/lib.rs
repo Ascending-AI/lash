@@ -108,11 +108,10 @@ impl StaticToolExecute for SessionProcessAdminTools {
                 "process_id": process_id,
                 "status": "cancelled",
             })),
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::CancelProcess(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::CancelProcess(
                 lash_core::CancelProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from(process_id),
-                    reason: Some("cancelled by processes.cancel".to_string()),
                 },
             )]),
         )
@@ -342,17 +341,13 @@ mod tests {
                 "status": "cancelled",
             })
         );
-        assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
+        assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V2);
         assert_eq!(intents.intents.len(), 1);
         let lash_core::ToolIntent::CancelProcess(intent) = &intents.intents[0] else {
             panic!("processes.cancel must declare CancelProcess")
         };
         assert_eq!(intent.session_id, "test-session");
         assert_eq!(intent.process_id, "literal-process");
-        assert_eq!(
-            intent.reason.as_deref(),
-            Some("cancelled by processes.cancel")
-        );
     }
 
     #[test]

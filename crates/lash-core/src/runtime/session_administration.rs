@@ -17,6 +17,8 @@ pub struct SessionAdministration {
     effect_host: Arc<dyn EffectHost>,
     process: Option<ProcessWorkWiring>,
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    process_engines: crate::ProcessEngineRegistry,
 }
 
 impl SessionAdministration {
@@ -30,12 +32,16 @@ impl SessionAdministration {
         effect_host: Arc<dyn EffectHost>,
         process: Option<ProcessWorkWiring>,
         trigger_store: Option<Arc<dyn crate::TriggerStore>>,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_engines: crate::ProcessEngineRegistry,
     ) -> Self {
         Self {
             store_factory,
             effect_host,
             process,
             trigger_store,
+            process_env_store,
+            process_engines,
         }
     }
 
@@ -66,6 +72,16 @@ impl SessionAdministration {
     #[doc(hidden)]
     pub fn trigger_store(&self) -> Option<&Arc<dyn crate::TriggerStore>> {
         self.trigger_store.as_ref()
+    }
+
+    #[doc(hidden)]
+    pub fn process_env_store(&self) -> &Arc<dyn crate::ProcessExecutionEnvStore> {
+        &self.process_env_store
+    }
+
+    #[doc(hidden)]
+    pub fn process_engines(&self) -> &crate::ProcessEngineRegistry {
+        &self.process_engines
     }
 
     /// Mint a delete context through this administration's retained host.

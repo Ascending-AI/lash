@@ -839,19 +839,65 @@ pub enum ToolRetryStatus {
     UnknownLegacy,
 }
 
+/// The runtime or actor decision that requested cancellation of a process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelOrigin {
+    TurnStopped,
+    ParentEnded,
+    OperatorRequested,
+    ModelRequested,
+    StartFailed,
+}
+
+/// A process cancellation fact. Its first timestamp survives retries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CancelRequest {
+    pub origin: CancelOrigin,
+    pub requester: String,
+    pub requested_at_ms: u64,
+}
+
+impl CancelRequest {
+    /// Construct a cancellation fact with an explicit actor or causal reference.
+    pub fn new(origin: CancelOrigin, requester: impl Into<String>, requested_at_ms: u64) -> Self {
+        Self {
+            origin,
+            requester: requester.into(),
+            requested_at_ms,
+        }
+    }
+
+    /// Whether these attempts request the same cancellation. A retry's clock
+    /// does not change the request identity or replace the first timestamp.
+    pub fn same_cancellation_as(&self, other: &Self) -> bool {
+        self.origin == other.origin && self.requester == other.requester
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCancellation {
     pub message: String,
     pub source: ToolFailureSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<CancelOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<ToolValue>,
 }
 
 impl ToolCancellation {
+    /// Attach the origin of the durable process cancellation being settled.
+    pub fn with_origin(mut self, origin: CancelOrigin) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
     pub fn runtime(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             source: ToolFailureSource::Cancellation,
+            origin: None,
             raw: None,
         }
     }
@@ -1311,6 +1357,7 @@ mod tests {
         let mut failure = ToolFailure::tool(ToolFailureClass::Execution, "boom", "boom");
         failure.raw = Some(ToolValue::untrusted_json(foreign.clone()));
         let cancellation = ToolCancellation {
+            origin: None,
             message: "stopped".to_string(),
             source: ToolFailureSource::Cancellation,
             raw: Some(ToolValue::untrusted_json(foreign.clone())),

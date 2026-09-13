@@ -131,27 +131,6 @@ jobs:
         self.assertEqual(len(violations), 1, violations)
         self.assertIn("`Test store`", violations[0].location)
 
-    def test_minio_endpoint_needs_its_own_flag(self) -> None:
-        write_workflow(
-            self.root,
-            "ci.yml",
-            """
-name: CI
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - name: S3 conformance
-        run: cargo test -p lash-internal-s3-store
-        env:
-          LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
-""",
-        )
-        violations = checker.check_repository(self.root)
-        self.assertEqual(len(violations), 1, violations)
-        self.assertIn("LASH_REQUIRE_MINIO is unset", violations[0].detail)
-
-
 class IgnoredSuiteRuleTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
@@ -368,18 +347,18 @@ jobs:
         justfile = self.root / "justfile"
         justfile.write_text(
             "cargo test -p lash-internal-restate --locked"
-            " live_restate_effect_group_conformance -- --nocapture\n",
+            " tests::conformance_and_poison:: -- --nocapture\n",
             encoding="utf-8",
         )
         violations = checker.check_repository(self.root)
         self.assertEqual(len(violations), 1, violations)
-        self.assertIn("live_restate_effect_group_conformance", violations[0].detail)
+        self.assertIn("tests::conformance_and_poison::", violations[0].detail)
 
     def test_a_registered_filter_with_the_ignored_flag_passes(self) -> None:
         justfile = self.root / "justfile"
         justfile.write_text(
             "cargo test -p lash-internal-restate --locked"
-            " live_restate_effect_group_conformance -- --ignored --nocapture\n",
+            " tests::conformance_and_poison:: -- --ignored --nocapture\n",
             encoding="utf-8",
         )
         self.assertEqual(checker.check_repository(self.root), [])

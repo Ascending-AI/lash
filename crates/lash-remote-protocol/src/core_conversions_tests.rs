@@ -10,6 +10,12 @@ use super::*;
 mod process_fixtures;
 use process_fixtures::*;
 
+#[path = "core_conversions_tests/cancellation.rs"]
+mod cancellation;
+
+#[path = "core_conversions_tests/observation_projection.rs"]
+mod observation_projection;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
@@ -605,17 +611,25 @@ fn trigger_subscription_dtos_round_trip_core_values() {
         serde_json::to_value(&record).expect("record json")
     );
 
-    let filter = lash_core::TriggerSubscriptionFilter {
-        registrant_scope_id: Some("session:session-a".to_string()),
-        session_id: None,
-        subscription_key: Some("button-watcher".to_string()),
-        name: Some("button watcher".to_string()),
-        source_type: Some("ui.button.pressed".to_string()),
-        source_key: Some("source-key".to_string()),
-        target: Some(trigger_target_identity()),
-        enabled: Some(true),
-    };
+    let mut filter = lash_core::TriggerSubscriptionFilter::for_session("session-a");
+    filter.subscription_key = Some("button-watcher".to_string());
+    filter.name = Some("button watcher".to_string());
+    filter.source_type = Some("ui.button.pressed".to_string());
+    filter.source_key = Some("source-key".to_string());
+    filter.target = Some(trigger_target_identity());
+    filter.enabled = Some(true);
     let remote = RemoteTriggerSubscriptionFilter::from(filter.clone());
+    assert_eq!(
+        remote.registrant_scope_id.as_deref(),
+        Some("session:session-a")
+    );
+    assert!(
+        serde_json::to_value(&remote)
+            .expect("remote filter json")
+            .get("session_id")
+            .is_none(),
+        "the remote mirror must not emit the removed session spelling"
+    );
     assert!(remote.target.is_some());
     let core = lash_core::TriggerSubscriptionFilter::try_from(remote).expect("core filter");
     assert_eq!(
@@ -642,6 +656,17 @@ fn trigger_subscription_dtos_round_trip_core_values() {
     assert_eq!(
         serde_json::to_value(&core_records[0]).expect("core record json"),
         serde_json::to_value(&record).expect("record json")
+    );
+}
+
+#[test]
+fn core_and_remote_session_filter_constructors_are_byte_identical() {
+    let core = lash_core::TriggerSubscriptionFilter::for_session("session-blue");
+    let remote = RemoteTriggerSubscriptionFilter::for_session("session-blue");
+
+    assert_eq!(
+        serde_json::to_vec(&core).expect("core session filter json"),
+        serde_json::to_vec(&remote).expect("remote session filter json")
     );
 }
 
@@ -814,6 +839,10 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 payload: serde_json::json!({ "text": "hi" }),
             }],
             event_tail_sequence: 1,
+            state: lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+                record_sequence: 0,
+                event_tail_sequence: 1,
+            },
             kind: "external".to_string(),
             label: "External".to_string(),
         }],
@@ -833,12 +862,14 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.id, "process:start-result");
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
+        origin: lash_sansio::CancelOrigin::ModelRequested,
         process_id: ProcessId::from("process:cancel"),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         status: lash_core::ProcessStatus::Cancelled,
     });
     let core = lash_core::ProcessCancelReceipt::try_from(cancel).expect("core cancel summary");
     assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
+    assert_eq!(core.origin, lash_sansio::CancelOrigin::ModelRequested);
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
         lash_core::ProcessRef::new(
@@ -944,7 +975,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let cancel = RemoteProcessCancelRequest {
         process_id: ProcessId::from("process:cancel"),
         incarnation: 1,
-        reason: Some("host requested".to_string()),
+        requester: "actor:remote-host".to_string(),
     };
     cancel.validate().expect("valid cancel");
     let command = lash_core::ProcessCommand::from(cancel);
@@ -2193,6 +2224,39 @@ fn observed_work_item_decode_rejects_a_mispaired_event_tail() {
 }
 
 #[test]
+fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
+    let mut observed = observed_work_item();
+    observed
+        .events
+        .push(lash_core::facade_support::ObservedProcessEvent {
+            sequence: 1,
+            event_type: "process.completed".to_string(),
+            occurred_at_ms: 12,
+            payload: serde_json::json!({}),
+        });
+    observed.event_tail_sequence = 1;
+    observed.state = lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+        record_sequence: 0,
+        event_tail_sequence: 1,
+    };
+
+    let remote = RemoteProcessWorkItem::try_from(observed).expect("remote mismatch item");
+    remote
+        .validate("RemoteProcessWorkItem")
+        .expect("truthful mismatch state");
+    let core =
+        lash_core::facade_support::ObservedWorkItem::try_from(remote).expect("core mismatch item");
+
+    assert_eq!(
+        core.state,
+        lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+            record_sequence: 0,
+            event_tail_sequence: 1,
+        }
+    );
+}
+
+#[test]
 fn remote_generation_options_round_trip_sampling_controls_losslessly() {
     let core = core_llm::GenerationOptions {
         output_token_cap: NonZeroUsize::new(2_048),
@@ -2394,5 +2458,3 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
-#[path = "core_conversions_tests/cancellation.rs"]
-mod cancellation;

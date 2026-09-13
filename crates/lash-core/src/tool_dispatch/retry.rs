@@ -4,7 +4,7 @@ use crate::{
 use futures_util::FutureExt as _;
 use lash_sansio::core_support::*;
 
-use super::context::ToolDispatchContext;
+use super::context::{ToolDispatchContext, ToolDispatchOutcome};
 use super::execution::AttemptAuthority;
 
 pub(crate) fn resolve_retry_policy(
@@ -46,11 +46,8 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
 
 /// Runs a leaf tool body exactly once, with no retry ladder around it.
 ///
-/// The authority selects the source route and attachment producer name;
-/// everything else — the attempt context, panic containment, attachment
-/// normalization — is identical on both routes. This compatibility entry
-/// point resolves the authority before entering the shared implementation so
-/// its attachment policy cannot fall back to provider-controlled identity.
+/// This compatibility entry point resolves authority before entering the
+/// shared implementation so tests exercise the production admission path.
 #[cfg(test)]
 pub(crate) async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
@@ -82,18 +79,10 @@ async fn execute_once_with_authority<'run>(
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> crate::ToolAttemptOutcome {
-    let mut attempt_result =
-        match build_attempt_context(context, prepared, &tool_context, authority.grant()).await {
-            Ok(attempt_context) => execute_attempt_body(context, prepared, &attempt_context).await,
-            Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
-        };
-    normalize_attempt_result_attachments(
-        context,
-        authority.manifest().name.as_str(),
-        &mut attempt_result,
-    )
-    .await;
-    attempt_result
+    match build_attempt_context(context, prepared, &tool_context, authority.grant()).await {
+        Ok(attempt_context) => execute_attempt_body(context, prepared, &attempt_context).await,
+        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
+    }
 }
 
 async fn execute_attempt_body(
@@ -154,26 +143,60 @@ fn tool_panicked(payload: Box<dyn std::any::Any + Send>) -> ToolOutcome {
     failure
 }
 
+/// A completed tool output that has crossed the attachment-policy and storage boundary.
+///
+/// Its payload is private to this module so record construction cannot accept a raw
+/// [`ToolOutcome`] from a tool body or plugin hook.
+pub(super) struct NormalizedToolOutput(crate::ToolCallOutput);
+
+impl NormalizedToolOutput {
+    pub(super) fn into_output(self) -> crate::ToolCallOutput {
+        self.0
+    }
+}
+
+pub(crate) async fn normalized_outcome(
+    context: &ToolDispatchContext<'_>,
+    tool_name: String,
+    args: serde_json::Value,
+    result: ToolOutcome,
+    duration_ms: u64,
+) -> ToolDispatchOutcome {
+    let output = Box::pin(normalize_tool_result_attachments(
+        context, &tool_name, result,
+    ))
+    .await;
+    super::context::outcome(tool_name, args, output, duration_ms)
+}
+
 async fn normalize_tool_result_attachments(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
-    result: &mut ToolOutcome,
-) {
-    let Some(output) = result.as_done_output() else {
-        return;
-    };
+    result: ToolOutcome,
+) -> NormalizedToolOutput {
+    let mut output = result.into_done_output().unwrap_or_else(|_| {
+        crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "pending_tool_not_finalized",
+            "pending tool result reached a completed-output projection path",
+        ))
+    });
     let sources = output.attachments();
-    for source in sources {
-        let producer = crate::AttachmentProducer::Tool {
-            tool_name: tool_name.to_string(),
-        };
+    let producer = crate::AttachmentProducer::Tool {
+        tool_name: tool_name.to_string(),
+    };
+    for source in &sources {
         if let Err(error) = context
             .attachment_source_policy
-            .authorize(&producer, &source)
+            .authorize(&producer, source)
         {
-            *result = attachment_failure("attachment_source_policy_denied", error);
-            return;
+            return NormalizedToolOutput(attachment_failure(
+                "attachment_source_policy_denied",
+                error,
+            ));
         }
+    }
+    for source in sources {
         let crate::AttachmentSource::Inline { media_type, bytes } = &source else {
             continue;
         };
@@ -187,38 +210,16 @@ async fn normalize_tool_result_attachments(
         {
             Ok(attachment_ref) => attachment_ref,
             Err(error) => {
-                *result = attachment_failure("attachment_store_failed", error);
-                return;
+                return NormalizedToolOutput(attachment_failure("attachment_store_failed", error));
             }
         };
-        if let Some(output) = result.as_done_output().cloned() {
-            let mut output = output;
-            output.replace_attachment_source(
-                &source,
-                &crate::AttachmentSource::stored(attachment_ref),
-            );
-            *result = ToolOutcome::from_output(output);
-        }
+        output.replace_attachment_source(&source, &crate::AttachmentSource::stored(attachment_ref));
     }
+    NormalizedToolOutput(output)
 }
 
-async fn normalize_attempt_result_attachments(
-    context: &ToolDispatchContext<'_>,
-    tool_name: &str,
-    result: &mut crate::ToolAttemptOutcome,
-) {
-    let crate::ToolAttemptOutcome::Done { result, .. } = result else {
-        return;
-    };
-    let mut tool_result = ToolOutcome::from_output(result.clone().into_output());
-    normalize_tool_result_attachments(context, tool_name, &mut tool_result).await;
-    if let ToolOutcome::Done(output) = tool_result {
-        *result = crate::ToolOutcomeDone::from_output(*output);
-    }
-}
-
-fn attachment_failure(code: &str, error: impl std::fmt::Display) -> ToolOutcome {
-    ToolOutcome::failure(crate::ToolFailure {
+fn attachment_failure(code: &str, error: impl std::fmt::Display) -> crate::ToolCallOutput {
+    crate::ToolCallOutput::failure(crate::ToolFailure {
         class: crate::ToolFailureClass::Execution,
         code: code.to_string(),
         message: error.to_string(),

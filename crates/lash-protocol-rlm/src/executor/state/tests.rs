@@ -12,7 +12,8 @@ use serde_json::json;
 #[test]
 fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
     use lash_lashlang_runtime::{
-        DeferredResolutionLinkKey, DeferredResolutionRecord, Resolution, ToolGrant,
+        DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredTriggerResolutionRecord,
+        Resolution, ToolGrant, TriggerGrant, TriggerResolution,
     };
     use lash_sansio::{
         CompactToolContract, ProjectionMode, SchemaContract, SchemaProjectionOverride,
@@ -88,6 +89,25 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         link_key: Some(link_key.clone()),
         resolutions: BTreeMap::from([("lookup".to_string(), resolution.clone())]),
     };
+    let trigger_grant: TriggerGrant = serde_json::from_value(json!({
+        "provider_id": "calendar",
+        "constructor_path": ["calendar", "Changed"],
+        "input_type": {"Union": [
+            {"Process": {"kind": "unknown"}},
+            {"List": {"TriggerHandle": "Str"}}
+        ]},
+        "event_type": {
+            "name": "calendar.Change",
+            "ty": {"Object": [{"name": "id", "ty": "Str", "optional": false}]}
+        },
+        "route": {"account": "primary"}
+    }))
+    .expect("valid trigger grant fixture");
+    let trigger_resolution = TriggerResolution::Resolved(Box::new(trigger_grant));
+    let deferred_trigger_resolutions = DeferredTriggerResolutionRecord {
+        link_key: Some(link_key.clone()),
+        resolutions: BTreeMap::from([("calendar.Changed".to_string(), trigger_resolution.clone())]),
+    };
     let root = RlmSnapshotRoot {
         version: RLM_SNAPSHOT_VERSION,
         engine: "lashlang".to_string(),
@@ -104,11 +124,18 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
             ),
         ]),
         deferred_resolutions: deferred_resolutions.clone(),
+        deferred_trigger_resolutions: deferred_trigger_resolutions.clone(),
     };
 
     assert_field_schema(
         ROOT_FIELDS,
-        &["version", "engine", "globals", "deferred_resolutions"],
+        &[
+            "version",
+            "engine",
+            "globals",
+            "deferred_resolutions",
+            "deferred_trigger_resolutions",
+        ],
         &[serialized_fields(&root)],
     );
     assert_field_schema(
@@ -130,6 +157,30 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         DEFERRED_LINK_KEY_FIELDS,
         &["address"],
         &[serialized_fields(&link_key)],
+    );
+    assert_field_schema(
+        DEFERRED_TRIGGER_RESOLUTION_FIELDS,
+        &["link_key", "resolutions"],
+        &[serialized_fields(&deferred_trigger_resolutions)],
+    );
+    assert_field_schema(
+        TRIGGER_RESOLUTION_FIELDS,
+        &[
+            "kind",
+            "provider_id",
+            "constructor_path",
+            "input_type",
+            "event_type",
+            "route",
+            "provider_ids",
+        ],
+        &[
+            serialized_fields(&trigger_resolution),
+            serialized_fields(&TriggerResolution::NotAvailable),
+            serialized_fields(&TriggerResolution::Ambiguous {
+                provider_ids: vec!["a".to_string(), "b".to_string()],
+            }),
+        ],
     );
     assert_field_schema(
         RESOLUTION_FIELDS,
@@ -200,6 +251,8 @@ fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
         &["kind", "field"],
         &[serialized_fields(&argument_projection)],
     );
+    let encoded = rmp_serde::to_vec_named(&root).expect("encode trigger-bearing root");
+    validate_canonical_root(&encoded).expect("trigger-bearing root is canonical");
 }
 
 fn assert_field_schema(generated: &[&str], expected: &[&str], serialized: &[Vec<String>]) {
@@ -364,7 +417,9 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     );
 
     assert_eq!(retained_bytes, 5_122_602);
-    assert_eq!(changed_bytes, 117_912);
+    // Snapshot v19's separate empty trigger-resolution record adds 43 fixed
+    // root bytes without retaining any additional session payload.
+    assert_eq!(changed_bytes, 117_955);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -582,13 +637,53 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
 }
 
 #[test]
-fn previous_snapshot_version_is_typed_rejection_with_or_without_file_leaves() {
-    const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
+fn previous_snapshot_version_is_typed_rejection_for_missing_trigger_record() {
+    const PREVIOUS_SNAPSHOT_VERSION: u32 = 18;
     assert_eq!(
         RLM_SNAPSHOT_VERSION,
-        EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION + 1,
-        "the effect-address snapshot bump must stay adjacent to its predecessor"
+        PREVIOUS_SNAPSHOT_VERSION + 1,
+        "the deferred-trigger snapshot bump must stay adjacent to its predecessor"
     );
+
+    #[derive(Serialize)]
+    struct PreviousEnvelope {
+        version: u32,
+        engine: &'static str,
+        globals: BTreeMap<String, PersistedValue>,
+        deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    }
+
+    let hydration = lash_core::plugin::HydratedExecutionState {
+        root: rmp_serde::to_vec_named(&PreviousEnvelope {
+            version: PREVIOUS_SNAPSHOT_VERSION,
+            engine: "lashlang",
+            globals: BTreeMap::new(),
+            deferred_resolutions: Default::default(),
+        })
+        .expect("encode version-18 root"),
+        components: BTreeMap::new(),
+    };
+    let mut target = RlmExecutionState::for_engine("lashlang");
+    let error = target
+        .restore_execution_state(&hydration)
+        .expect_err("version 18 must fail closed before decoding a missing trigger record");
+
+    assert!(matches!(
+        &error,
+        RlmSnapshotError::VersionMismatch {
+            expected: RLM_SNAPSHOT_VERSION,
+            found: PREVIOUS_SNAPSHOT_VERSION
+        }
+    ));
+    let message = error.to_string();
+    assert!(message.contains("drain in-flight sessions on the old build"));
+    assert!(message.contains("recreate development/test stores"));
+}
+
+#[test]
+fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
+    const EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION: u32 = 17;
+    const { assert!(RLM_SNAPSHOT_VERSION > EFFECT_ADDRESS_PREDECESSOR_SNAPSHOT_VERSION) };
 
     #[derive(Serialize)]
     struct PreviousEnvelope {
@@ -708,7 +803,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-18 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-19 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -719,9 +814,9 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_18_root_encodes_to_golden_bytes() {
+fn version_19_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "84a776657273696f6e12a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6",
+        "85a776657273696f6e13a6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6",
         "696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565a576616c756582a46b696e64",
         "a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e",
         "74d957657865637574696f6e5f73746174652f626c616b65332f653233376136623237663766343935393661656234313936323836346165",
@@ -734,6 +829,7 @@ fn version_18_root_encodes_to_golden_bytes() {
         "75745f736368656d6181a963616e6f6e6963616c81a474797065a6737472696e67a9736f757263655f6964ac72656769737472793a776562",
         "b1657865637574696f6e5f62696e64696e6781a76163636f756e74a6616363742d31a87a2e616273656e7481a46b696e64ad6e6f745f6176",
         "61696c61626c65",
+        "bc64656665727265645f747269676765725f7265736f6c7574696f6e7381ab7265736f6c7574696f6e7380",
     );
 
     let mut resolutions = BTreeMap::new();
@@ -787,6 +883,8 @@ fn version_18_root_encodes_to_golden_bytes() {
             }),
             resolutions,
         },
+        deferred_trigger_resolutions:
+            lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
     };
 
     let encoded = rmp_serde::to_vec_named(&root).expect("encode the golden root");
@@ -797,7 +895,7 @@ fn version_18_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-18 root encoding changed; decide on a version bump before updating the golden"
+        "the version-19 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -1138,6 +1236,7 @@ fn lashlang_dialect_pins_snapshot_engine_id() {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
             deferred_tool_resolver: None,
+            deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
             channel: crate::plugin::RlmChannel::Cell,

@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
@@ -1228,6 +1227,7 @@ pub struct SessionAttachmentStore {
 struct AttachmentOwner {
     kind: crate::AttachmentOwnerKind,
     id: String,
+    incarnation: Option<crate::ProcessIncarnation>,
     recorded_intent_ids: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
 
@@ -1335,17 +1335,19 @@ impl SessionAttachmentStore {
         self.bind_owner_scoped(
             crate::AttachmentOwnerKind::Turn,
             turn_id.into().into_inner(),
+            None,
         )
     }
 
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
     pub fn bind_process_scoped(
         self: &Arc<Self>,
-        process_id: impl Into<ProcessId>,
+        process_ref: crate::ProcessRef,
     ) -> AttachmentOwnerBinding {
         self.bind_owner_scoped(
             crate::AttachmentOwnerKind::Process,
-            process_id.into().to_string(),
+            process_ref.process_id.to_string(),
+            Some(process_ref.incarnation),
         )
     }
 
@@ -1353,10 +1355,12 @@ impl SessionAttachmentStore {
         self: &Arc<Self>,
         kind: crate::AttachmentOwnerKind,
         owner_id: String,
+        incarnation: Option<crate::ProcessIncarnation>,
     ) -> AttachmentOwnerBinding {
         let owner = AttachmentOwner {
             kind,
             id: owner_id,
+            incarnation,
             recorded_intent_ids: Arc::new(Mutex::new(BTreeSet::new())),
         };
         let previous = self.owner.lock_recover().replace(owner.clone());
@@ -1369,10 +1373,11 @@ impl SessionAttachmentStore {
 
     fn restore_owner(&self, completed: &AttachmentOwner, previous: Option<AttachmentOwner>) {
         let mut owner = self.owner.lock_recover();
-        if owner
-            .as_ref()
-            .is_some_and(|current| current.kind == completed.kind && current.id == completed.id)
-        {
+        if owner.as_ref().is_some_and(|current| {
+            current.kind == completed.kind
+                && current.id == completed.id
+                && current.incarnation == completed.incarnation
+        }) {
             *owner = previous;
         }
     }
@@ -1413,6 +1418,7 @@ impl SessionAttachmentStore {
             intent_at_epoch_ms: self.clock.timestamp_ms(),
             owner_kind: owner.as_ref().map(|owner| owner.kind),
             owner_id: owner.as_ref().map(|owner| owner.id.clone()),
+            owner_incarnation: owner.as_ref().and_then(|owner| owner.incarnation),
         };
         // Acquire the write fence first: the intent is recorded before any bytes
         // land (the write-ahead guarantee) and, in the same mutation, the digest

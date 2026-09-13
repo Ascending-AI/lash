@@ -4,8 +4,7 @@ use lash_core::{
 use lash_sansio::SessionId;
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
-#[tokio::test]
-async fn sqlite_unbound_session_meta_refuses_ambiguous_resolution() {
+lash_conformance::unbound_session_meta_tests!({
     let dir = tempfile::tempdir().expect("unbound-session-meta tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path());
     for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
@@ -22,10 +21,9 @@ async fn sqlite_unbound_session_meta_refuses_ambiguous_resolution() {
     let unbound = Store::open(&factory.catalog_path())
         .await
         .expect("open unbound SQLite store");
-
-    lash_conformance::unbound_session_meta_refuses_ambiguous_resolution(
+    (
+        dir,
         "SQLite",
-        unbound.load_session_meta(),
+        async move { unbound.load_session_meta().await },
     )
-    .await;
-}
+});

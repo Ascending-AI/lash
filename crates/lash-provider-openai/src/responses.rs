@@ -133,10 +133,6 @@ impl OpenAiCompatibleProvider {
         Ok((body, cache_control_emitted))
     }
 
-    pub(crate) fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
-        shared::response_parts_from_value(value)
-    }
-
     pub(crate) fn process_sse_event(
         raw: &str,
         state: &mut ResponsesStreamState,

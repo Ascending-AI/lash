@@ -35,7 +35,7 @@ fields.
 ## Safety and stop conditions
 
 1. Load `env.sh` from the owned warm workspace before Cargo commands.
-2. Use temporary SQLite files. For PostgreSQL, use only a database created for the current orb
+2. Use temporary SQLite files. For PostgreSQL, use only a database created for the current Kiln
    gate and named by `LASH_POSTGRES_DATABASE_URL`.
 3. Do not run schema probes against a user or shared database. Do not change schema stamps to
    make an incompatible store open.
@@ -72,7 +72,7 @@ For an owned PostgreSQL gate, export its fresh database URL and require the test
 than print its `LASH_POSTGRES_DATABASE_URL is not set` skip message:
 
 ```sh
-cargo test --workspace --all-targets postgres_runtime_effect_controller_satisfies_conformance_when_configured -- --nocapture
+cargo test -p lash-internal-postgres-store --locked --test conformance effect_controller_ -- --nocapture
 ```
 
 ## Phase 2 — Truthful attribution
@@ -146,7 +146,7 @@ ledger, effect journal, and Restate state as one operation, then start every pro
 on the same build. Old affected encodings must refuse; there is no compatibility alias or
 fabricated default authority. This runbook does not authorize deleting or rewriting a shared
 store: production replacement requires the deployment owner's approved drain and provisioning
-procedure, while local verification may recreate only stores owned by the current test or orb.
+procedure, while local verification may recreate only stores owned by the current test or Kiln.
 
 ## Pass record
 

@@ -162,23 +162,12 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
-    async fn cancel_with_reason(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        reason: Option<String>,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
-        let _ = reason;
-        self.cancel(session_id, process_id, scope).await
-    }
-
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
         &self,
         session_id: &SessionId,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError>;
 
@@ -194,7 +183,6 @@ pub trait ProcessService: Send + Sync {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, PluginError>;
 
@@ -214,7 +202,7 @@ pub trait ProcessService: Send + Sync {
             cancelled.push(
                 self.cancel(session_id, &record.id, scope.clone())
                     .await
-                    .map(ProcessCancelReceipt::from_record)?,
+                    .and_then(ProcessCancelReceipt::from_record)?,
             );
         }
         Ok(cancelled)
@@ -296,7 +284,6 @@ impl ProcessService for UnavailableProcessService {
         _identity: crate::ToolIntentIdentity,
         _process_id: ProcessId,
         _policy: crate::ProcessParentEndPolicy,
-        _reason: String,
         _scope: ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
         Err(PluginError::Session(
@@ -363,7 +350,7 @@ impl ProcessService for UnavailableProcessService {
         &self,
         _session_id: &SessionId,
         _process_id: &ProcessId,
-        _reason: Option<String>,
+        _identity: crate::ToolIntentIdentity,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
         Err(PluginError::Session(
@@ -515,7 +502,6 @@ mod tests {
             _identity: crate::ToolIntentIdentity,
             _process_id: ProcessId,
             _policy: crate::ProcessParentEndPolicy,
-            _reason: String,
             _scope: ProcessOpScope<'_>,
         ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
             Err(PluginError::Session(
@@ -579,17 +565,31 @@ mod tests {
             self.cancel_calls.lock_recover().push(process_id.clone());
             let mut record = self.record.clone();
             record.id = process_id.clone();
+            record.cancel_request = Some(Box::new(crate::CancelRequest::new(
+                crate::CancelOrigin::OperatorRequested,
+                serde_json::to_string(_scope.effect_controller.scoped().execution_scope())
+                    .expect("serializable effect scope"),
+                1,
+            )));
             Ok(record)
         }
 
         async fn cancel_recorded_intent(
             &self,
-            session_id: &SessionId,
+            _session_id: &SessionId,
             process_id: &ProcessId,
-            _reason: Option<String>,
-            scope: ProcessOpScope<'_>,
+            identity: crate::ToolIntentIdentity,
+            _scope: ProcessOpScope<'_>,
         ) -> Result<ProcessRecord, PluginError> {
-            self.cancel(session_id, process_id, scope).await
+            self.cancel_calls.lock_recover().push(process_id.clone());
+            let mut record = self.record.clone();
+            record.id = process_id.clone();
+            record.cancel_request = Some(Box::new(crate::CancelRequest::new(
+                crate::CancelOrigin::ModelRequested,
+                identity.replay_key,
+                1,
+            )));
+            Ok(record)
         }
 
         async fn signal_possessed(

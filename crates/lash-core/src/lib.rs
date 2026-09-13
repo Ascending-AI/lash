@@ -217,6 +217,20 @@ pub mod store_backend_support {
             .join(", ")
     }
 
+    /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
+    pub fn terminal_turn_input_states_sql() -> String {
+        let terminal_states = crate::TurnInputState::ALL
+            .iter()
+            .copied()
+            .filter(|state| state.is_terminal())
+            .collect::<Vec<_>>();
+        if terminal_states.is_empty() {
+            // Admit no state rather than interpolating the invalid SQL `IN ()`.
+            return "FALSE".to_string();
+        }
+        state_sql_literal_list(&terminal_states)
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
@@ -410,6 +424,7 @@ pub mod facade_support {
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
     pub use crate::runtime::ObservedWorkItem;
+    pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
     pub use crate::runtime::PROCESS_LEASE_SCHEMA_VERSION;
     pub use crate::runtime::ParkedSession;
@@ -721,22 +736,22 @@ pub use lash_sansio::llm::types::{
     ProviderReplayKind, ProviderRouteIdentity, RetryDecision,
 };
 pub use lash_sansio::{
-    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CellFailure,
-    CellFailureKind, CheckpointDelivery, CheckpointKind, CompactToolContract, DegradedBinding,
-    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, FrameKey, FrameKeyError,
-    LashSchema, LlmCallError, MediaType, Message, MessageOrigin, MessageRole, Observation,
-    OmittedToolCalls, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate, PromptLayer,
-    PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
-    PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
-    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
-    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
-    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
-    ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolManifest,
-    ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause, TurnId,
-    TurnOutputSource,
+    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CancelOrigin,
+    CancelRequest, CellFailure, CellFailureKind, CheckpointDelivery, CheckpointKind,
+    CompactToolContract, DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome,
+    ExecutedCallRecord, FrameKey, FrameKeyError, LashSchema, LlmCallError, MediaType, Message,
+    MessageOrigin, MessageRole, Observation, OmittedToolCalls, Part, PartKind, PluginMessage,
+    PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution, PromptContributionBody,
+    PromptContributionGate, PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate,
+    PromptTemplateEntry, PromptTemplateSection, PruneState, SchemaContract,
+    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
+    TokenUsage, TokenUsageOverflow, ToolActivation, ToolArgumentProjectionPolicy, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
+    ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
+    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
+    ToolValue, TurnCause, TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -1144,51 +1159,52 @@ pub use runtime::drive_with_event_pump;
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
+    AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, AssistantResponseHookEvents,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
     EffectAddress, EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
-    LedgerUsageDisposition, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
-    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
-    LlmRequestSpec, LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
-    OnParentEnd, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentScope,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineRegistration, ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInfraError,
-    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
-    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
-    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
-    ProcessOutcomeObserver, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
-    ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar, ProcessRegistration,
-    ProcessRegistrationProbe, ProcessRegistry, ProcessRegistryBinding, ProcessRetention,
-    ProcessRunOutcome, ProcessScopeFenceHosts, ProcessService, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery,
-    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority, QueuedWorkBatchingConfig,
-    QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate, RecoveryContract, Resolution,
-    ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy,
+    InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
+    NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
+    NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance, OnParentEnd,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentScope, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessArtifactCleanup,
+    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdentity, ProcessIncarnation, ProcessInfraError, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
+    ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
+    ProcessOriginator, ProcessOutcome, ProcessOutcomeObserver, ProcessParentEndPlan,
+    ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
+    ProcessRegistrar, ProcessRegistration, ProcessRegistrationProbe, ProcessRegistry,
+    ProcessRegistryBinding, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
+    ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents,
+    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
+    ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
+    ProjectionWatermark, PromptUsage, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
+    ProtocolTurnExtension, ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority,
+    QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate,
+    RecoveryContract, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
     RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
     RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
     ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
@@ -1220,11 +1236,11 @@ pub(crate) use runtime::{
     QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
     QueuedWorkClaimData, QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkItem,
     QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
-    materialize_process_event_semantics, persist_process_execution_env,
-    prepare_process_event_append, prepare_process_registration, prepare_process_start,
-    prepare_process_transition, process_event_invocation, process_registration_fingerprint,
-    process_wake_batch_draft, process_wake_input_from_event_payload, process_wake_turn_cause,
-    process_wake_turn_text, require_event_replay,
+    materialize_process_event_semantics, prepare_process_event_append,
+    prepare_process_registration, prepare_process_start, prepare_process_transition,
+    process_event_invocation, process_registration_fingerprint, process_wake_batch_draft,
+    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
+    publish_process_execution_env, require_event_replay,
 };
 pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 pub(crate) use session_model::plugin_runtime_protocol_event;
@@ -1272,7 +1288,7 @@ pub(crate) use store::{
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, ProcessParentEndPolicy,
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
+    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
     ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
 };

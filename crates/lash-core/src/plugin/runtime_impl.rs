@@ -381,7 +381,7 @@ impl PluginHost {
             tools,
             tool_registry: registry,
             tool_catalog_overlay,
-            tool_access: authority.tool_access,
+            tool_access: Arc::new(std::sync::RwLock::new(authority.tool_access)),
             subagent: authority.subagent,
             extensions: self.extensions.clone(),
             triggers,

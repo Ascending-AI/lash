@@ -246,7 +246,7 @@ impl RuntimeBoundaryHarness {
         let scripted_result = requested_result.clone();
         let call_id = effect_id.clone();
         let recorded_intents =
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(event.actor_alias.clone()),
                     request: lash_core::ProcessStartRequest::external(
@@ -946,8 +946,9 @@ impl RuntimeBoundaryHarness {
                 .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
-        let env_ref = lash_core::runtime::persist_process_execution_env(
+        let env_ref = lash_core::runtime::publish_process_execution_env(
             runtime_host.durability.process_env_store.as_ref(),
+            &lash_core::ArtifactOwner::host("sim-lifecycle"),
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::PluginOptions::default(),
                 policy.clone(),

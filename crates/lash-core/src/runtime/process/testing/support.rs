@@ -2,7 +2,6 @@ use crate::ProcessId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
 
 use tokio::sync::Mutex;
 
@@ -22,19 +21,20 @@ impl Default for TestLocalProcessRegistry {
             process_read_error: Arc::new(Mutex::new(None)),
             process_read_error_after: Arc::new(Mutex::new(None)),
             process_events_read_error: Arc::new(Mutex::new(None)),
-            process_events_read_count: Arc::new(AtomicUsize::new(0)),
             process_read_absent: Arc::new(Mutex::new(false)),
             process_read_override: Arc::new(Mutex::new(None)),
             process_lease_claim_error: Arc::new(Mutex::new(None)),
             process_lease_renew_error: Arc::new(Mutex::new(None)),
             process_terminal_write_error: Arc::new(Mutex::new(None)),
             process_terminal_write_outcome: Arc::new(Mutex::new(None)),
+            external_ref_write_error: Arc::new(Mutex::new(None)),
             process_lease_release_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
             tombstone_compaction_horizon: Arc::new(Mutex::new(0)),
             observers: Arc::new(Mutex::new(HashMap::<_, HashSet<_>>::new())),
             wake_targets: Arc::new(Mutex::new(HashMap::new())),
             tombstones: Arc::new(Mutex::new(HashMap::new())),
+            artifact_cleanup: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
             process_lease_point_reads: Arc::new(Mutex::new(0)),
             process_lease_batch_reads: Arc::new(Mutex::new(0)),
@@ -58,6 +58,11 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
+    #[doc(hidden)]
+    pub async fn fail_next_external_ref_write_for_testing(&self, error: PluginError) {
+        *self.external_ref_write_error.lock().await = Some(error);
+    }
+
     /// Inject a structurally valid wake row for delivery-driver boundary tests.
     #[doc(hidden)]
     pub async fn insert_wake_delivery_for_testing(
@@ -104,14 +109,6 @@ impl TestLocalProcessRegistry {
     #[doc(hidden)]
     pub async fn set_process_events_read_error_for_testing(&self, error: PluginError) {
         *self.process_events_read_error.lock().await = Some(error);
-    }
-
-    /// Returns how many event-history reads this fixture has served.
-    #[cfg(test)]
-    #[doc(hidden)]
-    pub(crate) fn process_events_read_count_for_testing(&self) -> usize {
-        self.process_events_read_count
-            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Controls deterministic read-as-absent injection for recovery tests.

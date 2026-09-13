@@ -49,14 +49,13 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     }
 }
 
-/// The durable SQLite tier answers the loser-drain contract (FIG-1536).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_effect_host_satisfies_the_loser_drain_contract() {
+// The durable SQLite tier answers the loser-drain contract (FIG-1536).
+lash_conformance::store_effect_group_drain_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("effect-group-drain.db");
     let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
         let path = path.clone();
         Box::pin(async move { world(path, spec).await })
     });
-    lash_conformance::store_effect_group_drain_conformance(make).await;
-}
+    (dir, make)
+});

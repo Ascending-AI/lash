@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use lash_core::SessionError;
-use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
+use lash_lashlang_runtime::{
+    LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver,
+    SharedDeferredTriggerResolver,
+};
 
 use super::{CellTags, DialectSession, RlmDialect, RlmDialectSession, SourceDialect};
 use crate::executor::RlmLashlangExecutionTraceConfig;
@@ -14,6 +17,7 @@ pub(crate) struct LashlangDialectServices {
     pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
     pub(crate) artifact_store: Arc<dyn LashlangArtifactStore>,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
+    pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     pub(crate) execution_trace_config: RlmLashlangExecutionTraceConfig,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
     /// The session-pinned transport programs arrive on. Carried with the

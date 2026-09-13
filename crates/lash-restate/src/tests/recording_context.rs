@@ -79,6 +79,16 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "direct_local",
         ),
         (
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "deferred_tool_resolution:v1:[\"web.fetch\"]".to_string(),
+            },
+            // FIG-2910 intentionally consumes one Restate journal ordinal
+            // before any dependent effect in a resource-bearing ExecCode body.
+            // Pre-cutover in-flight bodies must be drained or recreated; this
+            // command is never folded into the outer DirectLocal run.
+            "journaled_run",
+        ),
+        (
             RuntimeEffectCommand::Checkpoint {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
@@ -545,9 +555,10 @@ pub(super) struct RecordingContext {
     pub(super) sleeps: Mutex<Vec<u64>>,
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
+    fail_process_workflow_starts: AtomicUsize,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
-    pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
+    pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
@@ -573,6 +584,33 @@ impl lash_trace::TraceSink for RecordingTraceSink {
 }
 
 impl RecordingContext {
+    pub(super) fn fail_next_process_workflow_start(&self) {
+        self.fail_process_workflow_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(super) async fn wait_for_await_event_registration(
+        &self,
+        session_id: &SessionId,
+        key: &AwaitEventKey,
+    ) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if self
+                    .session_waits
+                    .lock_recover()
+                    .get(session_id)
+                    .is_some_and(|waits| waits.contains(key))
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the Restate durable waiter is registered before the sweep");
+    }
+
     pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {
         Self {
             endpoint: Some(endpoint),
@@ -773,6 +811,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             .lock_recover()
             .push(execution_context.clone());
         Box::pin(async move {
+            if self
+                .fail_process_workflow_starts
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(TerminalError::new(
+                    "injected process workflow start failure",
+                ));
+            }
             if let Some(endpoint) = endpoint {
                 let complete_runs =
                     matches!(registration.input.as_ref(), ProcessInput::ToolCall { .. });
@@ -802,10 +851,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         let endpoint = self.endpoint.clone();
-        let process_id = request.process_id.clone();
-        self.cancelled
-            .lock_recover()
-            .push((request.process_id.to_string(), request.reason.clone()));
+        let process_id = request.process_ref.process_id.clone();
+        self.cancelled.lock_recover().push(request.clone());
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
                 invoke_process_workflow_endpoint(&endpoint, "cancel", &process_id, &request, false)
@@ -1067,6 +1114,7 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) crash_after_run_commit: AtomicBool,
     pub(super) run_committed: ZeroPermitSemaphore,
     pub(super) runs: Mutex<Vec<String>>,
+    pub(super) journal_commands: Mutex<Vec<String>>,
     pub(super) records: Mutex<HashMap<String, Vec<u8>>>,
     pub(super) replaying: AtomicBool,
     pub(super) append_missing_on_replay: AtomicBool,
@@ -1142,7 +1190,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                                 "tool-intent-corpus-call",
                                 "tool_intent_corpus",
                             )),
-                            intents: lash_core::ToolIntents::v1(vec![
+                            intents: lash_core::ToolIntents::v2(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
                                         session_id: SessionId::from(
@@ -1295,11 +1343,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        // The mid-drain prefix ends before the durable-wait index call, so
-        // its v2 capture is unchanged by the scope-keyed index cutover.
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1328,6 +1374,55 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
     }
 }
 
+#[tokio::test]
+pub(super) async fn checked_in_v2_mid_drain_journal_refuses_v1_tool_intent_without_duplicate_effect()
+ {
+    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/tool_intent_journals/v2-mid-drain.json"
+    ))
+    .expect("decode the v2 mid-drain endpoint corpus fixture");
+    assert!(
+        fixture.captured_from_endpoint_interruption,
+        "{} must name its real endpoint-interruption provenance",
+        fixture.crash_point
+    );
+
+    let (command_frames, output, signal_events) = replay_tool_intent_corpus_fixture(&fixture).await;
+    assert_eq!(
+        command_frames,
+        Vec::<u16>::new(),
+        "{} response command frames",
+        fixture.crash_point
+    );
+    assert_eq!(
+        output,
+        Some(serde_json::json!([{
+            "identity": {
+                "execution_scope_id": "tool-intent-corpus-turn",
+                "intent_index": 0,
+                "minting_emission_replay_key": "tool-intent-drain:tool-intent-corpus-call",
+                "replay_key": "tool-intent:v2:blake3:b9d8ee83094dc1094ae4feff142c51941d4a07b150b5cf6f1ff6998a16883201",
+                "session_id": "tool-intent-corpus-session",
+                "tool_call_id": "tool-intent-corpus-call"
+            },
+            "intent_index": 0,
+            "kind": "signal_process",
+            "refusal": {
+                "reason": "unsupported_protocol_version",
+                "recorded": 1
+            },
+            "status": "refused"
+        }])),
+        "{} output",
+        fixture.crash_point
+    );
+    assert_eq!(
+        signal_events, 0,
+        "{} must refuse before reconstructing the signal effect",
+        fixture.crash_point
+    );
+}
+
 /// The untouched pre-cutover endpoint artifacts now encounter the earlier
 /// effect-envelope shape fence. That refusal happens before their recorded
 /// signal effect is reconstructed, so a fresh registry stays empty.
@@ -1348,6 +1443,16 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
         (
             "v2-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-full-drain.json")
+                .as_slice(),
+        ),
+        (
+            "v3-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json")
+                .as_slice(),
+        ),
+        (
+            "v3-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json")
                 .as_slice(),
         ),
     ] {
@@ -1705,16 +1810,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v2-mid-drain",
+            "v4-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v3-mid-intent",
+            "v4-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v3-full-drain", "full_drain", full),
+        ("v4-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -1788,6 +1893,7 @@ impl ReplayableRecordingContext {
             .records
             .lock_recover()
             .iter()
+            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
                 let recorded: RecordedRuntimeEffect =
                     serde_json::from_slice(bytes).expect("recorded runtime effect");
@@ -1812,6 +1918,7 @@ impl ReplayableRecordingContext {
         self.records
             .lock_recover()
             .iter()
+            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
                 let recorded =
                     serde_json::from_slice(bytes).expect("decode recorded runtime effect");
@@ -1856,6 +1963,11 @@ impl ReplayableRecordingContext {
         self.replay_process_workflow_starts_from_journal
             .store(true, Ordering::SeqCst);
     }
+}
+
+fn is_process_command_journal_fact(effect_name: &str) -> bool {
+    effect_name.ends_with(".process-cancel-admission:v1")
+        || effect_name.ends_with(".parent-end-cancel-decision:v1")
 }
 
 #[derive(Default)]
@@ -2131,6 +2243,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         Fut: Future<Output = T> + Send + 'run,
     {
         self.runs.lock_recover().push(effect_name.clone());
+        self.journal_commands
+            .lock_recover()
+            .push(format!("run:{effect_name}"));
         let replaying = self.replaying.load(Ordering::SeqCst);
         if replaying {
             let recorded = self.records.lock_recover().get(&effect_name).cloned();
@@ -2229,11 +2344,16 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
-        _request: RestateProcessCancelRequest,
+        request: RestateProcessCancelRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
+        self.journal_commands.lock_recover().push(format!(
+            "call:process-cancel:{}",
+            request.process_ref.process_id
+        ));
+        self.events.cancelled.lock_recover().push(request);
         Box::pin(async { Ok(()) })
     }
 

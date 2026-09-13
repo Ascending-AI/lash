@@ -190,6 +190,11 @@ string_identity!(
     "session"
 );
 
+/// Derives the stable owner namespace used by session-owned durable records.
+pub fn session_owner_namespace(session_id: impl AsRef<str>) -> String {
+    format!("session:{}", session_id.as_ref())
+}
+
 string_identity!(
     /// Host-supplied name of one reusable process.
     ///
@@ -281,6 +286,14 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<TurnId>(r#""turn-7""#).unwrap(),
             TurnId::from("turn-7")
+        );
+    }
+
+    #[test]
+    fn session_owner_namespace_has_one_canonical_spelling() {
+        assert_eq!(
+            session_owner_namespace(SessionId::from("session-blue")),
+            "session:session-blue"
         );
     }
 

@@ -827,6 +827,26 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 return self
                     .conn
                     .write(move |tx| {
+                        // Session deletion is the authoritative lifecycle
+                        // decision for every exact execution scope it owns.
+                        // Preserve those scopes as the same retirement
+                        // evidence used by scope-exact retirement so artifact
+                        // cleanup remains retryable after journal deletion.
+                        tx.execute(
+                            "INSERT INTO effect_scope_retirements (
+                                 scope_id, retired_at_ms, artifact_cleanup_completed
+                             )
+                             SELECT scope_id, ?2, 0 FROM (
+                                 SELECT DISTINCT scope_id FROM runtime_effect_replay
+                                 WHERE session_id = ?1
+                                 UNION
+                                 SELECT DISTINCT scope_id FROM runtime_effect_group
+                                 WHERE session_id = ?1
+                             ) AS retired_session_scopes
+                             WHERE 1
+                             ON CONFLICT(scope_id) DO NOTHING",
+                            params![session_id.as_str(), now_ms as i64],
+                        )?;
                         let deleted = tx.execute(
                             "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
                             params![session_id.as_str()],
@@ -924,6 +944,59 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 )
             })
     }
+
+    async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
+        self.conn
+            .call(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT scope_id FROM effect_scope_retirements
+                     WHERE artifact_cleanup_completed = 0
+                     ORDER BY scope_id",
+                )?;
+                let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                let mut scopes = Vec::new();
+                for row in rows {
+                    let key = row?;
+                    let scope = ExecutionScope::from_journal_key(&key).ok_or_else(|| {
+                        rusqlite::Error::InvalidParameterName(format!(
+                            "invalid retired effect scope key `{key}`"
+                        ))
+                    })?;
+                    scopes.push(scope);
+                }
+                Ok(scopes)
+            })
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
+
+    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let scope_id = scope_id.to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "UPDATE effect_scope_retirements
+                     SET artifact_cleanup_completed = 1
+                     WHERE scope_id = ?1",
+                    params![scope_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
 }
 
 /// Whether nothing under `scope_id` is still live: no `in_progress` effect
@@ -989,8 +1062,10 @@ pub(crate) fn insert_scope_fence(
 ) -> rusqlite::Result<()> {
     tx.execute(
         &format!(
-            "INSERT INTO {schema}.effect_scope_retirements (scope_id, retired_at_ms)
-             VALUES (?1, ?2)
+            "INSERT INTO {schema}.effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             VALUES (?1, ?2, 0)
              ON CONFLICT(scope_id) DO NOTHING"
         ),
         params![scope_id, now_ms as i64],

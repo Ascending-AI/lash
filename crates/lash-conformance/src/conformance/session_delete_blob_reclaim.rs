@@ -523,6 +523,7 @@ async fn attachment_prefix_retention(
             intent_at_epoch_ms: 0,
             owner_kind: Some(crate::AttachmentOwnerKind::Turn),
             owner_id: Some("orphan-turn".into()),
+            owner_incarnation: None,
         })
         .unwrap();
     let mut state = crate::RuntimeSessionState {

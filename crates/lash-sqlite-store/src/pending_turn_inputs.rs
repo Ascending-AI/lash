@@ -142,8 +142,9 @@ pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
     row: &PendingTurnInputRow,
     state: lash_core::TurnInputState,
 ) -> Option<lash_core::PendingTurnInputClaimDiagnostics> {
-    (row.claim_token.is_some() || matches!(state, lash_core::TurnInputState::Accepted)).then(|| {
-        lash_core::PendingTurnInputClaimDiagnostics {
+    row.claim_token
+        .is_some()
+        .then(|| lash_core::PendingTurnInputClaimDiagnostics {
             state,
             claim_id: row.claim_id.clone(),
             claim_owner: row.claim_owner.clone(),
@@ -152,8 +153,7 @@ pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
                 .as_ref()
                 .map(|_| row.claim_session_lease_generation),
             claim_fencing_token: row.claim_fencing_token,
-        }
-    })
+        })
 }
 
 #[derive(Clone, Debug)]

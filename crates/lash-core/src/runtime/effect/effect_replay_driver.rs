@@ -947,6 +947,13 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError>;
 
+    /// Read committed scope fences whose artifact-owner cleanup is pending.
+    async fn pending_artifact_owner_retirements(&self)
+    -> Result<Vec<ExecutionScope>, RuntimeError>;
+
+    /// Mark one committed fence's artifact-owner cleanup complete.
+    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError>;
+
     /// Delete the scope-retirement fence row of `scope_id`, if any, under the
     /// same lock retirement writes it: the scope's owner is being registered
     /// again (a pruned process id reused by the host, ADR 0049). Nothing else
@@ -1264,6 +1271,22 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.row_store.retire_journal(&retirement).await
     }
 
+    pub async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
+        self.row_store.pending_artifact_owner_retirements().await
+    }
+
+    pub async fn complete_artifact_owner_retirement(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        let identity = scope.journal_identity()?;
+        self.row_store
+            .complete_artifact_owner_retirement(identity.key())
+            .await
+    }
+
     /// Lift the scope-retirement fence of a non-session `scope` whose owner is
     /// registered again (ADR 0049). Session scopes are refused as on the
     /// retirement lever.
@@ -1508,8 +1531,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 recorded_envelope_json,
                 stored_envelope_hash,
             } => {
-                let recorded_envelope = serde_json::from_str(&recorded_envelope_json)
-                    .map_err(|err| vocabulary.decode_error(err))?;
+                let recorded_envelope =
+                    CanonicalRuntimeEffectEnvelope::decode(&recorded_envelope_json)?;
                 Ok(PreparedEffect::ReplayMismatch {
                     recorded_envelope: Box::new(recorded_envelope),
                     stored_envelope_hash,

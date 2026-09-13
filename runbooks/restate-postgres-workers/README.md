@@ -97,8 +97,8 @@ docker run --rm --name lash-postgres-conformance \
   -d postgres:16
 
 LASH_POSTGRES_DATABASE_URL=postgres://postgres:postgres@localhost:55432/lash_conformance \
-  cargo test -p lash-internal-postgres-store --locked \
-  postgres_process_registry_satisfies_conformance_when_configured
+  cargo test -p lash-internal-postgres-store --locked --test conformance \
+  process_registry_
 
 docker rm -f lash-postgres-conformance
 ```

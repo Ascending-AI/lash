@@ -51,7 +51,8 @@ fn main() {
 
 fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
     use lash_lashlang_runtime::{
-        DeferredResolutionLinkKey, DeferredResolutionRecord, Resolution, ToolGrant,
+        DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredTriggerResolutionRecord,
+        Resolution, ToolGrant, TriggerGrant, TriggerResolution,
     };
     use lash_sansio::{
         CompactToolContract, ProjectionMode, SchemaContract, SchemaProjectionOverride,
@@ -129,6 +130,24 @@ fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
             .into_iter()
             .collect(),
     };
+    let trigger_grant: TriggerGrant = serde_json::from_value(json!({
+        "provider_id": "calendar",
+        "constructor_path": ["calendar", "Changed"],
+        "input_type": {"Object": [{"name": "calendar", "ty": "Str", "optional": false}]},
+        "event_type": {
+            "name": "calendar.Change",
+            "ty": {"Object": [{"name": "id", "ty": "Str", "optional": false}]}
+        },
+        "route": {"account": "primary"}
+    }))
+    .expect("valid generated trigger grant");
+    let trigger_resolution = TriggerResolution::Resolved(Box::new(trigger_grant));
+    let deferred_trigger_resolutions = DeferredTriggerResolutionRecord {
+        link_key: Some(link_key.clone()),
+        resolutions: [("calendar.Changed".to_string(), trigger_resolution.clone())]
+            .into_iter()
+            .collect(),
+    };
 
     vec![
         (
@@ -138,6 +157,20 @@ fn serialized_dependency_schemas() -> Vec<(&'static str, Vec<String>)> {
         (
             "DEFERRED_LINK_KEY_FIELDS",
             serialized_union(&[serialized_fields(&link_key)]),
+        ),
+        (
+            "DEFERRED_TRIGGER_RESOLUTION_FIELDS",
+            serialized_union(&[serialized_fields(&deferred_trigger_resolutions)]),
+        ),
+        (
+            "TRIGGER_RESOLUTION_FIELDS",
+            serialized_union(&[
+                serialized_fields(&trigger_resolution),
+                serialized_fields(&TriggerResolution::NotAvailable),
+                serialized_fields(&TriggerResolution::Ambiguous {
+                    provider_ids: vec!["a".to_string(), "b".to_string()],
+                }),
+            ]),
         ),
         (
             "RESOLUTION_FIELDS",

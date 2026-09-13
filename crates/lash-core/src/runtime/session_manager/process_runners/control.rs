@@ -88,46 +88,35 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn cancel(
-        &self,
-        process_ref: crate::ProcessRef,
-        reason: Option<String>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::Cancel {
-                process_ref,
-                reason,
-                replay: None,
-            })
-            .await?
-        {
-            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            _ => Err(wrong_process_outcome("cancel")),
-        }
-    }
-
     async fn cancel_named(
         &self,
         process_id: &ProcessId,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        match self.registry.resolve_process_ref(process_id).await {
-            Ok(process_ref) => self.cancel(process_ref, reason).await,
+        let command = match self.registry.resolve_process_ref(process_id).await {
+            Ok(process_ref) => crate::ProcessCommand::Cancel {
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            },
             Err(refusal @ crate::PluginError::ProcessUnknown { .. })
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
-                match self
-                    .run(crate::ProcessCommand::CancelRefused {
-                        process_id: ProcessId::from(process_id.to_string()),
-                        reason,
-                        refusal,
-                    })
-                    .await?
-                {
-                    crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
-                    _ => Err(wrong_process_outcome("cancel_refused")),
+                crate::ProcessCommand::CancelRefused {
+                    process_id: process_id.clone(),
+                    origin,
+                    requester,
+                    refusal,
                 }
             }
-            Err(error) => Err(error),
+            Err(error) => return Err(error),
+        };
+        match self.run(command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
+            _ => Err(wrong_process_outcome("cancel")),
         }
     }
 
@@ -136,14 +125,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::ParentEnd {
                 identity,
                 process_id,
                 policy,
-                reason,
             })
             .await?
         {
@@ -299,6 +286,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
         ))
+        .with_process_engines(self.current.host.core.process_engines.clone())
         .with_process_effect_controller(owned_controller);
         if let Some(turn_cancellation) = self.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
@@ -354,26 +342,40 @@ impl ProcessCapability {
         state.process_execution_env_spec(&current.policy)
     }
 
-    async fn capture_execution_env_ref(
+    async fn capture_execution_env(
         &self,
         current: &CurrentSessionCapability,
         registration: &crate::ProcessRegistration,
-    ) -> Result<Option<crate::ProcessExecutionEnvRef>, crate::PluginError> {
+        requested_env_spec: Option<crate::ProcessExecutionEnvSpec>,
+    ) -> Result<
+        (
+            Option<crate::ProcessExecutionEnvRef>,
+            Option<crate::ProcessExecutionEnvSpec>,
+            Option<crate::ProcessExecutionEnvSpec>,
+        ),
+        crate::PluginError,
+    > {
         if let Some(env_ref) = registration.env_ref.clone() {
-            return Ok(Some(env_ref));
+            let spec = crate::load_process_execution_env(
+                current.host.core.durability.process_env_store.as_ref(),
+                &env_ref,
+            )
+            .await?;
+            // Keep the existing reference in the registration and let the
+            // replayable executor protect/transfer it. The decoded value is
+            // only for the pre-journal engine-admission check.
+            return Ok((Some(env_ref), None, Some(spec)));
+        }
+        if let Some(spec) = requested_env_spec {
+            return Ok((None, Some(spec.clone()), Some(spec)));
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
                 let spec = self.current_execution_env_spec(current);
-                crate::persist_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    &spec,
-                )
-                .await
-                .map(Some)
+                Ok((None, Some(spec.clone()), Some(spec)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
-                Ok(None)
+                Ok((None, None, None))
             }
         }
     }
@@ -395,8 +397,8 @@ impl ProcessCapability {
             .parent_invocation
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
-        let env_ref = self
-            .capture_execution_env_ref(current, &registration)
+        let (env_ref, command_env_spec, validation_env_spec) = self
+            .capture_execution_env(current, &registration, options.env_spec.clone())
             .await?;
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
@@ -416,9 +418,8 @@ impl ProcessCapability {
             )
             .with_execution_env_ref(env_ref)
             .with_wake_session_id(wake_session_id);
-        let registration = self
-            .prepare_process_environment(current, session_id, registration)
-            .await?;
+        let registration =
+            self.admit_and_stamp_engine_start(current, registration, validation_env_spec.as_ref())?;
         let execution_context = options.execution_context(&scope);
         let runner = ProcessCommandRunner::new(
             current,
@@ -429,7 +430,7 @@ impl ProcessCapability {
             .start(
                 registration,
                 options.initial_observers.into_iter().collect(),
-                None,
+                command_env_spec,
                 execution_context,
             )
             .await
@@ -473,31 +474,6 @@ impl ProcessCapability {
             .await
     }
 
-    async fn prepare_process_environment(
-        &self,
-        current: &CurrentSessionCapability,
-        _session_id: &SessionId,
-        registration: crate::ProcessRegistration,
-    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
-        if !matches!(
-            registration.input.as_ref(),
-            crate::ProcessInput::Engine { .. }
-        ) {
-            return Ok(registration);
-        }
-        let env_spec = match registration.env_ref.as_ref() {
-            Some(env_ref) => Some(
-                crate::load_process_execution_env(
-                    current.host.core.durability.process_env_store.as_ref(),
-                    env_ref,
-                )
-                .await?,
-            ),
-            None => None,
-        };
-        self.admit_and_stamp_engine_start(current, registration, env_spec.as_ref())
-    }
-
     /// Admit immutable recorded inputs and stamp the sole engine identity.
     fn admit_and_stamp_engine_start(
         &self,
@@ -510,7 +486,7 @@ impl ProcessCapability {
         };
         // Deliberate asymmetry between the two routes, and not a new refusal.
         // A request-shaped start captures the live session env before it reaches
-        // this gate (`capture_execution_env_ref`), so its env is never absent. A
+        // this gate (`capture_execution_env`), so its env is never absent. A
         // recorded intent must be validated against the env its own record
         // carries — substituting the live session env would make the admitted
         // start depend on when it was realized, which a journaled command may
@@ -723,33 +699,32 @@ impl ProcessCapability {
         let runner = self.command_runner(current, &scope)?;
         let _ = (managed, session_id);
         runner
-            .cancel_named(process_id, Some("requested by host".to_string()))
+            .cancel_named(
+                process_id,
+                crate::CancelOrigin::OperatorRequested,
+                serde_json::to_string(runner.effect_controller_handle.scoped().execution_scope())
+                    .expect("execution scopes contain only serializable identities"),
+                None,
+            )
             .await
-    }
-
-    pub(in crate::runtime::session_manager) async fn cancel_process_with_reason(
-        &self,
-        current: &CurrentSessionCapability,
-        managed: &ManagedSessionCapability,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let runner = self.command_runner(current, &scope)?;
-        let _ = (managed, session_id);
-        runner.cancel_named(process_id, reason).await
     }
 
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        runner.cancel_named(process_id, reason).await
+        runner
+            .cancel_named(
+                process_id,
+                crate::CancelOrigin::ModelRequested,
+                identity.replay_key.clone(),
+                Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+            )
+            .await
     }
 
     pub(in crate::runtime::session_manager) async fn finish_recorded_intent_parent(
@@ -758,11 +733,10 @@ impl ProcessCapability {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         self.command_runner(current, &scope)?
-            .parent_end(identity, process_id, policy, reason)
+            .parent_end(identity, process_id, policy)
             .await
     }
 

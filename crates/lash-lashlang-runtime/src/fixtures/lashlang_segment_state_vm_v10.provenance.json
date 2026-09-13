@@ -1,0 +1,13 @@
+{
+  "schema": "lash.lashlang-segment-predecessor-provenance.v1",
+  "source_commit": "ccab40166d0dc9296f48e58c89cce7e5de21175b",
+  "captured_by": "process::segment_trace_tests::capture_vm_v10_segment_state_from_predecessor_writer",
+  "capture_command": ". ./env.sh && cargo test -p lash-internal-lashlang-runtime process::segment_trace_tests::capture_vm_v10_segment_state_from_predecessor_writer -- --ignored --exact",
+  "capture_setup": "Apply the named ignored capture test to source_commit, then run the capture command; the test pins the runtime-varying execution nonce and elapsed time to the captured values.",
+  "relationship": "source commit immediately before the FIG-2868 VM continuation v11 cutover",
+  "vm_continuation_format_version": 10,
+  "artifact": {
+    "path": "lashlang_segment_state_vm_v10.json",
+    "sha256": "b609b463abfb5b14b8b286f9a0651569ef9cd1b16cc36248737d3c7f9080d2fd"
+  }
+}

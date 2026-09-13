@@ -205,6 +205,26 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
+    fn deferred_resolution_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
+        let execution_scope = self
+            .dispatch
+            .effect_controller
+            .scoped()
+            .execution_scope()
+            .clone();
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(execution_scope, effect_id)
+                .expect("runtime context carries an admitted effect scope"),
+            crate::RuntimeAttribution::none(),
+            effect_id,
+        )
+        .with_caused_by(
+            self.parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::causal_ref),
+        )
+    }
+
     /// Executes a nondeterministic language-runtime operation behind the
     /// durable effect controller so replay returns the recorded sample.
     pub async fn journaled_language_runtime_value(
@@ -227,6 +247,69 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?
             .into_language_runtime_value()
+    }
+
+    /// Journals the link-scoped deferred-resolution decision without inheriting
+    /// the live caller attribution. The admitted parent address supplies the
+    /// durable identity; attribution and descriptive parent labels are not part
+    /// of that decision and must not make recovery hash a different envelope.
+    #[doc(hidden)]
+    pub async fn journaled_deferred_resolution_with<F, Fut>(
+        &self,
+        effect_id: String,
+        operation: String,
+        run: F,
+    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError>
+    where
+        F: FnOnce() -> Fut + Send + 'run,
+        Fut: std::future::Future<
+                Output = Result<serde_json::Value, crate::RuntimeEffectControllerError>,
+            > + Send
+            + 'run,
+    {
+        let invocation = self.deferred_resolution_invocation(&effect_id);
+        let expected_operation = operation.clone();
+        self.dispatch
+            .effect_controller
+            .scoped()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
+                ),
+                crate::RuntimeEffectLocalExecutor::language_runtime_value_with(
+                    move |envelope| async move {
+                        let crate::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
+                            envelope.command
+                        else {
+                            return Err(crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                                "deferred-resolution executor requires a language_runtime_value command",
+                            ));
+                        };
+                        if operation != expected_operation {
+                            return Err(crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                                format!(
+                                    "deferred-resolution operation `{operation}` does not match `{expected_operation}`"
+                                ),
+                            ));
+                        }
+                        Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
+                            value: run().await?,
+                        })
+                    },
+                ),
+            )
+            .await?
+            .into_language_runtime_value()
+    }
+
+    /// Records a classified nested runtime-effect failure so the enclosing
+    /// `ExecCode` effect aborts instead of journaling a model-visible response.
+    #[doc(hidden)]
+    pub fn record_nested_runtime_effect_error(&self, error: crate::RuntimeEffectControllerError) {
+        self.record_nested_effect_error(error);
     }
     pub(super) fn process_scope(
         &self,
@@ -334,6 +417,18 @@ impl<'run> RuntimeExecutionContext<'run> {
             .scoped()
             .scope_id()
             .to_string()
+    }
+
+    /// Returns the exact owner used to stage artifacts produced by this
+    /// replayable execution.
+    pub fn artifact_owner(&self) -> crate::ArtifactOwner {
+        crate::ArtifactOwner::execution(
+            self.dispatch
+                .effect_controller
+                .scoped()
+                .execution_scope()
+                .clone(),
+        )
     }
 
     /// Exposes session scope to protocol and process-engine implementors while executing code
@@ -610,7 +705,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
-                let env_ref = self.captured_process_execution_env_ref().await?;
+                let owner = crate::ArtifactOwner::process_start(&registration.id);
+                let env_ref = self.captured_process_execution_env_ref(&owner).await?;
                 Ok(registration.with_execution_env_ref(Some(env_ref)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
@@ -623,6 +719,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// executing code against the session runtime.
     pub async fn captured_process_execution_env_ref(
         &self,
+        owner: &crate::ArtifactOwner,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self
             .process_execution
@@ -631,8 +728,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         {
             return Ok(env_ref);
         }
-        crate::persist_process_execution_env(
+        crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
+            owner,
             &self.execution_env_spec,
         )
         .await
@@ -980,13 +1078,19 @@ impl<'run> RuntimeExecutionContext<'run> {
                         .event_context
                         .as_ref()
                         .ok_or_else(missing_process_execution_error)?;
-                    let events = match event_context
+                    let record = match event_context
                         .process_work
                         .registry()
-                        .events_after(&process.process_id, 0)
+                        .get_process(&process.process_id)
                         .await
-                    {
-                        Ok(events) => events,
+                        .and_then(|record| {
+                            record.ok_or_else(|| {
+                                crate::runtime::registry_transitions::unknown_process(
+                                    &process.process_id,
+                                )
+                            })
+                        }) {
+                        Ok(record) => record,
                         Err(error) => {
                             let error = match error {
                                 crate::PluginError::Runtime(error) => {
@@ -998,9 +1102,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                             return Err(error);
                         }
                     };
-                    let cancel_requested = events
-                        .iter()
-                        .any(|event| event.event_type == "process.cancel_requested");
+                    let cancel_requested = record.cancel_request.is_some();
                     if cancel_requested {
                         cancellation.cancel();
                         return Err(crate::RuntimeEffectControllerError::new(

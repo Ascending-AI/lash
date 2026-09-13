@@ -6259,7 +6259,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -6593,7 +6593,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -6841,7 +6841,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -7089,7 +7089,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -7472,7 +7472,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -7720,7 +7720,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -8015,7 +8015,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -8263,7 +8263,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -9536,7 +9536,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,
@@ -10039,7 +10039,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 1
+              "protocol_version": 2
             },
             "record": {
               "args": null,

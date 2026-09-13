@@ -170,6 +170,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             external_ref,
             first_started,
             abandon_request,
+            cancel_request,
             wait,
             status,
             outcome,
@@ -195,6 +196,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
                 .map(|started| (*started).try_into())
                 .transpose()?,
             abandon_request: abandon_request.map(|request| (*request).into()),
+            cancel_request: cancel_request.map(|request| *request),
             wait: wait.map(Into::into),
             status: status.into(),
             outcome: outcome.map(TryInto::try_into).transpose()?,
@@ -224,6 +226,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             external_ref,
             first_started,
             abandon_request,
+            cancel_request,
             wait,
             status,
             outcome,
@@ -254,6 +257,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             .map(|started| started.try_into().map(Box::new))
             .transpose()?;
         record.abandon_request = abandon_request.map(|request| Box::new(request.into()));
+        record.cancel_request = cancel_request.map(Box::new);
         record.wait = wait.map(Into::into);
         record.status = status.into();
         record.outcome = outcome.map(TryInto::try_into).transpose()?;
@@ -283,6 +287,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             lease_holder,
             lease_expires_at_ms,
             abandon_request,
+            cancel_request,
             input,
             originator,
             env_ref,
@@ -310,6 +315,7 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
             abandon_request: abandon_request.map(Into::into),
+            cancel_request,
             input: input.try_into()?,
             originator: originator.into(),
             env_ref: env_ref
@@ -347,6 +353,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             lease_holder,
             lease_expires_at_ms,
             abandon_request,
+            cancel_request,
             input,
             originator,
             env_ref,
@@ -381,6 +388,7 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             lease_holder: lease_holder.map(Into::into),
             lease_expires_at_ms,
             abandon_request: abandon_request.map(Into::into),
+            cancel_request,
             input: input.try_into()?,
             originator: originator.try_into()?,
             env_ref: env_ref.map(|env_ref| {
@@ -403,16 +411,20 @@ impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkI
             process,
             events,
             event_tail_sequence,
+            state,
             kind,
             label,
         } = value;
-        Ok(Self {
+        let item = Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
+            state: state.into(),
             kind,
             label,
-        })
+        };
+        item.validate("RemoteProcessWorkItem")?;
+        Ok(item)
     }
 }
 
@@ -425,6 +437,7 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
             process,
             events,
             event_tail_sequence,
+            state,
             kind: _,
             label: _,
         } = value;
@@ -439,9 +452,40 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
             process,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
+            state: state.into(),
             kind,
             label,
         })
+    }
+}
+
+impl From<lash_core::facade_support::ObservedWorkItemState> for RemoteObservedWorkItemState {
+    fn from(value: lash_core::facade_support::ObservedWorkItemState) -> Self {
+        match value {
+            lash_core::facade_support::ObservedWorkItemState::Coherent => Self::Coherent,
+            lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => Self::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            },
+        }
+    }
+}
+
+impl From<RemoteObservedWorkItemState> for lash_core::facade_support::ObservedWorkItemState {
+    fn from(value: RemoteObservedWorkItemState) -> Self {
+        match value {
+            RemoteObservedWorkItemState::Coherent => Self::Coherent,
+            RemoteObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => Self::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            },
+        }
     }
 }
 

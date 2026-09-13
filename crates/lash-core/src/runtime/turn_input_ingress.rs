@@ -180,6 +180,11 @@ impl TurnInputState {
     pub fn is_next_turn_pending(self) -> bool {
         matches!(self, Self::DeferredNextTurn)
     }
+
+    /// Returns whether this state is settled and eligible for tombstone vacuum.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Cancelled | Self::Completed)
+    }
 }
 
 turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
@@ -949,6 +954,17 @@ mod tests {
         assert_eq!(TurnInputState::Accepted.as_str(), "accepted");
         assert_eq!(TurnInputState::Cancelled.as_str(), "cancelled");
         assert_eq!(TurnInputState::Completed.as_str(), "completed");
+    }
+
+    #[test]
+    fn turn_input_state_terminality_covers_exactly_settled_states() {
+        for state in TurnInputState::ALL.iter().copied() {
+            assert_eq!(
+                state.is_terminal(),
+                matches!(state, TurnInputState::Cancelled | TurnInputState::Completed),
+                "terminality drifted for {state:?}"
+            );
+        }
     }
 
     #[test]

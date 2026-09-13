@@ -24,6 +24,7 @@ RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
+STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 FEATURE_COVERAGE = ROOT / "scripts" / "feature-coverage.toml"
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
@@ -51,6 +52,30 @@ FAST_SHARDS = [
 VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
     "validate_manifest"
 ]
+
+
+
+def store_suite_branches(suite: str) -> tuple[str, str]:
+    """Returns the (Bazel, Cargo) halves of one `store-tests.sh` suite.
+
+    The service jobs dispatch to that script rather than inlining a command, so
+    a pin on a command or a test name has to follow the name into the branch
+    that actually runs it -- and has to hold on BOTH branches, because an
+    untrusted event (fork or Dependabot PR) gets no cache credentials and takes
+    the Cargo half.
+    """
+    script = STORE_TESTS.read_text(encoding="utf-8")
+    body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
+    bazel, cargo = body.split("\n    else\n", 1)
+    return bazel, cargo
+
+
+def store_suite_for_step(step: str) -> str:
+    """Reads the suite name out of a `run: bash scripts/ci/store-tests.sh <s>`."""
+    match = re.search(r"scripts/ci/store-tests\.sh\s+(\S+)", step)
+    if match is None:
+        raise AssertionError(f"step does not dispatch to store-tests.sh:\n{step}")
+    return match.group(1)
 
 
 def shell_int_constant(script: str, name: str) -> int:
@@ -564,13 +589,32 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             summary,
         )
 
-        # Every event uses the same primary/compatibility bracket. The focused
-        # contract tests in test_ci_plan.py evaluate per-role step selection.
+        # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
+        # bracket is asserted where it is decided. PG16 is the sole primary lane
+        # and runs on every event; the PG14/PG18 compatibility lanes only compare
+        # the live catalog artifact, so they are deferred off the pull-request
+        # critical path and run on merge_group, push and workflow_dispatch —
+        # nothing reaches trunk without all three majors. The focused contract
+        # tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
-        for version in ("14", "16", "18"):
-            self.assertIn(f'postgres: "{version}"', postgres)
-        self.assertEqual(2, postgres.count("role: compatibility"))
-        self.assertEqual(1, postgres.count("role: primary"))
+        self.assertIn("include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}", postgres)
+        for event, expected in (
+            ("pull_request", [("16", "primary")]),
+            ("merge_group", [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")]),
+            ("push", [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")]),
+            (
+                "workflow_dispatch",
+                [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
+            ),
+        ):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    expected,
+                    [
+                        (leg["postgres"], leg["role"])
+                        for leg in plan["postgres_matrix"](event)
+                    ],
+                )
 
         # postgres-store is unconditional on PR-class events, so a skipped
         # matrix job must fail the single required conclusion even if plan's
@@ -755,6 +799,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             3,
         )
         self.assertIn("store-contract-soak cases='256':", justfile)
+        for leaf in (
+            "store_contract_state_machine",
+            "runtime_persistence_state_machine",
+            "session_graph_state_machine",
+        ):
+            self.assertIn(f"::tests::{leaf}", scenario_harnesses)
+            self.assertIn(
+                f"cargo test -p lash-internal-conformance --locked ::tests::{leaf}",
+                justfile,
+            )
+            for package in (
+                "lash-internal-sqlite-store",
+                "lash-internal-postgres-store",
+            ):
+                self.assertIn(
+                    f"cargo test -p {package} --locked --test conformance {leaf}",
+                    justfile,
+                )
+            self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
         self.assertEqual(
@@ -1633,12 +1696,27 @@ derive_mutation_jobs() {{
         self.assertIn('LASH_REQUIRE_POSTGRES: "1"', workflow)
         self.assertIn('LASH_CROSS_BACKEND_CASES: "4"', postgres_store_job)
 
-        # Every live-Postgres step needs the flag on its OWN env block. Without
-        # it the suites short-circuit on the absent URL, print a skip reason and
-        # report `ok` — the cross-backend differential reports "ok in 0.00s"
-        # with `compared_backends=[]`, so losing the flag from one step silently
-        # returns the differential to comparing nothing. A workflow-wide
-        # `assertIn` cannot see that: the sibling step still carries the flag.
+        # Every live-Postgres suite needs both settings, on both dispatch paths.
+        # Without them the suites short-circuit on the absent URL, print a skip
+        # reason and report `ok` — the cross-backend differential reports
+        # "ok in 0.00s" with `compared_backends=[]`, so losing the URL from one
+        # suite silently returns the differential to comparing nothing.
+        #
+        # The job supplies both once, at job level, so no step can carry one and
+        # a sibling step not. That inheritance is what a Cargo run reads. A Bazel
+        # test spawn inherits nothing from the client environment, so the shared
+        # `bazel_test` helper has to forward both by name — and the forwarding
+        # is also what keeps the PG major an execution-only input, outside every
+        # compile action key.
+        postgres_job_env = yaml.safe_load(workflow)["jobs"]["postgres-store"]["env"]
+        self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres_job_env)
+        self.assertEqual("1", str(postgres_job_env["LASH_REQUIRE_POSTGRES"]))
+
+        store_tests = STORE_TESTS.read_text(encoding="utf-8")
+        bazel_helper = store_tests.split("bazel_test() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("--test_env=LASH_POSTGRES_DATABASE_URL", bazel_helper)
+        self.assertIn("--test_env=LASH_REQUIRE_POSTGRES", bazel_helper)
+
         for step_name in (
             "Test PostgreSQL catalog compatibility",
             "Test Postgres store (conformance and attempt atomicity)",
@@ -1648,33 +1726,45 @@ derive_mutation_jobs() {{
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(postgres_store_job, step_name)
-                self.assertIn("LASH_POSTGRES_DATABASE_URL:", step)
-                self.assertIn('LASH_REQUIRE_POSTGRES: "1"', step)
+                bazel, cargo = store_suite_branches(store_suite_for_step(step))
+                self.assertTrue(bazel.strip())
+                self.assertIn("cargo ", cargo)
 
         runtime_scenarios = workflow_step_block(
             postgres_store_job, "Test runtime Postgres agent scenarios"
         )
         self.assertIn("if: matrix.role == 'primary'", runtime_scenarios)
+        scenario_bazel, scenario_cargo = store_suite_branches(
+            store_suite_for_step(runtime_scenarios)
+        )
         self.assertIn(
             "cargo nextest run --profile ci -p lash-runtime --features rlm",
-            runtime_scenarios,
+            scenario_cargo,
         )
-        self.assertIn(
-            "test(agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres)",
-            runtime_scenarios,
+        oracle = (
+            "agent_scenario_public_process_parents_are_literal_and"
+            "_crash_atomic_on_postgres"
         )
+        self.assertIn(f"test({oracle})", scenario_cargo)
+        self.assertIn(oracle, scenario_bazel)
         self.assertIn("github.event_name == 'pull_request'", postgres_store_job)
         self.assertIn("github.event_name == 'merge_group'", postgres_store_job)
 
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured
         # output is what makes a real run distinguishable from a skipped one.
-        self.assertIn(
-            "--no-capture",
-            workflow_step_block(
-                postgres_store_job, "Test cross-backend store differential"
-            ),
+        differential_bazel, differential_cargo = store_suite_branches(
+            store_suite_for_step(
+                workflow_step_block(
+                    postgres_store_job, "Test cross-backend store differential"
+                )
+            )
         )
+        self.assertIn("--no-capture", differential_cargo)
+        # libtest's spelling of the same flag, plus the Bazel-side switch that
+        # actually lets the uncaptured stderr reach the log.
+        self.assertIn("--test_arg=--nocapture", differential_bazel)
+        self.assertIn("--test_output=all", differential_bazel)
         self.assertIn(
             'LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}"',
             push_gate,
@@ -1700,26 +1790,45 @@ derive_mutation_jobs() {{
         workflow = WORKFLOW.read_text(encoding="utf-8")
         s3_store_job = workflow_job_block(workflow, "s3-store")
 
-        self.assertIn(
-            "run: cargo test -p lash-internal-s3-store --locked", s3_store_job
-        )
-        self.assertIn(
-            "LASH_MINIO_ENDPOINT: http://127.0.0.1:9000", s3_store_job
-        )
+        self.assertNotIn("LASH_MINIO_ENDPOINT:", s3_store_job)
         self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
-        self.assertIn("attachment_blob_store_differential_agrees", s3_store_job)
 
-        # Same per-step rule as the Postgres lane: both MinIO steps skip green
-        # on an absent endpoint, so each needs the require flag in its own env
-        # block rather than relying on its sibling's.
-        for step_name in (
-            "Test S3 store conformance",
-            "Test attachment blob-store differential",
-        ):
-            with self.subTest(step=step_name):
-                step = workflow_step_block(s3_store_job, step_name)
-                self.assertIn("LASH_MINIO_ENDPOINT:", step)
-                self.assertIn('LASH_REQUIRE_MINIO: "1"', step)
+        # The require flag is supplied once at job level, so an unavailable
+        # service fails instead of skipping for every suite in the job and no
+        # step can lose it on its own. A Bazel test spawn inherits nothing from
+        # the client environment, so `bazel_test` forwards it by name.
+        s3_job_env = yaml.safe_load(workflow)["jobs"]["s3-store"]["env"]
+        self.assertEqual("1", str(s3_job_env["LASH_REQUIRE_MINIO"]))
+        self.assertNotIn("LASH_MINIO_ENDPOINT", s3_job_env)
+        bazel_helper = STORE_TESTS.read_text(encoding="utf-8").split(
+            "bazel_test() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("--test_env=LASH_REQUIRE_MINIO", bazel_helper)
+
+        conformance_bazel, conformance_cargo = store_suite_branches(
+            store_suite_for_step(
+                workflow_step_block(s3_store_job, "Test S3 store conformance")
+            )
+        )
+        self.assertIn("cargo test -p lash-internal-s3-store --locked", conformance_cargo)
+        # The Bazel half runs the generated label set, so a new MinIO-gated
+        # binary joins this job without a hand edit. The generated file is what
+        # has to name the crate.
+        self.assertIn("labels minio", conformance_bazel)
+        minio_labels = (ROOT / "tools" / "bazel" / "minio_test_labels.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("//crates/lash-s3-store:", minio_labels)
+
+        differential_bazel, differential_cargo = store_suite_branches(
+            store_suite_for_step(
+                workflow_step_block(
+                    s3_store_job, "Test attachment blob-store differential"
+                )
+            )
+        )
+        for branch in (differential_bazel, differential_cargo):
+            self.assertIn("attachment_blob_store_differential_agrees", branch)
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1756,11 +1865,11 @@ derive_mutation_jobs() {{
             "run_cargo_tests -p lash-internal-llm-transport --locked --test property",
             "run_cargo_tests -p lash-internal-provider-anthropic --locked --test property",
             "run_cargo_tests -p lash-internal-provider-google --locked --test property",
-            # Durable-wait session-cancel evidence: the inline effect-host
-            # conformance test that exercises
+            # Durable-wait session-cancel evidence: the generated native
+            # effect-host laws, including the await-event law that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
             'step "Native effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-conformance --locked native_effect_host_satisfies_conformance",
+            "run_cargo_tests -p lash-internal-conformance --locked ::tests::effect_host",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)

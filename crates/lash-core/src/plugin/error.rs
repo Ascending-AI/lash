@@ -4,6 +4,15 @@ use crate::SessionId;
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginError {
+    /// The process already accepted a different cancellation request.
+    #[error(
+        "process `{process_ref}` already accepted cancellation {existing:?}; refused {requested:?}"
+    )]
+    ProcessCancelConflict {
+        process_ref: crate::ProcessRef,
+        existing: Box<crate::CancelRequest>,
+        requested: Box<crate::CancelRequest>,
+    },
     /// A child requested cancellation on end of an already-ended parent.
     #[error("cannot register process `{process_id}`: parent scope {parent:?} has ended")]
     ParentEnded {
@@ -252,6 +261,7 @@ impl PluginError {
             | Self::ProcessCallerDeparted { .. }
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ParentEnded { .. }
+            | Self::ProcessCancelConflict { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
             | Self::InvalidProcessWakeIdentity { .. }

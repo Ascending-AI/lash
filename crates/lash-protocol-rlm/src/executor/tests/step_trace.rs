@@ -74,7 +74,7 @@ async fn run_step(code: &str) -> (ExecResponse, Vec<lash_core::facade_support::T
 #[test]
 fn rejected_deferred_contract_step_is_visible_in_trace_sink() {
     block_on(async {
-        let (response, records) = run_step("inbox.send_item({})").await;
+        let (response, records) = Box::pin(run_step("inbox.send_item({})")).await;
         let diagnostic = response
             .error
             .expect("contract must reject the program")
@@ -97,7 +97,7 @@ fn rejected_deferred_contract_step_is_visible_in_trace_sink() {
 #[test]
 fn successful_compile_step_is_visible_in_trace_sink() {
     block_on(async {
-        let (response, records) = run_step("finish 42").await;
+        let (response, records) = Box::pin(run_step("finish 42")).await;
         assert!(response.error.is_none(), "{:?}", response.error);
         let steps: Vec<_> = records
             .iter()
@@ -116,7 +116,7 @@ fn successful_compile_step_is_visible_in_trace_sink() {
 fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
     block_on(async {
         let code = format!("finish missing_{}", "x".repeat(8000));
-        let (response, records) = run_step(&code).await;
+        let (response, records) = Box::pin(run_step(&code)).await;
         let diagnostic = response.error.expect("unknown name must fail").message;
         assert!(diagnostic.chars().count() > 4000);
         let steps: Vec<_> = records

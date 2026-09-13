@@ -2,13 +2,14 @@
 
 use std::sync::Arc;
 
+use lash_sansio::SessionId;
 use tokio_util::sync::CancellationToken;
 
 use crate::conformance::durable_turn_address;
 use crate::{
-    AwaitEventWaitIdentity, EffectHost, ExecutionScope, Resolution, TurnAddress, TurnCancelMode,
-    TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnFinish, TurnOutcome,
-    TurnStop, TurnTerminal, TurnWorkDriver,
+    AwaitEventKey, AwaitEventWaitIdentity, EffectHost, ExecutionScope, Resolution, TurnAddress,
+    TurnCancelMode, TurnCancelOutcome, TurnCancelRequest, TurnCancellationEvidence, TurnFinish,
+    TurnOutcome, TurnStop, TurnTerminal, TurnWorkDriver,
 };
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
 use pretty_assertions::assert_eq;
@@ -31,12 +32,41 @@ async fn driver_for_session(host: Arc<dyn EffectHost>, address: &TurnAddress) ->
     TurnWorkDriver::for_session(host, address.session_id.clone(), store)
 }
 
+/// Wait until a host exposes one genuinely registered durable waiter.
+pub async fn await_event_registration_observed(
+    host: Arc<dyn EffectHost>,
+    session_id: SessionId,
+    key: AwaitEventKey,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let outstanding = host
+                .list_outstanding_await_event_keys(&session_id)
+                .await
+                .expect("list outstanding waits for registration barrier");
+            if outstanding.contains(&key) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the durable waiter is registered before the sweep");
+}
+
 /// Run the exact-address, replay, terminal, sweep, and revocation contract for
 /// a keyed-promise adapter.
-pub async fn turn_work_driver(host: Arc<dyn EffectHost>) {
+pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
+    host: Arc<dyn EffectHost>,
+    registration_barrier: RegistrationBarrier,
+) where
+    RegistrationBarrier:
+        FnOnce(Arc<dyn EffectHost>, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
+    RegistrationBarrierFuture: std::future::Future<Output = ()>,
+{
     cancel_before_start_duplicate_replay_and_terminal_attach(Arc::clone(&host)).await;
     completion_seal_vs_cancel_is_first_writer_wins(Arc::clone(&host)).await;
-    exact_scope_and_session_sweep_isolation(Arc::clone(&host)).await;
+    exact_scope_and_session_sweep_isolation(Arc::clone(&host), registration_barrier).await;
     after_step_request_defers_until_immediate_escalates_it(Arc::clone(&host)).await;
     after_step_request_is_honoured_at_the_step_boundary(Arc::clone(&host)).await;
     session_deletion_revokes_control_promises(host).await;
@@ -397,7 +427,14 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
     }
 }
 
-async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
+async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, RegistrationBarrierFuture>(
+    host: Arc<dyn EffectHost>,
+    registration_barrier: RegistrationBarrier,
+) where
+    RegistrationBarrier:
+        FnOnce(Arc<dyn EffectHost>, SessionId, AwaitEventKey) -> RegistrationBarrierFuture,
+    RegistrationBarrierFuture: std::future::Future<Output = ()>,
+{
     let address_a = address("scope");
     let driver = driver_for_session(Arc::clone(&host), &address_a).await;
     let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
@@ -425,12 +462,13 @@ async fn exact_scope_and_session_sweep_isolation(host: Arc<dyn EffectHost>) {
         .await
         .expect("tool key");
     let tool_host = Arc::clone(&host);
+    let waiter_tool_key = tool_key.clone();
     let tool_wait = crate::task::spawn(async move {
         tool_host
-            .await_await_event(&tool_key, CancellationToken::new(), None)
+            .await_await_event(&waiter_tool_key, CancellationToken::new(), None)
             .await
     });
-    tokio::task::yield_now().await;
+    registration_barrier(Arc::clone(&host), address_a.session_id.clone(), tool_key).await;
     host.cancel_await_events_for_session(&address_a.session_id)
         .await
         .expect("cancel durable waits");

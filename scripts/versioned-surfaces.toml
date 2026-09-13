@@ -708,10 +708,11 @@ kind = "rust_serde_shapes"
 paths = [
   "crates/lash-protocol-rlm/src/executor/state.rs",
   "crates/lash-lashlang-runtime/src/deferred.rs",
+  "crates/lash-lashlang-runtime/src/deferred_triggers.rs",
   "crates/lash-protocol-rlm/src/protocol/state.rs",
   "crates/lash-protocol-rlm/src/projection/bindings.rs",
 ]
-must_cover = ["RlmSnapshotRoot", "RlmDriverState"]
+must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRecord"]
 
 [[surface.guard]]
 kind = "rust_items"
@@ -924,7 +925,7 @@ symbols = [
 # pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
 # LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
 # SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
-# TOOL_INTENT_PROTOCOL_V1 is a permanently named v1 discriminator, not a mutable
+# TOOL_INTENT_PROTOCOL_V2 is a permanently named v2 discriminator, not a mutable
 # current-version constant.
 
 [[surface]]

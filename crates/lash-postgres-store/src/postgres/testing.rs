@@ -15,6 +15,13 @@
 
 use sqlx::{Connection, PgConnection};
 
+/// Returns the production trigger-subscription listing SQL for conformance assertions.
+pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> String {
+    crate::trigger_store::list_subscriptions_query(filter)
+        .sql()
+        .to_string()
+}
+
 #[doc(hidden)]
 pub use crate::runtime_persistence::TestTurnCancelReadPause as TurnCancelReadPause;
 

@@ -1,5 +1,5 @@
 # Keep repository and action caches off the space-constrained workspace
-# filesystem. These caches are safe to share across independent Orb forks.
+# filesystem. These caches are safe to share across independent Kiln forks.
 startup --output_user_root=/home/sam/.cache/lash-bazel/user-root
 startup --host_jvm_args=-Xmx4g
 common --repository_cache=/home/sam/.cache/lash-bazel/repository
@@ -7,14 +7,26 @@ common --disk_cache=/home/sam/.cache/lash-bazel/disk
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
-# The host-wide REAPI executor is selected explicitly. Its endpoint is installed
-# separately from this repository; an unavailable endpoint fails closed.
-build:shared --remote_executor=grpc://127.0.0.1:45191
-build:shared --remote_cache=grpc://127.0.0.1:45191
-build:shared --remote_instance_name=orb
-build:shared --remote_default_exec_properties=orb_executor_runtime=orb-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
-build:shared --remote_default_exec_properties=cpu_count=1
-build:shared --remote_default_exec_properties=memory_kb=2097152
+# The shared Kiln execution pool is selected explicitly: one scheduler, one
+# CAS/AC, and workers on this host and in Hetzner. The endpoint requires a
+# client certificate installed separately from this repository; an unavailable
+# endpoint or a missing certificate fails closed.
+build:shared --remote_executor=grpcs://178.105.21.6:8443
+build:shared --remote_cache=grpcs://178.105.21.6:8443
+build:shared --remote_instance_name=kiln
+build:shared --tls_certificate=/home/sam/.config/dev-setup/kiln-build-infra/tls/ca.crt
+build:shared --tls_client_certificate=/home/sam/.config/dev-setup/kiln-build-infra/tls/hetzner-dev.crt
+build:shared --tls_client_key=/home/sam/.config/dev-setup/kiln-build-infra/tls/hetzner-dev.key
+build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime-sha256-47a135193ff09d3f57a441099739fbc9162ff0b55d5b4393a279b7b003f36bac
+# Rust compile and link actions are large and mostly single-invocation: on
+# one core the workspace test binaries take 20-30 minutes each and sit on the
+# serial tail of the graph. Four cores per action lets rustc parallelise
+# codegen and linking. Pool capacity at four cores an action: the development
+# host advertises 16 CPUs and caps itself at four tasks in flight, the Hetzner
+# ccx33 worker advertises 8 and caps at two, so six of these actions run at
+# once across the pool.
+build:shared --remote_default_exec_properties=cpu_count=4
+build:shared --remote_default_exec_properties=memory_kb=4194304
 build:shared --remote_local_fallback=false
 build:shared --remote_upload_local_results=true
 test:shared --test_output=errors

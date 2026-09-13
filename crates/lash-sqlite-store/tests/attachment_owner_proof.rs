@@ -28,14 +28,12 @@ impl<S: tracing::Subscriber> Layer<S> for Warnings {
     }
 }
 
-#[tokio::test]
-async fn sqlite_attachment_owner_degraded_proof_conformance() {
+lash_conformance::attachment_owner_degraded_tests!({
     let dir = tempfile::tempdir().unwrap();
-    lash_conformance::attachment_owner_degraded_proof(Arc::new(SqliteSessionStoreFactory::new(
-        dir.path(),
-    )))
-    .await;
-}
+    let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
+        as Arc<dyn lash_core::SessionStoreFactory>;
+    (dir, factory)
+});
 
 #[tokio::test]
 async fn attachment_constructors_warn_exactly_once_with_fields() {
@@ -96,7 +94,7 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
                     } else {
                         SqliteSessionStoreFactory::with_options(dir.path(), StoreOptions::default())
                     };
-                    lash_conformance::attachment_owner_degraded_proof(Arc::new(factory)).await;
+                    drop(factory);
                 }
             }
         }

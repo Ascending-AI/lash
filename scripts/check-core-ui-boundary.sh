@@ -72,24 +72,13 @@ fi
 
 # Explicit ambient carve-outs:
 # - lash-rlm-types/src/lib.rs:440 reads the runbook dialect required by ADR 0066.
-# - lash-s3-store/src/lib.rs:637,641,649,657,658,665,668,671 are temporary
-#   FIG-1739 exclusions for the existing MinIO configuration reads. FIG-2420
-#   removes those reads and this complete exclusion.
 while IFS= read -r hit; do
   [[ -z "$hit" ]] && continue
   hit_path="${hit%%:*}"
   hit_rest="${hit#*:}"
   hit_line="${hit_rest%%:*}"
   case "$hit_path:$hit_line" in
-    crates/lash-rlm-types/src/lib.rs:440|\
-    crates/lash-s3-store/src/lib.rs:637|\
-    crates/lash-s3-store/src/lib.rs:641|\
-    crates/lash-s3-store/src/lib.rs:649|\
-    crates/lash-s3-store/src/lib.rs:657|\
-    crates/lash-s3-store/src/lib.rs:658|\
-    crates/lash-s3-store/src/lib.rs:665|\
-    crates/lash-s3-store/src/lib.rs:668|\
-    crates/lash-s3-store/src/lib.rs:671)
+    crates/lash-rlm-types/src/lib.rs:440)
       continue
       ;;
   esac

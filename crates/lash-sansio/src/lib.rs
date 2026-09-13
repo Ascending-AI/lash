@@ -34,7 +34,9 @@ pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
 pub use frame_key::{FrameKey, FrameKeyError};
-pub use identity::{BatchId, InputId, NodeId, ProcessId, SessionId, TurnId};
+pub use identity::{
+    BatchId, InputId, NodeId, ProcessId, SessionId, TurnId, session_owner_namespace,
+};
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
@@ -59,9 +61,10 @@ pub use sansio::{
     WaitingLlmState, render_turn_causes_prompt,
 };
 pub use schema_contract::{
-    ProjectionMode, ProviderSchemaCapabilities, ResolvedSchema, SchemaContract, SchemaDialect,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError,
-    SchemaResolutionRequest, project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
+    OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
+    ResolvedSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError, SchemaResolutionRequest,
+    project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
     CellFailure, CellFailureKind, DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome,
@@ -93,12 +96,13 @@ pub use tool_contract::{
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,
-    AttachmentMaterializationSource, ModelToolReturn, ModelToolReturnPart, ProcessParentEndPolicy,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCallStatus, ToolCancellation, ToolControl,
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntentExecutionOutcome,
-    ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction,
-    ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolRetryStatus, ToolValue,
-    format_tool_output_content, model_parts_from_tool_output,
+    AttachmentMaterializationSource, CancelOrigin, CancelRequest, ModelToolReturn,
+    ModelToolReturnPart, ProcessParentEndPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
+    ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
+    ToolIntentRefusalReason, ToolRetryStatus, ToolValue, format_tool_output_content,
+    model_parts_from_tool_output,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

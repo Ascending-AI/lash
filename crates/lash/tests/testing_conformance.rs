@@ -6,12 +6,8 @@ use std::sync::Arc;
 
 use lash::process::ConformanceProcessRegistry;
 use lash::testing::TestLocalProcessRegistry;
-use lash_conformance::process_registry;
-
-#[tokio::test]
-async fn base_process_registry_conformance_runs_with_testing_alone() {
-    process_registry(|| {
+lash_conformance::process_registry_tests!({
+    ((), |_: &str| {
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ConformanceProcessRegistry>
     })
-    .await;
-}
+});

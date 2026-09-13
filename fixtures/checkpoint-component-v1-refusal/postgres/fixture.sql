@@ -29,6 +29,30 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
+-- Name: lash_artifact_owner_retirements; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_artifact_owner_retirements (
+    owner_kind text NOT NULL,
+    owner_id text NOT NULL,
+    CONSTRAINT lash_artifact_owner_retirements_owner_kind_check CHECK ((owner_kind = 'execution'::text))
+);
+
+
+--
+-- Name: lash_artifact_owners; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_artifact_owners (
+    namespace text NOT NULL,
+    artifact_ref text NOT NULL,
+    owner_kind text NOT NULL,
+    owner_id text NOT NULL,
+    CONSTRAINT lash_artifact_owners_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['host'::text, 'process'::text, 'execution'::text])))
+);
+
+
+--
 -- Name: lash_attachment_condemnations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -55,7 +79,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     committed_at_ms bigint,
     owner_kind text,
     owner_id text,
-    CONSTRAINT lash_attachment_manifest_check CHECK (((owner_kind IS NULL) = (owner_id IS NULL))),
+    owner_incarnation bigint,
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL)))),
     CONSTRAINT lash_attachment_manifest_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])))
 );
 
@@ -137,7 +162,8 @@ CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
 
 CREATE TABLE lash_durable_read_fixture.lash_effect_scope_retirements (
     scope_id text NOT NULL,
-    retired_at_ms bigint NOT NULL
+    retired_at_ms bigint NOT NULL,
+    artifact_cleanup_completed boolean DEFAULT false NOT NULL
 );
 
 
@@ -234,6 +260,17 @@ CREATE SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_s
 --
 
 ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_pending_turn_inputs.enqueue_seq;
+
+
+--
+-- Name: lash_process_artifact_cleanup; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_artifact_cleanup (
+    process_id text NOT NULL COLLATE pg_catalog."C",
+    incarnation bigint NOT NULL,
+    cleanup_json text NOT NULL
+);
 
 
 --
@@ -763,6 +800,18 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_usage_deltas ALTER COLUMN seq SE
 
 
 --
+-- Data for Name: lash_artifact_owner_retirements; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_artifact_owners; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_attachment_condemnations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -772,7 +821,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_usage_deltas ALTER COLUMN seq SE
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL, NULL);
 
 
 --
@@ -870,6 +919,12 @@ INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durab
 
 
 --
+-- Data for Name: lash_process_artifact_cleanup; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_process_change_clock; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -964,7 +1019,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 87);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 90);
 
 
 --
@@ -1078,6 +1133,22 @@ SELECT pg_catalog.setval('lash_durable_read_fixture.lash_queued_work_batches_enq
 --
 
 SELECT pg_catalog.setval('lash_durable_read_fixture.lash_usage_deltas_seq_seq', 1, false);
+
+
+--
+-- Name: lash_artifact_owner_retirements lash_artifact_owner_retirements_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_artifact_owner_retirements
+    ADD CONSTRAINT lash_artifact_owner_retirements_pkey PRIMARY KEY (owner_kind, owner_id);
+
+
+--
+-- Name: lash_artifact_owners lash_artifact_owners_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_artifact_owners
+    ADD CONSTRAINT lash_artifact_owners_pkey PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id);
 
 
 --
@@ -1214,6 +1285,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
     ADD CONSTRAINT lash_pending_turn_inputs_session_id_source_key_key UNIQUE (session_id, source_key);
+
+
+--
+-- Name: lash_process_artifact_cleanup lash_process_artifact_cleanup_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_artifact_cleanup
+    ADD CONSTRAINT lash_process_artifact_cleanup_pkey PRIMARY KEY (process_id, incarnation);
 
 
 --
@@ -1505,10 +1584,17 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_wake_redelivery_fences
 
 
 --
+-- Name: idx_lash_artifact_owners_owner; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_artifact_owners_owner ON lash_durable_read_fixture.lash_artifact_owners USING btree (owner_kind, owner_id);
+
+
+--
 -- Name: idx_lash_attachment_manifest_owner; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, committed_at_ms);
+CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 
 
 --
@@ -1799,6 +1885,14 @@ CREATE UNIQUE INDEX uq_lash_runtime_effect_replay_group_seq ON lash_durable_read
 
 
 --
+-- Name: lash_artifact_owners lash_artifact_owners_namespace_artifact_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_artifact_owners
+    ADD CONSTRAINT lash_artifact_owners_namespace_artifact_ref_fkey FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_durable_read_fixture.lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE;
+
+
+--
 -- Name: lash_checkpoint_blob_refs lash_checkpoint_blob_refs_blob_ref_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1812,6 +1906,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
     ADD CONSTRAINT lash_checkpoint_blob_refs_checkpoint_ref_fkey FOREIGN KEY (checkpoint_ref) REFERENCES lash_durable_read_fixture.lash_blobs(hash) ON DELETE CASCADE;
+
+
+--
+-- Name: lash_process_artifact_cleanup lash_process_artifact_cleanup_process_id_incarnation_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_artifact_cleanup
+    ADD CONSTRAINT lash_process_artifact_cleanup_process_id_incarnation_fkey FOREIGN KEY (process_id, incarnation) REFERENCES lash_durable_read_fixture.lash_process_tombstones(process_id, incarnation) ON DELETE RESTRICT;
 
 
 --

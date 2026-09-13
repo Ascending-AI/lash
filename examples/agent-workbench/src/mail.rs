@@ -523,7 +523,7 @@ impl ToolProvider for MockMailProvider {
             // `mail.received` occurrence that follows it.
             Ok((receipt, intent)) => ToolAttemptOutcome::done(
                 ToolOutcomeDone::ok(receipt),
-                ToolIntents::v1(vec![intent]),
+                ToolIntents::v2(vec![intent]),
             ),
             Err(message) => done(ToolOutcome::err_fmt(message)),
         }

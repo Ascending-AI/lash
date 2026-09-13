@@ -11,7 +11,9 @@ use lash_sansio::sync::MutexExt;
 
 impl InMemoryPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
-        (self.claim.id().is_some() || matches!(self.input.state, crate::TurnInputState::Accepted))
+        self.claim
+            .id()
+            .is_some()
             .then(|| crate::PendingTurnInputClaimDiagnostics {
                 state: self.input.state,
                 claim_id: self.claim.id(),
@@ -33,13 +35,9 @@ impl InMemoryPendingTurnInput {
             crate::TurnInputState::Completed => {
                 crate::PendingTurnInputCancelOutcome::AlreadyCompleted(self.input.clone())
             }
-            crate::TurnInputState::Accepted => {
-                crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                    input: self.input.clone(),
-                    claim: self.claim_diagnostics(),
-                }
-            }
-            crate::TurnInputState::PendingActive | crate::TurnInputState::DeferredNextTurn => {
+            crate::TurnInputState::PendingActive
+            | crate::TurnInputState::DeferredNextTurn
+            | crate::TurnInputState::Accepted => {
                 if self.claim.token().is_some() && claim_is_live {
                     crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
                         input: self.input.clone(),

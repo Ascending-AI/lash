@@ -408,6 +408,48 @@ fn exact_core_defaults_are_excluded_but_core_named_overrides_conflict() {
 }
 
 #[test]
+fn tool_call_registration_refuses_empty_call_id_or_tool_name() {
+    for (call_id, tool_name, expected) in [
+        (
+            "",
+            "tool",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a call id",
+        ),
+        (
+            "  ",
+            "tool",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a call id",
+        ),
+        (
+            "call",
+            "",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a tool name",
+        ),
+        (
+            "call",
+            "\t",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a tool name",
+        ),
+    ] {
+        let registration = registration_for_input(ProcessInput::ToolCall {
+            call: crate::PreparedToolCall::from_parts(
+                call_id,
+                crate::ToolId::new("tool-id"),
+                tool_name,
+                serde_json::json!({}),
+                None,
+                serde_json::Value::Null,
+            ),
+        });
+        match validate_process_registration(&registration) {
+            Err(crate::PluginError::Session(message)) => assert_eq!(message, expected),
+            Err(other) => panic!("expected session refusal `{expected}`, got {other:?}"),
+            Ok(()) => panic!("expected session refusal `{expected}`, got success"),
+        }
+    }
+}
+
+#[test]
 fn executable_registration_changes_rotate_the_definition_fingerprint() {
     let base = registration_for_input(ProcessInput::Engine {
         kind: "engine".to_string(),

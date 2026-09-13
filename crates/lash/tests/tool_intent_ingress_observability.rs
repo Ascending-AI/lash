@@ -58,7 +58,6 @@ fn cancel_intent(session_id: &SessionId) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
         process_id: ProcessId::from(PROCESS.to_string()),
-        reason: Some("observability-law".to_string()),
     })
 }
 

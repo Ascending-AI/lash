@@ -47,7 +47,7 @@ def cargo_metadata() -> dict:
     ):
         metadata_env[variable] = ""
     result = subprocess.run(
-        [os.environ.get("ORB_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
+        [os.environ.get("KILN_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
         cwd=ROOT,
         env=metadata_env,
         check=True,
@@ -94,20 +94,38 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
 def cargo_test_policy(
     package_name: str, kind: str, target_name: str
 ) -> tuple[list[str], str | None]:
+    """Classify one executable test label as partition-owned or Cargo-owned.
+
+    `manual` keeps a label out of `//:workspace_tests` and out of `bazel test
+    //...`. It is reserved for labels the cacheable partition genuinely cannot
+    execute as proof: a live service, a nested Cargo invocation, a Cargo-relative
+    asset tree, or a toolchain the Bazel job does not install. Service-gated
+    labels are still *built* by Bazel; the PostgreSQL and MinIO jobs execute
+    them with `--nocache_test_results` so a cached result can never stand in for
+    a run against a real service, and so an unconfigured service is never proof.
+    """
     tags = []
     reasons = []
     if package_name in ("lash-internal-postgres-store", "lash-internal-s3-store"):
         tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("requires the Cargo-owned PostgreSQL or MinIO service gate")
-    if kind == "unit-test" and package_name in ("lash-internal-restate", "lash-runtime"):
-        tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("shares a unit-test binary with Cargo-owned live-service tests")
+        reasons.append(
+            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
+            " execute this label uncached against a real service"
+        )
     if package_name == "lash-internal-core" and kind == "unit-test":
         tags.extend(["manual", "cargo-nested-suite"])
-        reasons.append("shares a unit-test binary with nested-Cargo fault-matrix tests")
+        reasons.append(
+            "shares a unit-test binary with the fault-matrix tests, which execute"
+            " scripts/confidence-gate.sh against a fake Cargo on PATH"
+        )
     if package_name == "lash-sim" and kind == "unit-test":
         tags.extend(["manual", "cargo-heavy-suite"])
-        reasons.append("shares a unit-test binary with specially scheduled heavy simulation tests")
+        reasons.append(
+            "shares a unit-test binary with the specially scheduled heavy"
+            " simulation tests, a repository-root docs/gate walk from"
+            " CARGO_MANIFEST_DIR, and a search-mode case whose determinism"
+            " depends on the Cargo runner's scheduling"
+        )
     if package_name == "lash-internal-core" and target_name == "integration_boundary":
         tags.extend(["manual", "cargo-nested-suite"])
         reasons.append("invokes Cargo metadata against the workspace")
@@ -125,7 +143,10 @@ def cargo_test_policy(
         reasons.append("shares a unit-test binary with a Node.js browser projection gate")
     if package_name == "lash-sim" and target_name.startswith("cross_backend"):
         tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("requires explicitly scheduled durable backend services")
+        reasons.append(
+            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
+            " execute this label uncached against a real service"
+        )
     reason = "; ".join(reasons) if reasons else None
     return sorted(set(tags)), reason
 
@@ -181,7 +202,16 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},\n"
             ")\n\n"
         )
-        inventory_targets.append({"kind": "custom-build", "label": f"//{package_dir}:build_script"})
+        inventory_targets.append({
+            # `cargo_build_script` wraps its binary and exposes no `CrateInfo`,
+            # so the clippy aspect cannot attach to this label. Cargo lints
+            # `build.rs` under `--all-targets`; keep that coverage with the
+            # Cargo command on untrusted events and record the gap here rather
+            # than dropping it silently.
+            "clippy_exempt": "cargo_build_script exposes no CrateInfo for the clippy aspect",
+            "kind": "custom-build",
+            "label": f"//{package_dir}:build_script",
+        })
 
     if library:
         extra_compile_data = []
@@ -266,7 +296,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             inventory_targets.append({
                 "kind": "doc-test",
                 "label": f"//{package_dir}:{primary_target}__doc_test",
-                "tags": ["cargo-authoritative-doctest", "manual"],
+                "tags": [],
             })
 
     for target in targets:
@@ -330,7 +360,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 extra_compile_data.append("//crates/lash-core:cold_process_drivers")
             if target["name"] == "conformance":
                 extra_compile_data.extend([
-                    "//crates/lash-core:cold_process_turn_parent",
                     "//crates/lash-core:queued_claim_atomicity",
                 ])
             if target["name"] == "durable_read_fixture":
@@ -438,12 +467,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "    name = \"cold_process_drivers\",\n"
             "    srcs = [\n"
             "        \"tests/support/cold_process_effect_driver.rs\",\n"
-            "        \"tests/support/cold_process_turn_driver.rs\",\n"
             "    ],\n"
-            ")\n\n"
-            "filegroup(\n"
-            "    name = \"cold_process_turn_parent\",\n"
-            "    srcs = [\"tests/support/cold_process_turn_parent.rs\"],\n"
             ")\n\n"
             "filegroup(\n"
             "    name = \"durable_read_fixture_source\",\n"
@@ -533,6 +557,17 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             for target in labels
             if target["label"] is not None and target["kind"] != "doc-test"
         ),
+        # Cargo lints libs, bins, examples, benches and test crates under
+        # `clippy --workspace --all-targets`. Build scripts are excluded here
+        # because `cargo_build_script` exposes no `CrateInfo` for the clippy
+        # aspect to consume; their `cargo-build-script-clippy` exception is
+        # recorded per label in `tools/bazel/target-inventory.json`.
+        "WORKSPACE_CLIPPY_TARGETS": sorted(
+            target["label"]
+            for target in labels
+            if target["label"] is not None
+            and target["kind"] not in ("custom-build", "doc-test")
+        ),
         "WORKSPACE_DOCTEST_TARGETS": sorted(
             target["label"]
             for target in labels
@@ -569,6 +604,25 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n"
     )
+    # The service jobs build these labels from the shared cache and execute
+    # them uncached against the service they stand up. Generated, so a new
+    # service-gated binary reaches the service job without a hand edit.
+    service_packages = {
+        "postgres": ("lash-internal-postgres-store",),
+        "minio": ("lash-internal-s3-store",),
+    }
+    for service, package_names in service_packages.items():
+        labels = sorted(
+            target["label"]
+            for package in inventory
+            if package["package"] in package_names
+            for target in package["targets"]
+            if target["label"] is not None
+            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+        )
+        outputs[ROOT / f"tools/bazel/{service}_test_labels.txt"] = (
+            "".join(f"{label}\n" for label in labels)
+        )
     return outputs, inventory
 
 

@@ -63,7 +63,7 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
         5 => (0..PROCESS_COUNT, 0_u8..4, any::<u8>(), any::<bool>(), any::<bool>())
             .prop_map(|(process, replay, value, wake, stale)| StoreContractOp::Signal { process, replay, value, wake, stale }),
         2 => (0..PROCESS_COUNT, any::<u8>())
-            .prop_map(|(process, reason)| StoreContractOp::CancelRequest { process, reason }),
+            .prop_map(|(process, requester)| StoreContractOp::CancelRequest { process, requester }),
         3 => (0..PROCESS_COUNT, 0_u8..4)
             .prop_map(|(process, disposition)| StoreContractOp::Terminal { process, disposition }),
         2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)

@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
-    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _,
+    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _,
+    ProcessRegistrar as _,
 };
 
 #[tokio::test]
@@ -55,8 +56,15 @@ async fn claim_cannot_interleave_between_authority_validation_and_append() {
             .append_event_with_authority(
                 &ProcessId::from(PROCESS_ID),
                 ProcessEventAppendRequest::cancel_requested(
-                    &ProcessId::from(PROCESS_ID),
-                    Some("race".into()),
+                    &writer_registry
+                        .resolve_process_ref(&ProcessId::from(PROCESS_ID))
+                        .await
+                        .expect("retained cancellation target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:fixture:claim_cannot_interleave_between_authority_validation_and_append",
+                        11,
+                    ),
                 ),
                 &ProcessExecutionWriteAuthority::lease(writer_lease),
             )

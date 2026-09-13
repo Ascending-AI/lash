@@ -519,7 +519,7 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
         let session_id = call.context.session_id().to_string();
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
-            crate::ToolIntents::v1(vec![
+            crate::ToolIntents::v2(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: SessionId::from(session_id.clone()),
                     request: crate::ProcessStartRequest::external(
@@ -547,7 +547,6 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                     session_id: SessionId::from(session_id),
                     process_id: ProcessId::from("runtime-scenario-intent-target"),
-                    reason: Some("runtime scenario complete".to_string()),
                 }),
             ]),
         )

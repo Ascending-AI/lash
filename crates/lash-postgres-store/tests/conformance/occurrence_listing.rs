@@ -77,9 +77,8 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_trigger_occurrence_listing_corruption_is_not_partial_success_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::trigger_occurrence_listing_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres trigger occurrence-listing corruption law: database is not configured"
         );
@@ -88,6 +87,6 @@ async fn postgres_trigger_occurrence_listing_corruption_is_not_partial_success_w
     reset(&storage).await;
     let pool = storage.pool().clone();
     let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-    let injector = PostgresTriggerOccurrenceListingFaultInjector { pool };
-    lash_conformance::trigger_occurrence_listing_corruption_law(store, &injector).await;
-}
+    let injector = Arc::new(PostgresTriggerOccurrenceListingFaultInjector { pool });
+    (database_lock, store, injector)
+});

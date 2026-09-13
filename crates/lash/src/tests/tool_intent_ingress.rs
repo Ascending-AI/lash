@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessQuery as _};
+use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessToolIntents as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -53,6 +53,7 @@ async fn ingress_core_with_effect_host_and_env_store(
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -70,16 +71,18 @@ async fn register_ingress_trigger_subscription(
     store: &lash_core::facade_support::InMemoryTriggerStore,
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     use lash_core::TriggerStore as _;
+    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/intent-ingress-delivery",
-        lash_core::ProcessExecutionEnvRef::new("process-env:intent-ingress-delivery"),
+        process_env_ref,
         "intent.ingress.trigger",
         "intent-ingress-source",
         lash_core::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({"process": "intent-ingress-delivery"}),
         },
-        lash_core::ProcessIdentity::new("test-engine").with_label(Some("intent-ingress-delivery")),
+        lash_core::ProcessIdentity::new("testing-fixture")
+            .with_label(Some("intent-ingress-delivery")),
     )
     .with_payload_schema(lash_core::LashSchema::any());
     let outcome = store
@@ -106,25 +109,26 @@ async fn ingress_core_with_trigger_store(
     LashCore,
     Arc<lash_core::facade_support::InMemoryTriggerStore>,
     lash_core::TriggerSubscriptionRecord,
+    Arc<TestLocalProcessRegistry>,
 )> {
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let subscription = register_ingress_trigger_subscription(&store).await?;
     let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_env_store(Arc::new(
-            lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
+        .process_env_store(process_env_store)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
-    Ok((core, store, subscription))
+    Ok((core, store, subscription, registry))
 }
 
 fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
@@ -145,7 +149,7 @@ fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     use lash_core::TriggerStore as _;
 
-    let (core, store, subscription) =
+    let (core, store, subscription, _) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-trigger-call", 0);
@@ -170,6 +174,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
         .await?;
     assert_eq!(occurrences.len(), 1);
+    assert_eq!(occurrences[0].idempotency_key, key.identity().replay_key);
     assert_eq!(
         result["occurrence_id"].as_str(),
         Some(occurrences[0].occurrence_id.as_str())
@@ -227,6 +232,140 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
+-> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _subscription, _) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let first_key = ingress.key("host-trigger-call-a", 0);
+    let second_key = ingress.key("host-trigger-call-b", 0);
+
+    let mut first_outcomes = Vec::new();
+    for key in [&first_key, &second_key] {
+        let outcome = ingress
+            .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert!(matches!(
+            outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted { .. }
+        ));
+        first_outcomes.push(outcome);
+    }
+    let occurrences = store
+        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .await?;
+    assert_eq!(occurrences.len(), 2);
+    assert_eq!(
+        occurrences
+            .iter()
+            .map(|occurrence| occurrence.idempotency_key.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            first_key.identity().replay_key.clone(),
+            second_key.identity().replay_key.clone(),
+        ]
+        .into_iter()
+        .collect()
+    );
+
+    for (key, first) in [first_key, second_key].into_iter().zip(first_outcomes) {
+        let redriven = ingress
+            .submit(key, trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert_eq!(redriven, first, "redrive returns the byte-stable outcome");
+    }
+    assert_eq!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .len(),
+        2,
+        "redriving both identities must not add occurrences"
+    );
+    assert_eq!(store.list_deliveries().await?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _, _) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let mut predecessor = serde_json::to_value(ingress.key("predecessor-trigger-call", 0))?;
+    predecessor
+        .as_object_mut()
+        .expect("versioned ingress key")
+        .remove("protocol_version");
+    let predecessor = serde_json::from_value(predecessor)?;
+
+    assert!(matches!(
+        ingress
+            .submit(predecessor, trigger_intent(&SessionId::from(SESSION)))
+            .await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                recorded: 1
+            }
+        }
+    ));
+    assert!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .is_empty()
+    );
+    assert!(store.list_deliveries().await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn predecessor_runtime_owned_trigger_submission_is_refused_before_store_ingress() -> Result<()>
+{
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _, registry) =
+        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("predecessor-runtime-trigger-call", 0);
+    let intent = trigger_intent(&SessionId::from(SESSION));
+    let mut predecessor = serde_json::to_value(lash_core::ToolIntentSubmissionRecord::new(
+        key.identity().clone(),
+        intent.clone(),
+    )?)?;
+    predecessor
+        .as_object_mut()
+        .expect("versioned submission row")
+        .remove("protocol_version");
+    let predecessor = serde_json::from_value(predecessor)?;
+    assert!(matches!(
+        registry.admit_tool_intent_submission(predecessor).await?,
+        lash_core::ToolIntentSubmissionAdmission::Admitted
+    ));
+
+    assert!(matches!(
+        ingress.submit(key, intent).await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                recorded: 1
+            }
+        }
+    ));
+    assert!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .is_empty()
+    );
+    assert!(store.list_deliveries().await?.is_empty());
+    Ok(())
+}
+
 /// A runtime-owned host has no journal to replay the emission from, so the
 /// submission row is the whole record: the first submit realizes the emission
 /// and completes its row, and the second is refused against that row rather
@@ -235,7 +374,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
 async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<()> {
     use lash_core::TriggerStore as _;
 
-    let (core, store, _subscription) =
+    let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -286,13 +425,14 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
     fail_put: std::sync::atomic::AtomicBool,
-    values: tokio::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
 }
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &lash_core::ArtifactOwner,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> std::result::Result<(), lash_core::PluginError> {
@@ -302,18 +442,44 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
                 "injected process env persist failure".to_string(),
             ));
         }
-        self.values
-            .lock()
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
             .await
-            .insert(env_ref.as_str().to_string(), bytes.to_vec());
-        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner.retire_process_execution_env_owner(owner).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
-        Ok(self.values.lock().await.get(env_ref.as_str()).cloned())
+        self.inner.get_process_execution_env(env_ref).await
     }
 }
 
@@ -607,14 +773,13 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
 }
 
 fn cancel_intent(session_id: &SessionId) -> lash_core::ToolIntent {
-    cancel_intent_with_reason(session_id, "kind-swap probe")
+    cancel_intent_for_target(session_id, PROCESS)
 }
 
-fn cancel_intent_with_reason(session_id: &SessionId, reason: &str) -> lash_core::ToolIntent {
+fn cancel_intent_for_target(session_id: &SessionId, target: &str) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(PROCESS.to_string()),
-        reason: Some(reason.to_string()),
+        process_id: ProcessId::from(target),
     })
 }
 
@@ -870,15 +1035,45 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
-    for (call_id, first_reason, duplicate_reason) in [
-        ("cancel-same-reason", "same", "same"),
-        ("cancel-changed-reason", "first", "changed"),
+    let targets = [
+        "cancel-same-target",
+        "cancel-first-target",
+        "cancel-other-target",
+    ];
+    for target in targets {
+        let record = registry
+            .register_process_with_observers(
+                lash_core::ProcessRegistration::new(
+                    target,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryContract::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
+                ),
+                &[SessionId::from(SESSION)],
+            )
+            .await?;
+        assert!(!record.is_terminal());
+        assert!(record.cancel_request.is_none());
+    }
+    for (call_id, first_target, duplicate_target) in [
+        ("cancel-same-target", targets[0], targets[0]),
+        ("cancel-changed-target", targets[1], targets[2]),
     ] {
+        assert_eq!(
+            first_target == duplicate_target,
+            call_id == "cancel-same-target"
+        );
         let key = ingress.key(call_id, 0);
         let first = ingress
             .submit(
                 key.clone(),
-                cancel_intent_with_reason(&SessionId::from(SESSION), first_reason),
+                cancel_intent_for_target(&SessionId::from(SESSION), first_target),
             )
             .await;
         assert!(matches!(
@@ -894,7 +1089,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
         let duplicate = ingress
             .submit(
                 key,
-                cancel_intent_with_reason(&SessionId::from(SESSION), duplicate_reason),
+                cancel_intent_for_target(&SessionId::from(SESSION), duplicate_target),
             )
             .await;
         assert!(matches!(
@@ -911,11 +1106,11 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
     let (left, right) = tokio::join!(
         ingress.submit(
             concurrent_key.clone(),
-            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
         ingress.submit(
             concurrent_key,
-            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
     );
     let concurrent_outcomes = [left, right];
@@ -952,15 +1147,29 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
         "the racing duplicate is a typed refusal"
     );
 
-    assert_eq!(
-        registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+    let mut realized = 0;
+    for target in [targets[0], targets[1], PROCESS] {
+        let count = registry
+            .events_after(&ProcessId::from(target), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
-            .count(),
-        3,
+            .count();
+        assert_eq!(count, 1, "each admitted target is cancelled once");
+        realized += count;
+    }
+    assert_eq!(
+        realized, 3,
         "each ingress identity realizes one cancellation"
+    );
+    assert!(
+        registry
+            .get_process(&ProcessId::from(targets[2]))
+            .await?
+            .expect("retained alternate target")
+            .cancel_request
+            .is_none(),
+        "the conflicting duplicate never cancels its different target"
     );
     Ok(())
 }
@@ -1024,11 +1233,11 @@ async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handle
     let (left_outcome, right_outcome) = tokio::join!(
         left.submit(
             key.clone(),
-            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
         right.submit(
             key,
-            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
     );
     let outcomes = [left_outcome, right_outcome];
@@ -1113,15 +1322,14 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let (core, registry) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let malformed =
-        crate::tools::ToolIntentIngressKey::from_identity(lash_core::ToolIntentIdentity {
-            session_id: SessionId::from(SESSION.to_string()),
-            execution_scope_id: SCOPE.to_string(),
-            tool_call_id: "host-call".to_string(),
-            intent_index: 0,
-            replay_key: "forged".to_string(),
-            minting_emission_replay_key: None,
-        });
+    let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
+        SESSION,
+        SCOPE,
+        "host-call",
+        0,
+    ))?;
+    malformed["replay_key"] = serde_json::json!("forged");
+    let malformed = serde_json::from_value(malformed)?;
 
     assert!(matches!(
         ingress
@@ -1157,13 +1365,25 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
         let mut stripped = key_value.clone();
         stripped
             .as_object_mut()
-            .expect("transparent identity object")
+            .expect("versioned identity object")
             .remove(field);
         assert!(
             serde_json::from_value::<crate::tools::ToolIntentIngressKey>(stripped).is_err(),
             "ingress key field `{field}` must not acquire a serde default"
         );
     }
+
+    let mut predecessor = key_value;
+    predecessor
+        .as_object_mut()
+        .expect("versioned identity object")
+        .remove("protocol_version");
+    let predecessor: crate::tools::ToolIntentIngressKey =
+        serde_json::from_value(predecessor).expect("decode predecessor ingress key shape");
+    assert_eq!(
+        serde_json::to_value(predecessor).expect("re-encode predecessor ingress key")["protocol_version"],
+        serde_json::json!(1)
+    );
 
     let admitted = crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome: lash_core::ToolIntentExecutionOutcome::ProtocolRefused {
@@ -1825,7 +2045,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         runtime.process_service()?
     };
     let intents =
-        lash_core::ToolIntents::v1(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
+        lash_core::ToolIntents::v2(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
     let outcomes = lash_core::testing::execute_tool_intents_with_services(
         scoped,
         processes,

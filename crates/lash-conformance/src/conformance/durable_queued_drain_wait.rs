@@ -11,7 +11,10 @@
 //! durable backend owes rather than in-memory trivia.
 
 use lash_sansio::SessionId;
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::runtime_persistence::RuntimePersistenceLeaseTiming;
 use crate::store::{RuntimePersistence, SessionExecutionLeaseClaimOutcome};
@@ -51,6 +54,83 @@ pub async fn durable_queued_drain_wait_contract(
         ),
     }
     outcome
+}
+
+struct ScriptedQueuedLaneProbe {
+    attempts: Mutex<VecDeque<crate::QueuedLaneAttempt>>,
+    try_calls: AtomicUsize,
+    pause_calls: AtomicUsize,
+}
+
+impl ScriptedQueuedLaneProbe {
+    fn new(attempts: impl IntoIterator<Item = crate::QueuedLaneAttempt>) -> Self {
+        Self {
+            attempts: Mutex::new(attempts.into_iter().collect()),
+            try_calls: AtomicUsize::new(0),
+            pause_calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl QueuedLaneProbe for ScriptedQueuedLaneProbe {
+    async fn try_acquire(&self) -> Result<crate::QueuedLaneAttempt, RuntimeError> {
+        self.try_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self
+            .attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .expect("queued-lane probe attempt"))
+    }
+
+    async fn pause(&self, _slice: std::time::Duration) {
+        self.pause_calls.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Certify the engine-paced and deployment-host queued-lane policies.
+///
+/// The backend supplies only the two resolver implementations. The shared law
+/// owns the scripted lane probes and all outcome and call-count assertions.
+pub async fn durable_queued_drain_wait_resolver_laws<Engine, Deployment>(
+    make_engine: Engine,
+    make_deployment: Deployment,
+) where
+    Engine: FnOnce() -> Arc<dyn AwaitEventResolver>,
+    Deployment: FnOnce() -> Arc<dyn AwaitEventResolver>,
+{
+    let controller_probe = Arc::new(ScriptedQueuedLaneProbe::new([
+        crate::QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_400)),
+        crate::QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_401)),
+    ]));
+    let controller = make_engine();
+    let result = durable_queued_drain_wait_contract(
+        controller.as_ref(),
+        Arc::clone(&controller_probe) as Arc<dyn QueuedLaneProbe>,
+    )
+    .await;
+    let Err(error) = result else {
+        panic!("the engine-paced controller must use the typed retryable lane wait")
+    };
+    assert_eq!(error.code, RuntimeErrorCode::SessionExecutionLaneBusy);
+    assert!(error.is_retryable());
+    assert_eq!(controller_probe.try_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(controller_probe.pause_calls.load(Ordering::SeqCst), 1);
+
+    let host_probe = Arc::new(ScriptedQueuedLaneProbe::new([
+        crate::QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_400)),
+    ]));
+    let host = make_deployment();
+    let result = durable_queued_drain_wait_contract(
+        host.as_ref(),
+        Arc::clone(&host_probe) as Arc<dyn QueuedLaneProbe>,
+    )
+    .await
+    .expect("deployment-host queued-lane default");
+    assert!(matches!(result, QueuedLaneAcquisition::NotAcquired));
+    assert_eq!(host_probe.try_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host_probe.pause_calls.load(Ordering::SeqCst), 0);
 }
 
 /// Drive the durable queued-drain wait policy against `store`.

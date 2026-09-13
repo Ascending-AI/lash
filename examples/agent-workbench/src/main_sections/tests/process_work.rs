@@ -867,9 +867,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
     assert_eq!(handle.definition.as_ref().unwrap()["revision"], 7);
     assert_eq!(handle.status, ProcessStatus::Completed);
-    let cancel_summary = lash::process::ProcessCancelReceipt::from_record(completed.clone());
-    assert_eq!(cancel_summary.process_id, process_id);
-    assert_eq!(cancel_summary.status, ProcessStatus::Completed);
+    assert!(
+        lash::process::ProcessCancelReceipt::from_record(completed.clone()).is_err(),
+        "a completed process without an accepted cancel request has no cancel receipt"
+    );
 
     let worklist_cursor = ProcessWorklistCursor::new("example", "invoice-a", "invoice-z");
     assert_eq!(worklist_cursor.backend(), "example");
@@ -972,6 +973,33 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         compacted, 0,
         "unprojected deletions must retain their tombstones"
     );
+    let pending_cleanup = registry
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("list retained process artifact cleanup");
+    assert_eq!(
+        pending_cleanup
+            .iter()
+            .map(|cleanup| cleanup.process_id.as_str())
+            .collect::<Vec<_>>(),
+        [external_id, process_id],
+        "tombstones remain protected until exact artifact cleanup is acknowledged"
+    );
+    for cleanup in pending_cleanup {
+        let acknowledgement = registry
+            .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+            .await
+            .expect("acknowledge process artifact cleanup");
+        assert_eq!(
+            acknowledgement,
+            lash::process::ProcessArtifactCleanupAck::Acknowledged {
+                process_ref: lash::process::ProcessRef::new(
+                    cleanup.process_id,
+                    cleanup.incarnation,
+                ),
+            }
+        );
+    }
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None,)

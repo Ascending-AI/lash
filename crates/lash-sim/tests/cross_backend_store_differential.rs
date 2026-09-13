@@ -829,6 +829,14 @@ fn differential_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
 
+/// Reusable process name and the registry-minted incarnation that qualifies it.
+const DIFFERENTIAL_PROCESS_OWNER_ID: &str = "differential-process-owner";
+const DIFFERENTIAL_PROCESS_OWNER_INCARNATION: u64 = 7;
+
+fn differential_process_attachment_id() -> AttachmentId {
+    AttachmentId::parse("differential-process-attachment").expect("valid attachment id")
+}
+
 // Row shapes for the SQL observation queries. Named because the tuples are wide
 // enough that clippy flags them inline, and a name reads better at the use site.
 type AttachmentRow = (
@@ -838,6 +846,7 @@ type AttachmentRow = (
     Option<i64>,
     Option<String>,
     Option<String>,
+    Option<i64>,
 );
 type LeaseRow = (
     Option<String>,
@@ -892,6 +901,9 @@ fn attachment_manifest_observation(
         committed: entry.committed_at_epoch_ms.is_some(),
         owner_kind: entry.owner_kind,
         owner_id: entry.owner_id,
+        owner_incarnation: entry
+            .owner_incarnation
+            .map(|incarnation| incarnation.registration_sequence()),
     }
 }
 
@@ -1058,7 +1070,7 @@ async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
-                        owner_kind, owner_id
+                        owner_kind, owner_id, owner_incarnation
                  FROM attachment_manifest
                  WHERE session_id = ?1
                  ORDER BY attachment_id ASC",
@@ -1073,6 +1085,7 @@ async fn read_sqlite_durable_state(
                     row.get::<_, Option<i64>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
                 ))
             })
             .expect("read SQLite attachment manifest")
@@ -1087,6 +1100,7 @@ async fn read_sqlite_durable_state(
                     committed_at_epoch_ms,
                     owner_kind,
                     owner_id,
+                    owner_incarnation,
                 )| AttachmentManifestObservation {
                     attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
                     canonical_uri,
@@ -1094,6 +1108,7 @@ async fn read_sqlite_durable_state(
                     committed: committed_at_epoch_ms.is_some(),
                     owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
                     owner_id,
+                    owner_incarnation: owner_incarnation.map(|value| value as u64),
                 },
             )
             .collect()
@@ -1510,6 +1525,27 @@ impl BackendRunner {
                     intent_at_epoch_ms: 1_000,
                     owner_kind: Some(AttachmentOwnerKind::Turn),
                     owner_id: Some(operation),
+                    owner_incarnation: None,
+                })?;
+                // A second row under a process owner: the owner identity is
+                // `(process_id, incarnation)`, so the differential must show
+                // both backends persisting and reading back the incarnation,
+                // not just the turn shape that leaves the column NULL. This
+                // fixture wires no process registry, so the row stays an
+                // immortal root on every backend.
+                self.store().record_intent(AttachmentIntent {
+                    attachment_id: differential_process_attachment_id(),
+                    session_id: self.session_id.clone(),
+                    canonical_uri: "lash-attachment://blake3/differential-process-attachment"
+                        .to_string(),
+                    intent_at_epoch_ms: 1_000,
+                    owner_kind: Some(AttachmentOwnerKind::Process),
+                    owner_id: Some(DIFFERENTIAL_PROCESS_OWNER_ID.to_string()),
+                    owner_incarnation: Some(
+                        lash_core::ProcessIncarnation::from_registration_sequence(
+                            DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
+                        ),
+                    ),
                 })?;
                 Ok(None)
             }

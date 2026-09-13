@@ -368,33 +368,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let mut sql =
-                        "SELECT subscription_id, record_json FROM trigger_subscriptions WHERE 1 = 1"
-                            .to_string();
-                    let mut values = Vec::<rusqlite::types::Value>::new();
-                    if let Some(registrant_scope_id) = filter.effective_registrant_scope_id() {
-                        sql.push_str(" AND owner_scope = ?");
-                        values.push(registrant_scope_id.into());
-                    }
-                    if let Some(subscription_key) = filter.subscription_key.as_ref() {
-                        sql.push_str(" AND subscription_key = ?");
-                        values.push(subscription_key.clone().into());
-                    }
-                    if let Some(source_type) = filter.source_type.as_ref() {
-                        sql.push_str(" AND source_type = ?");
-                        values.push(source_type.clone().into());
-                    }
-                    if let Some(source_key) = filter.source_key.as_ref() {
-                        sql.push_str(" AND source_key = ?");
-                        values.push(source_key.clone().into());
-                    }
-                    if let Some(enabled) = filter.enabled {
-                        sql.push_str(" AND enabled = ?");
-                        values.push(i64::from(enabled).into());
-                    }
-                    sql.push_str(
-                        " AND tombstoned = 0 ORDER BY owner_scope ASC, subscription_key ASC",
-                    );
+                    let (sql, values) = list_subscriptions_query(&filter);
                     let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
@@ -1191,6 +1165,36 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .await
             .map_err(process_sqlite_error)
     }
+}
+
+pub(crate) fn list_subscriptions_query(
+    filter: &lash_core::TriggerSubscriptionFilter,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql =
+        "SELECT subscription_id, record_json FROM trigger_subscriptions WHERE 1 = 1".to_string();
+    let mut values = Vec::new();
+    if let Some(registrant_scope_id) = filter.registrant_scope_id.as_ref() {
+        sql.push_str(" AND owner_scope = ?");
+        values.push(registrant_scope_id.clone().into());
+    }
+    if let Some(subscription_key) = filter.subscription_key.as_ref() {
+        sql.push_str(" AND subscription_key = ?");
+        values.push(subscription_key.clone().into());
+    }
+    if let Some(source_type) = filter.source_type.as_ref() {
+        sql.push_str(" AND source_type = ?");
+        values.push(source_type.clone().into());
+    }
+    if let Some(source_key) = filter.source_key.as_ref() {
+        sql.push_str(" AND source_key = ?");
+        values.push(source_key.clone().into());
+    }
+    if let Some(enabled) = filter.enabled {
+        sql.push_str(" AND enabled = ?");
+        values.push(i64::from(enabled).into());
+    }
+    sql.push_str(" AND tombstoned = 0 ORDER BY owner_scope ASC, subscription_key ASC");
+    (sql, values)
 }
 
 fn reserve_sqlite_deliveries(

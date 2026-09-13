@@ -24,8 +24,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_wake_delivery_crash_matrix() {
+lash_conformance::wake_delivery_crash_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let process_registry_path = dir.path().join("processes.db");
     let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
@@ -51,18 +50,19 @@ async fn sqlite_wake_delivery_crash_matrix() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    Box::pin(lash_conformance::wake_delivery_crash_matrix(
+    (
+        dir,
         factory,
         registry,
         clock,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
-    ))
-    .await;
-}
+        || async {},
+        || async {},
+    )
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_wake_delivery_ordering_group_conformance() {
+lash_conformance::wake_delivery_ordering_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let process_registry_path = dir.path().join("processes.db");
     let registry = Arc::new(
@@ -73,13 +73,15 @@ async fn sqlite_wake_delivery_ordering_group_conformance() {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
-    lash_conformance::wake_delivery_ordering_group_conformance(
+    (
+        dir,
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector {
             path: process_registry_path,
         }),
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
+        || async {},
+        || async {},
     )
-    .await;
-}
+});

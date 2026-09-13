@@ -107,6 +107,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ParentEnded { .. } => {
                 Self::new(RuntimeErrorCode::ProcessParentEnded, err.to_string())
             }
+            err @ PluginError::ProcessCancelConflict { .. } => {
+                Self::new(RuntimeErrorCode::ProcessCancelConflict, err.to_string())
+            }
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
@@ -181,6 +184,31 @@ mod tests {
         assert_eq!(runtime.code.as_str(), "process_parent_ended");
         assert!(runtime.is_terminal());
         assert!(!runtime.is_retryable());
+    }
+
+    #[test]
+    fn cancellation_conflict_preserves_the_standing_request_at_the_effect_boundary() {
+        let existing =
+            crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:first", 11);
+        let requested =
+            crate::CancelRequest::new(crate::CancelOrigin::ModelRequested, "actor:second", 22);
+        assert!(!existing.same_cancellation_as(&requested));
+        let error = PluginError::ProcessCancelConflict {
+            process_ref: crate::ProcessRef::new(
+                "conflict",
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ),
+            existing: Box::new(existing),
+            requested: Box::new(requested),
+        };
+        assert!(error.is_terminal());
+        assert!(!error.is_retryable());
+        let runtime = RuntimeEffectControllerError::from(error).into_runtime_error();
+        assert_eq!(runtime.code.as_str(), "process_cancel_conflict");
+        assert!(runtime.is_terminal());
+        assert!(!runtime.is_retryable());
+        assert!(runtime.message.contains("OperatorRequested"));
+        assert!(runtime.message.contains("actor:first"));
     }
 
     #[test]

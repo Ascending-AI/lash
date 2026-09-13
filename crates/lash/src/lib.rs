@@ -196,7 +196,7 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
         ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
@@ -238,8 +238,8 @@ pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver,
-        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant,
+        RecordedGrantInstallError, Resolution as DeferredToolResolution,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
     };
     /// Author a fixed-tool provider without hand-rolling `tool_manifests` /
     /// `resolve_contract`: supply the [`ToolDefinition`]s once and an
@@ -675,6 +675,7 @@ pub mod process {
     pub use crate::process_admin::Processes;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
+    pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
@@ -685,24 +686,25 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork, OnParentEnd,
-        ParentScope, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
-        ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
-        ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog, ProcessEventType,
-        ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
-        ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeases,
-        ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-        ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-        ProcessOriginator, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-        ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention,
-        ProcessService, ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest,
-        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
-        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
-        ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
-        ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
-        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedWorkItem, facade_support::ProcessAdmissionDeferred,
+        AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, CausalRef,
+        NativeProcessWork, OnParentEnd, ParentScope, ProcessArtifactCleanupAck, ProcessAwaitOutput,
+        ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
+        ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventAppendRequest, ProcessEventLog, ProcessEventType, ProcessExecutionContext,
+        ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
+        ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+        ProcessLeaseCompletion, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+        ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+        ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessProvenance,
+        ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar,
+        ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessService,
+        ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
+        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessToolIntents,
+        ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate,
+        ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
+        RecoveryContract, SessionScope, WatchedRegistry, facade_support::ObservedProcess,
+        facade_support::ObservedProcessEvent, facade_support::ObservedWorkItem,
+        facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
         facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
         facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
         facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,

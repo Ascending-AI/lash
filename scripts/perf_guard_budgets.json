@@ -105,6 +105,22 @@
               "budget_ms": 11.906,
               "required": true
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 7.686,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.25,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 211.516,
               "required": true
@@ -257,6 +273,10 @@
             },
             "rlm_lashlang.compile_link": {
               "budget_ms": 5.894,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 4.272,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -551,6 +571,10 @@
               "budget_ms": 3.042,
               "required": false
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 1.926,
+              "required": true
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 2.352,
               "required": false
@@ -622,6 +646,22 @@
             "rlm_lashlang.compile_link": {
               "budget_ms": 3.014,
               "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.552,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.264,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.362,
+              "required": false
             },
             "rlm_lashlang.execute": {
               "budget_ms": 40.806,
@@ -695,6 +735,10 @@
               "budget_ms": 3.078,
               "required": false
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 2.16,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 64.384,
               "required": false
@@ -766,6 +810,22 @@
             "rlm_lashlang.compile_link": {
               "budget_ms": 4.184,
               "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.594,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.28,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.408,
+              "required": false
             },
             "rlm_lashlang.execute": {
               "budget_ms": 64.764,
@@ -841,6 +901,10 @@
             },
             "rlm_lashlang.compile_link": {
               "budget_ms": 7.462,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 81.676,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1063,6 +1127,22 @@
               "budget_ms": 4.536,
               "required": false
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.832,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.288,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.378,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 61.058,
               "required": false
@@ -1142,6 +1222,22 @@
             "rlm_lashlang.compile_link": {
               "budget_ms": 5.072,
               "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 5.462,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.3,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.4,
+              "required": false
             },
             "rlm_lashlang.execute": {
               "budget_ms": 3119.652,
@@ -1267,6 +1363,22 @@
               "budget_ms": 5.876,
               "required": true
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.534,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.256,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.37,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 440.038,
               "required": true
@@ -1387,6 +1499,22 @@
               "budget_ms": 4.58,
               "required": true
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.74,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.28,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.436,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 671.546,
               "required": true
@@ -1499,6 +1627,10 @@
               "budget_ms": 2.992,
               "required": true
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 2.086,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 2.366,
               "required": true
@@ -1577,6 +1709,22 @@
             },
             "rlm_lashlang.compile_link": {
               "budget_ms": 3.542,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.752,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.262,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.42,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1691,6 +1839,22 @@
               "budget_ms": 3.378,
               "required": false
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 3.624,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.294,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.36,
+              "required": false
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 44.788,
               "required": false
@@ -1762,6 +1926,22 @@
             "rlm_lashlang.compile_link": {
               "budget_ms": 5.826,
               "required": true
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 6.382,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_durable_record": {
+              "budget_ms": 0.25,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve.after_resolver_return": {
+              "budget_ms": 0.362,
+              "required": false
+            },
+            "rlm_lashlang.deferred_trigger_resolve": {
+              "budget_ms": 0.396,
+              "required": false
             },
             "rlm_lashlang.execute": {
               "budget_ms": 154.022,
@@ -2457,6 +2637,10 @@
             },
             "rlm_lashlang.compile_link": {
               "budget_ms": 5.706,
+              "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 2.0,
               "required": false
             },
             "rlm_lashlang.execute": {

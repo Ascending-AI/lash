@@ -3,7 +3,7 @@ use super::*;
 use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
-pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
+pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
     async fn filtered_ids(
         registry: &Arc<dyn ProcessRegistry>,
         filter: ProcessListFilter,
@@ -232,7 +232,7 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
     }
 }
 
-pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
+pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     const KIND: &str = "recent-retired-filter-kind";

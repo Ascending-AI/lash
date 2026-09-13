@@ -48,48 +48,7 @@ use pretty_assertions::assert_eq;
 /// A caller's whole interaction with one group: open, await, close.
 type Host = Arc<dyn EffectHost>;
 
-/// Run the durable effect-group host suite.
-///
-/// `make` is handed the suite's [`GroupExecutors`] resolver and must register it
-/// on the host it builds — **and must build an unregistered host when it is
-/// handed `None`**, because two laws are about exactly that host. It returns a
-/// host object over **one** substrate: two calls must reach the
-/// same journal, because a second host is how a law says "the process that
-/// resumes this continuation". On a store-backed tier that is a second host over
-/// the same database; on the native substrate, whose substrate is the process, it is
-/// the same host object handed out again. Laws namespace their own group keys
-/// and scopes, so sharing costs them nothing.
-pub async fn effect_group_host_conformance<F>(make: F)
-where
-    F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
-{
-    let unwired = || make(None);
-    let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
-    let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
-    // Keep the drop-based cancellation witness first: it proves the host
-    // actually stops a live loser, not merely that it records Cancelled.
-    cancel_stops_the_losers(&make, &prefix).await;
-    an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
-    a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
-    a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
-    a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal(&make, &prefix).await;
-    the_capability_flag_and_the_group_surface_agree(&make, &prefix).await;
-    wrong_scope_groups_are_refused_before_any_child_runs(&make, &prefix).await;
-    duplicate_replay_keys_are_refused_before_a_host_sees_them(&make, &prefix).await;
-    the_first_settlement_wakes_the_caller_while_the_loser_still_runs(&make, &prefix).await;
-    a_scope_with_a_live_group_child_is_not_quiescent(&make, &prefix).await;
-    settlement_n_is_stable_across_re_reads(&make, &prefix).await;
-    every_child_is_delivered_once_in_rank_order(&make, &prefix).await;
-    awaiting_past_the_last_child_is_refused(&make, &prefix).await;
-    a_cancelled_await_leaves_the_rank_to_be_read_again(&make, &prefix).await;
-    run_to_completion_losers_settle_after_the_caller_is_gone(&make, &prefix).await;
-    a_close_may_narrow_but_never_widen(&make, &prefix).await;
-    closing_twice_under_one_disposition_succeeds(&make, &prefix).await;
-    a_reopen_is_fenced_on_shape_and_runs_no_child_twice(&make, &prefix).await;
-    a_second_host_instance_reads_the_ranks_the_first_recorded(&make, &prefix).await;
-}
-
-async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Host>(
+pub async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -169,7 +128,7 @@ async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Host>(
 
 /// The durable-tier law: a cancelled child's terminal is a *journaled* fact.
 ///
-/// Separate from [`effect_group_host_conformance`] because it is not answerable
+/// Separate from the shared host laws because it is not answerable
 /// by every host. The native substrate journals nothing, so "the cancellation
 /// survived the host that issued it" has no meaning there; a durable tier owes
 /// it, and owes it in the only way that proves it — a second host instance,
@@ -501,7 +460,7 @@ where
 /// answering `close` with `Ok(())` would tell an operator to fix the group when
 /// the deployment is what is unwired — and a caller could not tell "this
 /// deployment does not do groups" from "this group is malformed".
-async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() -> Host>(
+pub async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() -> Host>(
     unwired: &F,
     prefix: &str,
 ) {
@@ -565,7 +524,7 @@ async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() ->
 /// behind shows up as rank 1 already allocated. On the native substrate, which
 /// journals nothing, both halves are true by construction and the law still pins
 /// the refusal.
-async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
+pub async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
     unwired: &U,
     make: &F,
     prefix: &str,
@@ -641,7 +600,7 @@ async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
 ///
 /// The third act proves the key really is untouched: once every child has a
 /// runner the same key opens as a *first* open, with rank 1 still unallocated.
-async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn() -> Host>(
+pub async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -726,7 +685,7 @@ async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn() -
 /// `NoExecutor` case. Refusing here would deny a resuming caller the settlements
 /// the group already recorded — a replayed frame would fail where the original
 /// succeeded, which is the one thing a durable group may never do.
-async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F: Fn() -> Host>(
+pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -797,7 +756,10 @@ async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F: Fn
 /// A host that forwarded the flag but left the methods on their fail-closed
 /// defaults would advertise support and then refuse every group, so the flag is
 /// asserted through the same object that runs the group.
-async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
     let host = make();
     let scope = scope(prefix, "flag");
     let scoped = host.scoped(scope.clone()).expect("a scope binds");
@@ -837,7 +799,7 @@ async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(make: 
 /// The second half is what makes this a law about hosts rather than about a
 /// constructor: the same key opens cleanly afterwards, so the refusal happened
 /// before anything was written under it.
-async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -> Host>(
+pub async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -890,7 +852,7 @@ async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -> Ho
 ///
 /// Asserted on the loser's own gate rather than on wall time — "the caller did
 /// not wait for it" is then a fact about the host, not about the scheduler.
-async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn() -> Host>(
+pub async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -930,7 +892,10 @@ async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn(
 /// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` while the
 /// child runs, leaves the scope unfenced, and retires it once every child
 /// has settled and the group is closed (FIG-2499 fix round 3, ruling 4).
-async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
+    make: &F,
+    prefix: &str,
+) {
     let host = make();
     let scope = scope(prefix, "live-child");
     let scoped = host.scoped(scope.clone()).expect("a scope binds");
@@ -985,7 +950,7 @@ async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(make:
 /// The re-read arrives through [`EffectGroupHandle::restored`], the path a
 /// durable continuation actually takes, which pins the reopen rule too: the
 /// caller's cursor wins and the host keeps no consumption state of its own.
-async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "stable")).expect("a scope binds");
     let key = group_key(prefix, "stable");
@@ -1034,7 +999,7 @@ async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, prefi
 /// The failing child is what makes the last clause more than an assertion about
 /// arity: a host that reported a loser's failure as the group's failure, or
 /// swallowed it, disagrees here.
-async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "order")).expect("a scope binds");
     let key = group_key(prefix, "order");
@@ -1080,7 +1045,7 @@ async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: &F, 
 
 /// Exhaustion is the caller's arithmetic; awaiting past it is a shape refusal
 /// rather than a hang.
-async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "past")).expect("a scope binds");
     let key = group_key(prefix, "past");
@@ -1110,7 +1075,7 @@ async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, pref
 
 /// A cancelled await leaves the cursor and the durable rank untouched, so a
 /// later await resumes at the same settlement.
-async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>(
+pub async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -1153,7 +1118,7 @@ async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>(
 /// The structural claim underneath is that children do not run inside the
 /// caller's future — a host that owned its leaves there would drop this loser at
 /// the close.
-async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() -> Host>(
+pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -1214,7 +1179,7 @@ async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() -> Hos
 /// [`effect_group_cancelled_child_terminal_is_durable`] from each store's own
 /// tests. What every tier owes here is that the loser does not go on to
 /// complete.
-async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "cancel")).expect("a scope binds");
     let key = group_key(prefix, "cancel");
@@ -1252,7 +1217,7 @@ async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
 /// Close may narrow the declared disposition and may never widen it: a
 /// crash-drain applies the *declared* one, so permitting a widening close would
 /// make the losers' fate depend on whether the caller reached its close at all.
-async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "narrow")).expect("a scope binds");
 
@@ -1311,7 +1276,7 @@ async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &
 
 /// Close is idempotent, because a crash between a successful close and the
 /// continuation commit replays it.
-async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F, prefix: &str) {
+pub async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host
         .scoped(scope(prefix, "idempotent"))
@@ -1341,7 +1306,7 @@ async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F,
 /// Both halves matter for the same reason: a shrunk child vec under one key
 /// renumbers every rank above the truncation, and a second dispatch doubles
 /// every side effect the first is still producing.
-async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
+pub async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -1418,7 +1383,7 @@ async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
 /// happen. A resuming host reopens the group, re-derives what it needs from the
 /// group it was handed, and reads rank 1 back — including a rank recorded by a
 /// child the *first* host is still running.
-async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Host>(
+pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
 ) {
@@ -1677,7 +1642,7 @@ impl GroupExecutors for StagedGroupExecutors {
 /// routing question as the first, and it was never handed the first's memory.
 /// Group keys carry a per-run uuid prefix, so two laws can never stage the same
 /// child.
-fn suite_executors() -> Arc<StagedGroupExecutors> {
+pub(super) fn suite_executors() -> Arc<StagedGroupExecutors> {
     static EXECUTORS: std::sync::OnceLock<Arc<StagedGroupExecutors>> = std::sync::OnceLock::new();
     Arc::clone(EXECUTORS.get_or_init(|| Arc::new(StagedGroupExecutors::new())))
 }

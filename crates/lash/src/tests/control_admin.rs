@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _};
+use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _, SessionCommitStore as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -443,32 +443,60 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
 #[tokio::test]
 async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> {
     let registry = Arc::new(TestLocalProcessRegistry::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
+    let watched = lash_core::facade_support::watch_process_registry(
+        registry.clone() as Arc<dyn lash_core::ProcessRegistry>
+    );
+    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
+    let provider = mock_provider();
+    let session_spec = provider_session_spec(&provider);
+    let runtime_host = explicit_runtime_host_config(provider);
+    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .session_spec(session_spec)
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_registry(registry.clone())
+        .process_work(wiring)
+        .with_native_queued_work()
+        .advanced()
+        .runtime_host_config(runtime_host)
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let process_id = "observed-process";
 
+    let request = lash_core::ProcessStartRequest::new(
+        process_id,
+        lash_core::ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                "observed-process-call",
+                "tool:observed-process",
+                "observed_process",
+                serde_json::Value::Null,
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+    )
+    .with_observers(["process-observation-events".to_string()])
+    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        lash_core::SessionPolicy {
+            model: mock_model_spec(),
+            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        },
+    ));
     let started = session
         .admin()
         .processes()
         .start(
-            lash_core::ProcessStartRequest::external(
-                process_id,
-                lash_core::ProcessOriginator::host(),
-                serde_json::Value::Null,
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            )
-            .with_observers(["process-observation-events".to_string()]),
+            request.clone(),
             native_scope(lash_core::ExecutionScope::process(process_id)),
         )
         .await?;
@@ -482,6 +510,17 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::OnParentEnd::Abandon
         )
     );
+    session
+        .admin()
+        .processes()
+        .start(
+            request,
+            native_scope(lash_core::ExecutionScope::runtime_operation(
+                "process-observation-events-replay",
+            )),
+        )
+        .await
+        .expect("public session start replay bypasses the retired staging owner");
     session
         .admin()
         .processes()
@@ -902,6 +941,42 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
             .expect("app tool")
             .is_member(),
         "the host-removed tool is a non-member"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn config_admin_sets_persisted_tool_access() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("config-admin-tool-access").open().await?;
+    let access = lash_core::SessionToolAccess::ambient()
+        .with_hidden_tools(["app_lookup"])
+        .expect("valid hidden tool");
+
+    session
+        .admin()
+        .config()
+        .set_tool_access(access.clone())
+        .await?;
+
+    let store = store_factory
+        .raw_store_for_testing(&SessionId::from("config-admin-tool-access"))
+        .expect("session store");
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("load session head")
+            .expect("session head")
+            .config
+            .tool_access,
+        access
     );
     Ok(())
 }

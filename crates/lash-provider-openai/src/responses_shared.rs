@@ -42,6 +42,9 @@ use lash_llm_transport::{
     openai_usage_from_response_value as usage_from_response_value, terminal_reason_from_parts,
 };
 
+mod tool_argument_decoder;
+pub use tool_argument_decoder::ToolArgumentDecoder;
+
 // ---------------------------------------------------------------------------
 // Request-building primitives
 // ---------------------------------------------------------------------------
@@ -802,6 +805,13 @@ pub fn has_structured_message_text(value: &Value) -> bool {
 }
 
 pub fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
+    response_parts_from_value_with_decoder(value, &ToolArgumentDecoder::default())
+}
+
+pub fn response_parts_from_value_with_decoder(
+    value: &Value,
+    tool_argument_decoder: &ToolArgumentDecoder,
+) -> Vec<LlmOutputPart> {
     let mut parts = Vec::new();
     if let Some(output) = value.get("output").and_then(|v| v.as_array()) {
         for item in output {
@@ -862,7 +872,7 @@ pub fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
                             .map(str::to_string)
                             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                         tool_name: name.to_string(),
-                        input_json: arguments,
+                        input_json: tool_argument_decoder.decode(name, arguments),
                         replay: item.get("id").and_then(|v| v.as_str()).map(|id| {
                             ProviderReplayMeta {
                                 item_id: Some(id.to_string()),
@@ -918,6 +928,7 @@ pub struct ResponsesStreamState {
     pub usage: LlmUsage,
     pub provider_usage: Option<Value>,
     pub execution_evidence: Option<ExecutionEvidence>,
+    pub(crate) tool_argument_decoder: ToolArgumentDecoder,
     pub final_response: Option<Value>,
     /// Set only by a terminal Responses event, never merely by an event that
     /// happens to carry a `response` snapshot.
@@ -949,6 +960,13 @@ pub struct ResponsesStreamState {
 }
 
 impl ResponsesStreamState {
+    pub fn with_tool_argument_decoder(tool_argument_decoder: ToolArgumentDecoder) -> Self {
+        Self {
+            tool_argument_decoder,
+            ..Self::default()
+        }
+    }
+
     fn slot_has_kind(&self, owner: usize, kind: ResponsesPartKind) -> bool {
         self.slot_owners
             .get(owner)
@@ -1204,7 +1222,7 @@ impl ResponsesStreamState {
             return;
         }
         let structured_message_text = has_structured_message_text(response);
-        for part in response_parts_from_value(response) {
+        for part in response_parts_from_value_with_decoder(response, &self.tool_argument_decoder) {
             match part {
                 LlmOutputPart::Text {
                     text,
@@ -1602,10 +1620,13 @@ impl ResponsesStreamState {
             }
             tool_call.clone()
         };
+        let tool_name = tool_call.tool_name;
         let part = LlmOutputPart::ToolCall {
             call_id: tool_call.call_id,
-            tool_name: tool_call.tool_name,
-            input_json: tool_call.input_json,
+            input_json: self
+                .tool_argument_decoder
+                .decode(&tool_name, tool_call.input_json),
+            tool_name,
             replay: (!tool_call.item_id.is_empty()).then_some(ProviderReplayMeta {
                 item_id: Some(tool_call.item_id),
                 opaque: None,
@@ -1635,7 +1656,8 @@ impl ResponsesStreamState {
             return parts;
         }
         if let Some(final_response) = &self.final_response {
-            let parts = response_parts_from_value(final_response);
+            let parts =
+                response_parts_from_value_with_decoder(final_response, &self.tool_argument_decoder);
             if !parts.is_empty() {
                 return parts;
             }

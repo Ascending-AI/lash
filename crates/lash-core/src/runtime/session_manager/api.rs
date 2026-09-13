@@ -234,29 +234,16 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         request: crate::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let env_ref = match request.env_spec.as_ref() {
-            Some(env_spec) => Some(
-                crate::persist_process_execution_env(
-                    self.services
-                        .current
-                        .host
-                        .core
-                        .durability
-                        .process_env_store
-                        .as_ref(),
-                    env_spec,
-                )
-                .await?,
-            ),
-            None => None,
-        };
+        let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(env_ref);
+        let registration = request.into_registration(None);
         let record = self
             .start(
                 session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                crate::ProcessStartOptions::new()
+                    .with_initial_observers(observers)
+                    .with_env_spec(env_spec),
                 scope,
             )
             .await?;
@@ -443,36 +430,16 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn cancel_with_reason(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.services
-            .processes
-            .cancel_process_with_reason(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                process_id,
-                reason,
-                scope,
-            )
-            .await
-    }
-
     async fn cancel_recorded_intent(
         &self,
         _session_id: &SessionId,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
             .processes
-            .cancel_recorded_intent(&self.services.current, process_id, reason, scope)
+            .cancel_recorded_intent(&self.services.current, process_id, identity, scope)
             .await
     }
 
@@ -482,7 +449,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         self.services
@@ -492,7 +458,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 identity,
                 process_id,
                 policy,
-                reason,
                 scope,
             )
             .await

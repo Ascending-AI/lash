@@ -37,30 +37,15 @@ impl StoreRecoveryLeaseTiming {
     }
 }
 
-/// Prove durable recovery across claim, checkpoint, commit, and settlement
-/// boundaries through independently constructed persistence handles.
-///
-/// These are store laws. They do not execute a runtime turn, model call, tool,
-/// or runtime phase hook and therefore do not certify turn-phase recovery.
-/// Process-local effect and wait-owner failures are covered by backend helper
-/// processes; real turn-loop crash injection remains a separate acceptance
-/// instrument.
-///
-/// Integrator class: conformance-suite embedders (ADR 0051 class 4).
-pub async fn runtime_persistence_recovery_laws<F>(make: F, lease_timing: StoreRecoveryLeaseTiming)
+/// The backend's maker hands every recovery law its own persistence handle
+/// rather than one shared instance.
+pub async fn store_recovery_fresh_instances<F>(make: &F, label: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
-    let first = make("fresh-instance-probe");
-    let second = make("fresh-instance-probe");
-    assert_fresh_instances(&first, &second, "runtime_persistence_recovery_laws");
-    drop((first, second));
-
-    let prefix = format!("store-recovery-{}", uuid::Uuid::new_v4());
-    expired_claim_is_recoverable_once(&make, &prefix, &lease_timing).await;
-    checkpoint_survives_before_claim_settlement(&make, &prefix, &lease_timing).await;
-    atomic_commit_settles_claim_once(&make, &prefix).await;
-    recorded_commit_replay_is_idempotent(&make, &prefix).await;
+    let first = make(label);
+    let second = make(label);
+    assert_fresh_instances(&first, &second, "store_recovery");
 }
 
 fn recovery_timings() -> crate::LeaseTimings {
@@ -221,7 +206,7 @@ async fn assert_settled_once(
     );
 }
 
-async fn expired_claim_is_recoverable_once<F>(
+pub async fn expired_claim_is_recoverable_once<F>(
     make: &F,
     prefix: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
@@ -279,7 +264,7 @@ async fn expired_claim_is_recoverable_once<F>(
     assert_settled_once(make, &session_id).await;
 }
 
-async fn checkpoint_survives_before_claim_settlement<F>(
+pub async fn checkpoint_survives_before_claim_settlement<F>(
     make: &F,
     prefix: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
@@ -360,7 +345,7 @@ async fn checkpoint_survives_before_claim_settlement<F>(
     assert_settled_once(make, &session_id).await;
 }
 
-async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
+pub async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
@@ -405,7 +390,7 @@ where
     );
 }
 
-async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
+pub async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {

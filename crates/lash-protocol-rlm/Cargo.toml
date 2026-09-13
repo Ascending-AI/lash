@@ -44,7 +44,9 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
+lash-sqlite-store = { workspace = true }
 insta = "1"
+tempfile = { workspace = true }
 
 [build-dependencies]
 lash-lashlang-runtime = { workspace = true }

@@ -112,16 +112,3 @@ async fn process_family_columns_and_worklist_index_pin_c_collation() {
     .expect("index collation");
     assert_eq!(index, "C", "worklist index must inherit byte order");
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_registry_pagination_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres pagination conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(&storage).await;
-    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    lash_conformance::process_registry_pagination(registry).await;
-}

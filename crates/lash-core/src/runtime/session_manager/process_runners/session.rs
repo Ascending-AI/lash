@@ -328,9 +328,23 @@ fn output_from_process_turn(
     state: crate::ProcessStatus,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {
-        return crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
-            "background session turn was cancelled",
-        ));
+        let cancellation = match &turn.outcome {
+            crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence }) => {
+                crate::ToolCancellation {
+                    message: evidence
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "background session turn was cancelled".to_string()),
+                    source: crate::ToolFailureSource::Cancellation,
+                    origin: Some(crate::CancelOrigin::TurnStopped),
+                    raw: serde_json::to_value(evidence)
+                        .ok()
+                        .map(crate::ToolValue::untrusted_json),
+                }
+            }
+            _ => crate::ToolCancellation::runtime("background session turn was cancelled"),
+        };
+        return crate::ToolCallOutput::cancelled(cancellation);
     }
     if state == crate::ProcessStatus::Failed {
         return crate::ToolCallOutput::failure(crate::ToolFailure::tool(
@@ -723,5 +737,92 @@ mod tests {
             },
         ))
         .await;
+    }
+
+    #[tokio::test]
+    async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
+        use crate::{ProcessLifecycle as _, ProcessRegistrar as _};
+
+        let process_id = crate::ProcessId::from("process:child-turn-cancellation-evidence");
+        let child_session_id = crate::SessionId::from("child-turn-cancellation-evidence");
+        let registration = crate::ProcessRegistration::new(
+            process_id.clone(),
+            crate::ProcessInput::External {
+                metadata: serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let evidence = crate::TurnCancellationEvidence {
+            request_id: "child-request-17".to_string(),
+            origin: Some("opaque-host-origin".to_string()),
+            reason: Some("child turn stopped by its host".to_string()),
+            undelivered: crate::TurnCancelDisposition::Defer,
+            mode: crate::TurnCancelMode::Immediate,
+            honoured_after_step: None,
+        };
+        let mut turn = crate::testing::mock_assembled_turn(&child_session_id, "");
+        turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
+            evidence: evidence.clone(),
+        });
+
+        let runner_output = output_from_process_turn(
+            &registration,
+            &child_session_id,
+            turn,
+            crate::ProcessStatus::Cancelled,
+        );
+        assert_child_turn_cancellation(&runner_output, &evidence);
+
+        let registry = crate::TestLocalProcessRegistry::default();
+        registry
+            .register_process(registration)
+            .await
+            .expect("register child-turn process");
+        let completion = registry
+            .complete_process(
+                &process_id,
+                crate::ProcessAwaitOutput::from_tool_output(runner_output),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("persist child-turn cancellation");
+        let recorded = completion
+            .stored()
+            .outcome
+            .as_ref()
+            .expect("terminal process outcome")
+            .clone()
+            .into_tool_output();
+        assert_child_turn_cancellation(&recorded, &evidence);
+        let parent_result = completion
+            .stored()
+            .outcome
+            .clone()
+            .expect("parent await result")
+            .into_tool_output();
+        assert_child_turn_cancellation(&parent_result, &evidence);
+    }
+
+    fn assert_child_turn_cancellation(
+        output: &crate::ToolCallOutput,
+        evidence: &crate::TurnCancellationEvidence,
+    ) {
+        let crate::ToolCallOutcome::Cancelled(cancellation) = &output.outcome else {
+            panic!("expected child-turn cancellation, got {:?}", output.outcome);
+        };
+        assert_eq!(cancellation.origin, Some(crate::CancelOrigin::TurnStopped));
+        assert_eq!(cancellation.message, evidence.reason.as_deref().unwrap());
+        assert_eq!(
+            cancellation
+                .raw
+                .as_ref()
+                .map(crate::ToolValue::to_json_value),
+            Some(serde_json::to_value(evidence).expect("encode turn cancellation evidence"))
+        );
     }
 }

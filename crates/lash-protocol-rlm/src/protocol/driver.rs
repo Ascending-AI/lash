@@ -1453,6 +1453,7 @@ mod tests {
             ToolValue::Attachment(failure_attachment.clone()),
         ]));
         let cancellation = ToolCancellation {
+            origin: None,
             message: "cancelled".to_string(),
             source: lash_core::ToolFailureSource::Cancellation,
             raw: Some(ToolValue::Array(vec![

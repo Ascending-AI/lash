@@ -1,6 +1,5 @@
 use super::*;
 use std::collections::VecDeque;
-use std::sync::atomic::AtomicUsize;
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
@@ -9,19 +8,21 @@ pub struct TestLocalProcessRegistry {
     pub(super) process_read_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_read_error_after: Arc<Mutex<Option<(usize, PluginError)>>>,
     pub(super) process_events_read_error: Arc<Mutex<Option<PluginError>>>,
-    pub(super) process_events_read_count: Arc<AtomicUsize>,
     pub(super) process_read_absent: Arc<Mutex<bool>>,
     pub(super) process_read_override: Arc<Mutex<Option<ProcessRecord>>>,
     pub(super) process_lease_claim_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_lease_renew_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_terminal_write_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_terminal_write_outcome: Arc<Mutex<Option<ProcessCompletionOutcome>>>,
+    pub(super) external_ref_write_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_lease_release_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) next_change_seq: Arc<Mutex<u64>>,
     pub(super) tombstone_compaction_horizon: Arc<Mutex<u64>>,
     pub(super) observers: Arc<Mutex<HashMap<SessionId, HashSet<ProcessId>>>>,
     pub(super) wake_targets: Arc<Mutex<HashMap<ProcessId, SessionId>>>,
     pub(super) tombstones: Arc<Mutex<HashMap<(String, ProcessIncarnation), ProcessTombstone>>>,
+    pub(super) artifact_cleanup:
+        Arc<Mutex<HashMap<(ProcessId, ProcessIncarnation), crate::ProcessArtifactCleanup>>>,
     pub(super) leases: Arc<Mutex<ManagedLeaseMap>>,
     pub(crate) process_lease_point_reads: Arc<Mutex<usize>>,
     pub(crate) process_lease_batch_reads: Arc<Mutex<usize>>,

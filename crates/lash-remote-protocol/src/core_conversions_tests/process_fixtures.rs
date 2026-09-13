@@ -116,6 +116,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         lease_holder: None,
         lease_expires_at_ms: None,
         abandon_request: None,
+        cancel_request: None,
         input: lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),
         },
@@ -134,6 +135,7 @@ pub(super) fn observed_work_item() -> lash_core::facade_support::ObservedWorkIte
         process: observed_process(),
         events: Vec::new(),
         event_tail_sequence: 0,
+        state: lash_core::facade_support::ObservedWorkItemState::Coherent,
         kind: "external".to_string(),
         label: "External".to_string(),
     }
