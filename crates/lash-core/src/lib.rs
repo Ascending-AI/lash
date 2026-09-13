@@ -217,6 +217,17 @@ pub mod store_backend_support {
             .join(", ")
     }
 
+    /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
+    pub fn terminal_turn_input_states_sql() -> String {
+        state_sql_literal_list(
+            &crate::TurnInputState::ALL
+                .iter()
+                .copied()
+                .filter(|state| state.is_terminal())
+                .collect::<Vec<_>>(),
+        )
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
