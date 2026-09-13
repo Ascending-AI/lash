@@ -47,7 +47,7 @@ pub async fn assert_real_turn_kill_recovery(
     mut command: impl FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
 ) {
     for (action, crashed_count, recovered_count, expected_end_state, known_defect) in
-        lash_conformance::cold_process_turn_expectations()
+        super::cold_process_turn_expectations()
     {
         let nonce = uuid::Uuid::new_v4().to_string();
         let marker = tempdir.join(format!("{action}-{nonce}.log"));
@@ -135,7 +135,7 @@ pub async fn assert_real_turn_kill_recovery(
         "checkpoint outcome-gap recovery failed: {stderr}; stdout: {stdout}"
     );
     let expected_end_state =
-        lash_conformance::cold_process_durable_recovery_expectation("checkpoint_execute_finalize");
+        super::cold_process_durable_recovery_expectation("checkpoint_execute_finalize");
     let expected_summary = format!("turn_complete {expected_end_state}");
     assert!(
         stdout.lines().any(|line| line == expected_summary),
@@ -176,9 +176,8 @@ pub async fn assert_real_turn_kill_recovery(
         recovered.status.success(),
         "checkpoint outcome-gap final recovery failed: {stderr}; stdout: {stdout}"
     );
-    let expected_end_state = lash_conformance::cold_process_durable_recovery_expectation(
-        "checkpoint_replacement_double_crash",
-    );
+    let expected_end_state =
+        super::cold_process_durable_recovery_expectation("checkpoint_replacement_double_crash");
     let expected_summary = format!("turn_complete {expected_end_state}");
     assert!(
         stdout.lines().any(|line| line == expected_summary),
@@ -219,7 +218,7 @@ pub async fn assert_real_turn_kill_recovery(
         recovered.status.success(),
         "pinned-active-input recovery failed: {stderr}; stdout: {stdout}"
     );
-    let expected_end_state = lash_conformance::cold_process_durable_recovery_expectation(
+    let expected_end_state = super::cold_process_durable_recovery_expectation(
         "active_turn_input_pinned_to_recovered_turn",
     );
     let expected_summary = format!("turn_complete {expected_end_state}");
@@ -257,8 +256,7 @@ pub async fn assert_real_turn_kill_recovery(
         recovered.status.success(),
         "peer-reclaim recovery failed: {stderr}; stdout: {stdout}"
     );
-    let expected_end_state =
-        lash_conformance::cold_process_durable_recovery_expectation("peer_reclaim");
+    let expected_end_state = super::cold_process_durable_recovery_expectation("peer_reclaim");
     let expected_summary = format!("turn_complete {expected_end_state}");
     assert!(
         stdout.lines().any(|line| line == expected_summary),
