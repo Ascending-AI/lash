@@ -241,7 +241,7 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
         ];
 
         for (site, expected_message) in cases {
-            let error = inject_host_setup_failure(site)
+            let error = Box::pin(inject_host_setup_failure(site))
                 .await
                 .error
                 .unwrap_or_else(|| panic!("{site:?}: injected setup failure must be observed"));
