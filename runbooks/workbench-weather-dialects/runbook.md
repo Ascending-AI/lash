@@ -1,15 +1,20 @@
-# E2E Scenario: Workbench live weather in both RLM dialects
+# E2E Scenario: Workbench live weather from web search
 
-> **Read [../RULES.md](../RULES.md) first** — especially dialect parity, browser-surface
-> authority, polling, named-checkpoint screenshots, the three-layer cross-check,
-> real-token use, Abort/RCA, and teardown. This runbook adds only the live-weather
-> search, parse, and finish scenario.
+> **Read [../RULES.md](../RULES.md) first** — especially browser-surface authority,
+> polling, named-checkpoint screenshots, the three-layer cross-check, real-token use,
+> Abort/RCA, and teardown. This runbook adds only the live-weather search, parse, and
+> finish scenario.
 
-**Purpose.** Ask the same unassisted current-weather question in fresh Lashlang and
-TypeScript sessions and judge whether each dialect can turn live web results into a
-finished, source-backed answer without entering a repeated execution-error loop.
+**Purpose.** Ask one unassisted current-weather question in a fresh session and judge
+whether the agent can turn live web results into a finished, source-backed answer without
+entering a repeated execution-error loop. The judged subject is web grounding: whether
+search output becomes parsed values a user can trust, not whether a language works.
 
-**Real tokens.** Both rows use OpenRouter and the keyless Parallel Search MCP web tools. Current
+**History.** This scenario was authored as a two-dialect comparison. [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
+retired the second dialect, so it is now one TypeScript row. Every grounding, value,
+conversion and error-loop gate below is unchanged; only the comparison framing is gone.
+
+**Real tokens.** The row uses OpenRouter and the keyless Parallel Search MCP web tools. Current
 conditions and exact prose vary. Gate the turn on its terminal outcome, successful tool
 evidence, source-backed values, and rendered answer shape rather than an exact sentence.
 
@@ -17,7 +22,7 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
 
 1. **Ask exactly the product question.** Submit only
    `What is the current weather in Utrecht, Netherlands?` Do not add source code, parsing
-   advice, a preferred weather site, retry advice, or dialect-specific hints. The path from
+   advice, a preferred weather site, retry advice, or language hints. The path from
    search result to parsed values to `finish` is what this scenario judges.
 2. **Validation-only authority.** The only agent tool operations permitted are
    the Parallel web-search and web-fetch MCP tools. Any process, filesystem, command-execution, messaging,
@@ -64,21 +69,20 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    consecutive failed executions with the same non-empty error are a FAIL; quote the
    repeated error in the scorecard. Do not discard failed iterations once a later one
    succeeds.
-9. **Each row proves its own identity.** The rendered dialect badge,
+9. **The row proves its own identity.** The rendered dialect badge,
    `/api/state.settings.rlm_dialect`, code-block language, and execution events must all
-   name the row's dialect. Record the served provider model from the row's model-call
+   read `typescript`. Record the served provider model from the row's model-call
    evidence. A mismatch or unrecorded model substitution is a mislabeled row and triggers
    Abort/RCA.
-10. **Run Lashlang before TypeScript, with no shared state.** Use the fixed row allocations
-    below and tear the Lashlang instance down completely before booting TypeScript. Each row
-    gets its own session id, data directory, run directory, artifacts, ports, Restate and
-    Postgres containers, and trace.
+10. **Start from nothing.** Use the fixed allocations below. The row gets its own session
+    id, data directory, run directory, artifacts, ports, Restate and Postgres containers,
+    and trace, none of them carried over from an earlier run.
 
 ## Working material
 
 Require non-empty `OPENROUTER_API_KEY` and `TAVILY_API_KEY` from the repository's ignored
 `.env`; missing credentials are a harness gap → Abort. Set
-`OPENROUTER_MODEL=openai/gpt-5.6-sol` and `AGENT_WORKBENCH_OPEN=0` for both rows. Never log
+`OPENROUTER_MODEL=openai/gpt-5.6-sol` and `AGENT_WORKBENCH_OPEN=0`. Never log
 credential values.
 
 Use these allocations exactly; they are intentionally explicit rather than relying on the
@@ -86,30 +90,29 @@ workbench port-derivation fallback:
 
 | Dialect | Workbench | Restate endpoint | ingress | admin | node | Postgres | Session |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `lashlang` | 3301 | 11791 | 10790 | 21780 | 21781 | 18142 | `fig2351-weather-lashlang-<run-id>` |
 | `typescript` | 3302 | 11801 | 10800 | 21790 | 21791 | 18152 | `fig2351-weather-typescript-<run-id>` |
 
-For each row export all of the following with that table's values before
+Export all of the following with that table's values before
 `just agent-workbench <workbench-port>`:
 
-- `LASH_RUNBOOK_DIALECT=<dialect>`;
-- `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig2351-weather/<run-id>/<dialect>/data`;
-- `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig2351-weather/<run-id>/<dialect>/run`;
+- `LASH_RUNBOOK_DIALECT=typescript`;
+- `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/data`;
+- `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/run`;
 - `AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:<endpoint>`;
 - `RESTATE_INGRESS_URL=http://127.0.0.1:<ingress>`;
 - `RESTATE_ADMIN_URL=http://127.0.0.1:<admin>`;
 - `AGENT_WORKBENCH_RESTATE_ADMIN_PORT=<admin>` and
   `AGENT_WORKBENCH_RESTATE_NODE_PORT=<node>`;
 - `AGENT_WORKBENCH_RESTATE_ENDPOINT_URL=http://127.0.0.1:<endpoint>`;
-- `AGENT_WORKBENCH_RESTATE_CONTAINER=lash-agent-workbench-fig2351-<dialect>-restate`;
+- `AGENT_WORKBENCH_RESTATE_CONTAINER=lash-agent-workbench-fig2351-typescript-restate`;
 - `AGENT_WORKBENCH_POSTGRES=1`, `AGENT_WORKBENCH_POSTGRES_PORT=<postgres>`, and
   `AGENT_WORKBENCH_DATABASE_URL=postgres://lash:lash@127.0.0.1:<postgres>/lash`;
-- `AGENT_WORKBENCH_POSTGRES_CONTAINER=lash-agent-workbench-fig2351-<dialect>-postgres`.
+- `AGENT_WORKBENCH_POSTGRES_CONTAINER=lash-agent-workbench-fig2351-typescript-postgres`.
 
 Before boot, require the row's data/run/artifact directories not to exist and all six
 allocated ports to be free. Never inspect, stop, or reuse anything on ports 3063 or 3067.
 Save evidence under
-`/workspace/tmp/fig2351-weather/<run-id>/<dialect>/artifacts`. Teardown each row with the
+`/workspace/tmp/fig2351-weather/<run-id>/typescript/artifacts`. Tear the row down with the
 same exported environment and `just agent-workbench-down <workbench-port>`; then require
 the workbench port closed and both exact containers absent. Preserve artifacts, but remove
 the row's data and run directories only after evidence has been copied.
@@ -120,8 +123,9 @@ Browser truth is the scoped page
 and nested web-tool rows. HTTP truth is `/healthz` plus
 `/api/state?session_id=<session-id>`. Durable truth is the row's non-tombstoned
 `lash_graph_nodes` ancestry in its dedicated Postgres container. Trace truth is the row's
-`data/trace.jsonl` and `data/lashlang-execution.jsonl`, filtered by the exact session id
-even for the TypeScript row (the historical filename is not a language claim).
+`data/trace.jsonl` and `data/lashlang-execution.jsonl`, filtered by the exact session id.
+The `lashlang-` filename names the IR and the VM that wrote the records, not an authoring
+language.
 Compare assistant text without conflating Markdown bytes with visible text: API and durable
 message Markdown must agree byte-for-byte, while the DOM must equal that Markdown after the
 page's own `renderMarkdownBlocks` projection.
@@ -131,8 +135,8 @@ page's own `renderMarkdownBlocks` projection.
 Do: boot the row, poll `/healthz` to 200, then open its scoped page with
 `wait_until="domcontentloaded"` and explicit waiting assertions.
 
-Expect: the composer is visible; the rendered session id and dialect equal the scoped id
-and row; `/api/state.settings` agrees; the transcript is empty;
+Expect: the composer is visible; the rendered session id equals the scoped id and the
+rendered dialect reads `typescript`; `/api/state.settings` agrees; the transcript is empty;
 the page is idle; the API has no active turns; the dedicated Postgres store has no graph
 rows for the session; and the trace has no turn, code-execution, or tool-call record for the
 session. Record the configured model from state, but treat the served-model evidence after
@@ -157,7 +161,7 @@ Do: order all of this turn's code execution completions and nested tool activity
 position. Save them as `02-execution-history.json`; save every successful web result used
 by the answer, without credentials, as `02-live-sources.json`.
 
-Expect: every code block and execution event names the active dialect; every agent tool is
+Expect: every code block and execution event reads `typescript`; every agent tool is
 on the validation-only allow-list; at least one successful web result identifies Utrecht
 and supports all four answer facts; and golden rule 8 finds no repeated-identical-error
 loop. If it does, stop and quote the exact repeated error rather than continuing to judge
@@ -178,23 +182,21 @@ completed turn. Any disagreement is a contract violation → Abort/RCA. Save
 
 ## Phase 4 — Teardown and score
 
-Do: tear down the row using its exact exported environment before moving to the next
-dialect. Confirm the PID is gone, all allocated ports are closed, and both exact containers
-are absent. Save a concise teardown transcript as `04-teardown.txt`.
+Do: tear down the row using its exact exported environment. Confirm the PID is gone, all
+allocated ports are closed, and both exact containers are absent. Save a concise teardown
+transcript as `04-teardown.txt`.
 
 Expect: no workbench-owned process, listener, or container from the row remains.
 
-Repeat Phases 0 through 4 for TypeScript only after Lashlang teardown passes.
+### Scorecard
 
-### Per-dialect scorecard
-
-Copy this table once for each dialect and fill every Result and Evidence cell. A specific
-rendered value or exact failure replaces a generic “looks good.”
+Fill every Result and Evidence cell. A specific rendered value or exact failure replaces a
+generic “looks good.”
 
 | Gate | Objective gate | Result | Evidence |
 | --- | --- | --- | --- |
 | Fresh isolated boot | six explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
-| Dialect and model identity | badge, state, code/execution events name the row; served model recorded | | `00-identities.json`, `01-finished-trace.json` |
+| Dialect and model identity | badge, state, code/execution events read `typescript`; served model recorded | | `00-identities.json`, `01-finished-trace.json` |
 | Do → expect completion | running observed; then idle + no active turn + one completed/final-value terminal within five minutes | | `01-finished.png`, state, trace |
 | Validation-only tools | every agent tool is a Parallel web-search or web-fetch MCP call | | `02-execution-history.json` |
 | Live source support | successful Utrecht current-condition result supports temperature, condition, humidity, and wind | | `02-live-sources.json` |
@@ -204,23 +206,22 @@ rendered value or exact failure replaces a generic “looks good.”
 | Three-layer fidelity | one user/assistant pair agrees by identity and text across DOM, API, durable graph, and trace | | `03-crosscheck.json` |
 | Teardown | exact PID, ports, and containers are gone | | `04-teardown.txt` |
 
-### Matrix summary
+### Run summary
 
 | Dialect | Verdict | Rendered answer or exact failing error | Evidence directory |
 | --- | --- | --- | --- |
-| `lashlang` | | | |
 | `typescript` | | | |
 
-**Aggregate:** did both fresh dialect sessions independently search live Utrecht weather,
-parse the returned values, finish within budget, and render a source-backed, internally
-consistent answer without placeholders or an identical-error retry loop?
+**Aggregate:** did a fresh session search live Utrecht weather, parse the returned values,
+finish within budget, and render a source-backed, internally consistent answer without
+placeholders or an identical-error retry loop?
 
 ## Notes
 
-- **FIG-2350 linkage.** The known TypeScript defect shape is a bound variable whose preview
+- **FIG-2350 linkage.** The known defect shape is a bound variable whose preview
   appears useful while its value remains a string of dictionary-like page text; later code
-  reads `.localtime` from `undefined` and repeats the same failed execution. If the
-  TypeScript row reproduces that shape, quote its exact error, mark the row FAIL, and link
+  reads `.localtime` from `undefined` and repeats the same failed execution. If the row
+  reproduces that shape, quote its exact error, mark the row FAIL, and link
   the finding to FIG-2350. Do not add parsing hints, increase the iteration budget, or
   weaken any gate to make the row pass.
 - FIG-2352 owns the deterministic benchmark for this behavior. This judged runbook does
