@@ -19,8 +19,8 @@ lash <name>`.
 
 Use `kiln build` for the warm shared-cache compilation path and `kiln test` for
 the generated cacheable test partition. Implementer loops do not run Postgres,
-S3, or E2E (`kiln test --service`, store recipes, Restate workers): CI owns
-those, and local live gates fight over ports (`KILN_GATE_ID`) and the
+S3, or E2E (`scripts/ci/with-service.sh`, store recipes, Restate workers): CI
+owns those, and local live gates fight over ports (`KILN_GATE_ID`) and the
 single-box database.
 
 ```sh
@@ -292,16 +292,32 @@ jobs and dispatches on `BAZEL_TRUSTED`. Two properties hold on the Bazel path:
   Cargo's one-binary-at-a-time execution, which the suites that share one
   database and one bucket depend on.
 
-### Running them locally: `kiln test --service`
+### Running them locally: `scripts/ci/with-service.sh`
 
-`kiln test --service <pg14|pg16|pg18|s3|all>` runs those same suites on this
-box. It starts the CI image on a free ephemeral port, waits for readiness,
-runs `scripts/ci/store-tests.sh` for each suite the matching CI job runs, in
-the same order and with the same environment variable names, and removes the
-container on success, failure and Ctrl-C alike. It is the same script, not a
-second copy of the test selection: `tools/kiln/services.json` names only the
-image, the readiness probe, the environment and the suite list, and
-`scripts/test_kiln_service_manifest.py` fails if it drifts from `ci.yml`.
+```sh
+scripts/ci/with-service.sh                 # list the services
+scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
+scripts/ci/with-service.sh all  -- bash scripts/ci/store-tests.sh s3-store
+```
+
+This is the same wrapper CI uses. The `postgres-store` and `s3-store` jobs run
+every one of their suites inside it -- the workflow starts no container of its
+own and names no image -- so a local run and a CI run are one code path rather
+than two descriptions of the same thing that drift.
+
+The wrapper starts the CI image on a free ephemeral port of the loopback
+interface (never a fixed 5432 or 9000, so two lanes on one box cannot share a
+database), waits for readiness on the same budget CI's health check used,
+performs the one-time setup a service needs, exports the connection settings
+under the environment variable names `store-tests.sh` forwards to the test
+spawn with `--test_env`, and removes the container on success, failure and
+Ctrl-C alike. `all` runs the given command against each service in turn.
+
+The service table -- image, container port, container environment, readiness
+probe, setup, exported settings -- lives in the wrapper and nowhere else.
+`scripts/test_with_service.py` holds it to `ci.yml` (every store suite is
+wrapped, every PostgreSQL matrix major is a declared service, the workflow
+names no image) and exercises the lifecycle against a fake `docker` on PATH.
 
 Locally the run takes the trusted path, so the binaries are shared-cache hits
 and pool actions exactly as `kiln build`'s are; only the `TestRunner` spawn is
@@ -312,13 +328,15 @@ Actions `store-tests.sh` defaults `BAZEL_SHARED_CACHE_FLAGS` to that
 configuration; inside CI both shared-cache variables stay required, so a job
 that lost its credentials fails instead of quietly missing the cache.
 
-Every run closes by printing the service-shaped cases it did *not* cover and
-the exact recipe for each, so a green `kiln test --service all` is never
-mistaken for full service coverage. Those are the three Cargo-owned jobs
-below, the `slack-clone` `e2e` feature, and the process-operations E2E driver,
-which stands up its own MinIO. No `justfile` recipe was converted or removed:
-the store suites had none, and the `*-soak` recipes are separate opt-in
-property runs that keep their Cargo commands.
+A local run closes by printing the service-shaped cases it did *not* cover and
+the exact recipe for each, so a green `with-service.sh all` is never mistaken
+for full service coverage. (Inside GitHub Actions the report is suppressed:
+each step wraps one suite, and the coverage question it answers is a local
+one.) Those are the three Cargo-owned jobs below, the `slack-clone` `e2e`
+feature, and the process-operations E2E driver, which stands up its own MinIO.
+No `justfile` recipe was converted or removed: the store suites had none, and
+the `*-soak` recipes are separate opt-in property runs that keep their Cargo
+commands.
 
 Untrusted events receive no cache credentials, so every step runs exactly the
 Cargo command it ran before this cutover, including the Rust toolchain, mold,
