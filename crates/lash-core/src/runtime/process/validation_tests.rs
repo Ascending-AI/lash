@@ -408,6 +408,43 @@ fn exact_core_defaults_are_excluded_but_core_named_overrides_conflict() {
 }
 
 #[test]
+fn tool_call_registration_refuses_empty_call_id_or_tool_name() {
+    let empty_call_id = registration_for_input(ProcessInput::ToolCall {
+        call: crate::PreparedToolCall::from_parts(
+            "  ",
+            crate::ToolId::new("tool-id"),
+            "tool",
+            serde_json::json!({}),
+            None,
+            serde_json::Value::Null,
+        ),
+    });
+    assert!(
+        validate_process_registration(&empty_call_id)
+            .expect_err("empty call id must be refused")
+            .to_string()
+            .contains("tool call must carry a call id")
+    );
+
+    let empty_tool_name = registration_for_input(ProcessInput::ToolCall {
+        call: crate::PreparedToolCall::from_parts(
+            "call",
+            crate::ToolId::new("tool-id"),
+            "\t",
+            serde_json::json!({}),
+            None,
+            serde_json::Value::Null,
+        ),
+    });
+    assert!(
+        validate_process_registration(&empty_tool_name)
+            .expect_err("empty tool name must be refused")
+            .to_string()
+            .contains("tool call must carry a tool name")
+    );
+}
+
+#[test]
 fn executable_registration_changes_rotate_the_definition_fingerprint() {
     let base = registration_for_input(ProcessInput::Engine {
         kind: "engine".to_string(),
