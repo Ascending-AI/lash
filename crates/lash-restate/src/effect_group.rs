@@ -625,7 +625,7 @@ pub(crate) fn ready_wait_request(
     group_wait_key(scope, group_key, EffectGroupWaitKind::Ready)
         .map(|key| RestateDurableWaitAwaitRequest {
             key,
-            timeout_ms: None,
+            deadline: None,
         })
         .map_err(|error| group_shape_error(error.to_string()))
 }
@@ -638,7 +638,7 @@ pub(crate) fn rank_wait_request(
     group_wait_key(scope, group_key, EffectGroupWaitKind::Rank(rank))
         .map(|key| RestateDurableWaitAwaitRequest {
             key,
-            timeout_ms: None,
+            deadline: None,
         })
         .map_err(|error| group_shape_error(error.to_string()))
 }
@@ -652,7 +652,7 @@ pub(crate) fn admit_wait_request(
     group_wait_key(scope, group_key, EffectGroupWaitKind::Admit(position))
         .map(|key| RestateDurableWaitAwaitRequest {
             key,
-            timeout_ms: None,
+            deadline: None,
         })
         .map_err(|error| group_shape_error(error.to_string()))
 }

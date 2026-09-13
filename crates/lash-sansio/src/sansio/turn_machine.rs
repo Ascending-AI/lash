@@ -46,7 +46,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
-            termination: TurnTerminationPolicyState::new(),
             synced_protocol_iteration: None,
             observed_cancellation: None,
         }
@@ -89,11 +88,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.messages.clone()
     }
 
-    /// Whether this machine scheduled its final turn-limit turn.
-    pub fn turn_limit_final_scheduled(&self) -> bool {
-        self.termination.should_force_exit_after_grace_turn()
-    }
-
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
     }
@@ -114,7 +108,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
-            termination: self.termination.clone(),
             synced_protocol_iteration: self.synced_protocol_iteration,
         }
     }
@@ -123,10 +116,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         config: TurnMachineConfig<M>,
         checkpoint: TurnCheckpoint<M>,
     ) -> Result<Self, TurnCheckpointRestoreError> {
-        if checkpoint.schema_version > TURN_CHECKPOINT_SCHEMA_VERSION {
-            return Err(TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+        if checkpoint.schema_version != TURN_CHECKPOINT_SCHEMA_VERSION {
+            return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual: checkpoint.schema_version,
-                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
             });
         }
         let side_effect_outbox = checkpoint
@@ -146,7 +139,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
-            termination: checkpoint.termination,
             synced_protocol_iteration: checkpoint.synced_protocol_iteration,
             observed_cancellation: None,
         })
@@ -160,7 +152,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             turn_causes: &self.turn_causes,
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
-            termination: &self.termination,
             observed_cancellation: self.observed_cancellation.as_ref(),
         }
     }
@@ -270,6 +261,19 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn prepare_protocol_iteration(&mut self) {
+        if self
+            .config
+            .turn_budget
+            .max_turns()
+            .is_some_and(|max_turns| {
+                self.protocol_iteration
+                    .saturating_sub(self.protocol_run_offset)
+                    >= max_turns
+            })
+        {
+            self.finish(TurnOutcome::Stopped(TurnStop::MaxTurns));
+            return;
+        }
         if self.config.sync_execution_environment
             && self.synced_protocol_iteration != Some(self.protocol_iteration)
         {
@@ -336,34 +340,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         };
     }
 
-    fn schedule_turn_limit_final(&mut self, message: Message) -> bool {
-        let Some(_max_turns) = self.termination.turn_limit_final_to_schedule(
-            self.protocol_iteration,
-            self.protocol_run_offset,
-            self.config.turn_budget,
-        ) else {
-            return false;
-        };
-        self.termination.mark_turn_limit_final_scheduled();
-        self.messages.push(message);
-        true
-    }
-
-    fn schedule_configured_turn_limit_final(&mut self) -> bool {
-        let Some(max_turns) = self.termination.turn_limit_final_to_schedule(
-            self.protocol_iteration,
-            self.protocol_run_offset,
-            self.config.turn_budget,
-        ) else {
-            return false;
-        };
-        let message_id = self.next_synthetic_message_id("turn_limit");
-        let message = (self.config.turn_limit_final_message)(message_id, max_turns);
-        self.termination.mark_turn_limit_final_scheduled();
-        self.messages.push(message);
-        true
-    }
-
     pub(super) fn append_event(&mut self, event: SessionHistoryRecord<M::Event>) {
         match event {
             SessionHistoryRecord::Conversation(record) => {
@@ -426,11 +402,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     self.protocol_iteration += 1;
                     self.synced_protocol_iteration = None;
                     progress_dirty = true;
-                }
-                DriverAction::ScheduleTurnLimitFinal { message } => {
-                    if self.schedule_turn_limit_final(message) {
-                        progress_dirty = true;
-                    }
                 }
                 DriverAction::FinishCancelled { evidence } => {
                     if progress_dirty {
@@ -640,12 +611,20 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.append_turn_causes(delivery.turn_causes);
             if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
                 self.protocol_iteration += 1;
-                if self.termination.should_force_exit_after_grace_turn() {
+                if self
+                    .config
+                    .turn_budget
+                    .max_turns()
+                    .is_some_and(|max_turns| {
+                        self.protocol_iteration
+                            .saturating_sub(self.protocol_run_offset)
+                            >= max_turns
+                    })
+                {
                     self.emit_progress();
                     self.finish(TurnOutcome::Stopped(TurnStop::MaxTurns));
                     return;
                 }
-                self.schedule_configured_turn_limit_final();
             }
             self.state = MachineState::PrepareIteration;
             self.emit_progress();

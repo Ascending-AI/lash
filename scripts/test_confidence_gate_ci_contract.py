@@ -503,7 +503,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         evaluate = plan["evaluate_conclusion"]
         needs = {
             job: {"result": "success", "outputs": {}}
-            for job in plan["UNGATED_JOBS"] | set(plan["GATED_JOBS"])
+            for job in plan["UNGATED_JOBS"]
+            | set(plan["GATED_JOBS"])
+            | {plan["BAZEL_TEST_JOB"]}
         }
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",

@@ -50,7 +50,7 @@ impl TurnAttach for RestateTurnAttach {
                 "await_resolution",
                 &RestateDurableWaitAwaitRequest {
                     key,
-                    timeout_ms: None,
+                    deadline: None,
                 },
             )
             .await

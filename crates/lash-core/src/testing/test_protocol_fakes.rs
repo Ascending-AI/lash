@@ -371,29 +371,13 @@ impl ProtocolDriverPlugin for TestProtocolDriver {
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(
-                Arc::new(TestDriver),
-                false,
-                Arc::new(test_turn_limit_final_message),
-            ),
+            config: TurnDriverConfig::chat(Arc::new(TestDriver), false),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names,
             tool_names_fingerprint,
             execution_prompt: Arc::from(""),
             prompt_contributions: input.extra_prompt_contributions,
         }
-    }
-}
-
-fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> crate::Message {
-    crate::Message {
-        id: message_id.clone(),
-        role: crate::MessageRole::System,
-        parts: crate::shared_parts(vec![crate::Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -639,15 +623,6 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         if let Some(max_turns) = ctx.turn_budget().max_turns()
             && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
         {
-            let message_id = format!(
-                "m_standard_{}_{next_protocol_iteration}_turn_limit",
-                ctx.turn_id()
-            );
-            actions.push(DriverAction::AppendEvents(vec![
-                SessionHistoryRecord::Conversation(ConversationRecord::from_message(
-                    test_turn_limit_final_message(message_id, max_turns),
-                )),
-            ]));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::MaxTurns,
             )));

@@ -42,6 +42,11 @@ const FINISH_REQUIRED_EXEC_ERROR_MAX_TURN: RlmProtocolScenarioCoverage = rlm_pro
     "finish-required exec error max-turn stop",
     "Exec errors at max turns stop cleanly without another repair turn."
 );
+const NATURAL_CELL_MAX_TURN: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
+    rlm_protocol_scenario_natural_cell_at_budget_stops_without_another_provider_call,
+    "natural cell max-turn stop",
+    "A natural-mode cell at N=1 executes once, then emits a typed MaxTurns stop without a synthetic message or another provider call."
+);
 const FINISH_REQUIRED_PROSE_DIAGNOSTIC: RlmProtocolScenarioCoverage = rlm_protocol_coverage!(
     rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts,
     "finish-required prose diagnostic",
@@ -129,6 +134,7 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
     FINISH_REQUIRED_PROSE_REQUESTS_FINISH,
     FINISH_REQUIRED_PROSE_MAX_TURN,
     FINISH_REQUIRED_EXEC_ERROR_MAX_TURN,
+    NATURAL_CELL_MAX_TURN,
     FINISH_REQUIRED_PROSE_DIAGNOSTIC,
     NATURAL_PROSE_DIAGNOSTIC,
     CELL_REASONING_PROSE_CODE_DIAGNOSTIC,
@@ -149,7 +155,7 @@ const RLM_PROTOCOL_SCENARIO_COVERAGE: &[RlmProtocolScenarioCoverage] = &[
 
 #[test]
 fn rlm_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 20);
+    assert_eq!(RLM_PROTOCOL_SCENARIO_COVERAGE.len(), 21);
     let mut names = BTreeSet::new();
     for coverage in RLM_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -365,6 +371,26 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
                 )),
                 final_output: None,
             }),
+            ..RlmProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn rlm_protocol_scenario_natural_cell_at_budget_stops_without_another_provider_call() {
+    RlmProtocolScenario::new(NATURAL_CELL_MAX_TURN.display_name)
+        .user_message("run exactly one cell")
+        .max_turns(1)
+        .llm_response(vec![text_part(&lashlang_block("print \"allowed\""))])
+        .exec_result(exec_response(&["allowed"], None, None))
+        .expect(RlmProtocolExpectations {
+            exec_codes: vec!["print \"allowed\""],
+            llm_call_count: Some(1),
+            done: Some(true),
+            transcript_system_message_count: Some(0),
+            turn_outcome: Some(lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::MaxTurns,
+            )),
             ..RlmProtocolExpectations::default()
         })
         .run();

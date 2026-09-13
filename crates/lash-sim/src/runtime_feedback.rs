@@ -462,7 +462,7 @@ impl lash_core::plugin::PluginFactory for FeedbackPlugin {
         )
     }
 }
-async fn captured_standard_feedback(checkpoint: bool) -> Vec<LlmRequest> {
+async fn captured_checkpoint_feedback() -> Vec<LlmRequest> {
     use std::collections::VecDeque;
 
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -484,19 +484,10 @@ async fn captured_standard_feedback(checkpoint: bool) -> Vec<LlmRequest> {
                         .await
                         .pop_front()
                         .expect("RLM response script");
-                    let parts = if !checkpoint && text == "first" {
-                        vec![lash_core::LlmOutputPart::ToolCall {
-                            call_id: "call-1".into(),
-                            tool_name: "missing_tool".into(),
-                            input_json: "{}".into(),
-                            replay: None,
-                        }]
-                    } else {
-                        vec![lash_core::LlmOutputPart::Text {
-                            text,
-                            response_meta: None,
-                        }]
-                    };
+                    let parts = vec![lash_core::LlmOutputPart::Text {
+                        text,
+                        response_meta: None,
+                    }];
                     Ok(lash_core::LlmResponse {
                         terminal_reason: lash_core::LlmTerminalReason::Stop,
                         parts,
@@ -508,14 +499,8 @@ async fn captured_standard_feedback(checkpoint: bool) -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
-    let mut builder = lash::LashCore::standard_builder(if checkpoint {
-        lash::TurnBudget::Unbounded
-    } else {
-        lash::TurnBudget::bounded(1)
-    });
-    if checkpoint {
-        builder = builder.plugin(Arc::new(FeedbackPlugin));
-    }
+    let builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .plugin(Arc::new(FeedbackPlugin));
     let core = builder
         .with_native_queued_work()
         .effect_host(Arc::new(
@@ -552,13 +537,6 @@ async fn captured_standard_feedback(checkpoint: bool) -> Vec<LlmRequest> {
         .await
         .expect("RLM cache regression turn");
 
-    if !checkpoint {
-        session
-            .turn(lash::TurnInput::text("after limit"))
-            .run()
-            .await
-            .expect("next user turn exposes the limit feedback");
-    }
     captures.lock_recover().clone()
 }
 
@@ -595,15 +573,8 @@ fn assert_captured_feedback(requests: &[LlmRequest], needle: &str) {
 #[tokio::test]
 async fn runtime_feedback_real_checkpoint_directive_reaches_provider_wires() {
     assert_captured_feedback(
-        &captured_standard_feedback(true).await,
+        &captured_checkpoint_feedback().await,
         "checkpoint feedback nonce 2505",
-    );
-}
-#[tokio::test]
-async fn runtime_feedback_real_standard_turn_limit_reaches_provider_wires() {
-    assert_captured_feedback(
-        &captured_standard_feedback(false).await,
-        "Turn limit reached (1)",
     );
 }
 

@@ -130,6 +130,13 @@ jobs:
       scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
+      bazel_trusted: >-
+        ${{ github.event_name == 'merge_group'
+        || github.event_name == 'push'
+        || github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'pull_request'
+        && github.actor != 'dependabot[bot]'
+        && github.event.pull_request.head.repo.full_name == github.repository) }}
 
     steps:
       - name: Check out repository
@@ -370,6 +377,7 @@ jobs:
       - name: Test repository scripts
         run: |
           python3 scripts/test_agent_workbench_restate_e2e.py
+          python3 scripts/test_bazel_test_contract.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/check_feature_coverage.py check
@@ -681,12 +689,99 @@ jobs:
       - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
-  # Build and execute the workspace suite on one runner. The suite itself is
-  # short enough that shipping a multi-gigabyte archive to four fresh runners
-  # costs more than running every test here. Service-backed jobs retain their
-  # independent feature graphs and services.
+  # The deterministic/default-feature partition is authoritative on trusted
+  # events. The job executes locally on a GitHub-hosted runner and only shares
+  # action results with that exact runner image identity, never Orb's executor
+  # identity. Fork and Dependabot pull requests intentionally skip this
+  # secret-bearing job and retain the full Cargo workspace suite below.
+  bazel-tests:
+    name: Test Bazel partition
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: plan
+    if: needs.plan.outputs.bazel_trusted == 'true'
+    environment: build-cache
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install pinned Bazelisk
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 \
+            -o "$RUNNER_TEMP/bazel"
+          printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' \
+            "$RUNNER_TEMP/bazel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bazel"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Resolve GitHub runner cache identity
+        id: bazel-runtime
+        run: |
+          python3 scripts/ci_plan.py bazel-runtime \
+            --runner-os "${RUNNER_OS}" \
+            --runner-arch "${RUNNER_ARCH}" \
+            --image-os "${ImageOS:-}" \
+            --image-version "${ImageVersion:-}" >> "${GITHUB_OUTPUT}"
+
+      - name: Configure authenticated cache
+        shell: bash
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
+          mkdir -p "$RUNNER_TEMP/build-cache"
+          printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
+          printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
+          printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
+
+      - name: Test deterministic workspace suite with shared cache
+        shell: bash
+        run: |
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
+            --repository_cache="$RUNNER_TEMP/bazel-repository" \
+            --disk_cache= --spawn_strategy=local \
+            --remote_cache=grpcs://51.15.75.60:8443 --remote_instance_name=orb \
+            --tls_certificate="$RUNNER_TEMP/build-cache/ca.crt" \
+            --tls_client_certificate="$RUNNER_TEMP/build-cache/client.crt" \
+            --tls_client_key="$RUNNER_TEMP/build-cache/client.key" \
+            --remote_default_exec_properties=github_runner_runtime=${{ steps.bazel-runtime.outputs.bazel_runtime }} \
+            --remote_default_exec_properties=cpu_count=1 \
+            --remote_default_exec_properties=memory_kb=2097152 \
+            --remote_download_outputs=toplevel --remote_timeout=120 \
+            --cache_test_results=yes --test_output=errors \
+            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
+            //:workspace_tests
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+  # Build and execute the Cargo-owned partition on one runner. Its generated
+  # nextest filter is intersected with profile.ci, preserving ordinary cases
+  # in all 22 Cargo-owned binaries and the existing heavy/trybuild split.
+  # Untrusted pull requests receive no cache credentials, so they omit the
+  # filter and retain the full workspace coverage that predates this cutover.
   workspace-tests:
-    name: Test workspace
+    name: Test Cargo workspace partition
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
@@ -787,20 +882,34 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Workspace-wide: every crate's tests run, not a hand-maintained crate
-      # list. Live tests (Restate e2e, Postgres conformance without a database
-      # URL) are #[ignore]d or self-skip. `profile.ci` excludes the multi-minute
-      # heavy suites run by heavy-tests below and the trybuild ui binary run by
+      # Trusted events select the generated Cargo-owned binary partition;
+      # untrusted pull requests omit the filter and retain full-workspace
+      # coverage. In either mode profile.ci excludes the multi-minute heavy
+      # cases run by heavy-tests below and the trybuild ui binary run by
       # test-doc's seal step. Keep the recovery helpers in this target because
       # their certification fixtures are dev-only.
       - name: Test workspace
+        env:
+          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
         run: |
+          nextest_args=()
+          case "${BAZEL_TRUSTED}" in
+            true)
+              nextest_args=(-E "$(<tools/bazel/cargo_owned_nextest_filter.txt)")
+              ;;
+            false)
+              ;;
+            *)
+              echo "invalid Bazel trust decision: ${BAZEL_TRUSTED}" >&2
+              exit 1
+              ;;
+          esac
           # shellcheck disable=SC2086
           cargo build --workspace --locked ${LASH_CI_FEATURES} \
             --example sqlite-await-event-helper --example postgres-await-event-helper
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
-            --no-fail-fast
+            --no-fail-fast "${nextest_args[@]}"
 
       - name: Save workspace test build outputs
         if: success() && steps.workspace-test-cache.outputs.cache-hit != 'true'
@@ -2490,6 +2599,7 @@ jobs:
       - package-feature-checks
       - runtime-feature-boundary
       - workspace-tests
+      - bazel-tests
       - heavy-tests
       - lint
       - diff-hygiene
@@ -2525,5 +2635,6 @@ jobs:
       - name: Validate CI conclusion
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
+          BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
           WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
         run: python3 scripts/ci/conclusion.py conclusion

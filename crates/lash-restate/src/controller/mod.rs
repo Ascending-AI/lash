@@ -48,6 +48,7 @@ use crate::effect_group::{
     rank_wait_request, ready_wait_request, settlement_from_payload,
 };
 use crate::process::RestateProcessCancelRequest;
+use context::journaled_restate_durable_wait_request;
 
 pub use context::RestateControllerContext;
 
@@ -524,8 +525,16 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         let clock = lash_core::facade_support::SystemClock;
+        let request = journaled_restate_durable_wait_request(&self.context, key, deadline, &clock)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })?;
         self.context
-            .await_event(restate_durable_wait_request(key, deadline, &clock), cancel)
+            .await_event(request, cancel)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -1081,13 +1090,22 @@ where
                         wait_kind: "await_event".to_string(),
                     }
                 });
+                let request = journaled_restate_durable_wait_request(
+                    &self.context,
+                    &key,
+                    deadline,
+                    clock.as_ref(),
+                )
+                .await
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
+                })?;
                 match self
                     .context
-                    .await_event_or_turn_cancel(
-                        restate_durable_wait_request(&key, deadline, clock.as_ref()),
-                        turn_cancel,
-                        cancellation.clone(),
-                    )
+                    .await_event_or_turn_cancel(request, turn_cancel, cancellation.clone())
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {

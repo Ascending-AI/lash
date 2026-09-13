@@ -36,6 +36,16 @@ paths = ["crates/lash-remote-protocol/src/*.rs"]
 must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "RemoteTurnReport"]
 
 [[surface]]
+constant = "DURABLE_WAIT_REQUEST_VERSION"
+constant_path = "crates/lash-restate/src/durable_wait.rs"
+description = "Restate durable-wait nested workflow request wire"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/durable_wait.rs"]
+symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"

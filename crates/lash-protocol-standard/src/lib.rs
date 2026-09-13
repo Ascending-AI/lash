@@ -159,7 +159,6 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
                     discovery: self.config.discovery.is_some(),
                 }),
                 true,
-                Arc::new(turn_limit_exhausted_message),
             ),
             tool_specs: if self.config.discovery.is_some() {
                 input.tool_catalog.inline_tools().model_tool_specs()
@@ -171,18 +170,6 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
             prompt_contributions: input.extra_prompt_contributions,
         }
-    }
-}
-
-fn turn_limit_exhausted_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final assistant response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -697,11 +684,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         if let Some(max_turns) = ctx.turn_budget().max_turns()
             && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
         {
-            let message_id =
-                standard_message_id(ctx.turn_id(), next_protocol_iteration, "turn_limit");
-            actions.push(DriverAction::AppendEvents(vec![conversation_event(
-                turn_limit_exhausted_message(message_id, max_turns),
-            )]));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::MaxTurns,
             )));

@@ -408,7 +408,7 @@ impl LiveConformanceHarness {
                     "await_resolution",
                     &RestateDurableWaitAwaitRequest {
                         key: retired_key,
-                        timeout_ms: None,
+                        deadline: None,
                     },
                 )
                 .await

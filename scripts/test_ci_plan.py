@@ -138,7 +138,12 @@ class ClassifyTests(unittest.TestCase):
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
     plan_outputs.update({"docs_only": "false", "fail_open": "false"})
-    needs = {job: {"result": "success", "outputs": {}} for job in ci_plan.UNGATED_JOBS | set(ci_plan.GATED_JOBS)}
+    needs = {
+        job: {"result": "success", "outputs": {}}
+        for job in ci_plan.UNGATED_JOBS
+        | set(ci_plan.GATED_JOBS)
+        | {ci_plan.BAZEL_TEST_JOB}
+    }
     needs["plan"]["outputs"] = plan_outputs
     return needs
 
@@ -158,6 +163,47 @@ def apply_event_deferrals(needs: dict, event: str) -> dict:
 
 
 class ConclusionTests(unittest.TestCase):
+    def test_github_runner_cache_identity_is_exact_and_runtime_specific(self) -> None:
+        first = ci_plan.github_runner_cache_identity(
+            "Linux", "X64", "ubuntu24", "20260907.1"
+        )
+        self.assertRegex(first, r"^github-actions-[0-9a-f]{64}$")
+        self.assertEqual(
+            first,
+            ci_plan.github_runner_cache_identity(
+                "Linux", "X64", "ubuntu24", "20260907.1"
+            ),
+        )
+        self.assertNotEqual(
+            first,
+            ci_plan.github_runner_cache_identity(
+                "Linux", "X64", "ubuntu24", "20260908.1"
+            ),
+        )
+        with self.assertRaises(ci_plan.PlanError):
+            ci_plan.github_runner_cache_identity("Linux", "X64", "", "version")
+
+    def test_bazel_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
+        trusted = successful_needs()
+        self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))
+
+        untrusted = successful_needs()
+        untrusted[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+        self.assertEqual(
+            [], ci_plan.evaluate_conclusion(untrusted, bazel_is_trusted=False)
+        )
+
+        for trusted_event, result in ((True, "skipped"), (False, "success")):
+            with self.subTest(trusted=trusted_event, result=result):
+                needs = successful_needs()
+                needs[ci_plan.BAZEL_TEST_JOB]["result"] = result
+                problems = ci_plan.evaluate_conclusion(
+                    needs, bazel_is_trusted=trusted_event
+                )
+                self.assertTrue(
+                    any(ci_plan.BAZEL_TEST_JOB in problem for problem in problems)
+                )
+
     def test_hygiene_jobs_are_required_for_every_event_and_docs_changes(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         for job in ("diff-hygiene", "secret-scan"):

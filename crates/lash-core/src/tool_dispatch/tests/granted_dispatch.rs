@@ -22,6 +22,11 @@ struct GrantProbeTools {
     observed_execution_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
 
+struct RenamedPreparationTools {
+    definition: crate::ToolDefinition,
+    executed: Arc<AtomicUsize>,
+}
+
 #[async_trait::async_trait]
 impl ToolProvider for GrantProbeTools {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
@@ -61,6 +66,31 @@ impl ToolProvider for GrantProbeTools {
                 ))
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for RenamedPreparationTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        manifests(vec![self.definition.clone()])
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: crate::ToolPrepareCall<'_>,
+    ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+        let mut prepared = crate::PreparedToolCall::identity(call.tool_id, call.pending);
+        prepared.tool_name = "provider_controlled_name".to_string();
+        Ok(prepared)
+    }
+
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+        self.executed.fetch_add(1, Ordering::SeqCst);
+        ToolOutcome::ok(json!("must not execute"))
     }
 }
 
@@ -274,6 +304,80 @@ async fn granted_attachment_producer_is_the_grant_name_when_the_prepared_call_is
         vec![crate::AttachmentProducer::Tool {
             tool_name: "grant_probe".to_string(),
         }],
+    );
+}
+
+/// A catalog-authorized attempt must use the catalog manifest as its
+/// attachment producer. The prepared DTO is provider-controlled and is not an
+/// authority source, even when this direct coordinator seam receives a
+/// deliberately drifted name.
+#[tokio::test]
+async fn catalog_attachment_producer_is_the_manifest_name_when_prepared_call_is_renamed() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let producers = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (mut context, _grant) = grant_probe_dispatch(
+        GrantProbeMode::InlineAttachment,
+        Arc::clone(&attempts),
+        ToolRetryPolicy::Never,
+        Arc::clone(&observed_execution_bindings),
+    );
+    context.attachment_source_policy = Arc::new(RecordingAttachmentSourcePolicy {
+        producers: Arc::clone(&producers),
+    });
+    let prepared = grant_prepared_call("renamed_by_the_provider");
+    let tool_context = tool_context_for_prepared(&context, &prepared);
+
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
+        &context,
+        prepared,
+        None,
+        tool_context,
+    )
+    .await;
+
+    let ToolCallLaunch::Done(outcome) = launch else {
+        panic!("the catalog attachment call must complete");
+    };
+    assert!(outcome.record.output.is_success());
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *producers.lock_recover(),
+        vec![crate::AttachmentProducer::Tool {
+            tool_name: "grant_probe".to_string(),
+        }],
+    );
+}
+
+/// Preparation must reject a provider-controlled name that does not match the
+/// admitted manifest before the provider's execution body runs.
+#[tokio::test]
+async fn preparation_rejects_provider_prepared_tool_name_drift() {
+    let executed = Arc::new(AtomicUsize::new(0));
+    let definition = named_beta_tool("prepared_name_probe");
+    let context = exact_dispatch_context(Arc::new(RenamedPreparationTools {
+        definition,
+        executed: Arc::clone(&executed),
+    }));
+
+    let outcome = dispatch_tool_call(
+        &context,
+        "prepared_name_probe".to_string(),
+        json!({ "value": "ok" }),
+    )
+    .await;
+
+    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
+        panic!("provider-prepared name drift must be refused");
+    };
+    assert_eq!(failure.class, crate::ToolFailureClass::Internal);
+    assert_eq!(failure.code, "prepared_tool_name_mismatch");
+    assert!(failure.message.contains("provider_controlled_name"));
+    assert!(failure.message.contains("prepared_name_probe"));
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        0,
+        "name drift must be rejected before provider execution"
     );
 }
 

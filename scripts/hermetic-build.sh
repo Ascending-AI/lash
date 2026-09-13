@@ -67,9 +67,7 @@ case "$operation" in
     ;;
   test)
     if (($# == 0)); then
-      echo "hermetic-build: test requires explicit Bazel labels" >&2
-      echo "service-backed and Cargo-specific gates must retain their named recipes" >&2
-      exit 2
+      set -- //:workspace_tests
     fi
     python3 tools/bazel/generate_build_files.py --check
     "$bazel" test "--config=$config" "$@"
