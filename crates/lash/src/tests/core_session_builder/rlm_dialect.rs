@@ -590,6 +590,80 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
     Ok(())
 }
 
+/// A writer whose resident bag was invalidated must decide set-if-unset from
+/// the reloaded durable head. Otherwise a stale `None` smooths over the value
+/// another writer recorded between resident reads.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_termination() -> Result<()> {
+    use crate::rlm::RlmSessionExt as _;
+
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let build_core = || {
+        explicit_ephemeral_facets(rlm_core_builder())
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .store_factory(store_factory.clone())
+            .build(crate::testing::runtime_lease_owner())
+    };
+    let stale_core = build_core()?;
+    let concurrent_core = build_core()?;
+    let stale = stale_core.session("rlm-stale-guarded-write").open().await?;
+    let concurrent = concurrent_core
+        .session("rlm-stale-guarded-write")
+        .open()
+        .await?;
+    concurrent
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new()
+                .termination(crate::rlm::RlmTermination::FinishRequired { schema: None }),
+        )
+        .await
+        .expect("the concurrent writer records the previously unset termination");
+
+    {
+        let writer = stale.runtime.writer();
+        let mut runtime = writer.lock().await;
+        lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
+    }
+
+    let error = stale
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().termination(crate::rlm::RlmTermination::Natural),
+        )
+        .await
+        .expect_err("the stale writer must reload and refuse the recorded termination");
+    let crate::rlm::RlmSessionConfigError::Conflict(
+        crate::rlm::RlmSessionConfigConflict::Termination {
+            recorded,
+            requested,
+        },
+    ) = error
+    else {
+        panic!("the disagreement must remain a typed termination conflict");
+    };
+    assert_eq!(
+        recorded,
+        Box::new(crate::rlm::RlmTermination::FinishRequired { schema: None })
+    );
+    assert_eq!(requested, Box::new(crate::rlm::RlmTermination::Natural));
+
+    let verifier_core = build_core()?;
+    let verifier = verifier_core
+        .session("rlm-stale-guarded-write")
+        .open()
+        .await?;
+    assert_eq!(
+        verifier
+            .rlm_config()
+            .expect("the durable verifier config decodes")
+            .termination,
+        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
+        "the refused stale write must leave the concurrently recorded head intact"
+    );
+    Ok(())
+}
+
 /// A host that states no dialect still gets one: the first open records the
 /// default, and that default is a pin like any other. A post-open statement is
 /// compared against the dialect the session is running and never written, so

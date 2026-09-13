@@ -51,6 +51,13 @@ pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::Queued
     })
 }
 
+/// Marks resident state stale for downstream reload-race tests.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn invalidate_resident_session_state_for_testing(runtime: &mut crate::LashRuntime) {
+    runtime.invalidate_resident_session_state();
+}
+
 #[cfg(any(test, feature = "testing"))]
 pub fn process_work_wiring_for_registry(
     registry: Arc<dyn crate::ProcessRegistry>,
