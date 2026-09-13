@@ -752,7 +752,53 @@ pub(super) async fn wait_for_terminal_result(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     dump_workflow_timeout_diagnostics(pool, workflow_id).await;
-    anyhow::bail!("timed out waiting for `{workflow_id}`")
+    anyhow::bail!("{}", workflow_timeout_reason(pool, workflow_id).await)
+}
+
+/// Name the failure the harness actually saw.
+///
+/// A crash-injecting scenario has two very different timeouts: the crashed
+/// worker never rebound its Restate endpoint, or it came back and the replay
+/// still never produced a terminal result. Collapsing both into "timed out"
+/// costs a full trunk round trip to tell apart (FIG-3030).
+async fn workflow_timeout_reason(pool: &sqlx::PgPool, workflow_id: &str) -> String {
+    let marker = sqlx::query_scalar::<_, String>(
+        "SELECT worker_id FROM lash_e2e_failover_markers WHERE workflow_id = $1",
+    )
+    .bind(workflow_id)
+    .fetch_optional(pool)
+    .await;
+    let crashed_worker = match marker {
+        Ok(Some(crashed_worker)) => crashed_worker,
+        Ok(None) => return format!("timed out waiting for `{workflow_id}`"),
+        Err(err) => {
+            return format!(
+                "timed out waiting for `{workflow_id}` (failover marker query failed: {err:#})"
+            );
+        }
+    };
+    let restarts = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM lash_e2e_worker_events
+         WHERE workflow_id = $1 AND worker_id = $2 AND event_type = 'endpoint_restarted'",
+    )
+    .bind(workflow_id)
+    .bind(&crashed_worker)
+    .fetch_one(pool)
+    .await;
+    match restarts {
+        Ok(0) => format!(
+            "timed out waiting for `{workflow_id}`: worker never restarted \
+             (`{crashed_worker}` exited from crash_once and never rebound its Restate endpoint)"
+        ),
+        Ok(_) => format!(
+            "timed out waiting for `{workflow_id}`: replay never resumed \
+             (`{crashed_worker}` rebound its Restate endpoint after crash_once, \
+             but no terminal result was recorded)"
+        ),
+        Err(err) => format!(
+            "timed out waiting for `{workflow_id}` (restart-evidence query failed: {err:#})"
+        ),
+    }
 }
 
 pub(super) async fn wait_for_terminal_results(

@@ -952,7 +952,8 @@ async fn async_main() -> Result<()> {
         tracing::warn!(worker_id = %state.worker_id, "worker can exit once from crash_once tool");
         let recovering_failover_owner: bool = sqlx::query_scalar(
             "SELECT EXISTS (
-                SELECT 1 FROM lash_e2e_failover_markers WHERE worker_id = $1
+                SELECT 1 FROM lash_e2e_failover_markers
+                WHERE worker_id = $1 AND peer_takeover_expected
             )",
         )
         .bind(&state.worker_id)
@@ -964,6 +965,11 @@ async fn async_main() -> Result<()> {
             // the legally expired session lane and committed the workflow's
             // terminal result. A fixed sleep either races Restate's retry or
             // wastes the outer harness budget after takeover already won.
+            //
+            // Only markers whose scenario declared `peer_takeover` are waited
+            // on. A scenario recovered by journal replay on this same worker
+            // (FIG-3030) would otherwise block on a terminal result that only
+            // the held-down endpoint can produce, burning the whole deadline.
             tracing::warn!(
                 worker_id = %state.worker_id,
                 "delaying failover-owner endpoint restart for peer takeover"
@@ -977,6 +983,7 @@ async fn async_main() -> Result<()> {
                         LEFT JOIN lash_e2e_terminal_results AS terminal
                           ON terminal.workflow_id = marker.workflow_id
                         WHERE marker.worker_id = $1
+                          AND marker.peer_takeover_expected
                           AND terminal.workflow_id IS NULL
                     )",
                 )
@@ -1036,6 +1043,27 @@ async fn async_main() -> Result<()> {
             tracing::error!(error = %err, "worker control endpoint exited");
         }
     });
+    // Durable evidence that this worker rebound its Restate endpoint after an
+    // intentional crash, so a workflow timeout can say "worker never restarted"
+    // instead of "replay never resumed" (FIG-3030).
+    let restarted_markers: Vec<String> = sqlx::query_scalar(
+        "SELECT workflow_id FROM lash_e2e_failover_markers WHERE worker_id = $1",
+    )
+    .bind(&state.worker_id)
+    .fetch_all(storage.pool())
+    .await
+    .context("load failover markers for endpoint restart evidence")?;
+    for marker_workflow_id in &restarted_markers {
+        record_worker_event(
+            storage.pool(),
+            marker_workflow_id,
+            &state.worker_id,
+            "endpoint_restarted",
+            json!({ "port": port }),
+        )
+        .await?;
+    }
+
     let endpoint = Endpoint::builder()
         .bind(E2eTurnWorkflowImpl::new(state).serve())
         .bind(process_workflow.serve())
