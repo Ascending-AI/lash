@@ -424,6 +424,7 @@ pub mod facade_support {
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
     pub use crate::runtime::ObservedWorkItem;
+    pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
     pub use crate::runtime::PROCESS_LEASE_SCHEMA_VERSION;
     pub use crate::runtime::ParkedSession;

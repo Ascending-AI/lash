@@ -411,16 +411,20 @@ impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkI
             process,
             events,
             event_tail_sequence,
+            state,
             kind,
             label,
         } = value;
-        Ok(Self {
+        let item = Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
+            state: state.into(),
             kind,
             label,
-        })
+        };
+        item.validate("RemoteProcessWorkItem")?;
+        Ok(item)
     }
 }
 
@@ -433,6 +437,7 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
             process,
             events,
             event_tail_sequence,
+            state,
             kind: _,
             label: _,
         } = value;
@@ -447,9 +452,40 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
             process,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
+            state: state.into(),
             kind,
             label,
         })
+    }
+}
+
+impl From<lash_core::facade_support::ObservedWorkItemState> for RemoteObservedWorkItemState {
+    fn from(value: lash_core::facade_support::ObservedWorkItemState) -> Self {
+        match value {
+            lash_core::facade_support::ObservedWorkItemState::Coherent => Self::Coherent,
+            lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => Self::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            },
+        }
+    }
+}
+
+impl From<RemoteObservedWorkItemState> for lash_core::facade_support::ObservedWorkItemState {
+    fn from(value: RemoteObservedWorkItemState) -> Self {
+        match value {
+            RemoteObservedWorkItemState::Coherent => Self::Coherent,
+            RemoteObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => Self::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            },
+        }
     }
 }
 

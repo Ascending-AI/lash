@@ -147,7 +147,8 @@ pub use usage_activity::*;
 // Window 61: FIG-2960 requires an explicit lifecycle policy on process starts and records.
 // Window 62: FIG-2961 adds typed cancellation requests and cancellation origins.
 // Window 63: FIG-2886 removes the duplicate session spelling from trigger-subscription filters.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 63;
+// Window 64: FIG-2860 carries typed coherence state for process work-item observations.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 64;
 
 /// One versioned remote-protocol message.
 ///
