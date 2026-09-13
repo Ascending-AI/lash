@@ -61,6 +61,7 @@ impl LashRuntime {
             }
         }
         self.state = state;
+        self.publish_plugin_tool_access();
         Ok(())
     }
 
@@ -331,6 +332,7 @@ impl LashRuntime {
         execution_before_append: Option<crate::plugin::HydratedExecutionState>,
     ) -> Result<(), SessionError> {
         self.state = state;
+        self.publish_plugin_tool_access();
         let state_for_restore = self.state.clone();
         let mut restored_capture = None;
         if let Some(session) = self.session.as_mut() {

@@ -195,7 +195,7 @@ impl LashRuntime {
             state.policy = policy.clone();
         }
         if state.checkpoint_ref.is_none() && state.head_revision == 0 {
-            state.authority.tool_access = services.plugins.tool_access().clone();
+            state.authority.tool_access = services.plugins.tool_access();
             state.authority.subagent = services.plugins.subagent_context().cloned();
         }
         state.ensure_agent_frame_initialized();

@@ -519,6 +519,7 @@ impl LashRuntime {
                     )
                 })?;
             self.state = durable_state;
+            self.publish_plugin_tool_access();
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second
             // durable probe right after this reload (FIG-1875).

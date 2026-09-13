@@ -199,6 +199,22 @@ fn catalog_names(runtime: &LashRuntime) -> Vec<String> {
         .collect()
 }
 
+fn plugin_catalog_names(runtime: &LashRuntime) -> Vec<String> {
+    runtime
+        .plugin_session()
+        .expect("live plugin session")
+        .tool_catalog(&runtime.state.session_id)
+        .expect("live plugin tool catalog")
+        .into_iter()
+        .filter_map(|entry| {
+            entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn parked_resume_keeps_the_store_bound_session_id() {
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
@@ -470,6 +486,59 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         requests[1].contains(&tool.name.to_string()),
         "the next request must observe the widened authority: {:?}",
         requests[1]
+    );
+}
+
+#[tokio::test]
+async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
+    let tool = DynamicToolSpec::new(
+        "tool:live-discovery-authority",
+        "live_discovery_authority",
+        "visible to live discovery when the session authority permits it",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![tool.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface;
+    let plugin_host = dynamic_plugin_host(provider);
+    let env = runtime_environment(plugin_host);
+    let mut runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(&SessionId::from("mutable-authority-discovery")),
+        Some(Arc::new(RecordingStore::default())),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("persistent runtime");
+    assert!(plugin_catalog_names(&runtime).contains(&tool.name.to_string()));
+    assert!(catalog_names(&runtime).contains(&tool.name.to_string()));
+
+    let narrowed = crate::SessionToolAccess::ambient()
+        .with_hidden_tools([tool.name])
+        .expect("valid hidden tool");
+    runtime
+        .set_tool_access(narrowed)
+        .await
+        .expect("narrow persisted tool authority");
+    assert!(
+        !plugin_catalog_names(&runtime).contains(&tool.name.to_string()),
+        "live plugin discovery must immediately observe narrowed authority"
+    );
+    assert!(
+        !catalog_names(&runtime).contains(&tool.name.to_string()),
+        "host discovery must not retain its pre-update catalog cache"
+    );
+
+    runtime
+        .set_tool_access(crate::SessionToolAccess::ambient())
+        .await
+        .expect("widen persisted tool authority");
+    assert!(
+        plugin_catalog_names(&runtime).contains(&tool.name.to_string()),
+        "live plugin discovery must immediately observe widened authority"
+    );
+    assert!(
+        catalog_names(&runtime).contains(&tool.name.to_string()),
+        "host discovery must immediately observe widened authority"
     );
 }
 

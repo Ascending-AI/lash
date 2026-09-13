@@ -18,6 +18,20 @@ impl LashRuntime {
             self.state.set_plugin_state(None);
         }
     }
+
+    /// Publish the already-adopted runtime authority to the live plugin
+    /// session, invalidating discovery caches only when it changed.
+    pub(super) fn publish_plugin_tool_access(&self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        if session
+            .plugins()
+            .replace_tool_access(self.state.authority.tool_access.clone())
+        {
+            session.invalidate_runtime_caches();
+        }
+    }
     pub(super) fn active_tool_catalog_shared(
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
@@ -359,6 +373,7 @@ impl LashRuntime {
             context: "failed to restore session checkpoint".to_string(),
             source,
         })?;
+        self.publish_plugin_tool_access();
         self.resident_session.mark_graph_head_current();
         // The adopted head is authoritative for usage too: rebuild the attempts
         // this session still owes usage for from the durable rows plus the
@@ -1129,6 +1144,7 @@ impl LashRuntime {
         else {
             if let Some(next_state) = next_config_state {
                 self.state = next_state;
+                self.publish_plugin_tool_access();
             }
             return Ok(());
         };
@@ -1175,6 +1191,7 @@ impl LashRuntime {
         commit_state.mark_node_ids_persisted(persisted_node_ids);
         if let Some(next_state) = next_config_state {
             self.state = next_state;
+            self.publish_plugin_tool_access();
         }
         Ok(())
     }
