@@ -29,12 +29,13 @@ use pretty_assertions::assert_eq;
 
 // The shared registry fixture leaves 59 modeled registrations after its
 // compaction probes; the cold refold fixture below adds the 60th. The
-// incarnation-reuse contract contributes two registrations and one prune;
+// incarnation-reuse contract contributes four registrations and two prunes
+// across its raw and watched modes;
 // three more registrations and two more prunes come from the append-arm
 // contract, whose two completed rows are terminal and prune-eligible by the
 // time retention runs.
-const REOPEN_BASELINE_SPAWNS: usize = 60;
-const REOPEN_BASELINE_PRUNED: usize = 7;
+const REOPEN_BASELINE_SPAWNS: usize = 62;
+const REOPEN_BASELINE_PRUNED: usize = 8;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
@@ -480,7 +481,10 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
-    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry)).await;
+    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry), "raw").await;
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
+    reused_process_ids_refuse_superseded_incarnations(Arc::clone(watched.registry()), "watched")
+        .await;
     lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
     process_event_append_arms_are_ordered(probe).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
@@ -488,10 +492,17 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
 }
 
-async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("incarnation-reuse-conformance");
+async fn reused_process_ids_refuse_superseded_incarnations(
+    registry: Arc<dyn ProcessRegistry>,
+    mode: &str,
+) {
+    let expected_process_id = format!("incarnation-reuse-conformance-{mode}");
+    let process_id = ProcessId::from(expected_process_id.clone());
+    let event_type = "signal.incarnation-stale";
     let first = registry
-        .register_process(registration(&process_id))
+        .register_process(
+            registration(&process_id).with_extra_event_types([plain_event_type(event_type)]),
+        )
         .await
         .expect("register first process incarnation");
     registry
@@ -509,13 +520,26 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         .expect("prune first process incarnation");
 
     let second = registry
-        .register_process(registration(&process_id))
+        .register_process(
+            registration(&process_id).with_extra_event_types([plain_event_type(event_type)]),
+        )
         .await
         .expect("register second process incarnation");
     assert_ne!(first.incarnation, second.incarnation);
     let first_ref = ProcessRef::from_record(&first);
     for refusal in [
+        registry
+            .append_event_ref(
+                &first_ref,
+                ProcessEventAppendRequest::new(event_type, serde_json::Value::Null),
+            )
+            .await
+            .map(|_| ()),
         registry.events_after_ref(&first_ref, 0).await.map(|_| ()),
+        registry
+            .count_events_through_ref(&first_ref, event_type, u64::MAX)
+            .await
+            .map(|_| ()),
         registry
             .add_observer_ref(
                 &SessionId::from("incarnation-stale-observer"),
@@ -531,7 +555,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
                     ref process_id,
                     requested_incarnation,
                     current_incarnation,
-                }) if process_id == "incarnation-reuse-conformance"
+                }) if process_id == &expected_process_id
                     && requested_incarnation == first.incarnation
                     && current_incarnation == second.incarnation
             ),

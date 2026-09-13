@@ -92,6 +92,325 @@ macro_rules! delegate_process_query {
 }
 pub(crate) use delegate_process_query;
 
+/// Implement [`ProcessRegistrar`](super::registry_concerns::ProcessRegistrar) for `$wrapper` by
+/// forwarding every method to the registry held in its `$inner` field.
+///
+/// The supplied hooks wrap the forwarded registration and event-producing
+/// operations so a decorator can retain its side effects without replacing
+/// the delegation itself.
+macro_rules! delegate_process_registrar {
+    (
+        $wrapper:ty,
+        $inner:ident,
+        registration |$registration_self:ident, $registration_process_id:ident, $registration_call:ident| $registration_hook:block,
+        event |$event_self:ident, $event_process_id:ident, $event_call:ident| $event_hook:block
+    ) => {
+        #[async_trait::async_trait]
+        impl $crate::runtime::process::registry_concerns::ProcessRegistrar for $wrapper {
+            async fn register_process(
+                &self,
+                registration: $crate::ProcessRegistration,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $registration_process_id = registration.id.clone();
+                let $registration_self = self;
+                let $registration_call = self.$inner.register_process(registration);
+                $registration_hook
+            }
+
+            async fn register_process_with_observers(
+                &self,
+                registration: $crate::ProcessRegistration,
+                observers: &[$crate::SessionId],
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $registration_process_id = registration.id.clone();
+                let $registration_self = self;
+                let $registration_call = self
+                    .$inner
+                    .register_process_with_observers(registration, observers);
+                $registration_hook
+            }
+
+            fn bind_effect_host(&self, effect_host: &std::sync::Arc<dyn $crate::EffectHost>) {
+                self.$inner.bind_effect_host(effect_host);
+            }
+
+            async fn set_external_ref(
+                &self,
+                process_id: &$crate::ProcessId,
+                external_ref: $crate::ProcessExternalRef,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.set_external_ref(process_id, external_ref);
+                $event_hook
+            }
+        }
+    };
+}
+pub(crate) use delegate_process_registrar;
+
+/// Implement [`ProcessEventLog`](super::registry_concerns::ProcessEventLog) for `$wrapper` by
+/// forwarding every method to the registry held in its `$inner` field.
+///
+/// The supplied hook wraps each event-producing operation. Incarnation-pinned
+/// operations are still forwarded directly to the inner registry, so its
+/// atomic pair check remains authoritative through the decorator.
+macro_rules! delegate_process_event_log {
+    (
+        $wrapper:ty,
+        $inner:ident,
+        event |$event_self:ident, $event_process_id:ident, $event_call:ident| $event_hook:block
+    ) => {
+        #[async_trait::async_trait]
+        impl $crate::runtime::process::registry_concerns::ProcessEventLog for $wrapper {
+            async fn append_event(
+                &self,
+                process_id: &$crate::ProcessId,
+                request: $crate::ProcessEventAppendRequest,
+            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.append_event(process_id, request);
+                $event_hook
+            }
+
+            async fn append_event_ref(
+                &self,
+                process_ref: &$crate::ProcessRef,
+                request: $crate::ProcessEventAppendRequest,
+            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
+                let $event_process_id = &process_ref.process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.append_event_ref(process_ref, request);
+                $event_hook
+            }
+
+            async fn append_event_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                request: $crate::ProcessEventAppendRequest,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .append_event_with_authority(process_id, request, authority);
+                $event_hook
+            }
+
+            async fn events_after(
+                &self,
+                process_id: &$crate::ProcessId,
+                after_sequence: u64,
+            ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
+                self.$inner.events_after(process_id, after_sequence).await
+            }
+
+            async fn events_after_ref(
+                &self,
+                process_ref: &$crate::ProcessRef,
+                after_sequence: u64,
+            ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
+                self.$inner
+                    .events_after_ref(process_ref, after_sequence)
+                    .await
+            }
+
+            async fn count_events_through(
+                &self,
+                process_id: &$crate::ProcessId,
+                event_type: &str,
+                up_to_sequence: u64,
+            ) -> Result<u64, $crate::PluginError> {
+                self.$inner
+                    .count_events_through(process_id, event_type, up_to_sequence)
+                    .await
+            }
+
+            async fn count_events_through_ref(
+                &self,
+                process_ref: &$crate::ProcessRef,
+                event_type: &str,
+                up_to_sequence: u64,
+            ) -> Result<u64, $crate::PluginError> {
+                self.$inner
+                    .count_events_through_ref(process_ref, event_type, up_to_sequence)
+                    .await
+            }
+
+            async fn recent_events(
+                &self,
+                process_id: &$crate::ProcessId,
+                limit: usize,
+            ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
+                self.$inner.recent_events(process_id, limit).await
+            }
+        }
+    };
+}
+pub(crate) use delegate_process_event_log;
+
+/// Implement [`ProcessLifecycle`](super::registry_concerns::ProcessLifecycle) for `$wrapper` by
+/// forwarding every method to the registry held in its `$inner` field.
+///
+/// The supplied hook wraps operations that append lifecycle events. Plan reads
+/// and settlement are forwarded without a hook because they do not append to
+/// the process event log.
+macro_rules! delegate_process_lifecycle {
+    (
+        $wrapper:ty,
+        $inner:ident,
+        event |$event_self:ident, $event_process_id:ident, $event_call:ident| $event_hook:block
+    ) => {
+        #[async_trait::async_trait]
+        impl $crate::runtime::process::registry_concerns::ProcessLifecycle for $wrapper {
+            async fn complete_process(
+                &self,
+                process_id: &$crate::ProcessId,
+                await_output: $crate::ProcessAwaitOutput,
+                authority: $crate::ProcessCompletionAuthority,
+            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .complete_process(process_id, await_output, authority);
+                $event_hook
+            }
+
+            async fn complete_process_with_parent_end(
+                &self,
+                process_id: &$crate::ProcessId,
+                await_output: $crate::ProcessAwaitOutput,
+                authority: $crate::ProcessCompletionAuthority,
+                actions: Vec<$crate::ToolIntentParentEndAction>,
+            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.complete_process_with_parent_end(
+                    process_id,
+                    await_output,
+                    authority,
+                    actions,
+                );
+                $event_hook
+            }
+
+            async fn complete_process_with_lease(
+                &self,
+                lease: &$crate::ProcessLease,
+                await_output: $crate::ProcessAwaitOutput,
+            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
+                let $event_process_id = &lease.process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.complete_process_with_lease(lease, await_output);
+                $event_hook
+            }
+
+            async fn complete_process_with_lease_and_parent_end(
+                &self,
+                lease: &$crate::ProcessLease,
+                await_output: $crate::ProcessAwaitOutput,
+                actions: Vec<$crate::ToolIntentParentEndAction>,
+            ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
+                let $event_process_id = &lease.process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.complete_process_with_lease_and_parent_end(
+                    lease,
+                    await_output,
+                    actions,
+                );
+                $event_hook
+            }
+
+            async fn list_pending_parent_end_plans(
+                &self,
+                limit: std::num::NonZeroUsize,
+            ) -> Result<Vec<$crate::ProcessParentEndPlan>, $crate::PluginError> {
+                self.$inner.list_pending_parent_end_plans(limit).await
+            }
+
+            async fn get_pending_parent_end_plan(
+                &self,
+                process_id: &$crate::ProcessId,
+            ) -> Result<Option<$crate::ProcessParentEndPlan>, $crate::PluginError> {
+                self.$inner.get_pending_parent_end_plan(process_id).await
+            }
+
+            async fn complete_parent_end_plan(
+                &self,
+                process_id: &$crate::ProcessId,
+            ) -> Result<(), $crate::PluginError> {
+                self.$inner.complete_parent_end_plan(process_id).await
+            }
+
+            async fn record_first_started_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                started: $crate::ProcessStarted,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessStartOutcome, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .record_first_started_with_authority(process_id, started, authority);
+                $event_hook
+            }
+
+            async fn request_process_abandon(
+                &self,
+                process_id: &$crate::ProcessId,
+                request: $crate::AbandonRequest,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.request_process_abandon(process_id, request);
+                $event_hook
+            }
+
+            async fn record_caller_departure(
+                &self,
+                process_id: &$crate::ProcessId,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self.$inner.record_caller_departure(process_id);
+                $event_hook
+            }
+
+            async fn set_process_wait_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                wait: $crate::WaitState,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .set_process_wait_with_authority(process_id, wait, authority);
+                $event_hook
+            }
+
+            async fn clear_process_wait_with_authority(
+                &self,
+                process_id: &$crate::ProcessId,
+                authority: &$crate::ProcessExecutionWriteAuthority,
+            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
+                let $event_process_id = process_id;
+                let $event_self = self;
+                let $event_call = self
+                    .$inner
+                    .clear_process_wait_with_authority(process_id, authority);
+                $event_hook
+            }
+        }
+    };
+}
+pub(crate) use delegate_process_lifecycle;
+
 /// Implement [`ProcessObserverRegistry`](super::registry_concerns::ProcessObserverRegistry) for `$wrapper` by
 /// forwarding every method to the registry held in its `$inner` field.
 macro_rules! delegate_process_observer_registry {
