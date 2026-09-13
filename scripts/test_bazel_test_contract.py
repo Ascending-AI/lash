@@ -403,6 +403,42 @@ class BazelTestContractTests(unittest.TestCase):
             root_build,
         )
 
+    def test_every_lintable_label_contributes_a_clippy_marker(self) -> None:
+        # `lash_rust_clippy` fails analysis when a dep contributes no clippy
+        # marker, so membership in WORKSPACE_CLIPPY_TARGETS is the same fact as
+        # "this label was linted". The partition may therefore only omit a
+        # labelled target that records why, and the exemption list is asserted
+        # here rather than left implicit in the generator's filter.
+        targets = [
+            target for target in inventory_targets() if target["label"] is not None
+        ]
+        clippy = set(generated_list("WORKSPACE_CLIPPY_TARGETS"))
+        doctests = {
+            target["label"] for target in targets if target["kind"] == "doc-test"
+        }
+        exempt = {
+            target["label"]: target["clippy_exempt"]
+            for target in targets
+            if target.get("clippy_exempt")
+        }
+
+        self.assertEqual(
+            {target["label"] for target in targets} - doctests,
+            clippy | set(exempt),
+        )
+        self.assertFalse(clippy & set(exempt))
+        self.assertEqual(
+            {
+                "//crates/lash-protocol-rlm:build_script": (
+                    "cargo_build_script exposes no CrateInfo for the clippy aspect"
+                )
+            },
+            exempt,
+        )
+
+        clippy_bzl = (ROOT / "tools/bazel/clippy.bzl").read_text(encoding="utf-8")
+        self.assertIn('fail("clippy produced no marker for: {}"', clippy_bzl)
+
     def test_lint_and_doc_jobs_branch_on_the_shared_trust_decision(self) -> None:
         jobs = workflow()["jobs"]
         trusted = "needs.plan.outputs.bazel_trusted == 'true'"
