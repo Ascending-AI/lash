@@ -672,8 +672,19 @@ pub struct RemoteProcessWorkItem {
     #[serde(default)]
     pub events: Vec<RemoteObservedProcessEvent>,
     pub event_tail_sequence: u64,
+    pub state: RemoteObservedWorkItemState,
     pub kind: String,
     pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteObservedWorkItemState {
+    Coherent,
+    EventTailMismatch {
+        record_sequence: u64,
+        event_tail_sequence: u64,
+    },
 }
 
 impl RemoteProcessWorkItem {
@@ -691,6 +702,34 @@ impl RemoteProcessWorkItem {
                     self.event_tail_sequence
                 ),
             });
+        }
+        match self.state {
+            RemoteObservedWorkItemState::Coherent => {
+                if self.process.last_event_sequence != self.event_tail_sequence {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: format!(
+                            "coherent work-item record sequence {} contradicts event-tail sequence {}",
+                            self.process.last_event_sequence, self.event_tail_sequence
+                        ),
+                    });
+                }
+            }
+            RemoteObservedWorkItemState::EventTailMismatch {
+                record_sequence,
+                event_tail_sequence,
+            } => {
+                if record_sequence != self.process.last_event_sequence
+                    || event_tail_sequence != self.event_tail_sequence
+                    || record_sequence == event_tail_sequence
+                {
+                    return Err(RemoteProtocolError::InvalidEnvelope {
+                        type_name,
+                        message: "work-item mismatch state contradicts its record and event-tail sequences"
+                            .to_string(),
+                    });
+                }
+            }
         }
         require_non_empty(type_name, "kind", &self.kind)?;
         if self.kind != self.process.identity.kind {

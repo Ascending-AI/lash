@@ -1648,6 +1648,7 @@ pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubst
 pub(crate) struct WorkItem {
     pub(crate) process: WorkProcess,
     pub(crate) events: Vec<WorkEvent>,
+    pub(crate) state: lash::process::ObservedWorkItemState,
     pub(crate) kind: String,
     pub(crate) label: String,
 }

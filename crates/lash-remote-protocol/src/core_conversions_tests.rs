@@ -13,6 +13,9 @@ use process_fixtures::*;
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;
 
+#[path = "core_conversions_tests/observation_projection.rs"]
+mod observation_projection;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
@@ -836,6 +839,10 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 payload: serde_json::json!({ "text": "hi" }),
             }],
             event_tail_sequence: 1,
+            state: lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+                record_sequence: 0,
+                event_tail_sequence: 1,
+            },
             kind: "external".to_string(),
             label: "External".to_string(),
         }],
@@ -2217,6 +2224,39 @@ fn observed_work_item_decode_rejects_a_mispaired_event_tail() {
 }
 
 #[test]
+fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
+    let mut observed = observed_work_item();
+    observed
+        .events
+        .push(lash_core::facade_support::ObservedProcessEvent {
+            sequence: 1,
+            event_type: "process.completed".to_string(),
+            occurred_at_ms: 12,
+            payload: serde_json::json!({}),
+        });
+    observed.event_tail_sequence = 1;
+    observed.state = lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+        record_sequence: 0,
+        event_tail_sequence: 1,
+    };
+
+    let remote = RemoteProcessWorkItem::try_from(observed).expect("remote mismatch item");
+    remote
+        .validate("RemoteProcessWorkItem")
+        .expect("truthful mismatch state");
+    let core =
+        lash_core::facade_support::ObservedWorkItem::try_from(remote).expect("core mismatch item");
+
+    assert_eq!(
+        core.state,
+        lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+            record_sequence: 0,
+            event_tail_sequence: 1,
+        }
+    );
+}
+
+#[test]
 fn remote_generation_options_round_trip_sampling_controls_losslessly() {
     let core = core_llm::GenerationOptions {
         output_token_cap: NonZeroUsize::new(2_048),
@@ -2417,68 +2457,4 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         }
         other => panic!("unexpected event: {other:?}"),
     }
-}
-
-#[test]
-fn tool_call_completed_observation_projects_frame_switch_without_seed_bodies() {
-    const MESSAGE_SEED_BODY: &str = "message seed body must stay local";
-    const PLUGIN_SEED_BODY: &str = "plugin seed body must stay local";
-    let output = lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }))
-        .with_control(lash_core::ToolControl::SwitchAgentFrame {
-            frame_key: lash_core::FrameKey::from_caller_material("remote-observation-test")
-                .expect("non-empty caller material"),
-            initial_nodes: vec![
-                lash_core::SessionAppendNode::message(lash_core::PluginMessage::text(
-                    lash_core::MessageRole::User,
-                    MESSAGE_SEED_BODY,
-                )),
-                lash_core::SessionAppendNode::plugin(
-                    "test.seed",
-                    serde_json::json!({ "secret": PLUGIN_SEED_BODY }),
-                ),
-            ],
-            task: Some("continue safely".to_string()),
-        });
-    let activity = lash_core::TurnActivity::independent(lash_core::TurnEvent::ToolCallCompleted {
-        call_id: Some("call-frame-switch".to_string()),
-        name: "continue_as".to_string(),
-        args: serde_json::json!({}),
-        output,
-        duration_ms: 12,
-        graph_key: None,
-        parent_call_id: None,
-    });
-    let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
-    let prepared = lash_core::LiveReplayStore::prepare_publication(
-        &store,
-        &SessionId::from("session"),
-        lash_core::SessionRevision::new(1),
-        vec![lash_core::LiveReplayEventDraft::new(
-            Some(&TurnId::from("turn")),
-            lash_core::SessionObservationEventPayload::TurnActivity(activity),
-        )],
-    )
-    .expect("prepare observation");
-    let event = lash_core::LiveReplayStore::publish_prepared(&store, prepared)
-        .expect("publish observation")
-        .remove(0);
-
-    let remote =
-        RemoteSessionObservationEvent::from_core(1, event).expect("project remote observation");
-    let wire = remote.encode_json().expect("encode remote observation");
-    let wire_text = String::from_utf8(wire.clone()).expect("JSON is UTF-8");
-    assert!(!wire_text.contains(MESSAGE_SEED_BODY));
-    assert!(!wire_text.contains(PLUGIN_SEED_BODY));
-    let encoded: serde_json::Value = serde_json::from_slice(&wire).expect("decode projected JSON");
-    assert_eq!(
-        encoded["activity"]["output"]["control"],
-        serde_json::json!({
-            "type": "switch_agent_frame",
-            "frame_key": lash_core::FrameKey::from_caller_material("remote-observation-test")
-                .expect("non-empty caller material")
-                .as_str(),
-            "task": "continue safely",
-            "seed_count": 2,
-        })
-    );
 }

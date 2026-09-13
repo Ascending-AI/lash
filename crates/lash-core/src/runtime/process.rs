@@ -59,8 +59,8 @@ pub use model::{
     load_process_execution_env, persist_process_execution_env, process_runtime_session_ids,
 };
 pub use observation::{
-    ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ProcessWorkObserver,
-    ProcessWorkSnapshot,
+    ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,
+    ProcessWorkObserver, ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,

@@ -30,7 +30,7 @@ pub(crate) use lash_core::{
     AttachmentStore, LlmCallRecord, Message, PluginMessage, PluginOptions, ProcessRegistry,
     ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest, SessionCursor,
     SessionError, SessionProcessEventKind, SessionReadView, SessionScope, SessionSnapshot,
-    SessionStoreFactory, ToolCallRecord, ToolManifest, ToolProvider, ToolState,
+    SessionStoreFactory, SessionToolAccess, ToolCallRecord, ToolManifest, ToolProvider, ToolState,
     TurnCancelOriginHint, facade_support::AssembledTurn, facade_support::EventSink,
     facade_support::PluginFactory, facade_support::ProviderHandle, facade_support::SessionHandle,
     facade_support::SessionObservation, facade_support::SessionObservationSubscription,
