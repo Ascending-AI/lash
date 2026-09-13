@@ -11,8 +11,23 @@ remain authoritative. Third-party crates are imported from the same lockfile.
 These labels are repository build surfaces; they do not expand the supported
 SDK package surface described by ADR 0079.
 
-Run every command from a checkout root. In an Orb, source `env.sh` before direct
-Cargo commands; the entry script does this automatically.
+On the shared development box, create one Kiln fork per agent with `kiln fork
+lash <name>`. The printed path ends in `/merged`; change to that directory and
+source `env.sh` before **any** Cargo command. Never write under `golden-*` or
+remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
+lash <name>`.
+
+Use `kiln build` for the warm shared-cache compilation path and `kiln test` for
+the generated cacheable test partition:
+
+```sh
+. ./env.sh
+kiln build
+kiln test
+```
+
+The lower-level entry script remains available for graph analysis, sync, local
+executor reproduction, and focused Bazel labels.
 
 `analyze` validates generated files and performs Bazel loading and analysis with
 `--nobuild`; it does not run rustc and is not a substitute for `cargo check`.
@@ -25,25 +40,26 @@ suite; explicit labels remain available for a focused edit loop.
 scripts/hermetic-build.sh analyze
 
 # Compile the complete Cargo --workspace --all-targets shape.
-scripts/hermetic-build.sh build
+kiln build
 
 # Run the generated cacheable test suite (87 test binaries).
-scripts/hermetic-build.sh test
+kiln test
 
 # Compile or run focused targets instead.
-scripts/hermetic-build.sh build //crates/lash-core:lash-core
-scripts/hermetic-build.sh test \
+kiln build //crates/lash-core:lash-core
+kiln test \
   //crates/lash-sansio:lash-sansio__unit_test \
   //crates/lash-sqlite-store:integration__test
 ```
 
-These commands select the host shared executor by default. `--shared` makes
-that choice explicit. It uses REAPI instance `orb` at
-`grpc://127.0.0.1:45191`, requires the declared NativeLink runtime identity,
-and fails when the executor is unavailable. NativeLink executes trusted builds
-directly on the host. Hermeticity here describes pinned tools and declared
-inputs, not an OS security boundary. `--local` executes actions in the checkout
-for CI, bootstrap, and reproducing an executor-specific failure:
+These build and test commands select the host shared executor by default.
+`--shared` on the lower-level script makes that choice explicit. It uses REAPI
+instance `orb` at `grpc://127.0.0.1:45191`, requires the declared NativeLink
+runtime identity, and fails when the executor is unavailable. NativeLink
+executes trusted builds directly on the host. Hermeticity here describes pinned
+tools and declared inputs, not an OS security boundary. `--local` executes
+actions in the checkout for CI, bootstrap, and reproducing an executor-specific
+failure:
 
 ```sh
 scripts/hermetic-build.sh --local build //crates/lash-core:lash-core
@@ -66,7 +82,7 @@ floor.
 
 The shared caches live under `/home/sam/.cache/lash-bazel`; Bazel action keys use
 declared repository-relative source, patch, data, runfiles, build environment,
-and rule inputs, so two Orb paths can reuse the same results. Successful test
+and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
 a different test action key. Failed tests are never reused as successes. The
 executor has eight action slots. Each action declares one CPU and 2 GiB by
@@ -76,36 +92,30 @@ remains in the caller's cgroup; remote compilation runs inside the executor's
 `orb-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
 cache.
 
-For a golden refresh, prewarm the shared action cache once with:
+The Kiln golden is maintained outside agent forks. Its refresh prewarms the
+shared action cache with the equivalent of:
 
 ```sh
 scripts/hermetic-build.sh --shared build
 ```
 
-New agents use the same command or request focused labels. A golden refresh
+New agents use `kiln build`, `kiln test`, or focused labels. A golden refresh
 skips the full Cargo warmup. Cargo target directories remain lazy and scoped to
 the gates below that need Cargo semantics; those gates use direct rustc rather
-than a separate shared compiler-cache daemon.
+than a separate shared compiler-cache daemon. The fork's generated `env.sh`
+selects its private Cargo target and applies the shared build budget; do not
+override it or create a cold target by hand.
 
-Keep each retained Cargo gate's target directory unique to its checkout and
-under `/home/sam/.cache/lash-cargo/`, which has room for compiler artifacts.
-Do not place new cold targets on `/workspace`. These Cargo targets are separate
-from Bazel's shared repository and action caches and can be removed with their
-owning checkout after its Cargo-specific gates finish.
-
-Before removing an Orb fork, stop its Bazel server and remove its workspace
-output base:
-
-```sh
-scripts/hermetic-build.sh clean
-```
+`kiln rm lash <name>` runs the repository cleanup hook before unmounting and
+deleting the fork. Do not call the hook directly or manually remove the
+checkout.
 
 Bazel maps each checkout to a hashed directory below
 `/home/sam/.cache/lash-bazel/user-root`; `clean --expunge` removes only the
 calling checkout's output base. It preserves the shared
 `/home/sam/.cache/lash-bazel/repository` and
-`/home/sam/.cache/lash-bazel/disk` caches. Orb removal hooks should invoke this
-entry point before deleting the checkout.
+`/home/sam/.cache/lash-bazel/disk` caches. Kiln invokes this cleanup before
+deleting a fork.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
 Of its 109 executable test binaries, `//:workspace_tests` owns 87 deterministic
@@ -163,17 +173,17 @@ job is intentionally skipped and their ordinary nextest job omits the generated
 filter, preserving the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.
 
-GitHub-hosted actions execute locally, not in Orb's pinned executor image. Their
-remote-cache platform property is therefore derived from GitHub's `runner.os`,
-`runner.arch`, `ImageOS`, and `ImageVersion` values. This gives each concrete
-GitHub runner image a deterministic action identity distinct from
-`orb_executor_runtime`; the cache service and instance remain shared, but
-actions cannot cross the runtime boundary under the same key.
+GitHub-hosted actions execute locally, not in the shared executor's pinned
+runtime image. Their remote-cache platform property is therefore derived from
+GitHub's `runner.os`, `runner.arch`, `ImageOS`, and `ImageVersion` values. This
+gives each concrete GitHub runner image a deterministic action identity
+distinct from `orb_executor_runtime`; the cache service and instance remain
+shared, but actions cannot cross the runtime boundary under the same key.
 
 The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent
 optimization and debug flags, the same target set, and separately reported
-cold repository, cold action-cache, warm, representative-edit, and second-Orb
+cold repository, cold action-cache, warm, representative-edit, and second-fork
 runs. Compare focused Bazel edit builds with Cargo's existing `cargo check`
 path as separate operations: Bazel `build` produces linkable
 artifacts, while Cargo `check` normally stops at metadata. Cargo release or
