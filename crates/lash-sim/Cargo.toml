@@ -33,7 +33,7 @@ lash-provider-google = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-protocol-standard = { workspace = true }
-lash-postgres-store = { workspace = true }
+lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-subagents = { workspace = true }

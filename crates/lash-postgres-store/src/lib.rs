@@ -359,6 +359,8 @@ type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 pub struct PostgresSessionStoreFactory {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
+    #[cfg(feature = "testing")]
+    fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     await_event_signing_secret: Arc<[u8]>,
     process_registry_shared: bool,
@@ -372,6 +374,8 @@ pub struct PostgresSessionStoreFactory {
 pub struct PostgresSessionStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
+    #[cfg(feature = "testing")]
+    fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core::Clock>,
@@ -803,6 +807,8 @@ impl PostgresStorage {
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
@@ -821,6 +827,8 @@ impl PostgresStorage {
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
@@ -846,6 +854,8 @@ impl PostgresStorage {
             turn_cancel_closure_owner: None,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
+            #[cfg(feature = "testing")]
+            fault_injector: None,
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
@@ -923,6 +933,17 @@ impl PostgresSessionStoreFactory {
         self.clock = clock;
         self
     }
+
+    /// Arm every session store this factory opens with one deterministic
+    /// substrate fault injector.
+    ///
+    /// Only compiled with the crate's `testing` feature; production factories
+    /// carry no injector and the write transactions carry no hook.
+    #[cfg(feature = "testing")]
+    pub fn with_fault_injector(mut self, injector: testing::PostgresFaultInjector) -> Self {
+        self.fault_injector = Some(injector);
+        self
+    }
 }
 
 fn warn_postgres_process_registry_not_wired(path: &'static str) {
@@ -962,6 +983,30 @@ impl PostgresSessionStore {
         }
     }
 }
+
+// Fault points are syntax declarations in the write-transaction code. With the
+// `testing` feature disabled, the invocation and all of its arguments expand to
+// nothing, so production transactions carry no injector branch or state.
+#[cfg(feature = "testing")]
+macro_rules! pg_sim_fault {
+    ($injector:expr, $point:ident, $write_transaction_ordinal:expr) => {
+        if let Some(injector) = $injector.as_ref() {
+            injector.inject(
+                crate::testing::PostgresFaultPoint::$point,
+                $write_transaction_ordinal,
+            )?;
+        }
+    };
+}
+
+#[cfg(not(feature = "testing"))]
+macro_rules! pg_sim_fault {
+    ($($ignored:tt)*) => {};
+}
+
+#[cfg(feature = "testing")]
+#[path = "postgres/fault_injection.rs"]
+mod fault_injection;
 
 mod await_event;
 

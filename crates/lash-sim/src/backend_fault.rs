@@ -1,16 +1,298 @@
+//! Backend substrate faults for the simulator.
+//!
+//! One neutral fault vocabulary — [`BackendFaultKind`], [`BackendFaultPoint`],
+//! [`BackendFaultArm`], [`BackendFaultObservation`] — drives both real store
+//! injectors, so a single scenario plan runs against SQLite and PostgreSQL.
+
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use lash_core::{
     OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
-use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint};
+use lash_postgres_store::testing::{PostgresFaultArm, PostgresFaultInjector, PostgresFaultPoint};
+use lash_sqlite_store::testing::{SqliteFaultArm, SqliteFaultInjector, SqliteFaultPoint};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::runner::FixedScriptRunnerError;
 use crate::scheduler::BoundaryEvent;
+
+/// Which real store backend a fault plan is driving.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendFaultKind {
+    Sqlite,
+    Postgres,
+}
+
+impl BackendFaultKind {
+    pub const ALL: [Self; 2] = [Self::Sqlite, Self::Postgres];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
+        }
+    }
+
+    pub const fn injector_implementation(self) -> &'static str {
+        match self {
+            Self::Sqlite => "lash_sqlite_store::testing::SqliteFaultInjector",
+            Self::Postgres => "lash_postgres_store::testing::PostgresFaultInjector",
+        }
+    }
+}
+
+/// Transaction boundary at which one armed fault is injected, in either backend.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendFaultPoint {
+    AfterBegin,
+    BeforeCommit,
+    CommitIo,
+}
+
+impl BackendFaultPoint {
+    const fn sqlite(self) -> SqliteFaultPoint {
+        match self {
+            Self::AfterBegin => SqliteFaultPoint::AfterBegin,
+            Self::BeforeCommit => SqliteFaultPoint::BeforeCommit,
+            Self::CommitIo => SqliteFaultPoint::CommitIo,
+        }
+    }
+
+    const fn postgres(self) -> PostgresFaultPoint {
+        match self {
+            Self::AfterBegin => PostgresFaultPoint::AfterBegin,
+            Self::BeforeCommit => PostgresFaultPoint::BeforeCommit,
+            Self::CommitIo => PostgresFaultPoint::CommitIo,
+        }
+    }
+
+    const fn from_sqlite(point: SqliteFaultPoint) -> Self {
+        match point {
+            SqliteFaultPoint::AfterBegin => Self::AfterBegin,
+            SqliteFaultPoint::BeforeCommit => Self::BeforeCommit,
+            SqliteFaultPoint::CommitIo => Self::CommitIo,
+        }
+    }
+
+    const fn from_postgres(point: PostgresFaultPoint) -> Self {
+        match point {
+            PostgresFaultPoint::AfterBegin => Self::AfterBegin,
+            PostgresFaultPoint::BeforeCommit => Self::BeforeCommit,
+            PostgresFaultPoint::CommitIo => Self::CommitIo,
+        }
+    }
+}
+
+/// One deterministic one-shot arm in a backend fault plan.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BackendFaultArm {
+    pub seed: u64,
+    pub point: BackendFaultPoint,
+    pub occurrence: NonZeroU64,
+}
+
+impl BackendFaultArm {
+    pub const fn new(seed: u64, point: BackendFaultPoint, occurrence: NonZeroU64) -> Self {
+        Self {
+            seed,
+            point,
+            occurrence,
+        }
+    }
+
+    const fn sqlite(self) -> SqliteFaultArm {
+        SqliteFaultArm::new(self.seed, self.point.sqlite(), self.occurrence)
+    }
+
+    const fn postgres(self) -> PostgresFaultArm {
+        PostgresFaultArm::new(self.seed, self.point.postgres(), self.occurrence)
+    }
+}
+
+/// Evidence that an armed fault reached a real store's transaction seam.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BackendFaultObservation {
+    pub arm_index: usize,
+    pub seed: u64,
+    pub point: BackendFaultPoint,
+    pub point_occurrence: u64,
+    pub write_transaction_ordinal: u64,
+}
+
+/// The real fault injector of one backend, behind the neutral vocabulary.
+#[derive(Clone, Debug)]
+pub enum BackendFaultInjector {
+    Sqlite(SqliteFaultInjector),
+    Postgres(PostgresFaultInjector),
+}
+
+impl BackendFaultInjector {
+    pub fn kind(&self) -> BackendFaultKind {
+        match self {
+            Self::Sqlite(_) => BackendFaultKind::Sqlite,
+            Self::Postgres(_) => BackendFaultKind::Postgres,
+        }
+    }
+
+    pub fn arm(&self, seed: u64, point: BackendFaultPoint) {
+        match self {
+            Self::Sqlite(injector) => injector.arm(seed, point.sqlite()),
+            Self::Postgres(injector) => injector.arm(seed, point.postgres()),
+        }
+    }
+
+    pub fn arm_many(&self, arms: impl IntoIterator<Item = BackendFaultArm>) {
+        match self {
+            Self::Sqlite(injector) => {
+                injector.arm_many(arms.into_iter().map(BackendFaultArm::sqlite))
+            }
+            Self::Postgres(injector) => {
+                injector.arm_many(arms.into_iter().map(BackendFaultArm::postgres));
+            }
+        }
+    }
+
+    pub fn remaining_arms(&self) -> Vec<BackendFaultArm> {
+        match self {
+            Self::Sqlite(injector) => injector
+                .remaining_arms()
+                .into_iter()
+                .map(|arm| {
+                    BackendFaultArm::new(
+                        arm.seed,
+                        BackendFaultPoint::from_sqlite(arm.point),
+                        arm.occurrence,
+                    )
+                })
+                .collect(),
+            Self::Postgres(injector) => injector
+                .remaining_arms()
+                .into_iter()
+                .map(|arm| {
+                    BackendFaultArm::new(
+                        arm.seed,
+                        BackendFaultPoint::from_postgres(arm.point),
+                        arm.occurrence,
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    pub fn observations(&self) -> Vec<BackendFaultObservation> {
+        match self {
+            Self::Sqlite(injector) => injector
+                .observations()
+                .into_iter()
+                .map(|observation| BackendFaultObservation {
+                    arm_index: observation.arm_index,
+                    seed: observation.seed,
+                    point: BackendFaultPoint::from_sqlite(observation.point),
+                    point_occurrence: observation.point_occurrence,
+                    write_transaction_ordinal: observation.write_transaction_ordinal,
+                })
+                .collect(),
+            Self::Postgres(injector) => injector
+                .observations()
+                .into_iter()
+                .map(|observation| BackendFaultObservation {
+                    arm_index: observation.arm_index,
+                    seed: observation.seed,
+                    point: BackendFaultPoint::from_postgres(observation.point),
+                    point_occurrence: observation.point_occurrence,
+                    write_transaction_ordinal: observation.write_transaction_ordinal,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// One backend lane a fault profile runs against.
+///
+/// The SQLite lane needs nothing beyond a directory per case. The Postgres
+/// lane owns one throwaway database created from `LASH_POSTGRES_DATABASE_URL`
+/// and dropped with the lane, so concurrent suites that truncate the shared
+/// database cannot delete a scenario's durable prefix mid-run.
+pub struct BackendFaultLane {
+    kind: BackendFaultKind,
+    postgres: Option<PostgresFaultLane>,
+}
+
+struct PostgresFaultLane {
+    storage: lash_postgres_store::PostgresStorage,
+    // Dropped with the lane, which drops the database.
+    _database: lash_postgres_store::testing::IsolatedDatabase,
+}
+
+impl BackendFaultLane {
+    /// Open a lane for `kind`, or `None` when the Postgres lane is not
+    /// configured.
+    ///
+    /// `LASH_REQUIRE_POSTGRES=1` turns a missing database URL into a panic, so
+    /// a missing CI variable cannot silently skip the Postgres lane.
+    pub async fn open(kind: BackendFaultKind) -> Result<Option<Self>, String> {
+        match kind {
+            BackendFaultKind::Sqlite => Ok(Some(Self {
+                kind,
+                postgres: None,
+            })),
+            BackendFaultKind::Postgres => {
+                let Some(database) = crate::postgres_test_isolation::isolated_database().await
+                else {
+                    return Ok(None);
+                };
+                let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+                    .await
+                    .map_err(|error| format!("connect postgres fault store: {error}"))?;
+                Ok(Some(Self {
+                    kind,
+                    postgres: Some(PostgresFaultLane {
+                        storage,
+                        _database: database,
+                    }),
+                }))
+            }
+        }
+    }
+
+    pub fn kind(&self) -> BackendFaultKind {
+        self.kind
+    }
+
+    /// A fresh store factory armed with its own fault injector.
+    ///
+    /// `case_root` is only used by the SQLite lane, whose database is a file.
+    pub fn armed_factory(
+        &self,
+        case_root: &std::path::Path,
+    ) -> (Arc<dyn SessionStoreFactory>, BackendFaultInjector) {
+        match &self.postgres {
+            None => {
+                let injector = SqliteFaultInjector::default();
+                let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+                    lash_sqlite_store::SqliteSessionStoreFactory::new(case_root.join("store"))
+                        .with_fault_injector(injector.clone()),
+                );
+                (factory, BackendFaultInjector::Sqlite(injector))
+            }
+            Some(lane) => {
+                let injector = PostgresFaultInjector::default();
+                let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+                    lash_postgres_store::PostgresSessionStoreFactory::new(&lane.storage)
+                        .with_fault_injector(injector.clone()),
+                );
+                (factory, BackendFaultInjector::Postgres(injector))
+            }
+        }
+    }
+}
 
 pub(crate) struct GeneratedBackendFaultHarness {
     attempts_by_session_operation: BTreeMap<(String, String), usize>,

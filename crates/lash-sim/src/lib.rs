@@ -1,4 +1,4 @@
-mod backend_fault;
+pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;
 mod canonical_scripts;
@@ -19,7 +19,6 @@ pub mod generator;
 pub mod minimize;
 pub mod oracles;
 pub mod postgres_replay;
-#[cfg(test)]
 mod postgres_test_isolation;
 pub mod provider;
 pub mod provider_mutations;
@@ -33,6 +32,7 @@ pub mod runtime_boundaries;
 pub mod runtime_contracts;
 pub mod runtime_providers;
 pub mod scheduler;
+pub mod slow_alive;
 pub mod sqlite_faults;
 pub mod sqlite_replay;
 pub mod stack_policy;

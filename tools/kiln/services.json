@@ -82,6 +82,10 @@
           "run": ["bash", "scripts/ci/store-tests.sh", "pg-agent-scenario"]
         },
         {
+          "name": "Test simulator backend faults on Postgres",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-sim-backend-faults"]
+        },
+        {
           "name": "Test cross-backend store differential",
           "run": ["bash", "scripts/ci/store-tests.sh", "pg-cross-backend"],
           "env": { "LASH_CROSS_BACKEND_CASES": "4" }

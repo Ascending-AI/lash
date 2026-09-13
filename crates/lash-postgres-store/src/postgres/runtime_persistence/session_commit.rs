@@ -264,6 +264,14 @@ impl SessionCommitStore for PostgresSessionStore {
         let now = self.clock.timestamp_ms();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        // The simulator's backend-fault plan arms this transaction seam; the
+        // `testing` feature is off in production, where these expand to nothing.
+        #[cfg(feature = "testing")]
+        let write_transaction_ordinal = self
+            .fault_injector
+            .as_ref()
+            .map_or(0, crate::testing::PostgresFaultInjector::begin_write);
+        pg_sim_fault!(self.fault_injector, AfterBegin, write_transaction_ordinal);
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -354,6 +362,8 @@ impl SessionCommitStore for PostgresSessionStore {
                             .bind(closure.session_id().as_str()).bind(closure.turn_id().as_str()).bind(encoded)
                             .execute(&mut *tx).await.map_err(store_sqlx_error)?;
                     }
+                    pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
+                    pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
                     tx.commit().await.map_err(store_sqlx_error)?;
                     return Ok(replay.into_result());
                 }
@@ -946,6 +956,8 @@ impl SessionCommitStore for PostgresSessionStore {
                 release_session_execution_lease_tx(&mut tx, completion).await?;
             // FIG-884: head CAS is commit authority; release is ancillary.
         }
+        pg_sim_fault!(self.fault_injector, BeforeCommit, write_transaction_ordinal);
+        pg_sim_fault!(self.fault_injector, CommitIo, write_transaction_ordinal);
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(result)
     }

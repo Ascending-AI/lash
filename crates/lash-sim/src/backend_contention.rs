@@ -11,8 +11,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::Barrier;
 
-const LEASE_TTL_MS: u64 = 60_000;
-const LEASE_SEMANTIC_TTL_MS: u64 = 50;
+pub(crate) const LEASE_TTL_MS: u64 = 60_000;
+pub(crate) const LEASE_SEMANTIC_TTL_MS: u64 = 50;
 // Keep these harness budgets aligned with runtime-persistence conformance.
 const LEASE_OBSERVATION_STALL_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(5);
 const LEASE_OBSERVATION_ATTEMPTS: usize = 3;

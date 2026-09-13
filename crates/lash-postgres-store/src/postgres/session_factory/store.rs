@@ -26,6 +26,8 @@ impl PostgresSessionStoreFactory {
             turn_cancel_closure_owner: self.turn_cancel_closure_owner_binding(),
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: self.lease_clock_for_testing.clone(),
+            #[cfg(feature = "testing")]
+            fault_injector: self.fault_injector.clone(),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
