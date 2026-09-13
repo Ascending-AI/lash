@@ -742,13 +742,23 @@ mod tests {
         if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
             return None;
         }
+        let prefix = std::env::var("LASH_MINIO_PREFIX")
+            .unwrap_or_else(|_| format!("tests/{}", uuid_like_suffix()));
         Some(S3AttachmentStoreConfig {
-            endpoint_url: Some("http://127.0.0.1:9000".to_string()),
-            region: "us-east-1".to_string(),
-            bucket: "lash-attachments".to_string(),
-            prefix: Some(format!("tests/{}", uuid_like_suffix())),
-            access_key_id: Some("minioadmin".to_string()),
-            secret_access_key: Some(Redacted::new("minioadmin".to_string())),
+            endpoint_url: Some(
+                std::env::var("LASH_MINIO_ENDPOINT")
+                    .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string()),
+            ),
+            region: std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            bucket: std::env::var("LASH_MINIO_BUCKET")
+                .unwrap_or_else(|_| "lash-attachments".to_string()),
+            prefix: Some(prefix),
+            access_key_id: Some(
+                std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            ),
+            secret_access_key: Some(Redacted::new(
+                std::env::var("LASH_MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            )),
             path_style: true,
         })
     }
