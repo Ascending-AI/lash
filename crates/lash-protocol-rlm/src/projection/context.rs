@@ -235,6 +235,18 @@ struct HistoryProjectedValue {
     projection: Arc<RlmHistoryProjection>,
 }
 
+impl HistoryProjectedValue {
+    /// `contains(history, x)` compares `x` against each entry's projected
+    /// value, the same shape `history[i]` hands back, so the two agree.
+    fn contains(&self, needle: &FlowValue) -> bool {
+        (0..self.projection.len())
+            .filter_map(|index| self.projection.item(index))
+            .filter_map(|item| serde_json::to_value(item).ok())
+            .map(json_to_flow_value)
+            .any(|item| &item == needle)
+    }
+}
+
 impl ProjectedHostDescriptor for HistoryProjectedValue {
     fn type_name(&self) -> &str {
         "list"
@@ -243,29 +255,73 @@ impl ProjectedHostDescriptor for HistoryProjectedValue {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
-                ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.projection.len()),
+                ProjectedReadRequest::Len => {
+                    Some(ProjectedReadResponse::Len(self.projection.len()))
+                }
                 ProjectedReadRequest::Index(index) => {
                     let Ok(Some(index)) = projected_index(&index, self.projection.len()) else {
-                        return ProjectedReadResponse::Missing;
+                        return None;
                     };
                     self.projection
                         .item(index)
                         .and_then(|item| serde_json::to_value(item).ok())
                         .map(json_to_flow_value)
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
-                ProjectedReadRequest::Render => ProjectedReadResponse::Text(
+                // `Empty`, `Truthy`, `Keys` and `Contains` below are reachable
+                // through the lashlang intrinsics (`empty`, truthiness, `keys`,
+                // `contains`) and through any host that drives the descriptor
+                // directly. TypeScript source reaches none of them: it has no
+                // `empty`, its array methods lower to their own operations
+                // rather than these hooks, and `Object.keys` materializes
+                // first. They are answered, not dead.
+                //
+                // A list is empty exactly when it has no entries and truthy
+                // whatever its length, matching the dialect's own reading of a
+                // `Value::List`. Answering both here keeps `if (history)` and
+                // `empty(history)` off the materializing path (FIG-2863).
+                ProjectedReadRequest::Empty => {
+                    Some(ProjectedReadResponse::Bool(self.projection.is_empty()))
+                }
+                ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
+                // `keys` over a list is the dialect's empty key set, not an
+                // unanswerable request: a list has no named fields.
+                ProjectedReadRequest::Keys => Some(ProjectedReadResponse::Keys(Vec::new())),
+                ProjectedReadRequest::Contains(needle) => {
+                    Some(ProjectedReadResponse::Bool(self.contains(&needle)))
+                }
+                // `history.length` is the one field a list answers; every other
+                // field is unanswerable and says so rather than degrading.
+                ProjectedReadRequest::Field(field) if field.as_ref() == "length" => {
+                    Some(ProjectedReadResponse::Len(self.projection.len()))
+                }
+                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(
                     serde_json::to_string(self.projection.history())
                         .unwrap_or_else(|_| "[]".to_string()),
-                ),
-                ProjectedReadRequest::Materialize => {
-                    ProjectedReadResponse::Value(json_to_flow_value(self.projection.value()))
-                }
-                _ => ProjectedReadResponse::Missing,
+                )),
+                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                    json_to_flow_value(self.projection.value()),
+                )),
+                // Everything else this descriptor does not answer. The caller
+                // turns that into a typed refusal instead of a widened guess.
+                ProjectedReadRequest::Field(_)
+                | ProjectedReadRequest::Find { .. }
+                | ProjectedReadRequest::GrepText(_)
+                | ProjectedReadRequest::Values
+                | ProjectedReadRequest::StartsWith(_)
+                | ProjectedReadRequest::EndsWith(_)
+                | ProjectedReadRequest::Split(_)
+                | ProjectedReadRequest::Join(_)
+                | ProjectedReadRequest::Trim
+                | ProjectedReadRequest::Slice { .. }
+                | ProjectedReadRequest::Push(_)
+                | ProjectedReadRequest::ToNumber
+                | ProjectedReadRequest::JsonParse
+                | ProjectedReadRequest::SliceBound
+                | ProjectedReadRequest::RangeBound => None,
             }
         })
     }
@@ -435,7 +491,7 @@ mod tests {
             .read_one(ProjectedReadRequest::Index(FlowValue::Number(index as f64)))
             .await
         {
-            ProjectedReadResponse::Value(value) => value,
+            Some(ProjectedReadResponse::Value(value)) => value,
             other => panic!("expected indexed value, got {other:?}"),
         }
     }
@@ -468,6 +524,188 @@ mod tests {
             text.as_str(),
             full.as_str(),
             "re-fetched value must be the full untruncated output"
+        );
+    }
+
+    /// A host whose only ability is finishing, so a cell's `finish(...)` is the
+    /// observable result.
+    struct FinishOnlyHost;
+
+    impl lashlang::ExecutionHost for FinishOnlyHost {
+        async fn perform(
+            &self,
+            op: lashlang::AbilityOp,
+        ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+            match op {
+                lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
+                    Ok(lashlang::AbilityResult::Value(value))
+                }
+                _ => Err(lashlang::ExecutionHostError::new(
+                    "unsupported host ability",
+                )),
+            }
+        }
+    }
+
+    /// Runs a TypeScript cell against the real `history` projection, the way a
+    /// model's cell reaches it. Cell source is authored in TypeScript (FIG-3015).
+    async fn run_history_cell(
+        source: &str,
+        history: &lash_core::facade_support::ChronologicalProjection,
+    ) -> Result<FlowValue, lashlang::RuntimeError> {
+        let mut bindings = ProjectedBindings::new();
+        bindings.insert(
+            "history",
+            lashlang::ProjectedValue::custom(
+                "history",
+                Arc::new(HistoryProjectedValue {
+                    projection: Arc::new(rlm_history_projection(history)),
+                }),
+            ),
+        );
+        let globals = BTreeSet::from(["history".to_string()]);
+        let parsed = lash_typescript::parse_with_globals(source, &globals)
+            .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
+        let compiled =
+            lashlang::compile_ast_with_dialect(&parsed, lashlang::CompilationDialect::Typescript)
+                .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
+        let env =
+            lashlang::ExecutionEnvironment::new(&FinishOnlyHost).with_projected_bindings(bindings);
+        let mut state = lashlang::State::new();
+        match lashlang::execute(&compiled, &mut state, &env).await? {
+            lashlang::ExecutionOutcome::Finished(value) => Ok(value),
+            other => panic!("`{source}` should finish, got {other:?}"),
+        }
+    }
+
+    /// `history.length` used to reach the blanket `Missing` default and widen
+    /// into whatever each consumer guessed. The descriptor now answers `Len`
+    /// explicitly, so the cell reads the real entry count (FIG-2863).
+    #[tokio::test]
+    async fn history_length_reads_the_real_entry_count() {
+        let projection = step_projection("only");
+        assert_eq!(
+            run_history_cell("finish(history.length);", &projection)
+                .await
+                .expect("`history.length` should answer"),
+            FlowValue::Number(1.0)
+        );
+    }
+
+    /// `contains(history, history[0])` must agree with what `history[0]` hands
+    /// back: the descriptor answers `Contains` against the same projected shape
+    /// it answers `Index` with. Pinned at the descriptor seam because the
+    /// TypeScript surface's `includes` is JavaScript's SameValueZero, which
+    /// compares objects by reference and is false for any two built records.
+    #[tokio::test]
+    async fn history_contains_its_own_first_entry() {
+        let value = HistoryProjectedValue {
+            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
+        };
+        let first = read_index(&value, 0).await;
+        assert!(matches!(
+            value.read_one(ProjectedReadRequest::Contains(first)).await,
+            Some(ProjectedReadResponse::Bool(true))
+        ));
+        assert!(matches!(
+            value
+                .read_one(ProjectedReadRequest::Contains(FlowValue::String(
+                    "absent".into()
+                )))
+                .await,
+            Some(ProjectedReadResponse::Bool(false))
+        ));
+    }
+
+    /// A list is truthy at any length, matching the dialect's reading of a
+    /// `Value::List`, so a cell can guard on `history` without materializing it.
+    #[tokio::test]
+    async fn history_answers_truthiness_without_materializing() {
+        let projection = step_projection("only");
+        assert_eq!(
+            run_history_cell(r#"finish(history ? "yes" : "no");"#, &projection)
+                .await
+                .expect("truthiness should answer"),
+            FlowValue::String("yes".into())
+        );
+    }
+
+    /// `keys` over a list is the empty key set -- exactly what the scalar path
+    /// answers for a `Value::List` -- not an unanswerable request. Pinned at
+    /// the descriptor seam: JavaScript's `Object.keys` over an array is its own
+    /// index-name enumeration and does not reach this hook.
+    #[tokio::test]
+    async fn history_answers_keys_with_the_empty_key_set() {
+        let value = HistoryProjectedValue {
+            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
+        };
+        assert!(matches!(
+            value.read_one(ProjectedReadRequest::Keys).await,
+            Some(ProjectedReadResponse::Keys(keys)) if keys.is_empty()
+        ));
+    }
+
+    /// The TypeScript surface has no `empty(...)`, so `Empty` is pinned at the
+    /// descriptor seam: it answers, rather than falling through to a refusal or
+    /// to materializing the whole history.
+    #[tokio::test]
+    async fn history_answers_empty_at_the_descriptor_seam() {
+        let populated = HistoryProjectedValue {
+            projection: Arc::new(rlm_history_projection(&step_projection("only"))),
+        };
+        assert!(matches!(
+            populated.read_one(ProjectedReadRequest::Empty).await,
+            Some(ProjectedReadResponse::Bool(false))
+        ));
+
+        let empty = HistoryProjectedValue {
+            projection: Arc::new(RlmHistoryProjection {
+                history: Vec::new(),
+                chronological_indices: HashMap::new(),
+                suppressed_chronological_indices: HashSet::new(),
+            }),
+        };
+        assert!(matches!(
+            empty.read_one(ProjectedReadRequest::Empty).await,
+            Some(ProjectedReadResponse::Bool(true))
+        ));
+    }
+
+    /// A field this descriptor does not answer is the dialect's absent value,
+    /// not a refusal and not a hardcoded `null`: a list view genuinely has no
+    /// such property, and TypeScript reads that as `undefined` (FIG-2863).
+    ///
+    /// `??` alone would not pin this -- it fires on `null` and `undefined`
+    /// alike, so the pre-fix `Value::Null` passes it. The identity comparisons
+    /// are what separate the two, and `typeof` names which one arrived.
+    #[tokio::test]
+    async fn an_unanswered_history_field_reads_as_the_dialects_absent_value() {
+        let projection = step_projection("only");
+        assert_eq!(
+            run_history_cell("finish(history.nonexistent === undefined);", &projection)
+                .await
+                .expect("an unanswered field is absent, not a failure"),
+            FlowValue::Bool(true),
+            "an unanswered field must be `undefined` under the TypeScript dialect"
+        );
+        assert_eq!(
+            run_history_cell("finish(history.nonexistent === null);", &projection)
+                .await
+                .expect("an unanswered field is absent, not a failure"),
+            FlowValue::Bool(false),
+            "`null` is the lashlang surface's absent value, not TypeScript's"
+        );
+        assert_eq!(
+            run_history_cell("finish(typeof history.nonexistent);", &projection)
+                .await
+                .expect("an unanswered field is absent, not a failure"),
+            FlowValue::String("undefined".into())
+        );
+        assert_eq!(
+            run_history_cell(r#"finish(history.nonexistent ?? "fallback");"#, &projection)
+                .await
+                .expect("an unanswered field is absent, not a failure"),
+            FlowValue::String("fallback".into())
         );
     }
 

@@ -272,6 +272,14 @@ impl crate::runtime::ProjectedHostDescriptor for WireProbeDescriptor {
     fn type_name(&self) -> &str {
         "string"
     }
+
+    /// Identity only: this descriptor answers no read (FIG-2863).
+    fn read_one(
+        &self,
+        _request: crate::runtime::ProjectedReadRequest,
+    ) -> crate::runtime::ProjectedFuture<'_, Option<crate::runtime::ProjectedReadResponse>> {
+        Box::pin(async { None })
+    }
 }
 
 /// FIG-2865: the continuation wire refused `Value::Projected` recursively, so a

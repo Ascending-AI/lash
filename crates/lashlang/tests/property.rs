@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
-    ProjectedHostDescriptor, ProjectedValue, Record, ResourceHandle, Snapshot, State, Value,
-    canonical_program_ir, canonical_program_source, parse,
+    ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, Record, ResourceHandle, Snapshot, State, Value, canonical_program_ir,
+    canonical_program_source, parse,
 };
 use proptest::prelude::*;
 
@@ -220,6 +221,14 @@ struct SnapshotProjectedDescriptor;
 impl ProjectedHostDescriptor for SnapshotProjectedDescriptor {
     fn type_name(&self) -> &str {
         "snapshot_property"
+    }
+
+    /// Identity only: this descriptor answers no read (FIG-2863).
+    fn read_one(
+        &self,
+        _request: ProjectedReadRequest,
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
+        Box::pin(async { None })
     }
 }
 

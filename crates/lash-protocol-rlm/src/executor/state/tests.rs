@@ -1192,18 +1192,20 @@ impl ProjectedHostDescriptor for CountingProjectedValue {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
                 ProjectedReadRequest::Render => {
                     self.render_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Text("rendered".to_string())
+                    Some(ProjectedReadResponse::Text("rendered".to_string()))
                 }
                 ProjectedReadRequest::Materialize => {
                     self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Value(FlowValue::String("materialized".into()))
+                    Some(ProjectedReadResponse::Value(FlowValue::String(
+                        "materialized".into(),
+                    )))
                 }
-                _ => ProjectedReadResponse::Missing,
+                _ => None,
             }
         })
     }

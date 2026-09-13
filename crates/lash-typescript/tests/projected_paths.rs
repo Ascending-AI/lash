@@ -92,7 +92,7 @@ impl ProjectedHostDescriptor for RecordingView {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         let label = match &request {
             ProjectedReadRequest::Field(field) => format!("field:{field}"),
             ProjectedReadRequest::Materialize => "materialize".to_string(),
@@ -105,9 +105,9 @@ impl ProjectedHostDescriptor for RecordingView {
         Box::pin(async move {
             match request {
                 ProjectedReadRequest::Field(field) if field.as_ref() == "kind" => {
-                    ProjectedReadResponse::Value(Value::String("tool".into()))
+                    Some(ProjectedReadResponse::Value(Value::String("tool".into())))
                 }
-                _ => ProjectedReadResponse::Missing,
+                _ => None,
             }
         })
     }

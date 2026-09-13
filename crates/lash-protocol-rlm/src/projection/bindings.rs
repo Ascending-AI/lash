@@ -274,14 +274,16 @@ mod tests {
         fn read_one(
             &self,
             request: ProjectedReadRequest,
-        ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+        ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
             Box::pin(async move {
                 match request {
-                    ProjectedReadRequest::Materialize => {
-                        ProjectedReadResponse::Value(FlowValue::String("lazy".into()))
+                    ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
+                        FlowValue::String("lazy".into()),
+                    )),
+                    ProjectedReadRequest::Render => {
+                        Some(ProjectedReadResponse::Text("lazy".into()))
                     }
-                    ProjectedReadRequest::Render => ProjectedReadResponse::Text("lazy".into()),
-                    _ => ProjectedReadResponse::Missing,
+                    _ => None,
                 }
             })
         }

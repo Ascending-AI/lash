@@ -11,6 +11,19 @@
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    /// The value this dialect reads for a key that is not there: `undefined`
+    /// under TypeScript, `null` under the lashlang surface. A custom descriptor
+    /// answers reads without knowing which dialect is asking, so the
+    /// substitution for an unanswered field or index belongs here rather than
+    /// hardcoded in the descriptor seam (FIG-2863).
+    fn dialect_absent_value(&self) -> Value {
+        if self.reference_semantics {
+            Value::Undefined
+        } else {
+            Value::Null
+        }
+    }
+
     /// Field access on a projected source.
     ///
     /// `ProjectedValue::get_field` can only fall back to the dialect-blind
@@ -29,7 +42,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_field(value.clone(), field)?,
-            None => projected.get_field(field).await?,
+            None => projected
+                .get_field(field)
+                .await?
+                .unwrap_or_else(|| self.dialect_absent_value()),
         };
         Ok(ProjectedValue::propagate_field(
             projected.name(),
@@ -49,7 +65,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Value, RuntimeError> {
         let inner = match projected.scalar_value() {
             Some(value) => self.read_dialect_index(value.clone(), index.clone())?,
-            None => projected.get_index(index).await?,
+            None => projected
+                .get_index(index)
+                .await?
+                .unwrap_or_else(|| self.dialect_absent_value()),
         };
         Ok(ProjectedValue::propagate_index(
             projected.name(),

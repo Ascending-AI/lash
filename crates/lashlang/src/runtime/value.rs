@@ -372,14 +372,81 @@ pub enum ProjectedReadRequest {
     Materialize,
 }
 
+impl ProjectedReadRequest {
+    /// The request's name, for the error a consumer raises when a descriptor
+    /// does not answer it.
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Len => "len",
+            Self::Empty => "empty",
+            Self::Truthy => "truthy",
+            Self::Field(_) => "field",
+            Self::Index(_) => "index",
+            Self::Contains(_) => "contains",
+            Self::Find { .. } => "find",
+            Self::GrepText(_) => "grep_text",
+            Self::Keys => "keys",
+            Self::Values => "values",
+            Self::StartsWith(_) => "starts_with",
+            Self::EndsWith(_) => "ends_with",
+            Self::Split(_) => "split",
+            Self::Join(_) => "join",
+            Self::Trim => "trim",
+            Self::Slice { .. } => "slice",
+            Self::Push(_) => "push",
+            Self::ToNumber => "to_number",
+            Self::JsonParse => "json_parse",
+            Self::SliceBound => "slice_bound",
+            Self::RangeBound => "range_bound",
+            Self::Render => "render",
+            Self::Materialize => "materialize",
+        }
+    }
+}
+
+/// What a host descriptor answers when it *does* answer.
+///
+/// "Cannot answer" is not in here: that is `None` from
+/// [`ProjectedHostDescriptor::read_one`]. Keeping the two apart is the point of
+/// FIG-2863 — a single `Missing` used to mean both, and each consumer picked
+/// its own widening for it, so an unanswerable `Contains` read as `false` and an
+/// unanswerable `Field` read as `null`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProjectedReadResponse {
-    Missing,
     Value(Value),
     Text(String),
     Bool(bool),
     Len(usize),
     Keys(Vec<String>),
+}
+
+impl ProjectedReadResponse {
+    /// The answer as a runtime value.
+    ///
+    /// A descriptor that has no value for a request says so in the dialect's
+    /// own terms by answering `Value(Value::Undefined)`; nothing here invents
+    /// `Value::Null` (FIG-2863).
+    pub(crate) fn into_value(self) -> Value {
+        match self {
+            Self::Value(value) => value,
+            Self::Bool(value) => Value::Bool(value),
+            Self::Len(value) => Value::Number(value as f64),
+            Self::Text(value) => Value::String(value.into()),
+            Self::Keys(values) => Value::List(
+                values
+                    .into_iter()
+                    .map(|value| Value::String(value.into()))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+        }
+    }
+}
+
+impl From<ProjectedReadResponse> for Value {
+    fn from(response: ProjectedReadResponse) -> Self {
+        response.into_value()
+    }
 }
 
 pub trait ProjectedHostDescriptor: Send + Sync {
@@ -393,12 +460,19 @@ pub trait ProjectedHostDescriptor: Send + Sync {
         false
     }
 
+    /// Answers one read, or `None` when this descriptor does not answer that
+    /// request at all.
+    ///
+    /// There is deliberately no default: a descriptor states what it answers,
+    /// so an unanswered request is a decision rather than an omission
+    /// (FIG-2863). Consumers that need an answer refuse with
+    /// [`RuntimeError::ProjectedReadUnsupported`]; the string and iteration
+    /// helpers treat `None` as "no special implementation" and fall back to
+    /// materializing.
     fn read_one(
         &self,
-        _request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
-        Box::pin(async { ProjectedReadResponse::Missing })
-    }
+        request: ProjectedReadRequest,
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>>;
 }
 
 impl ProjectedValue {
@@ -463,6 +537,16 @@ impl ProjectedValue {
         RuntimeError::ProjectedValueUnavailable {
             name: self.name.to_string(),
             type_name: self.value_type_name().to_string(),
+        }
+    }
+
+    /// The refusal a consumer raises when this descriptor does not answer a
+    /// request it needs an answer to (FIG-2863).
+    fn unsupported(&self, request: &ProjectedReadRequest) -> RuntimeError {
+        RuntimeError::ProjectedReadUnsupported {
+            name: self.name.to_string(),
+            type_name: self.value_type_name().to_string(),
+            request: request.label().to_string(),
         }
     }
 
@@ -574,12 +658,13 @@ impl ProjectedValue {
         Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).unwrap_or(0),
             ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Len).await {
-                ProjectedReadResponse::Len(value) => value,
-                ProjectedReadResponse::Value(value) => value_len(&value).unwrap_or(0),
-                ProjectedReadResponse::Missing
-                | ProjectedReadResponse::Text(_)
-                | ProjectedReadResponse::Bool(_)
-                | ProjectedReadResponse::Keys(_) => 0,
+                Some(ProjectedReadResponse::Len(value)) => value,
+                Some(ProjectedReadResponse::Value(value)) => value_len(&value).unwrap_or(0),
+                Some(ProjectedReadResponse::Text(value)) => value.chars().count(),
+                Some(ProjectedReadResponse::Keys(values)) => values.len(),
+                Some(ProjectedReadResponse::Bool(_)) | None => {
+                    return Err(self.unsupported(&ProjectedReadRequest::Len));
+                }
             },
         })
     }
@@ -590,13 +675,13 @@ impl ProjectedValue {
             ProjectedKind::Scalar(value) => value_len(value).map(|len| len == 0),
             ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Empty).await
             {
-                ProjectedReadResponse::Bool(value) => Some(value),
-                ProjectedReadResponse::Value(Value::Bool(value)) => Some(value),
-                ProjectedReadResponse::Value(value) => Some(value_truthy(&value)?),
-                ProjectedReadResponse::Missing
-                | ProjectedReadResponse::Text(_)
-                | ProjectedReadResponse::Len(_)
-                | ProjectedReadResponse::Keys(_) => None,
+                Some(ProjectedReadResponse::Bool(value)) => Some(value),
+                Some(ProjectedReadResponse::Value(Value::Bool(value))) => Some(value),
+                Some(ProjectedReadResponse::Value(value)) => Some(value_truthy(&value)?),
+                Some(ProjectedReadResponse::Len(value)) => Some(value == 0),
+                Some(ProjectedReadResponse::Keys(values)) => Some(values.is_empty()),
+                Some(ProjectedReadResponse::Text(value)) => Some(value.is_empty()),
+                None => return Err(self.unsupported(&ProjectedReadRequest::Empty)),
             },
         })
     }
@@ -607,39 +692,46 @@ impl ProjectedValue {
             ProjectedKind::Scalar(value) => value_truthy(value)?,
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Truthy).await {
-                    ProjectedReadResponse::Bool(value) => value,
-                    ProjectedReadResponse::Value(value) => value_truthy(&value)?,
-                    _ => false,
+                    Some(ProjectedReadResponse::Bool(value)) => value,
+                    Some(ProjectedReadResponse::Value(value)) => value_truthy(&value)?,
+                    Some(ProjectedReadResponse::Len(value)) => value != 0,
+                    Some(ProjectedReadResponse::Keys(values)) => !values.is_empty(),
+                    Some(ProjectedReadResponse::Text(value)) => !value.is_empty(),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Truthy)),
                 }
             }
         })
     }
 
-    pub(crate) async fn get_index(&self, index: &Value) -> Result<Value, RuntimeError> {
+    /// Indexes a projected source.
+    ///
+    /// `None` means the descriptor does not answer an index read of this key --
+    /// which for a container view is the ordinary "no element there". The
+    /// caller, which knows the dialect, substitutes its absent value; this layer
+    /// does not invent one, because `null` and `undefined` are different answers
+    /// in the two dialects (FIG-2863).
+    pub(crate) async fn get_index(&self, index: &Value) -> Result<Option<Value>, RuntimeError> {
         self.refuse_if_unavailable()?;
         let index = materialize_projected_async(index.clone()).await?;
         match &self.kind {
-            ProjectedKind::Scalar(value) => read_index_ref_direct(value, &index),
-            ProjectedKind::Custom(value) => {
-                match value.read_one(ProjectedReadRequest::Index(index)).await {
-                    ProjectedReadResponse::Value(value) => Ok(value),
-                    _ => Ok(Value::Null),
-                }
-            }
+            ProjectedKind::Scalar(value) => read_index_ref_direct(value, &index).map(Some),
+            ProjectedKind::Custom(value) => Ok(value
+                .read_one(ProjectedReadRequest::Index(index))
+                .await
+                .map(ProjectedReadResponse::into_value)),
         }
     }
 
-    pub(crate) async fn get_field(&self, field: &Name) -> Result<Value, RuntimeError> {
+    /// Reads a field of a projected source. `None` carries the same meaning as
+    /// in [`Self::get_index`].
+    pub(crate) async fn get_field(&self, field: &Name) -> Result<Option<Value>, RuntimeError> {
         self.refuse_if_unavailable()?;
         match &self.kind {
-            ProjectedKind::Scalar(value) => read_field_ref_direct(value, field),
-            ProjectedKind::Custom(value) => match value
+            ProjectedKind::Scalar(value) => read_field_ref_direct(value, field).map(Some),
+            ProjectedKind::Custom(value) => Ok(value
                 .read_one(ProjectedReadRequest::Field(field.text.clone()))
                 .await
-            {
-                ProjectedReadResponse::Value(value) => Ok(value),
-                _ => Ok(Value::Null),
-            },
+                .map(ProjectedReadResponse::into_value)),
         }
     }
 
@@ -647,16 +739,14 @@ impl ProjectedValue {
         self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => execute_contains_direct(value, needle),
-            ProjectedKind::Custom(value) => Ok(
-                match value
-                    .read_one(ProjectedReadRequest::Contains(needle.clone()))
-                    .await
-                {
-                    ProjectedReadResponse::Bool(value) => value,
-                    ProjectedReadResponse::Value(value) => value_truthy(&value)?,
-                    _ => false,
-                },
-            ),
+            ProjectedKind::Custom(value) => {
+                let request = ProjectedReadRequest::Contains(needle.clone());
+                match value.read_one(request.clone()).await {
+                    Some(ProjectedReadResponse::Bool(value)) => Ok(value),
+                    Some(ProjectedReadResponse::Value(value)) => value_truthy(&value),
+                    Some(_) | None => Err(self.unsupported(&request)),
+                }
+            }
         }
     }
 
@@ -683,15 +773,17 @@ impl ProjectedValue {
             },
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Keys).await {
-                    ProjectedReadResponse::Keys(value) => value,
-                    ProjectedReadResponse::Value(Value::List(values)) => values
+                    Some(ProjectedReadResponse::Keys(value)) => value,
+                    Some(ProjectedReadResponse::Value(Value::List(values))) => values
                         .iter()
                         .filter_map(|value| match value {
                             Value::String(value) => Some(value.to_string()),
                             _ => None,
                         })
                         .collect(),
-                    _ => Vec::new(),
+                    Some(_) | None => {
+                        return Err(self.unsupported(&ProjectedReadRequest::Keys));
+                    }
                 }
             }
         })
@@ -707,9 +799,11 @@ impl ProjectedValue {
                 Value::Null => Some(Value::List(Vec::new().into())),
                 _ => None,
             },
-            ProjectedKind::Custom(_) => {
-                self.custom_read_or_missing(ProjectedReadRequest::Values)
-                    .await?
+            ProjectedKind::Custom(value) => {
+                match value.read_one(ProjectedReadRequest::Values).await {
+                    Some(response) => Some(response.into_value()),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Values)),
+                }
             }
         })
     }
@@ -780,20 +874,12 @@ impl ProjectedValue {
         self.refuse_if_unavailable()?;
         Ok(match &self.kind {
             ProjectedKind::Scalar(_) => None,
-            ProjectedKind::Custom(value) => match value.read_one(request).await {
-                ProjectedReadResponse::Value(value) => Some(value),
-                ProjectedReadResponse::Bool(value) => Some(Value::Bool(value)),
-                ProjectedReadResponse::Len(value) => Some(Value::Number(value as f64)),
-                ProjectedReadResponse::Text(value) => Some(Value::String(value.into())),
-                ProjectedReadResponse::Keys(values) => Some(Value::List(
-                    values
-                        .into_iter()
-                        .map(|value| Value::String(value.into()))
-                        .collect::<Vec<_>>()
-                        .into(),
-                )),
-                ProjectedReadResponse::Missing => None,
-            },
+            // `None` here is "no special implementation", not "cannot answer a
+            // read of my data": every caller of these helpers falls back to
+            // materializing and computing the true answer generically, so
+            // refusing would remove a correct result rather than a fabricated
+            // one (FIG-2863).
+            ProjectedKind::Custom(value) => value.read_one(request).await.map(Into::into),
         })
     }
 
@@ -803,11 +889,11 @@ impl ProjectedValue {
             ProjectedKind::Scalar(value) => stringify_value_async(value).await.unwrap_or_default(),
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Render).await {
-                    ProjectedReadResponse::Text(value) => value,
-                    ProjectedReadResponse::Value(value) => {
-                        stringify_value_async(&value).await.unwrap_or_default()
-                    }
-                    _ => String::new(),
+                    Some(ProjectedReadResponse::Text(value)) => value,
+                    Some(response) => stringify_value_async(&response.into_value())
+                        .await
+                        .unwrap_or_default(),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Render)),
                 }
             }
         })
@@ -819,18 +905,8 @@ impl ProjectedValue {
             ProjectedKind::Scalar(value) => (**value).clone(),
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Materialize).await {
-                    ProjectedReadResponse::Value(value) => value,
-                    ProjectedReadResponse::Text(value) => Value::String(value.into()),
-                    ProjectedReadResponse::Bool(value) => Value::Bool(value),
-                    ProjectedReadResponse::Len(value) => Value::Number(value as f64),
-                    ProjectedReadResponse::Keys(values) => Value::List(
-                        values
-                            .into_iter()
-                            .map(|value| Value::String(value.into()))
-                            .collect::<Vec<_>>()
-                            .into(),
-                    ),
-                    ProjectedReadResponse::Missing => Value::Null,
+                    Some(response) => response.into_value(),
+                    None => return Err(self.unsupported(&ProjectedReadRequest::Materialize)),
                 }
             }
         })
@@ -864,9 +940,9 @@ impl ProjectedHostDescriptor for UnavailableProjection {
     fn read_one(
         &self,
         _request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         // Unreachable: `ProjectedValue` refuses before asking a placeholder.
-        Box::pin(async { ProjectedReadResponse::Missing })
+        Box::pin(async { None })
     }
 }
 

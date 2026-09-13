@@ -78,18 +78,22 @@ impl ProjectedHostDescriptor for SnapshotGuardProjectedValue {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
                 ProjectedReadRequest::Render => {
                     self.render_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Text("rendered full text".to_string())
+                    Some(ProjectedReadResponse::Text(
+                        "rendered full text".to_string(),
+                    ))
                 }
                 ProjectedReadRequest::Materialize => {
                     self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Value(Value::String("materialized full text".into()))
+                    Some(ProjectedReadResponse::Value(Value::String(
+                        "materialized full text".into(),
+                    )))
                 }
-                _ => ProjectedReadResponse::Missing,
+                _ => None,
             }
         })
     }
@@ -103,26 +107,30 @@ impl ProjectedHostDescriptor for SearchProjectedText {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
-                ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.text.chars().count()),
+                ProjectedReadRequest::Len => {
+                    Some(ProjectedReadResponse::Len(self.text.chars().count()))
+                }
                 ProjectedReadRequest::Slice { start, end } => {
                     self.slice_count.fetch_add(1, Ordering::SeqCst);
                     self.slices.lock_recover().push((start, end));
-                    ProjectedReadResponse::Value(Value::String(
+                    Some(ProjectedReadResponse::Value(Value::String(
                         slice_string(&self.text, start, end).into(),
-                    ))
+                    )))
                 }
                 ProjectedReadRequest::Render => {
                     self.render_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Text(self.text.to_string())
+                    Some(ProjectedReadResponse::Text(self.text.to_string()))
                 }
                 ProjectedReadRequest::Materialize => {
                     self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                    ProjectedReadResponse::Value(Value::String(self.text.as_ref().into()))
+                    Some(ProjectedReadResponse::Value(Value::String(
+                        self.text.as_ref().into(),
+                    )))
                 }
-                _ => ProjectedReadResponse::Missing,
+                _ => None,
             }
         })
     }
@@ -136,40 +144,43 @@ impl ProjectedHostDescriptor for TestProjectedValue {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             let ProjectedReadRequest::Index(index) = request else {
                 return match request {
-                    ProjectedReadRequest::Len => ProjectedReadResponse::Len(self.values.len()),
+                    ProjectedReadRequest::Len => {
+                        Some(ProjectedReadResponse::Len(self.values.len()))
+                    }
                     ProjectedReadRequest::Render => {
                         self.render_count.fetch_add(1, Ordering::SeqCst);
-                        ProjectedReadResponse::Text("<projected list>".to_string())
+                        Some(ProjectedReadResponse::Text("<projected list>".to_string()))
                     }
                     ProjectedReadRequest::Materialize => {
                         self.materialize_count.fetch_add(1, Ordering::SeqCst);
-                        ProjectedReadResponse::Value(Value::List(self.values.clone().into()))
+                        Some(ProjectedReadResponse::Value(Value::List(
+                            self.values.clone().into(),
+                        )))
                     }
-                    _ => ProjectedReadResponse::Missing,
+                    _ => None,
                 };
             };
             let Value::Number(index) = index else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
             if !index.is_finite() || index.fract() != 0.0 {
-                return ProjectedReadResponse::Missing;
+                return None;
             }
             let len = self.values.len() as isize;
             let index = index as isize;
             let index = if index < 0 { len + index } else { index };
             if index < 0 || index >= len {
-                return ProjectedReadResponse::Missing;
+                return None;
             }
             self.get_count.fetch_add(1, Ordering::SeqCst);
             self.values
                 .get(index as usize)
                 .cloned()
                 .map(ProjectedReadResponse::Value)
-                .unwrap_or(ProjectedReadResponse::Missing)
         })
     }
 }
@@ -197,17 +208,15 @@ impl ProjectedFixture {
 fn projected_response_from_value(
     value: &Value,
     request: ProjectedReadRequest,
-) -> ProjectedReadResponse {
+) -> Option<ProjectedReadResponse> {
     match request {
-        ProjectedReadRequest::Len => value_len(value)
-            .map(ProjectedReadResponse::Len)
-            .unwrap_or(ProjectedReadResponse::Missing),
-        ProjectedReadRequest::Empty => value_len(value)
-            .map(|len| ProjectedReadResponse::Bool(len == 0))
-            .unwrap_or(ProjectedReadResponse::Missing),
+        ProjectedReadRequest::Len => value_len(value).map(ProjectedReadResponse::Len),
+        ProjectedReadRequest::Empty => {
+            value_len(value).map(|len| ProjectedReadResponse::Bool(len == 0))
+        }
         ProjectedReadRequest::Truthy => match is_truthy(value) {
-            Ok(truthy) => ProjectedReadResponse::Bool(truthy),
-            Err(_) => ProjectedReadResponse::Missing,
+            Ok(truthy) => Some(ProjectedReadResponse::Bool(truthy)),
+            Err(_) => None,
         },
         ProjectedReadRequest::Field(field) => {
             let field = Name {
@@ -215,119 +224,125 @@ fn projected_response_from_value(
                 text: field,
             };
             read_field_ref_direct(value, &field)
+                .ok()
                 .map(ProjectedReadResponse::Value)
-                .unwrap_or(ProjectedReadResponse::Missing)
         }
         ProjectedReadRequest::Index(index) => read_index_ref_direct(value, &index)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::Contains(needle) => execute_contains_direct(value, &needle)
-            .map(ProjectedReadResponse::Bool)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Bool),
         ProjectedReadRequest::Find { needle, start } => execute_find_direct(value, &needle, start)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::GrepText(needle) => execute_grep_text_direct(value, &needle)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::Keys => match value {
-            Value::Record(record) => {
-                ProjectedReadResponse::Keys(record.keys().map(ToString::to_string).collect())
-            }
-            _ => ProjectedReadResponse::Missing,
+            Value::Record(record) => Some(ProjectedReadResponse::Keys(
+                record.keys().map(ToString::to_string).collect(),
+            )),
+            _ => None,
         },
         ProjectedReadRequest::Values => match value {
-            Value::Record(record) => ProjectedReadResponse::Value(Value::List(
+            Value::Record(record) => Some(ProjectedReadResponse::Value(Value::List(
                 record.values().cloned().collect::<Vec<_>>().into(),
-            )),
-            Value::Null => ProjectedReadResponse::Value(Value::List(Vec::new().into())),
-            _ => ProjectedReadResponse::Missing,
+            ))),
+            Value::Null => Some(ProjectedReadResponse::Value(Value::List(Vec::new().into()))),
+            _ => None,
         },
         ProjectedReadRequest::StartsWith(prefix) => {
             let Ok(value) = coerce_string(value) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
             let Ok(prefix) = coerce_string(&prefix) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
-            ProjectedReadResponse::Bool(value.starts_with(prefix.as_ref()))
+            Some(ProjectedReadResponse::Bool(
+                value.starts_with(prefix.as_ref()),
+            ))
         }
         ProjectedReadRequest::EndsWith(suffix) => {
             let Ok(value) = coerce_string(value) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
             let Ok(suffix) = coerce_string(&suffix) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
-            ProjectedReadResponse::Bool(value.ends_with(suffix.as_ref()))
+            Some(ProjectedReadResponse::Bool(
+                value.ends_with(suffix.as_ref()),
+            ))
         }
         ProjectedReadRequest::Split(needle) => {
             let Ok(value) = coerce_string(value) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
             let Ok(needle) = coerce_string(&needle) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
-            ProjectedReadResponse::Value(Value::List(
+            Some(ProjectedReadResponse::Value(Value::List(
                 value
                     .split(needle.as_ref())
                     .map(|part| Value::String(part.into()))
                     .collect::<Vec<_>>()
                     .into(),
-            ))
+            )))
         }
         ProjectedReadRequest::Join(sep) => execute_join_builtin(value, &sep)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::Trim => {
             let Ok(value) = coerce_string(value) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
-            ProjectedReadResponse::Value(Value::String(value.trim().into()))
+            Some(ProjectedReadResponse::Value(Value::String(
+                value.trim().into(),
+            )))
         }
         ProjectedReadRequest::Slice { start, end } => match value {
-            Value::String(value) => {
-                ProjectedReadResponse::Value(Value::String(slice_string(value, start, end).into()))
-            }
+            Value::String(value) => Some(ProjectedReadResponse::Value(Value::String(
+                slice_string(value, start, end).into(),
+            ))),
             Value::List(items) => {
                 let Some((start, end)) = clamp_slice_bounds(start, end, items.len()) else {
-                    return ProjectedReadResponse::Value(Value::List(Vec::new().into()));
+                    return Some(ProjectedReadResponse::Value(Value::List(Vec::new().into())));
                 };
-                ProjectedReadResponse::Value(Value::List(items[start..end].to_vec().into()))
+                Some(ProjectedReadResponse::Value(Value::List(
+                    items[start..end].to_vec().into(),
+                )))
             }
-            _ => ProjectedReadResponse::Missing,
+            _ => None,
         },
         ProjectedReadRequest::Push(item) => execute_push_builtin(value, item)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .ok()
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::ToNumber => as_number(value)
+            .ok()
             .map(Value::Number)
-            .map(ProjectedReadResponse::Value)
-            .unwrap_or(ProjectedReadResponse::Missing),
+            .map(ProjectedReadResponse::Value),
         ProjectedReadRequest::JsonParse => {
             let Ok(text) = coerce_string(value) else {
-                return ProjectedReadResponse::Missing;
+                return None;
             };
             serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
                 .map(from_json)
                 .map(ProjectedReadResponse::Value)
-                .unwrap_or(ProjectedReadResponse::Missing)
         }
-        ProjectedReadRequest::SliceBound => as_slice_bound(value)
-            .map(|bound| {
-                ProjectedReadResponse::Value(match bound {
-                    Some(value) => Value::Number(value as f64),
-                    None => Value::Null,
-                })
+        ProjectedReadRequest::SliceBound => as_slice_bound(value).ok().map(|bound| {
+            ProjectedReadResponse::Value(match bound {
+                Some(value) => Value::Number(value as f64),
+                None => Value::Null,
             })
-            .unwrap_or(ProjectedReadResponse::Missing),
+        }),
         ProjectedReadRequest::RangeBound => as_range_bound(value)
-            .map(|value| ProjectedReadResponse::Value(Value::Number(value as f64)))
-            .unwrap_or(ProjectedReadResponse::Missing),
-        ProjectedReadRequest::Render => ProjectedReadResponse::Text(
+            .ok()
+            .map(|value| ProjectedReadResponse::Value(Value::Number(value as f64))),
+        ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(
             stringify_value(value).expect("projected fixture should stringify"),
-        ),
-        ProjectedReadRequest::Materialize => ProjectedReadResponse::Value(value.clone()),
+        )),
+        ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(value.clone())),
     }
 }
 
@@ -339,7 +354,7 @@ impl ProjectedHostDescriptor for ProjectedFixture {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             if matches!(request, ProjectedReadRequest::Materialize) {
                 self.materialize_count.fetch_add(1, Ordering::SeqCst);
@@ -435,6 +450,57 @@ pub(super) async fn exec_with_projected(
         ExecutionOutcome::Finished(value) => Ok((value, state)),
         ExecutionOutcome::Continued => panic!("expected `finish` in test program"),
         ExecutionOutcome::Failed(value) => panic!("unexpected process failure: {value}"),
+    }
+}
+
+/// A descriptor that answers nothing at all: every read is a decision it has
+/// not made.
+struct SilentDescriptor;
+
+impl ProjectedHostDescriptor for SilentDescriptor {
+    fn type_name(&self) -> &str {
+        "widget"
+    }
+
+    fn read_one(
+        &self,
+        _request: ProjectedReadRequest,
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
+        Box::pin(async move { None })
+    }
+}
+
+/// A read a descriptor does not answer, and for which no absent value stands
+/// in, is a typed refusal naming the binding, its type and the request --
+/// mirroring `EmptyUnsupported`/`KeysUnsupported` rather than widening into
+/// `false`, `null` or an empty key set (FIG-2863).
+#[tokio::test(flavor = "current_thread")]
+async fn an_unanswered_read_refuses_with_the_binding_and_request_named() {
+    let projected = ProjectedValue::custom("widget", Arc::new(SilentDescriptor));
+
+    for (label, error) in [
+        ("len", projected.len().await.err()),
+        ("empty", projected.empty().await.err()),
+        ("truthy", projected.truthy().await.err()),
+        ("keys", projected.keys().await.err()),
+        ("values", projected.values().await.err()),
+        (
+            "contains",
+            projected.contains(&Value::Number(1.0)).await.err(),
+        ),
+    ] {
+        let error = error.unwrap_or_else(|| panic!("`{label}` must refuse"));
+        assert!(
+            matches!(
+                error,
+                RuntimeError::ProjectedReadUnsupported {
+                    ref name,
+                    ref type_name,
+                    ref request,
+                } if name == "widget" && type_name == "widget" && request == label
+            ),
+            "unexpected error for `{label}`: {error:?}"
+        );
     }
 }
 
@@ -774,33 +840,29 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
     fn read_one(
         &self,
         request: ProjectedReadRequest,
-    ) -> ProjectedFuture<'_, ProjectedReadResponse> {
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
         Box::pin(async move {
             match request {
                 ProjectedReadRequest::Len => {
                     self.push_call("len");
-                    value_len(&self.value)
-                        .map(ProjectedReadResponse::Len)
-                        .unwrap_or(ProjectedReadResponse::Missing)
+                    value_len(&self.value).map(ProjectedReadResponse::Len)
                 }
                 ProjectedReadRequest::Empty => {
                     self.push_call("empty");
-                    value_len(&self.value)
-                        .map(|len| ProjectedReadResponse::Bool(len == 0))
-                        .unwrap_or(ProjectedReadResponse::Missing)
+                    value_len(&self.value).map(|len| ProjectedReadResponse::Bool(len == 0))
                 }
                 ProjectedReadRequest::Truthy => {
                     self.push_call("truthy");
                     match is_truthy(&self.value) {
-                        Ok(truthy) => ProjectedReadResponse::Bool(truthy),
-                        Err(_) => ProjectedReadResponse::Missing,
+                        Ok(truthy) => Some(ProjectedReadResponse::Bool(truthy)),
+                        Err(_) => None,
                     }
                 }
                 ProjectedReadRequest::Index(index) => {
                     self.push_call("get_index");
                     read_index_ref_direct(&self.value, &index)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::Field(field) => {
                     self.push_call("get_field");
@@ -809,145 +871,149 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
                         text: field,
                     };
                     read_field_ref_direct(&self.value, &field)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::Contains(needle) => {
                     self.push_call("contains");
-                    ProjectedReadResponse::Bool(
+                    Some(ProjectedReadResponse::Bool(
                         execute_contains_direct(&self.value, &needle).expect("contains override"),
-                    )
+                    ))
                 }
                 ProjectedReadRequest::Find { needle, start } => {
                     self.push_call("find");
                     execute_find_direct(&self.value, &needle, start)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::GrepText(needle) => {
                     self.push_call("grep_text");
                     execute_grep_text_direct(&self.value, &needle)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::Keys => {
                     self.push_call("keys");
                     match &self.value {
-                        Value::Record(record) => ProjectedReadResponse::Keys(
+                        Value::Record(record) => Some(ProjectedReadResponse::Keys(
                             record.keys().map(ToString::to_string).collect(),
-                        ),
-                        _ => ProjectedReadResponse::Missing,
+                        )),
+                        _ => None,
                     }
                 }
                 ProjectedReadRequest::Values => {
                     self.push_call("values");
                     match &self.value {
-                        Value::Record(record) => ProjectedReadResponse::Value(Value::List(
+                        Value::Record(record) => Some(ProjectedReadResponse::Value(Value::List(
                             record.values().cloned().collect::<Vec<_>>().into(),
-                        )),
-                        _ => ProjectedReadResponse::Missing,
+                        ))),
+                        _ => None,
                     }
                 }
                 ProjectedReadRequest::StartsWith(prefix) => {
                     self.push_call("starts_with");
                     let value = coerce_string(&self.value).expect("string receiver");
                     let prefix = coerce_string(&prefix).expect("string prefix");
-                    ProjectedReadResponse::Bool(value.starts_with(prefix.as_ref()))
+                    Some(ProjectedReadResponse::Bool(
+                        value.starts_with(prefix.as_ref()),
+                    ))
                 }
                 ProjectedReadRequest::EndsWith(suffix) => {
                     self.push_call("ends_with");
                     let value = coerce_string(&self.value).expect("string receiver");
                     let suffix = coerce_string(&suffix).expect("string suffix");
-                    ProjectedReadResponse::Bool(value.ends_with(suffix.as_ref()))
+                    Some(ProjectedReadResponse::Bool(
+                        value.ends_with(suffix.as_ref()),
+                    ))
                 }
                 ProjectedReadRequest::Split(needle) => {
                     self.push_call("split");
                     let value = coerce_string(&self.value).expect("string receiver");
                     let needle = coerce_string(&needle).expect("string needle");
-                    ProjectedReadResponse::Value(Value::List(
+                    Some(ProjectedReadResponse::Value(Value::List(
                         value
                             .split(needle.as_ref())
                             .map(|part| Value::String(part.to_string().into()))
                             .collect::<Vec<_>>()
                             .into(),
-                    ))
+                    )))
                 }
                 ProjectedReadRequest::Join(sep) => {
                     self.push_call("join");
                     execute_join_builtin(&self.value, &sep)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::Trim => {
                     self.push_call("trim");
                     let value = coerce_string(&self.value).expect("string receiver");
-                    ProjectedReadResponse::Value(Value::String(value.trim().to_string().into()))
+                    Some(ProjectedReadResponse::Value(Value::String(
+                        value.trim().to_string().into(),
+                    )))
                 }
                 ProjectedReadRequest::Slice { start, end } => {
                     self.push_call("slice");
                     match &self.value {
-                        Value::String(value) => ProjectedReadResponse::Value(Value::String(
+                        Value::String(value) => Some(ProjectedReadResponse::Value(Value::String(
                             slice_string(value, start, end).into(),
-                        )),
+                        ))),
                         Value::List(items) => {
                             let Some((start, end)) = clamp_slice_bounds(start, end, items.len())
                             else {
-                                return ProjectedReadResponse::Value(Value::List(
+                                return Some(ProjectedReadResponse::Value(Value::List(
                                     Vec::new().into(),
-                                ));
+                                )));
                             };
-                            ProjectedReadResponse::Value(Value::List(
+                            Some(ProjectedReadResponse::Value(Value::List(
                                 items[start..end].to_vec().into(),
-                            ))
+                            )))
                         }
-                        _ => ProjectedReadResponse::Missing,
+                        _ => None,
                     }
                 }
                 ProjectedReadRequest::Push(item) => {
                     self.push_call("push");
                     execute_push_builtin(&self.value, item)
+                        .ok()
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::ToNumber => {
                     self.push_call("to_number");
                     as_number(&self.value)
+                        .ok()
                         .map(Value::Number)
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::JsonParse => {
                     self.push_call("json_parse");
                     let value = coerce_string(&self.value).expect("json text");
                     serde_json::from_str::<serde_json::Value>(&value)
+                        .ok()
                         .map(from_json)
                         .map(ProjectedReadResponse::Value)
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::SliceBound => {
                     self.push_call("slice_bound");
-                    as_slice_bound(&self.value)
-                        .map(|bound| {
-                            ProjectedReadResponse::Value(match bound {
-                                Some(value) => Value::Number(value as f64),
-                                None => Value::Null,
-                            })
+                    as_slice_bound(&self.value).ok().map(|bound| {
+                        ProjectedReadResponse::Value(match bound {
+                            Some(value) => Value::Number(value as f64),
+                            None => Value::Null,
                         })
-                        .unwrap_or(ProjectedReadResponse::Missing)
+                    })
                 }
                 ProjectedReadRequest::RangeBound => {
                     self.push_call("range_bound");
                     as_range_bound(&self.value)
+                        .ok()
                         .map(|value| ProjectedReadResponse::Value(Value::Number(value as f64)))
-                        .unwrap_or(ProjectedReadResponse::Missing)
                 }
                 ProjectedReadRequest::Materialize => {
                     self.push_call("materialize");
-                    ProjectedReadResponse::Value(self.value.clone())
+                    Some(ProjectedReadResponse::Value(self.value.clone()))
                 }
-                ProjectedReadRequest::Render => ProjectedReadResponse::Text(
+                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text(
                     stringify_value(&self.value).expect("render projected override"),
-                ),
+                )),
             }
         })
     }
