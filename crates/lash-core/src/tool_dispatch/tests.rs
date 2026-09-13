@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+mod attachment_normalization;
 mod directives;
 mod intent_drain;
 mod internal_activation;
@@ -896,7 +897,10 @@ async fn dispatch_orchestrating_tool_call(
     tool_name: &str,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
-    dispatch_orchestrating_tool_call_with_prepared_name(context, tool_name, tool_name, args).await
+    Box::pin(dispatch_orchestrating_tool_call_with_prepared_name(
+        context, tool_name, tool_name, args,
+    ))
+    .await
 }
 
 async fn dispatch_orchestrating_tool_call_with_prepared_name(
@@ -924,7 +928,12 @@ async fn dispatch_orchestrating_tool_call_with_prepared_name(
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .build();
-    crate::tool_dispatch::execute_orchestrating_tool(context, prepared, tool_context).await
+    Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+        context,
+        prepared,
+        tool_context,
+    ))
+    .await
 }
 
 use crate::testing::MockSessionManager;
