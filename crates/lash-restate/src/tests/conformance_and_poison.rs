@@ -1,5 +1,9 @@
 use super::*;
 
+// No store-family macros: Restate certifies an engine adapter over borrowed memory/SQLite stores.
+// No SQL-journal retirement/fencing macros: replay lives in workflow history, not SQL rows.
+// No store effect-group drain macro: queued durable drain is a storage-side protocol.
+
 fn operation_effect_invocation(
     operation_id: impl Into<String>,
     attribution: lash_core::RuntimeAttribution,
@@ -38,12 +42,16 @@ fn turn_effect_invocation(
     )
 }
 
-#[tokio::test]
-pub(super) async fn restate_turn_work_driver_satisfies_shared_conformance() {
+lash_conformance::turn_work_driver_tests!({
     let context = Arc::new(RecordingContext::default());
+    let registration_context = Arc::clone(&context);
     let host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new(context));
-    lash_conformance::turn_work_driver(host).await;
-}
+    ((), host, move |_host, session_id, key| async move {
+        registration_context
+            .wait_for_await_event_registration(&session_id, &key)
+            .await;
+    })
+});
 
 pub(super) fn replayable_conformance_invocation(
     context: Arc<ReplayableRecordingContext>,
@@ -105,6 +113,19 @@ impl ConformanceProcessWaitTransport {
             "every Restate attachment must retain the same process id: {requests:?}"
         );
     }
+
+    async fn wait_for_bounded_reattachment(&self) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if self.request_urls.lock_recover().len() >= 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Restate must begin its reattachment before terminal completion");
+    }
 }
 
 #[async_trait::async_trait]
@@ -164,65 +185,59 @@ pub(super) fn conformance_restate_process_work(
     (process_work, transport)
 }
 
-#[tokio::test]
-pub(super) async fn restate_handler_controller_satisfies_concurrent_replay_conformance() {
+lash_conformance::effect_controller_replay_tests!(
+    {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        let make_context = Arc::clone(&context);
+        (context, move || {
+            replayable_conformance_invocation(Arc::clone(&make_context))
+        })
+    },
+    |law: &str, context: &Arc<ReplayableRecordingContext>| {
+        let runs = context.runs();
+        match law {
+            "effect-controller-concurrent-replay" => {
+                assert_eq!(runs.len(), 4);
+                assert!(runs.iter().any(|name| name.ends_with(":effect-slow")));
+                assert!(runs.iter().any(|name| name.ends_with(":effect-fast")));
+            }
+            "effect-controller-tool-attempt-fanout" => {
+                assert_eq!(runs.len(), 4);
+                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-slow")));
+                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-fast")));
+            }
+            "effect-controller-journaled-replay" => {}
+            unknown => panic!("unexpected Restate replay conformance law: {unknown}"),
+        }
+    }
+);
+
+lash_conformance::effect_controller_replay_mismatch_tests!({
     let context = Arc::new(ReplayableRecordingContext::default());
-    lash_conformance::effect_controller_concurrent_replay_deterministic({
-        let context = Arc::clone(&context);
-        move || replayable_conformance_invocation(context)
-    })
-    .await;
-
-    let durable_context = Arc::new(ReplayableRecordingContext::default());
-    lash_conformance::effect_controller_journaled_effect_replay({
-        let context = Arc::clone(&durable_context);
-        move || replayable_conformance_invocation(context)
-    })
-    .await;
-
-    let tool_context = Arc::new(ReplayableRecordingContext::default());
-    lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic({
-        let context = Arc::clone(&tool_context);
-        move || replayable_conformance_invocation(context)
-    })
-    .await;
-
-    let runs = context.runs();
-    assert_eq!(runs.len(), 4);
-    assert!(runs.iter().any(|name| name.ends_with(":effect-slow")));
-    assert!(runs.iter().any(|name| name.ends_with(":effect-fast")));
-
-    let tool_runs = tool_context.runs();
-    assert_eq!(tool_runs.len(), 4);
-    assert!(
-        tool_runs
-            .iter()
-            .any(|name| name.ends_with(":tool-attempt-slow"))
-    );
-    assert!(
-        tool_runs
-            .iter()
-            .any(|name| name.ends_with(":tool-attempt-fast"))
-    );
-}
-
-#[tokio::test]
-pub(super) async fn restate_effect_controller_replay_mismatch_diagnostics_conformance() {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        move || replayable_conformance_invocation(context),
+    let make_context = Arc::clone(&context);
+    (
+        context,
+        move || replayable_conformance_invocation(Arc::clone(&make_context)),
         "worker_replacement_abort",
     )
-    .await;
-}
+});
 
-#[tokio::test]
-pub(super) async fn restate_durable_queued_drain_wait_conformance() {
-    assert_restate_queued_lane_conformance().await;
-}
+lash_conformance::durable_queued_drain_wait_resolver_tests!({
+    (
+        (),
+        || {
+            Arc::new(RestateRuntimeEffectController::new(Arc::new(
+                RecordingContext::default(),
+            ))) as Arc<dyn lash_core::AwaitEventResolver>
+        },
+        || {
+            Arc::new(RestateEffectHost::new("http://127.0.0.1:8080"))
+                as Arc<dyn lash_core::AwaitEventResolver>
+        },
+    )
+});
 
-#[tokio::test]
-pub(super) async fn restate_public_signal_intent_wakes_parked_process_conformance() {
+lash_conformance::signal_intent_tests!({
     let context = Arc::new(RecordingContext::default());
     let effect_host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new(context));
     let registry =
@@ -232,18 +247,21 @@ pub(super) async fn restate_public_signal_intent_wakes_parked_process_conformanc
     ));
     let (process_work, wait_transport) =
         conformance_restate_process_work(Arc::clone(&registry), terminal);
-    lash_conformance::public_signal_intent_wakes_parked_process(
+    let verify_transport = Arc::clone(&wait_transport);
+    (
+        wait_transport,
         "restate-public-signal-intent",
         effect_host,
         registry,
         process_work,
+        move || async move {
+            verify_transport
+                .assert_reattached_to(&ProcessId::from("restate-public-signal-intent-target"));
+        },
     )
-    .await;
-    wait_transport.assert_reattached_to(&ProcessId::from("restate-public-signal-intent-target"));
-}
+});
 
-#[tokio::test]
-pub(super) async fn restate_wake_delivery_ordering_group_conformance() {
+lash_conformance::wake_delivery_ordering_tests!({
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
         serde_json::json!({"terminal_wait": "observed"}),
@@ -252,18 +270,24 @@ pub(super) async fn restate_wake_delivery_ordering_group_conformance() {
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
         terminal,
     );
-    lash_conformance::wake_delivery_ordering_group_conformance(
+    let verify_transport = Arc::clone(&wait_transport);
+    let barrier_transport = Arc::clone(&wait_transport);
+    (
+        wait_transport,
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
         registry as Arc<dyn lash_conformance::WakeDeliveryOrderingGroupFaultInjector>,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
+        move || async move {
+            barrier_transport.wait_for_bounded_reattachment().await;
+        },
+        move || async move {
+            verify_transport.assert_reattached_to(&ProcessId::from("wake-ordering-terminal"));
+        },
     )
-    .await;
-    wait_transport.assert_reattached_to(&ProcessId::from("wake-ordering-terminal"));
-}
+});
 
-#[tokio::test]
-pub(super) async fn restate_wake_delivery_crash_matrix_conformance() {
+lash_conformance::wake_delivery_crash_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
     let registry = Arc::new(
         lash_core::TestLocalProcessRegistry::default()
@@ -287,23 +311,31 @@ pub(super) async fn restate_wake_delivery_crash_matrix_conformance() {
             Arc::clone(&clock) as Arc<dyn lash_core::Clock>
         ),
     );
-    Box::pin(lash_conformance::wake_delivery_crash_matrix(
+    let verify_transport = Arc::clone(&wait_transport);
+    let barrier_transport = Arc::clone(&wait_transport);
+    (
+        wait_transport,
         factory,
         registry as Arc<dyn lash_core::ConformanceProcessRegistry>,
         clock,
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Reattach,
-    ))
-    .await;
-    wait_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
-}
+        move || async move {
+            barrier_transport.wait_for_bounded_reattachment().await;
+        },
+        move || async move {
+            verify_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
+        },
+    )
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-pub(super) async fn restate_turn_crash_matrix_level_1_conformance() {
+lash_conformance::turn_crash_matrix_tests!({
     let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
-    lash_conformance::turn_crash_matrix_level_1(
-        move |scenario| {
-            let path = dir.path().join(format!("restate-turn-crash-{scenario}.db"));
+    let root = dir.path().to_path_buf();
+    (
+        dir,
+        move |scenario: &str| {
+            let path = root.join(format!("restate-turn-crash-{scenario}.db"));
             sync_await(async move {
                 Arc::new(
                     lash_sqlite_store::Store::open(&path)
@@ -314,56 +346,82 @@ pub(super) async fn restate_turn_crash_matrix_level_1_conformance() {
         },
         crash_redrive_conformance_invocation,
     )
-    .await;
-}
+});
 
-#[test]
+lash_conformance::effect_group_host_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    }
+);
+
+lash_conformance::effect_group_cancelled_child_terminal_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    }
+);
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-pub(super) fn live_restate_effect_group_conformance() {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("build Restate conformance-parity runtime")
-        .block_on(async {
-            tokio::time::timeout(Duration::from_secs(240), async {
-                let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-
-                lash_conformance::effect_group_host_conformance(harness.group_host_factory()).await;
-                println!("RESTATE_CONFORMANCE effect_group_host_conformance PASS");
-                lash_conformance::effect_group_cancelled_child_terminal_is_durable(
-                    harness.group_host_factory(),
-                )
-                .await;
-                println!(
-                    "RESTATE_CONFORMANCE effect_group_cancelled_child_terminal_is_durable PASS"
-                );
-                harness.run_design_witnesses().await;
-                println!("EFFECT_GROUP_CONFORMANCE 19/19 PASS");
-                println!("EFFECT_GROUP_WITNESSES h-m PASS");
-                harness.run_executing_effect_quiescence_witness().await;
-                println!("RESTATE_QUIESCENCE executing_handler_effect PASS");
-                let registries = harness.run_cold_reopen_witnesses().await;
-                println!("RESTATE_COLD_REOPEN registries={registries} PASS");
-                lash_conformance::effect_host_await_events_cold_instance_with_active_wait_witness(
-                    harness.effect_host_factory(),
-                    |host| harness.run_active_wait_registration_witnesses(host),
-                )
-                .await;
-                println!("RESTATE_CONFORMANCE effect_host_await_events_cold_instance PASS");
-                lash_conformance::effect_host_await_events_with_active_wait_witness(
-                    harness.effect_host_factory(),
-                    |host| harness.run_active_wait_registration_witnesses(host),
-                )
-                .await;
-                println!("RESTATE_CONFORMANCE effect_host_await_events PASS");
-
-                println!("RESTATE_CONFORMANCE_PARITY live=4/4 PASS");
-                harness.finish().await;
-            })
-            .await
-            .expect("Restate conformance parity exceeded 240 seconds");
-        });
+async fn live_restate_effect_group_design_witnesses() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
+        .await
+        .expect("Restate design witnesses exceeded 240 seconds");
+    harness.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_executing_effect_quiescence_witness() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(
+        Duration::from_secs(240),
+        harness.run_executing_effect_quiescence_witness(),
+    )
+    .await
+    .expect("Restate quiescence witness exceeded 240 seconds");
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+async fn live_restate_cold_reopen_witnesses() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    tokio::time::timeout(
+        Duration::from_secs(240),
+        harness.run_cold_reopen_witnesses(),
+    )
+    .await
+    .expect("Restate cold-reopen witnesses exceeded 240 seconds");
+    harness.finish().await;
+}
+
+lash_conformance::effect_host_await_event_witness_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness = Arc::new(effect_group_conformance::LiveConformanceHarness::start().await);
+        let make = harness.effect_host_factory();
+        let witness_harness = Arc::clone(&harness);
+        let teardown_harness = Arc::clone(&harness);
+        (
+            harness,
+            Duration::from_secs(240),
+            make,
+            move |host, assert_retirement| async move {
+                witness_harness
+                    .run_active_wait_registration_witnesses(host, assert_retirement)
+                    .await;
+            },
+            async move { teardown_harness.finish().await },
+        )
+    }
+);
 
 #[tokio::test]
 pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_command() {

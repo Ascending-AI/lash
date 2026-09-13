@@ -197,48 +197,51 @@ async fn the_native_substrate_supports_groups_through_the_scoped_host_view() {
         .expect("the scoped view closes the group");
 }
 
-/// The in-memory reference host answers the shared host suite, which is what
-/// makes "the SQL tiers agree with the reference" a checkable claim rather than
-/// two files of similar-looking tests (FIG-1564).
-///
-/// The laws in this file stay where they are: they reach this tier's own
-/// settlement record, which is how the *allocator* is asserted, and the shared
-/// suite deliberately cannot.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_native_host_satisfies_the_shared_effect_group_suite() {
-    // One host, handed out repeatedly: the suite's factory stands for "another
-    // view of the same substrate", and on a tier whose substrate *is* the
-    // process, that is this object. A fresh `NativeEffectHost` per call would be
-    // a different substrate, which is the one thing the factory may not be.
-    //
-    // The suite hands its own resolver to every factory call, and registering it
-    // is what makes this host support groups at all.
-    //
-    // `None` asks for the unregistered host two laws are about, and on this tier
-    // that has to be a *fresh* controller: registration is a property of the
-    // substrate here rather than of a connection to it, so "the same substrate,
-    // unwired" does not exist. The cost is only to the second of those laws — "a
-    // refused open journals nothing" — and it is no cost at all, because this
-    // tier journals nothing to leave behind.
-    let controller = Arc::new(NativeRuntimeEffectController::default());
-    let host: std::sync::Arc<dyn crate::EffectHost> = std::sync::Arc::new(
-        crate::NativeEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>),
-    );
-    crate::conformance::effect_group_host_conformance(move |suite_executors| {
-        let Some(suite_executors) = suite_executors else {
-            return std::sync::Arc::new(crate::NativeEffectHost::new(Arc::new(
-                NativeRuntimeEffectController::default(),
-            )
-                as Arc<dyn RuntimeEffectController>))
-                as std::sync::Arc<dyn crate::EffectHost>;
-        };
-        controller
-            .register_group_executors(suite_executors)
-            .expect("the suite registers one resolver on this host");
-        std::sync::Arc::clone(&host)
-    })
-    .await;
+// The in-memory reference host answers the shared host suite, which is what
+// makes "the SQL tiers agree with the reference" a checkable claim rather than
+// two files of similar-looking tests (FIG-1564).
+mod shared_effect_group_host_laws {
+    use super::*;
+
+    crate::effect_group_host_tests!({
+        // One host, handed out repeatedly: the suite's factory stands for "another
+        // view of the same substrate", and on a tier whose substrate *is* the
+        // process, that is this object. A fresh `NativeEffectHost` per call would be
+        // a different substrate, which is the one thing the factory may not be.
+        //
+        // The suite hands its own resolver to every factory call, and registering it
+        // is what makes this host support groups at all.
+        //
+        // `None` asks for the unregistered host two laws are about, and on this tier
+        // that has to be a *fresh* controller: registration is a property of the
+        // substrate here rather than of a connection to it, so "the same substrate,
+        // unwired" does not exist. The cost is only to the second of those laws — "a
+        // refused open journals nothing" — and it is no cost at all, because this
+        // tier journals nothing to leave behind.
+        let controller = Arc::new(NativeRuntimeEffectController::default());
+        let host: std::sync::Arc<dyn crate::EffectHost> =
+            std::sync::Arc::new(crate::NativeEffectHost::new(
+                Arc::clone(&controller) as Arc<dyn RuntimeEffectController>
+            ));
+        ((), move |suite_executors| {
+            let Some(suite_executors) = suite_executors else {
+                return std::sync::Arc::new(crate::NativeEffectHost::new(Arc::new(
+                    NativeRuntimeEffectController::default(),
+                )
+                    as Arc<dyn RuntimeEffectController>))
+                    as std::sync::Arc<dyn crate::EffectHost>;
+            };
+            controller
+                .register_group_executors(suite_executors)
+                .expect("the suite registers one resolver on this host");
+            std::sync::Arc::clone(&host)
+        })
+    });
 }
+
+// No durable effect-group retirement macros: the native host has no cross-process journal.
+
+// No cancelled-terminal durability invocation: the native host has no journal to reopen.
 
 /// First-settlement wake: the caller resumes on the winner while the loser is
 /// still running.

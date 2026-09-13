@@ -217,7 +217,7 @@ effect-group-conformance-e2e:
   EG_RESTATE_ENDPOINT_BIND="$endpoint_bind" \
   EG_RESTATE_ENDPOINT_URL="$endpoint_url" \
   cargo test -p lash-internal-restate --locked \
-    live_restate_effect_group_conformance -- --ignored --nocapture --test-threads=1
+    tests::conformance_and_poison:: -- --ignored --nocapture --test-threads=1
 
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"

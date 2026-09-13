@@ -11,10 +11,6 @@ pub(super) struct ProcessCountConservation {
 }
 
 impl ProcessCountConservation {
-    pub(super) fn from_modeled_totals(spawned: usize, pruned: usize) -> Self {
-        Self { spawned, pruned }
-    }
-
     pub(super) fn record_spawn(&mut self) {
         self.spawned += 1;
     }
@@ -64,7 +60,7 @@ pub(super) async fn assert_process_count_conservation(
     Ok(())
 }
 
-pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
+pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let mut conservation = ProcessCountConservation::default();

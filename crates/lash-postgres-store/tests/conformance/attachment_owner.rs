@@ -1,7 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
+lash_conformance::attachment_owner_cold_replay_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres attachment-owner conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -39,7 +38,8 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
         Arc::new(move |duration_ms| clock.advance(duration_ms)) as Arc<dyn Fn(u64) + Send + Sync>
     };
 
-    lash_conformance::attachment_owner_cold_replay(
+    (
+        _database_lock,
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
@@ -50,5 +50,4 @@ async fn postgres_attachment_owner_cold_replay_conformance_when_configured() {
             advance_clock,
         },
     )
-    .await;
-}
+});

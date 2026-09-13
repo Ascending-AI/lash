@@ -1,29 +1,23 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_cross_owner_attachment_adoption_conformance() {
-    let Some((_database_lock, storage)) = storage().await else {
-        return;
-    };
-    reset(&storage).await;
-    lash_conformance::cross_owner_attachment_adoption_conformance(Arc::new(
-        storage.session_store_factory(),
-    ))
-    .await;
-}
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_attachment_condemnation_enumeration_conformance() {
-    let Some((_database_lock, storage)) = storage().await else {
+// No attachment_store_*_tests!: those laws certify the separate FileAttachmentStore component.
+// No live_replay_tests!: live replay is an in-process cache, not PostgreSQL-backed storage.
+// No append_usage_cancellation_tests!: exactly-once cancellation requires the SQLite worker seam.
+// No unbound_session_read_tests!: PostgreSQL reads require an explicit session binding.
+// No runtime_persistence_clock_tests!: the backend clock is PostgreSQL-owned and not controllable.
+// No queued-lane resolver macro: engine pacing belongs to Restate, not a persistence store.
+
+#[path = "blob_probe.rs"]
+mod blob_probe;
+lash_conformance::attachment_adoption_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         return;
     };
     reset(&storage).await;
-    lash_conformance::attachment_condemnation_enumeration_conformance(Arc::new(
-        storage.session_store_factory(),
-    ))
-    .await;
-}
+    (database_lock, Arc::new(storage.session_store_factory()))
+});
 
 use std::future::Future;
 #[path = "conformance/attachment_owner_kind.rs"]
@@ -77,34 +71,13 @@ use injectors::{
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
 use support::{SharedDatabaseLock, database_url};
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_fork_lineage_conformance_when_configured() {
-    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
-        eprintln!(
-            "skipping Postgres fork-lineage conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
+lash_conformance::lineage_tests!({
+    let Some((database_lock, handles)) = postgres_lineage_handles().await else {
+        eprintln!("skipping Postgres lineage laws: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    lash_conformance::fork_lineage_conformance(handles).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_fork_lineage_no_carrier_law_when_configured() {
-    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
-        eprintln!("skipping Postgres no-carrier law: database URL is not set");
-        return;
-    };
-    lash_conformance::fork_lineage_no_carrier_law(handles).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_fork_plan_matches_edge_walk_law_when_configured() {
-    let Some((_database_lock, handles)) = postgres_lineage_handles().await else {
-        eprintln!("skipping Postgres ForkPlan ground-truth law: database URL is not set");
-        return;
-    };
-    lash_conformance::fork_plan_matches_edge_walk_law(handles).await;
-}
+    (database_lock, handles)
+});
 
 fn sync_await<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
@@ -192,26 +165,21 @@ async fn reset(storage: &PostgresStorage) {
     .expect("reset postgres process change clock");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::tool_access_persistence_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres tool-access recovery: database URL is not set");
         return;
     };
     reset(&storage).await;
-    lash_conformance::session_tool_access_durable_recovery(Arc::new(
-        storage.session_store_factory(),
-    ))
-    .await;
-}
+    (database_lock, Arc::new(storage.session_store_factory()))
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_fence_integrity_conformance_when_configured() {
+lash_conformance::fence_integrity_tests!({
     let Some(database_url) = database_url() else {
         eprintln!("skipping Postgres fence-integrity conformance: database is not configured");
         return;
     };
-    lash_conformance::fence_integrity_conformance(|session_id| {
+    ((), move |session_id| {
         let database_url = database_url.clone();
         async move {
             let database_lock = SharedDatabaseLock::acquire(&database_url).await;
@@ -231,21 +199,19 @@ async fn postgres_fence_integrity_conformance_when_configured() {
             }
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_signed_counter_write_domain_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::signed_counter_write_domain_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres signed-write conformance: database is not configured");
         return;
     };
     reset(&storage).await;
-    lash_conformance::signed_counter_write_domain_conformance(Arc::new(
-        storage.session_store("signed-write-available"),
-    ))
-    .await;
-}
+    (
+        database_lock,
+        Arc::new(storage.session_store("signed-write-available")) as Arc<dyn RuntimePersistence>,
+    )
+});
 
 async fn wait_for_session_lease_advisory_waiters(pool: &sqlx::PgPool, at_least: i64) {
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -307,8 +273,8 @@ lash_conformance::runtime_persistence_reopenable_tests!({
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let lease_clock = Arc::clone(&clock);
     (
+        database_lock,
         move |session_id: &str| {
-            let _database_lock = &database_lock;
             let storage = Arc::clone(&storage);
             let database_url = database_url.clone();
             let clock = Arc::clone(&clock);
@@ -352,17 +318,6 @@ lash_conformance::runtime_persistence_reopenable_tests!({
         }),
     )
 });
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_store_enforces_core_lease_fence_authority_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres lease-fence conformance: database URL is not set");
-        return;
-    };
-    reset(&storage).await;
-    let store = storage.session_store("lease-fence-authority");
-    lash_conformance::session_execution_lease_fence_authority(&store).await;
-}
 
 /// Pins the PostgreSQL-local hardening rule that claims and renewals join the
 /// same per-session advisory-lock queue before taking the lease-row lock. The
@@ -463,16 +418,16 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
         .expect("release successor lease");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_runtime_persistence_recovery_laws_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::store_recovery_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres store-recovery laws: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::runtime_persistence_recovery_laws(
-        |session_id| {
+    (
+        database_lock,
+        move |session_id: &str| {
             let database_url = database_url.clone();
             let session_id = SessionId::from(session_id.to_string());
             let storage = sync_await(async move {
@@ -484,11 +439,9 @@ async fn postgres_runtime_persistence_recovery_laws_when_configured() {
         },
         lash_conformance::StoreRecoveryLeaseTiming::Realtime,
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_real_turn_crash_matrix_when_configured() {
+lash_conformance::turn_crash_matrix_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres real-turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
@@ -497,8 +450,9 @@ async fn postgres_real_turn_crash_matrix_when_configured() {
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    Box::pin(lash_conformance::turn_crash_matrix_level_1(
-        |scenario| {
+    (
+        _database_lock,
+        move |scenario: &str| {
             let database_url = database_url.clone();
             let storage = sync_await(async move {
                 PostgresStorage::connect(&database_url)
@@ -508,14 +462,11 @@ async fn postgres_real_turn_crash_matrix_when_configured() {
             Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
                 as Arc<dyn RuntimePersistence>
         },
-        |_| lash_conformance::ConformanceInvocation::native(),
-    ))
-    .await;
-}
+        |_: &str| lash_conformance::ConformanceInvocation::native(),
+    )
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopens_when_configured()
-{
+lash_conformance::checkpoint_component_reopen_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres checkpoint-component recovery: LASH_POSTGRES_DATABASE_URL is not set"
@@ -524,7 +475,7 @@ async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopen
     };
     reset(&storage).await;
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::complete_runtime_checkpoint_component_set_survives_cold_reopens(|| {
+    (_database_lock, move || {
         let database_url = database_url.clone();
         let storage = sync_await(async move {
             PostgresStorage::connect(&database_url)
@@ -533,8 +484,7 @@ async fn postgres_complete_runtime_checkpoint_component_set_survives_cold_reopen
         });
         Arc::new(storage.session_store("checkpoint-component-refs")) as Arc<dyn RuntimePersistence>
     })
-    .await;
-}
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_runtime_turn_receipt_identity_columns_are_nullable_when_configured() {
@@ -585,17 +535,17 @@ async fn postgres_runtime_turn_receipt_rejects_half_populated_append_identity_wh
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configured() {
+lash_conformance::append_head_switch_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres append-receipt conformance: database is not configured");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
-    lash_conformance::append_request_receipt_replays_after_ancestor_superseded(
+    (
+        _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id| async move {
+        move |leaf_node_id: String| async move {
             sqlx::query(
                 "UPDATE lash_sessions
                  SET leaf_node_id = $1, head_revision = head_revision + 1
@@ -607,45 +557,19 @@ async fn postgres_append_receipt_replays_after_ancestor_superseded_when_configur
             .expect("switch Postgres active branch");
         },
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_inactive_append_ancestor_precedes_stale_head_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres append-precedence conformance: database is not configured");
-        return;
-    };
-    reset(&storage).await;
-    let pool = storage.pool().clone();
-    lash_conformance::inactive_append_ancestor_precedes_stale_head(
-        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id| async move {
-            sqlx::query(
-                "UPDATE lash_sessions
-                 SET leaf_node_id = $1, head_revision = head_revision + 1
-                 WHERE session_id = 'root'",
-            )
-            .bind(leaf_node_id)
-            .execute(&pool)
-            .await
-            .expect("switch Postgres active branch");
-        },
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_tombstoned_old_leaf_is_rejected_when_configured() {
+lash_conformance::append_tombstone_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres tombstoned-leaf conformance: database is not configured");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
-    lash_conformance::tombstoned_old_leaf_is_rejected(
+    (
+        _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |node_id| async move {
+        move |node_id: String| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
                 .bind(node_id)
                 .execute(&pool)
@@ -653,11 +577,9 @@ async fn postgres_tombstoned_old_leaf_is_rejected_when_configured() {
                 .expect("tombstone Postgres old leaf");
         },
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_append_receipt_restores_mixed_usage_envelope_when_configured() {
+lash_conformance::append_receipt_envelope_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres mixed-envelope receipt conformance: database is not configured"
@@ -665,20 +587,22 @@ async fn postgres_append_receipt_restores_mixed_usage_envelope_when_configured()
         return;
     };
     reset(&storage).await;
-    lash_conformance::append_receipt_mixed_usage_envelope(Arc::new(storage.session_store("root")))
-        .await;
-}
+    (
+        _database_lock,
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
+    )
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_old_format_append_receipt_returns_public_leaf_when_configured() {
+lash_conformance::append_receipt_rewrite_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres old-format receipt conformance: database is not configured");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
-    lash_conformance::old_format_append_receipt_returns_public_leaf(
-        Arc::new(storage.session_store("root")),
+    (
+        _database_lock,
+        Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         move || async move {
             sqlx::query(
                 "UPDATE lash_runtime_turn_commits
@@ -693,12 +617,10 @@ async fn postgres_old_format_append_receipt_returns_public_leaf_when_configured(
             .expect("install raw pre-upgrade Postgres receipt fixture");
         },
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_artifact_store_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::artifact_store_reopenable_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres artifact-store conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -706,7 +628,7 @@ async fn postgres_artifact_store_satisfies_conformance_when_configured() {
     };
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    lash_conformance::fused_artifact_store::artifact_store_reopenable(|| {
+    (database_lock, move || {
         let storage = Arc::clone(&storage);
         let database_url = database_url.clone();
         sync_await(async move {
@@ -740,8 +662,7 @@ async fn postgres_artifact_store_satisfies_conformance_when_configured() {
             }
         })
     })
-    .await;
-}
+});
 
 /// Corrupt the live checkpoint manifest so the mark phase cannot decode the
 /// root it must follow, giving the sweep a real failure to report.
@@ -768,9 +689,8 @@ impl lash_conformance::StoreMaintenanceFaultInjector for PostgresCorruptRootedMa
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_store_satisfies_the_maintenance_outcome_contract_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::store_maintenance_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres maintenance-outcome conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -778,24 +698,39 @@ async fn postgres_store_satisfies_the_maintenance_outcome_contract_when_configur
     };
     let storage = Arc::new(storage);
     let make_storage = Arc::clone(&storage);
-    lash_conformance::store_maintenance_outcome_contract(
+    (database_lock, "postgres", move || {
+        let storage = Arc::clone(&make_storage);
+        sync_await(async move {
+            reset(&storage).await;
+            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+        })
+    })
+});
+
+lash_conformance::store_maintenance_fault_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres maintenance-outcome conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let make_storage = Arc::clone(&storage);
+    (
+        database_lock,
         "postgres",
-        || {
+        move || {
             let storage = Arc::clone(&make_storage);
             sync_await(async move {
                 reset(&storage).await;
                 Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
             })
         },
-        Some(Arc::new(PostgresCorruptRootedManifest {
-            storage: Arc::clone(&storage),
-        })),
+        Arc::new(PostgresCorruptRootedManifest { storage }),
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_session_store_factory_satisfies_conformance_when_configured() {
+lash_conformance::session_store_factory_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres session-store-factory conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -804,19 +739,19 @@ async fn postgres_session_store_factory_satisfies_conformance_when_configured() 
     };
     let storage = Arc::new(storage);
     // A Postgres session store takes its session id by value: no unbound handle.
-    lash_conformance::session_store_factory("postgres", None, || {
-        let storage = Arc::clone(&storage);
+    let make_storage = Arc::clone(&storage);
+    let make = move || {
+        let storage = Arc::clone(&make_storage);
         sync_await(async move {
             reset(&storage).await;
             Arc::new(storage.session_store_factory())
                 as Arc<dyn lash_core::store::ConformanceSessionStoreFactory>
         })
-    })
-    .await;
-}
+    };
+    (_database_lock, "postgres", None, make)
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_fresh_session_admission_returns_created_when_configured() {
+lash_conformance::fresh_session_admission_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres fresh-admission conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -824,15 +759,13 @@ async fn postgres_fresh_session_admission_returns_created_when_configured() {
         return;
     };
     reset(&storage).await;
-    lash_conformance::fresh_session_admission_returns_created(|session_id| {
+    (_database_lock, move |session_id: &str| {
         Arc::new(storage.session_store(session_id)) as Arc<dyn RuntimePersistence>
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_fork_observer_intent_transient_failure_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::observer_intent_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres fork-observer intent conformance: \
              LASH_POSTGRES_DATABASE_URL is not set"
@@ -840,14 +773,10 @@ async fn postgres_fork_observer_intent_transient_failure_when_configured() {
         return;
     };
     reset(&storage).await;
-    lash_conformance::fork_observer_intent_transient_failure(Arc::new(
-        storage.session_store_factory(),
-    ))
-    .await;
-}
+    (database_lock, Arc::new(storage.session_store_factory()))
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_session_graph_append_branch_liveness_when_configured() {
+lash_conformance::session_graph_append_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres session-graph append branch-liveness conformance: \
@@ -856,11 +785,11 @@ async fn postgres_session_graph_append_branch_liveness_when_configured() {
         return;
     };
     reset(&storage).await;
-    lash_conformance::session_graph_append_branch_liveness(
+    (
+        _database_lock,
         Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
     )
-    .await;
-}
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
@@ -1265,8 +1194,7 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_deletes_owned_session_stores_when_configured() {
+lash_conformance::process_prune_session_store_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres process-owned session prune conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -1277,9 +1205,8 @@ async fn postgres_process_prune_deletes_owned_session_stores_when_configured() {
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
         as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-
-    lash_conformance::process_prune_deletes_owned_session_stores(factory, registry).await;
-}
+    (_database_lock, factory, registry)
+});
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() {
@@ -1887,83 +1814,49 @@ async fn postgres_real_turn_satisfies_cold_process_crash_matrix_when_configured(
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_runtime_effect_controller_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::effect_host_retirement_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres runtime-effect conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     reset(&storage).await;
+    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    (database_lock, host)
+});
 
-    let host = storage.effect_host();
-    lash_conformance::effect_host_retires_session_journal(&host).await;
-    lash_conformance::effect_host_retires_process_journal(&host).await;
-    lash_conformance::effect_host_retires_runtime_operation_journal(&host).await;
-    let retained: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay
-         WHERE session_id = $1",
-    )
-    .bind("retired-journal-session")
-    .fetch_one(storage.pool())
-    .await
-    .expect("count retained Postgres session journal rows");
-    assert_eq!(retained, 0);
-    let session_free_retained: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay WHERE session_id IS NULL",
-    )
-    .fetch_one(storage.pool())
-    .await
-    .expect("count retained Postgres session-free journal rows");
-    assert_eq!(
-        session_free_retained, 1,
-        "only the in-flight runtime operation's row survives among session-free scopes"
-    );
-    let fences: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_effect_scope_retirements")
-        .fetch_one(storage.pool())
-        .await
-        .expect("count Postgres scope fences");
-    assert_eq!(
-        fences, 2,
-        "the process and the retired runtime operation each leave one permanent fence"
-    );
-
+lash_conformance::effect_controller_replay_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres effect replay conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
     let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");
     let controller = storage.runtime_effect_controller(scope.clone());
-    lash_conformance::effect_controller_journaled_effect_replay(|| {
+    (database_lock, move || {
         postgres_conformance_invocation(controller.clone(), scope.clone())
     })
-    .await;
+});
 
+lash_conformance::effect_controller_replay_mismatch_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres effect mismatch conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
     let scope =
         ExecutionScope::runtime_operation("postgres-effect-controller-mismatch-conformance");
     let controller = storage.runtime_effect_controller(scope.clone());
-    lash_conformance::effect_controller_replay_mismatch_diagnostics(
-        || postgres_conformance_invocation(controller.clone(), scope.clone()),
+    (
+        database_lock,
+        move || postgres_conformance_invocation(controller.clone(), scope.clone()),
         "postgres_effect_replay_hash_conflict",
     )
-    .await;
+});
 
-    let scope =
-        ExecutionScope::runtime_operation("postgres-effect-controller-concurrent-conformance");
-    let controller = storage.runtime_effect_controller(scope.clone());
-    lash_conformance::effect_controller_concurrent_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone(), scope.clone())
-    })
-    .await;
-
-    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-tool-conformance");
-    let controller = storage.runtime_effect_controller(scope.clone());
-    lash_conformance::effect_controller_tool_attempt_fanout_replay_deterministic(|| {
-        postgres_conformance_invocation(controller.clone(), scope.clone())
-    })
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::effect_controller_lease_fencing_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres effect lease-fencing conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -1974,7 +1867,8 @@ async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_con
     let make_storage = storage.clone();
     let steal_pool = storage.pool().clone();
     let expire_pool = storage.pool().clone();
-    lash_conformance::effect_controller_lease_fencing(
+    (
+        database_lock,
         lash_conformance::EffectLeaseFencingBackend {
             make_controller: Box::new(move |ttl, clock| {
                 let storage = make_storage.clone();
@@ -2033,8 +1927,7 @@ async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_con
             }),
         },
     )
-    .await;
-}
+});
 
 fn epoch_ms_for_test() -> u64 {
     std::time::SystemTime::now()
@@ -2043,14 +1936,13 @@ fn epoch_ms_for_test() -> u64 {
         .as_millis() as u64
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_registry_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::process_registry_reopenable_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres process conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     let storage = Arc::new(storage);
-    lash_conformance::process_registry_reopenable(|| {
+    (database_lock, move |_: &str| {
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(&storage).await;
@@ -2061,54 +1953,30 @@ async fn postgres_process_registry_satisfies_conformance_when_configured() {
             ReopenableProcessRegistry { open, reopen }
         })
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_change_feed_refuses_cursor_below_tombstone_compaction_horizon_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::process_change_horizon_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres prune-horizon conformance: database URL is not set");
         return;
     };
     reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    lash_conformance::process_change_cursor_below_tombstone_compaction_horizon_is_refused(registry)
-        .await;
-}
+    (database_lock, registry)
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_batch_tombstones_are_ordered_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres process prune batch conformance: database URL is not set");
-        return;
-    };
-    reset(&storage).await;
-    lash_conformance::process_prune_batch_tombstones(Arc::new(storage.process_registry())).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_scopes_to_the_retention_filter_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres scoped process prune conformance: database URL is not set");
-        return;
-    };
-    reset(&storage).await;
-    lash_conformance::process_prune_scoped_by_originator(Arc::new(storage.process_registry()))
-        .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_leased_completion_replay_repairs_projection_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::process_projection_repair_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres leased replay repair: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    lash_conformance::leased_completion_replay_repairs_projection(
+    (
+        database_lock,
         registry,
-        move |stale| async move {
+        move |stale: lash_core::ProcessRecord| async move {
             let changed =
                 sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
                     .bind(stale.id.as_str())
@@ -2120,19 +1988,17 @@ async fn postgres_leased_completion_replay_repairs_projection_when_configured() 
             assert_eq!(changed, 1);
         },
     )
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_trigger_retention_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::process_trigger_retention_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres process-trigger retention conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     let storage = Arc::new(storage);
-    lash_conformance::process_trigger_retention(|| {
+    (database_lock, move || {
         let storage = Arc::clone(&storage);
         async move {
             reset(&storage).await;
@@ -2144,19 +2010,17 @@ async fn postgres_process_trigger_retention_satisfies_conformance_when_configure
             }
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_store_contract_state_machine_properties_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::store_contract_state_machine_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres store-contract properties: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     let storage = Arc::new(storage);
-    lash_conformance::store_contract_state_machine("postgres", move |_, session_id| {
+    (database_lock, "postgres", move |_, session_id| {
         let storage = Arc::clone(&storage);
         async move {
             reset(&storage).await;
@@ -2166,19 +2030,17 @@ async fn postgres_store_contract_state_machine_properties_when_configured() {
             }
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_runtime_persistence_state_machine_properties_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::runtime_persistence_state_machine_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres runtime-persistence properties: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     let storage = Arc::new(storage);
-    lash_conformance::runtime_persistence_state_machine("postgres", move |_| {
+    (database_lock, "postgres", move |_| {
         let storage = Arc::clone(&storage);
         async move {
             reset(&storage).await;
@@ -2190,34 +2052,27 @@ async fn postgres_runtime_persistence_state_machine_properties_when_configured()
             .expect("create Postgres runtime-persistence property handles")
         }
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_session_graph_state_machine_properties_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::session_graph_state_machine_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres session-graph properties: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     let storage = Arc::new(storage);
-    Box::pin(lash_conformance::session_graph_state_machine(
-        "postgres",
-        move |_| {
-            let storage = Arc::clone(&storage);
-            async move {
-                reset(&storage).await;
-                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-            }
-        },
-    ))
-    .await;
-}
+    (database_lock, "postgres", move |_| {
+        let storage = Arc::clone(&storage);
+        async move {
+            reset(&storage).await;
+            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+        }
+    })
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_continuation_store_satisfies_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::process_continuation_store_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres continuation conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
@@ -2227,21 +2082,24 @@ async fn postgres_process_continuation_store_satisfies_conformance_when_configur
     let process_storage = Arc::new(storage.process_registry());
     let registry = Arc::clone(&process_storage) as Arc<dyn lash_core::ProcessRegistry>;
     let store = process_storage as Arc<dyn lash_core::ProcessContinuationStore>;
-    lash_conformance::process_continuation_store(registry, store).await;
-}
+    (database_lock, registry, store)
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_trigger_store_satisfies_conformance_when_configured() {
+#[test]
+fn trigger_subscription_owner_filter_is_pushed_down() {
     lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
         "PostgreSQL",
         lash_postgres_store::testing::trigger_subscription_list_sql,
     );
-    let Some((_database_lock, storage)) = storage().await else {
+}
+
+lash_conformance::trigger_store_reopenable_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres trigger conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
     let storage = Arc::new(storage);
-    lash_conformance::trigger_store_reopenable(|| {
+    (database_lock, move || {
         let storage = Arc::clone(&storage);
         sync_await(async move {
             reset(&storage).await;
@@ -2250,61 +2108,20 @@ async fn postgres_trigger_store_satisfies_conformance_when_configured() {
             ReopenableTriggerStore { open, reopen }
         })
     })
-    .await;
-}
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_legacy_ownerless_trigger_receipt_is_retained_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres legacy trigger receipt law: database is not configured");
+lash_conformance::trigger_retention_fault_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres trigger retention fault laws: database is not configured");
         return;
     };
     reset(&storage).await;
     let pool = storage.pool().clone();
     let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-    let injector = PostgresLegacyTriggerMutationReceiptInjector { pool };
-    lash_conformance::legacy_ownerless_trigger_receipt_is_retained_law(store, &injector).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_trigger_occurrence_retention_failure_is_not_laundered_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres trigger occurrence retention failure law: database is not configured"
-        );
-        return;
-    };
-    reset(&storage).await;
-    let pool = storage.pool().clone();
-    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-    let fault = PostgresTriggerOccurrenceRetentionFaultInjector { pool: pool.clone() };
-    lash_conformance::trigger_occurrence_retention_failure_law(store, &fault).await;
-    sqlx::query(
-        "DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete ON lash_trigger_occurrences",
-    )
-    .execute(&pool)
-    .await
-    .expect("drop Postgres occurrence delete failure trigger");
-    sqlx::query("DROP FUNCTION IF EXISTS lash_fig1507_fail_occurrence_delete()")
-        .execute(&pool)
-        .await
-        .expect("drop Postgres occurrence delete failure function");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_trigger_retention_reconciliation_is_transactional_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres trigger retention transaction law: database is not configured"
-        );
-        return;
-    };
-    reset(&storage).await;
-    let pool = storage.pool().clone();
-    let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-    let fault = PostgresTriggerOccurrenceRetentionFaultInjector { pool };
-    lash_conformance::trigger_retention_reconciliation_failure_law(store, &fault).await;
-}
+    let legacy = Arc::new(PostgresLegacyTriggerMutationReceiptInjector { pool: pool.clone() });
+    let fault = Arc::new(PostgresTriggerOccurrenceRetentionFaultInjector { pool });
+    (database_lock, store, legacy, fault)
+});
 
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
@@ -2313,8 +2130,7 @@ include!("conformance/append_identity.rs");
 mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_session_read_view_satisfies_conformance_when_configured() {
+lash_conformance::session_read_view_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres read-session conformance: database URL is not set");
         return;
@@ -2326,27 +2142,23 @@ async fn postgres_session_read_view_satisfies_conformance_when_configured() {
             .session_store_factory()
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     );
-    lash_conformance::session_store_factory_mid_stream_failure_evidence(factory.clone(), || {
-        clock.advance(1)
-    })
-    .await;
-    lash_conformance::session_store_factory_read_session(factory).await;
-}
+    (_database_lock, factory, move || clock.advance(1))
+});
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_attachment_owner_degraded_proof_conformance() {
+lash_conformance::attachment_owner_degraded_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
     reset(&storage).await;
-    lash_conformance::attachment_owner_degraded_proof(Arc::new(storage.session_store_factory()))
-        .await;
-}
+    (
+        _database_lock,
+        Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
+    )
+});
 
-#[tokio::test]
-async fn postgres_terminal_evidence_retention_conformance_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+lash_conformance::retention_tests!({
+    let Some((database_lock, storage)) = storage().await else {
         return;
     };
-    lash_conformance::retention_conformance(Arc::new(storage.session_store_factory())).await;
-}
+    (database_lock, Arc::new(storage.session_store_factory()))
+});
