@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+(FIG-3016, 2026-09-13). See "What 0096 kept" at the end of this ADR.
 
 ## Context
 
@@ -132,3 +133,23 @@ is independently useful to a host.
   reliable statement about how its state must be read.
 - Deployments take one breaking window: drain or recreate parked processes, and
   expect old snapshots to be refused rather than migrated.
+
+## What 0096 kept
+
+[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
+surface: TypeScript is the only RLM authoring language, and "lashlang" names
+the dialect-neutral IR and VM.
+
+**Dead.** The parity guarantee and the doubled battery. The permanence clause
+("neither dialect is deprecated by the existence of the other"). The per-session
+dialect choice, the create-contract selection, the first-commit pin and its
+typed reopen refusal, the `lashlang` default, and subagent inheritance of a
+pin — one language id means nothing is pinned. The "create a new session to get
+the other dialect" move. The Lashlang-only scoping of the workflow-graph lens,
+which was a consequence of the surface split rather than of the lens laws.
+
+**Alive.** The naming rule: `typescript`, spelled out, in the language id, the
+engine id, host configuration, telemetry and documentation — no `ts`, no `js`,
+no aliases. The cutover stance: no migration decoders at any format boundary,
+old artifacts fail closed on the exact version check, parked segments drain or
+are recreated, one announced breaking window.

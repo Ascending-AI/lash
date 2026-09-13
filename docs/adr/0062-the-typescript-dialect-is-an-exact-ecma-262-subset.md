@@ -15,6 +15,11 @@ split: one batch, one recorded settlement order. `waitSignal`, `sleep` and
 cell-only `finish` are unchanged, as is the `return`/`throw`/`finally`
 contract for a process body.
 
+Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) makes this the only RLM
+dialect; there is no second surface to be at parity with. Every reference to
+"Lashlang" below names the IR and VM that this dialect lowers into, never a
+second authored language.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
