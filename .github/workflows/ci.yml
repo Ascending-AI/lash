@@ -247,6 +247,11 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    needs: plan
+    # Trusted events replace the workspace check and the workspace doctests
+    # with cached Bazel actions, which need the shared cache credentials.
+    # Untrusted events never see them and keep the Cargo commands below.
+    environment: build-cache
     strategy:
       fail-fast: false
       matrix:
@@ -309,15 +314,54 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      - name: Configure Bazel shared cache
+        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # `//:workspace_compile` is every first-party label of the resolved
+      # default workspace graph except doctests: libraries, binaries, examples,
+      # benches, build scripts, and the unit- and integration-test crates that
+      # carry the `cfg(test)` shape. It compiles and links them, so it proves a
+      # strict superset of `cargo check --workspace --all-targets`. The graph is
+      # generated from the same `cargo metadata --locked` resolution the Cargo
+      # command uses, so feature unification is identical and the members that
+      # are not `default-members` — `lash-typescript` and `lashlang` — are
+      # present. The one Cargo target outside the resolved graph,
+      # `slack-clone-live-e2e`, is skipped by `cargo check` for the same reason.
+      #
+      # `//:workspace_doctests` is the same 35 rustdoc binaries Cargo builds,
+      # run against the pinned toolchain and the declared dependency graph.
+      - name: Check workspace and run doctests with shared cache
+        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
+        run: |
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --cache_test_results=yes --test_output=errors \
+            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
+            //:workspace_compile //:workspace_doctests
+
+      - name: Remove client credentials
+        if: always() && matrix.lane == 'workspace'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      # Untrusted pull requests receive no cache credentials, so they keep
+      # exactly the Cargo commands that predate the Bazel branch above.
       - name: Check workspace (all targets)
-        if: matrix.lane == 'workspace'
+        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
           cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
 
       # nextest does not run doctests; keep the full workspace gate.
       - name: Test workspace doctests
-        if: matrix.lane == 'workspace'
+        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
           cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
@@ -1004,6 +1048,11 @@ jobs:
     name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    needs: plan
+    # Trusted events run the workspace clippy as cached Bazel actions, which
+    # need the shared cache credentials. Untrusted events never see them and
+    # keep the Cargo command below.
+    environment: build-cache
     # The transcript gate reads the `Transcript:` justification from the PR
     # body. A manually dispatched run — the recovery path when GitHub stops
     # delivering a branch's events — has no pull request in its payload, so the
@@ -1128,11 +1177,47 @@ jobs:
           # add it here.
           python3 scripts/check_included_file_formatting.py
 
+      - name: Configure Bazel shared cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # `//:workspace_clippy` runs one clippy action per first-party target of
+      # the resolved default workspace graph — the `--workspace --all-targets`
+      # shape — with the `[workspace.lints]` table, the nearest `clippy.toml`
+      # and a trailing `-D warnings`, in the order Cargo emits them. See
+      # `tools/bazel/clippy.bzl`.
+      - name: Clippy (workspace, all targets, shared cache)
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
+        run: |
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
+            //:workspace_clippy
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      # Untrusted pull requests receive no cache credentials and keep exactly
+      # the Cargo command that predates the Bazel branch above.
       - name: Clippy (workspace, all targets)
+        if: needs.plan.outputs.bazel_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
-          cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
+
+      # `slack-clone`'s `e2e` feature is outside the resolved default workspace
+      # graph, so its `cfg(feature = "e2e")` code has no Bazel label. This
+      # command stays Cargo on every event.
+      - name: Clippy (slack-clone e2e feature)
+        run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
       - name: Check Restate handler panic boundary
         run: python3 scripts/check-restate-handler-panics.py

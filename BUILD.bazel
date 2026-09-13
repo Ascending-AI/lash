@@ -1,5 +1,7 @@
+load("//tools/bazel:clippy.bzl", "lash_rust_clippy")
 load(
     "//tools/bazel:workspace_targets.bzl",
+    "WORKSPACE_CLIPPY_TARGETS",
     "WORKSPACE_COMPILE_TARGETS",
     "WORKSPACE_BAZEL_TEST_TARGETS",
     "WORKSPACE_DOCTEST_TARGETS",
@@ -10,6 +12,7 @@ load(
 exports_files([
     "Cargo.lock",
     "Cargo.toml",
+    "clippy.toml",
 ])
 
 filegroup(
@@ -66,10 +69,21 @@ filegroup(
     testonly = True,
 )
 
-filegroup(
+# rustdoc runs these against the pinned toolchain and the declared dependency
+# graph; nothing here reaches a service, the network or a Cargo-relative asset,
+# so the partition is executable and its successes are cacheable.
+test_suite(
     name = "workspace_doctests",
-    srcs = WORKSPACE_DOCTEST_TARGETS,
+    tests = WORKSPACE_DOCTEST_TARGETS,
+)
+
+# The `cargo clippy --workspace --all-targets` shape as cached Bazel actions:
+# one clippy action per first-party crate target, with the workspace lint table
+# and the nearest `clippy.toml` applied exactly as Cargo applies them.
+lash_rust_clippy(
+    name = "workspace_clippy",
     testonly = True,
+    deps = WORKSPACE_CLIPPY_TARGETS,
 )
 
 # This target keeps the complete Bazel and Cargo-owned test label set queryable.

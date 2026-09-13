@@ -1,0 +1,68 @@
+name: Bazel shared cache
+description: >-
+  Installs the pinned Bazelisk, derives this runner image's cache identity and
+  writes the authenticated cache client credentials. Exports the resulting
+  Bazel flags as BAZEL_SHARED_CACHE_FLAGS.
+
+runs:
+  using: composite
+  steps:
+    - name: Install pinned Bazelisk
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl --fail --location --silent --show-error \
+          https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 \
+          -o "$RUNNER_TEMP/bazel"
+        printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' \
+          "$RUNNER_TEMP/bazel" | sha256sum -c -
+        chmod +x "$RUNNER_TEMP/bazel"
+        echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+    # GitHub-hosted actions execute locally rather than in the shared executor's
+    # pinned runtime image, so their remote-cache identity is derived from the
+    # concrete runner image instead of `kiln_executor_runtime`.
+    - name: Resolve GitHub runner cache identity
+      id: bazel-runtime
+      shell: bash
+      run: |
+        python3 scripts/ci_plan.py bazel-runtime \
+          --runner-os "${RUNNER_OS}" \
+          --runner-arch "${RUNNER_ARCH}" \
+          --image-os "${ImageOS:-}" \
+          --image-version "${ImageVersion:-}" >> "${GITHUB_OUTPUT}"
+
+    - name: Configure authenticated cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        umask 077
+        test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
+        mkdir -p "$RUNNER_TEMP/build-cache"
+        printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
+        printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
+        printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
+
+    - name: Export shared cache flags
+      shell: bash
+      env:
+        BAZEL_RUNTIME: ${{ steps.bazel-runtime.outputs.bazel_runtime }}
+      run: |
+        set -euo pipefail
+        {
+          echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
+          echo "--repository_cache=$RUNNER_TEMP/bazel-repository"
+          echo "--disk_cache="
+          echo "--spawn_strategy=local"
+          echo "--remote_cache=grpcs://178.105.21.6:8443"
+          echo "--remote_instance_name=kiln"
+          echo "--tls_certificate=$RUNNER_TEMP/build-cache/ca.crt"
+          echo "--tls_client_certificate=$RUNNER_TEMP/build-cache/client.crt"
+          echo "--tls_client_key=$RUNNER_TEMP/build-cache/client.key"
+          echo "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}"
+          echo "--remote_default_exec_properties=cpu_count=1"
+          echo "--remote_default_exec_properties=memory_kb=2097152"
+          echo "--remote_download_outputs=toplevel"
+          echo "--remote_timeout=120"
+          echo "EOF"
+        } >> "$GITHUB_ENV"
