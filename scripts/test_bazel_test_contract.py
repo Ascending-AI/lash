@@ -19,6 +19,7 @@ import yaml
 
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import bazel_executor_runtime  # noqa: E402
 import ci_plan  # noqa: E402
 
 
@@ -258,7 +259,7 @@ class BazelTestContractTests(unittest.TestCase):
             ],
         )
 
-    def test_ci_enrolls_the_contract_and_uses_a_distinct_runner_identity(self) -> None:
+    def test_ci_enrolls_the_contract_and_configures_the_shared_pool(self) -> None:
         jobs = workflow()["jobs"]
         repository_tests = job_step(jobs["repo-gates"], "Test repository scripts")[
             "run"
@@ -269,46 +270,72 @@ class BazelTestContractTests(unittest.TestCase):
         )
 
         setup = shared_cache_action()
-        runtime = job_step(setup, "Resolve GitHub runner cache identity")
-        self.assertIn("scripts/ci_plan.py bazel-runtime", runtime["run"])
-        with tempfile.TemporaryDirectory() as temporary:
-            github_output = pathlib.Path(temporary) / "output"
-            environment = os.environ | {
-                "GITHUB_OUTPUT": str(github_output),
-                "ImageOS": "ubuntu24",
-                "ImageVersion": "20260907.1",
-                "RUNNER_ARCH": "X64",
-                "RUNNER_OS": "Linux",
-            }
-            subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", runtime["run"]],
-                cwd=ROOT,
-                env=environment,
-                check=True,
-            )
-            self.assertEqual(
-                "bazel_runtime="
-                + ci_plan.github_runner_cache_identity(
-                    "Linux", "X64", "ubuntu24", "20260907.1"
-                ),
-                github_output.read_text(encoding="utf-8").strip(),
-            )
         flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
+        self.assertIn("--remote_executor=grpcs://178.105.21.6:8443", flags)
         self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", flags)
         self.assertIn("--remote_instance_name=kiln", flags)
+        self.assertIn("--remote_local_fallback=false", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
         self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)
+        self.assertNotIn("github_runner_runtime", flags)
+        self.assertNotIn("spawn_strategy=local", flags)
+
+    def test_ci_and_local_builds_advertise_one_executor_runtime(self) -> None:
+        """The pool matches `kiln_executor_runtime` exactly, so CI may not own a copy.
+
+        `.bazelrc` is the single source: `scripts/bazel_executor_runtime.py`
+        reads the value from it and the composite action interpolates whatever
+        that prints. The only way CI and `.bazelrc` could disagree is a second
+        checked-in copy of the fingerprint, so this test refuses one anywhere
+        under `.github/`.
+        """
+        bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
+        fingerprint = bazel_executor_runtime.executor_runtime(bazelrc)
+        self.assertRegex(fingerprint, r"^kiln-runtime-sha256-[0-9a-f]{64}$")
         self.assertIn(
-            "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}",
+            "build:shared "
+            f"--remote_default_exec_properties=kiln_executor_runtime={fingerprint}",
+            bazelrc,
+        )
+        with self.assertRaises(bazel_executor_runtime.FingerprintError):
+            bazel_executor_runtime.executor_runtime("build --jobs=8\n")
+
+        setup = shared_cache_action()
+        runtime = job_step(setup, "Resolve shared executor runtime")
+        self.assertIn("scripts/bazel_executor_runtime.py", runtime["run"])
+        with tempfile.TemporaryDirectory() as temporary:
+            github_output = pathlib.Path(temporary) / "output"
+            subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", runtime["run"]],
+                cwd=ROOT,
+                env=os.environ | {"GITHUB_OUTPUT": str(github_output)},
+                check=True,
+            )
+            self.assertEqual(
+                f"executor_runtime={fingerprint}",
+                github_output.read_text(encoding="utf-8").strip(),
+            )
+
+        flags = job_step(setup, "Export shared cache flags")["run"]
+        self.assertIn(
+            "--remote_default_exec_properties=kiln_executor_runtime=${EXECUTOR_RUNTIME}",
             flags,
         )
-        self.assertNotIn("kiln_executor_runtime", flags)
-        self.assertNotIn("kiln_executor_runtime", bazel_command)
+        for path in sorted((ROOT / ".github").rglob("*")):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="surrogateescape")
+            self.assertNotIn(
+                "kiln-runtime-sha256-",
+                text,
+                f"{path.relative_to(ROOT)} carries its own copy of the executor "
+                "runtime fingerprint; read it from .bazelrc instead",
+            )
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
         jobs = workflow()["jobs"]
@@ -540,7 +567,8 @@ class BazelTestContractTests(unittest.TestCase):
         script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
         self.assertIn("--nocache_test_results", script)
         self.assertIn(
-            "--modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache",
+            "--modify_execution_info=TestRunner=+no-cache,"
+            "TestRunner=+no-remote-cache,TestRunner=+no-remote-exec",
             script,
         )
         self.assertNotIn("--cache_test_results=yes", script)

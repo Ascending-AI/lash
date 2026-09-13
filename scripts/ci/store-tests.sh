@@ -24,6 +24,11 @@
 #     whose verdict depends on a live database is a false green. The
 #     `--modify_execution_info` filter is scoped to `TestRunner` precisely so
 #     the compile actions above it stay cacheable.
+#   * `no-remote-exec` on the same mnemonic keeps the test spawn on this
+#     runner. The service this job stood up listens on the runner's loopback
+#     and exists nowhere else, so a test action dispatched to the execution
+#     pool would have no database or bucket to talk to. Only the compile
+#     actions below it are submitted to the pool.
 #
 # Usage: scripts/ci/store-tests.sh <suite>
 set -euo pipefail
@@ -45,9 +50,8 @@ bazel_test() {
   # shellcheck disable=SC2086
   bazel --output_user_root="${BAZEL_OUTPUT_USER_ROOT:?}" test \
     ${BAZEL_SHARED_CACHE_FLAGS:?} \
-    --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
     --nocache_test_results \
-    --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache \
+    --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache,TestRunner=+no-remote-exec \
     --local_test_jobs=1 \
     --test_timeout=1200 \
     --test_output=errors \

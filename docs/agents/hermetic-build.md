@@ -326,18 +326,31 @@ service jobs take the Cargo branch of `scripts/ci/store-tests.sh`, preserving
 the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.
 
-Every CI job that talks to the shared cache configures it through the
+Every CI job that talks to the shared pool configures it through the
 `.github/actions/bazel-shared-cache` composite action, which pins Bazelisk,
-derives the runner identity, materializes the client certificate, and exports
-`BAZEL_CACHE_FLAGS` and `BAZEL_OUTPUT_USER_ROOT`. Its companion
-`bazel-shared-cache-cleanup` removes the credentials in an `if: always()` step.
+resolves the executor runtime fingerprint, materializes the client certificate,
+and exports `BAZEL_SHARED_CACHE_FLAGS` and `BAZEL_OUTPUT_USER_ROOT`. Pair it
+with an `if: always()` step that removes `"$RUNNER_TEMP/build-cache"`.
 
-GitHub-hosted actions execute locally, not in the shared executor's pinned
-runtime image. Their remote-cache platform property is therefore derived from
-GitHub's `runner.os`, `runner.arch`, `ImageOS`, and `ImageVersion` values. This
-gives each concrete GitHub runner image a deterministic action identity
-distinct from `kiln_executor_runtime`; the cache service and instance remain
-shared, but actions cannot cross the runtime boundary under the same key.
+CI does not compile. Trusted events submit their actions to the same execution
+pool a local fork uses (`--remote_executor=grpcs://178.105.21.6:8443`), so the
+two-core GitHub runner uploads inputs, waits, and downloads results. The runner
+and a fork therefore advertise one `kiln_executor_runtime` and share one action
+cache namespace: a label a fork already built is a cache hit in CI and the
+reverse. `.bazelrc` is the single source of that fingerprint, CI reads it
+through `scripts/bazel_executor_runtime.py`, and
+`scripts/test_bazel_test_contract.py` refuses a second copy of it anywhere
+under `.github/`, because the scheduler matches the property exactly and a
+stale copy would silently stop matching the pool.
+
+`--jobs=32` counts in-flight remote actions rather than local cores, against
+the eight concurrent slots the pool advertises. `--remote_local_fallback=false`
+makes an unreachable pool a red job rather than a silent two-core compile,
+which is the intended trust posture. Service-backed tests are the one spawn
+that stays on the runner: `scripts/ci/store-tests.sh` adds `no-remote-exec` to
+the `TestRunner` mnemonic, because the database or bucket the job stood up
+listens on the runner's loopback and exists nowhere else. Their compile actions
+still run on the pool.
 
 The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent

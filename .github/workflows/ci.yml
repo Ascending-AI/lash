@@ -355,7 +355,6 @@ jobs:
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
-            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
             //:workspace_compile //:workspace_doctests
 
       - name: Remove client credentials
@@ -791,7 +790,6 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
-            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
             //:workspace_tests
 
       - name: Remove client credentials
@@ -1177,7 +1175,7 @@ jobs:
           # shellcheck disable=SC2086
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
-            --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
+            --remote_download_outputs=minimal \
             //:workspace_clippy
 
       - name: Remove client credentials
