@@ -320,7 +320,6 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         operand_stack: Vec::new(),
         last_value: None,
         slots: vec![None; slot_count],
-        projected_slots: vec![false; slot_count],
         globals: Record::new(),
         iterator_stack: Vec::new(),
         frame_stack: Vec::new(),

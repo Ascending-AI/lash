@@ -26,9 +26,13 @@ use super::exceptions::PendingErrorOrigin;
 /// v10 preserves structured tool-failure classification inside a pending
 /// runtime error's serialized execution-host source.
 ///
+/// v11 removes the redundant all-false projected-slot vectors. Durable
+/// continuations cannot carry projected bindings, so restore reconstructs the
+/// in-memory vectors from the slot counts.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 10;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 11;
 
 /// The execution identity pending-tool handles carry.
 ///
@@ -113,7 +117,6 @@ pub struct VmContinuation {
         deserialize_with = "continuation_serde::deserialize_slots"
     )]
     pub slots: Vec<Option<Value>>,
-    pub projected_slots: Vec<bool>,
     #[serde(
         serialize_with = "continuation_serde::serialize_record",
         deserialize_with = "continuation_serde::deserialize_record"
@@ -137,6 +140,7 @@ pub struct VmContinuation {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct VmFrameContinuation {
     pub return_instruction_pointer: usize,
     pub function: Option<u32>,
@@ -146,7 +150,6 @@ pub(crate) struct VmFrameContinuation {
         deserialize_with = "continuation_serde::deserialize_slots"
     )]
     pub slots: Vec<Option<Value>>,
-    pub projected_slots: Vec<bool>,
     #[serde(
         serialize_with = "continuation_serde::serialize_record",
         deserialize_with = "continuation_serde::deserialize_record"
@@ -987,6 +990,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.heap.collect(roots.iter());
         validate_values(&self.stack, "operand stack")?;
         validate_optional_value(self.last_value.as_ref(), "last value")?;
+        if let Some(index) = self.slots.projected.iter().position(|projected| *projected) {
+            return Err(ContinuationError::UnserializableValue {
+                location: format!("slot {index}"),
+                variant: "Projected",
+            });
+        }
         for (index, value) in self.slots.values.iter().enumerate() {
             validate_optional_value(value.as_ref(), &format!("slot {index}"))?;
         }
@@ -1041,7 +1050,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     .map_err(|_| ContinuationError::FunctionIndexOverflow)?,
                 operand_stack_base: frame.operand_stack_base,
                 slots: frame.slots.values.clone(),
-                projected_slots: frame.slots.projected.clone(),
                 globals: frame.slots.extras.clone(),
                 iterator_stack,
                 return_target,
@@ -1116,7 +1124,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             operand_stack: self.stack.clone(),
             last_value: self.last_value.clone(),
             slots: self.slots.values.clone(),
-            projected_slots: self.slots.projected.clone(),
             globals: self.slots.extras.clone(),
             iterator_stack,
             frame_stack,
@@ -1181,9 +1188,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 .len(),
             None => program.chunk.slot_names.len(),
         };
-        if continuation.slots.len() != active_slot_count
-            || continuation.projected_slots.len() != active_slot_count
-        {
+        if continuation.slots.len() != active_slot_count {
             return Err(ContinuationError::SlotCountMismatch {
                 expected: active_slot_count,
                 actual: continuation.slots.len(),
@@ -1200,7 +1205,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     .len(),
                 None => program.chunk.slot_names.len(),
             };
-            if frame.slots.len() != expected || frame.projected_slots.len() != expected {
+            if frame.slots.len() != expected {
                 return Err(ContinuationError::SlotCountMismatch {
                     expected,
                     actual: frame.slots.len(),
@@ -1287,46 +1292,50 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let frames = continuation
             .frame_stack
             .into_iter()
-            .map(|frame| CallFrame {
-                return_ip: frame.return_instruction_pointer,
-                function: frame.function.map(|index| index as usize),
-                operand_stack_base: frame.operand_stack_base,
-                slots: SlotState {
-                    values: frame.slots,
-                    projected: frame.projected_slots,
-                    extras: frame.globals,
-                },
-                iter_stack: frame
-                    .iterator_stack
-                    .into_iter()
-                    .map(iterator_from_continuation)
-                    .collect(),
-                extras_heapified: false,
-                return_target: match frame.return_target {
-                    VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
-                    VmFrameReturnContinuation::Callback {
-                        function,
-                        calls,
-                        next_index,
-                        results,
-                        completion,
-                        allow_effects,
-                        live_url_search_params,
-                    } => ReturnTarget::Callback(CallbackDriver {
-                        function,
-                        calls,
-                        next_index,
-                        results,
-                        completion: match completion {
-                            VmCallbackCompletion::Collect => CallbackCompletion::Collect,
-                            VmCallbackCompletion::Discard => CallbackCompletion::Discard,
-                        },
-                        allow_effects,
-                        live_url_search_params,
-                    }),
-                },
+            .map(|frame| {
+                let projected = vec![false; frame.slots.len()];
+                CallFrame {
+                    return_ip: frame.return_instruction_pointer,
+                    function: frame.function.map(|index| index as usize),
+                    operand_stack_base: frame.operand_stack_base,
+                    slots: SlotState {
+                        values: frame.slots,
+                        projected,
+                        extras: frame.globals,
+                    },
+                    iter_stack: frame
+                        .iterator_stack
+                        .into_iter()
+                        .map(iterator_from_continuation)
+                        .collect(),
+                    extras_heapified: false,
+                    return_target: match frame.return_target {
+                        VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
+                        VmFrameReturnContinuation::Callback {
+                            function,
+                            calls,
+                            next_index,
+                            results,
+                            completion,
+                            allow_effects,
+                            live_url_search_params,
+                        } => ReturnTarget::Callback(CallbackDriver {
+                            function,
+                            calls,
+                            next_index,
+                            results,
+                            completion: match completion {
+                                VmCallbackCompletion::Collect => CallbackCompletion::Collect,
+                                VmCallbackCompletion::Discard => CallbackCompletion::Discard,
+                            },
+                            allow_effects,
+                            live_url_search_params,
+                        }),
+                    },
+                }
             })
             .collect();
+        let projected = vec![false; continuation.slots.len()];
         Ok(Self {
             chunk: &program.chunk,
             ip: continuation.instruction_pointer,
@@ -1334,7 +1343,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             last_value: continuation.last_value,
             slots: SlotState {
                 values: continuation.slots,
-                projected: continuation.projected_slots,
+                projected,
                 extras: continuation.globals,
             },
             host,
@@ -1392,7 +1401,6 @@ mod tests {
             operand_stack: Vec::new(),
             last_value: None,
             slots: Vec::new(),
-            projected_slots: Vec::new(),
             globals: Record::new(),
             iterator_stack: Vec::new(),
             frame_stack: Vec::new(),
@@ -1467,7 +1475,6 @@ mod tests {
             .expect("EffectError");
         let mut continuation = empty_continuation(heap);
         continuation.slots = vec![Some(error)];
-        continuation.projected_slots = vec![false];
         let bytes = serde_json::to_vec(&continuation).expect("serialize continuation");
         let mut future_bytes = bytes.clone();
         let effect_error_pos = future_bytes
@@ -1529,7 +1536,6 @@ mod tests {
             .expect("close cycle");
         let mut continuation = empty_continuation(cyclic);
         continuation.slots = vec![Some(Value::Ref(root))];
-        continuation.projected_slots = vec![false];
         let error = validate_continuation(&continuation)
             .expect_err("a cyclic continuation must be rejected");
         assert!(
@@ -1548,7 +1554,6 @@ mod tests {
         };
         let mut continuation = empty_continuation(heap);
         continuation.slots = vec![Some(Value::Ref(id))];
-        continuation.projected_slots = vec![false];
         validate_continuation(&continuation).expect("an owned tree validates");
         let bytes = serde_json::to_vec(&continuation).expect("serialize heap");
         let restored: VmContinuation = serde_json::from_slice(&bytes).expect("restore heap");
