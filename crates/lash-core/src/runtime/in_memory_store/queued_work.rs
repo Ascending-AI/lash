@@ -405,50 +405,35 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             }
         };
         indices.truncate(selected_len);
-        let next_fencing_tokens = indices
-            .iter()
-            .map(|index| {
-                crate::StoreError::checked_monotonic_increment(
-                    "queued_work_claim_fencing_token",
-                    queued[*index].claim.fencing_token,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let first = &queued[indices[0]];
-        let abandon_restore_claim_id = first.claim.id();
-        let abandon_restore_claim_token = first.claim.token();
-        let fencing_token = next_fencing_tokens[0];
-        let claim_id = crate::store::queued_work::derive_claim_id(
+        let enqueue_seq = queued[indices[0]].batch.enqueue_seq;
+        let minted = super::claim_hold::mint_in_memory_claim(
+            queued.as_mut_slice(),
+            &indices,
+            enqueue_seq,
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-            first.batch.enqueue_seq,
-            fencing_token,
-        );
-        let lease_token =
-            crate::store::queued_work::derive_claim_lease_token(session_id, owner, &claim_id, now);
-        let mut batches = Vec::new();
-        for (index, next_fencing_token) in indices.into_iter().zip(next_fencing_tokens) {
-            let entry = &mut queued[index];
-            entry.claim.acquire(
-                claim_id.clone(),
-                lease_token.clone(),
-                owner.clone(),
-                generation,
-                next_fencing_token,
-            );
-            batches.push(entry.batch.clone());
-        }
+            "queued_work_claim_fencing_token",
+            session_id,
+            owner,
+            generation,
+            now,
+        )?;
+        let batches = indices
+            .iter()
+            .map(|&index| queued[index].batch.clone())
+            .collect();
         Ok(crate::SelectedQueuedWorkClaimOutcome::new(
             Some(crate::QueuedWorkClaim {
                 session_id: SessionId::from(session_id.to_string()),
-                claim_id,
+                claim_id: minted.claim_id,
                 owner: owner.clone(),
-                lease_token,
-                fencing_token,
+                lease_token: minted.lease_token,
+                fencing_token: minted.fencing_token,
                 session_lease_generation: generation,
                 data: crate::QueuedWorkClaimData {
                     batches,
-                    abandon_restore_claim_id,
-                    abandon_restore_claim_token: abandon_restore_claim_token
+                    abandon_restore_claim_id: minted.abandon_restore_claim_id,
+                    abandon_restore_claim_token: minted
+                        .abandon_restore_claim_token
                         .map(String::into_boxed_str),
                 },
             }),
