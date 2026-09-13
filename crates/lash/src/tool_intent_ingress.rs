@@ -899,7 +899,10 @@ impl ToolIntentIngress {
                     lash_core::OnParentEnd::Cancel => lash_core::ProcessParentEndPolicy::Cancel,
                 });
                 let mut request = intent.request;
-                request.id = lash_core::ProcessId::from(identity.replay_key.clone());
+                // The replay key is the process id, so a re-submitted
+                // declaration starts the same process. One projection, shared
+                // with core's recorded-intent seam (FIG-2876).
+                request.id = identity.recorded_process_id();
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
                 let registration =
@@ -918,10 +921,13 @@ impl ToolIntentIngress {
                     .await?;
                 let event_type =
                     lash_core::facade_support::process_signal_event_type(&intent.signal_name)?;
+                // Core's recorded-intent seam mints the same key from the same
+                // three parts; both routes call the one constructor (FIG-2876).
                 let request = lash_core::ProcessEventAppendRequest::new(event_type, intent.payload)
-                    .with_replay_key(format!(
-                        "process:{}:signal.{}:{}",
-                        intent.process_id, intent.signal_name, identity.replay_key
+                    .with_replay_key(lash_core::facade_support::process_signal_wait_key(
+                        &intent.process_id,
+                        &intent.signal_name,
+                        &identity.replay_key,
                     ));
                 lash_core::ProcessCommand::Signal {
                     process_ref,
@@ -935,6 +941,11 @@ impl ToolIntentIngress {
                     .process_registry()?
                     .resolve_process_ref(&intent.process_id)
                     .await?;
+                // Same stamping core's recorded-intent cancel seam applies
+                // (`runtime/session_manager/process_runners/control.rs`): the
+                // replay key requests the cancel and the whole identity is the
+                // replay attribution. Not a separate contract — the broad
+                // `ProcessCommand` type is why it is spelled again here.
                 lash_core::ProcessCommand::Cancel {
                     process_ref,
                     origin: lash_core::CancelOrigin::ModelRequested,
@@ -945,6 +956,9 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::EmitProcessEvent(intent) => {
+                // A plain event emission appends under the declaration's own
+                // replay key, with no signal-key derivation: core's
+                // `emit_event_recorded_intent` passes the same key through.
                 let request =
                     lash_core::ProcessEventAppendRequest::new(intent.event_type, intent.payload)
                         .with_replay_key(identity.replay_key.clone());

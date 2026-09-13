@@ -9,7 +9,7 @@ pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn Pro
         )
         .await
         .expect("register canonical-payload process");
-    let replay_key = format!("process:{process_id}:signal.zero:1");
+    let replay_key = lash_core::runtime::process_signal_wait_key(&process_id, "zero", 1);
     let first = registry
         .append_event(
             &process_id,

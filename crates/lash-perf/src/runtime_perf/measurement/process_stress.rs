@@ -186,9 +186,13 @@ pub(super) async fn run_once_process_list_stress(
                         signal_event_type.clone(),
                         serde_json::json!({ "turn": turn_index, "n": signal_index }),
                     )
-                    .with_replay_key(format!(
-                        "process:{signal_process_id}:signal.stress:{turn_index}:{signal_index}"
-                    )),
+                    .with_replay_key(
+                        lash_core::facade_support::process_signal_wait_key(
+                            &ProcessId::from(signal_process_id),
+                            "stress",
+                            format_args!("{turn_index}:{signal_index}"),
+                        ),
+                    ),
                 )
                 .await?;
         }
@@ -216,9 +220,10 @@ pub(super) async fn run_once_process_list_stress(
                     kind: lash_core::WaitKind::Signal {
                         name: "stress".to_string(),
                         event_type: signal_event_type.clone(),
-                        key: format!(
-                            "process:{signal_process_id}:signal.stress:{}",
-                            turn_index + 1
+                        key: lash_core::facade_support::process_signal_wait_key(
+                            &ProcessId::from(signal_process_id),
+                            "stress",
+                            turn_index + 1,
                         ),
                         ordinal: turn_index as u64 + 1,
                     },

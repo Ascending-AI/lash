@@ -2,7 +2,7 @@
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
   "cargo_target_count": 119,
-  "generated_label_count": 174,
+  "generated_label_count": 173,
   "packages": [
     {
       "declared_features": [],
@@ -92,7 +92,9 @@
           "cargo": "lash_core",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
-          "tags": []
+          "tags": [
+            "no-remote-exec"
+          ]
         },
         {
           "cargo": "integration_boundary",
@@ -1192,7 +1194,6 @@
           "cargo": "lash_sim",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
-          "shard_count": 8,
           "tags": []
         },
         {
@@ -1249,6 +1250,12 @@
           "cargo": "schema_congruence",
           "kind": "test",
           "label": "//crates/lash-sim:schema_congruence__test",
+          "tags": []
+        },
+        {
+          "cargo": "signal_replay_key_constructor",
+          "kind": "test",
+          "label": "//crates/lash-sim:signal_replay_key_constructor__test",
           "tags": []
         },
         {
@@ -2115,18 +2122,6 @@
           "cargo": "lash-e2e-await-event-helper",
           "kind": "bin-unit-test",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-await-event-helper__bin__unit_test",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-context-overflow-recovery",
-          "kind": "bin",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin",
-          "tags": []
-        },
-        {
-          "cargo": "lash-e2e-context-overflow-recovery",
-          "kind": "bin-unit-test",
-          "label": "//runbooks/restate-postgres-workers:lash-e2e-context-overflow-recovery__bin__unit_test",
           "tags": []
         },
         {

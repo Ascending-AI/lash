@@ -1154,7 +1154,7 @@ async fn refolded_process_record_matches_stored_projection(
         kind: WaitKind::Signal {
             name: "ready".to_string(),
             event_type: "signal.ready".to_string(),
-            key: format!("process:{process_id}:signal.ready:1"),
+            key: lash_core::runtime::process_signal_wait_key(process_id, "ready", 1),
             ordinal: 1,
         },
     };
@@ -1182,7 +1182,9 @@ async fn refolded_process_record_matches_stored_projection(
     assert_refold_matches_stored_projection(&reader, &base, process_id, "external ref set").await;
     let signal =
         ProcessEventAppendRequest::new("signal.ready", serde_json::json!({"signal": "ready"}))
-            .with_replay_key(format!("process:{process_id}:signal.ready:1"));
+            .with_replay_key(lash_core::runtime::process_signal_wait_key(
+                process_id, "ready", 1,
+            ));
     let first_signal = writer
         .append_event(process_id, signal.clone())
         .await

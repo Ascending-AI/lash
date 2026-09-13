@@ -307,9 +307,9 @@ fn signal_request(
 ) -> lash_core::ProcessEventAppendRequest {
     let event_type = lash_core::facade_support::process_signal_event_type(signal_name)
         .expect("signal event type");
-    lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(format!(
-        "process:{process_id}:signal.{signal_name}:{signal_id}"
-    ))
+    lash_core::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
+        lash_core::facade_support::process_signal_wait_key(process_id, signal_name, signal_id),
+    )
 }
 
 async fn wait_for_process(

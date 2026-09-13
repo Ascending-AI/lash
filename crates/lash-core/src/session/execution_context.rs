@@ -1043,7 +1043,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .resolve_process_ref(process_id)
             .await
             .map_err(crate::RuntimeEffectControllerError::from)?;
-        let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
+        let replay_key = crate::process_signal_wait_key(process_id, signal_name, &signal_id);
         let command = crate::ProcessCommand::Signal {
             process_ref,
             signal_name: signal_name.to_string(),

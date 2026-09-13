@@ -503,8 +503,30 @@ pub fn process_signal_name_from_event_type(event_type: &str) -> Option<&str> {
     event_type.strip_prefix("signal.")
 }
 
-pub fn process_signal_wait_key(process_id: &ProcessId, signal_name: &str, ordinal: u64) -> String {
-    format!("process:{process_id}:signal.{signal_name}:{ordinal}")
+/// The one spelling of a process signal's replay key.
+///
+/// Every caller that appends, awaits, or parks on a signal event derives its
+/// dedupe identity from this function (FIG-2876). The key was hand-spelled at
+/// eight sites, one of them a runbook binary outside the workspace, so a change
+/// to the format silently minted a second dedupe key and double-realized one
+/// recorded intent — not a compile error. `discriminator` is the signal's
+/// ordinal on the wait side and the recorded intent's replay key on the append
+/// side; both are the same slot of the same key.
+pub fn process_signal_wait_key(
+    process_id: &ProcessId,
+    signal_name: &str,
+    discriminator: impl std::fmt::Display,
+) -> String {
+    format!("process:{process_id}:signal.{signal_name}:{discriminator}")
+}
+
+/// The replay key of the effect that *awaits* a signal, as distinct from the
+/// key of the append that satisfies it.
+///
+/// Lives beside [`process_signal_wait_key`] so the shared
+/// `process:<id>:signal.<name>` prefix has exactly one definition.
+pub fn process_signal_await_key(process_id: &ProcessId, signal_name: &str, ordinal: u64) -> String {
+    process_signal_wait_key(process_id, signal_name, format_args!("await:{ordinal}"))
 }
 
 pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::PluginError> {

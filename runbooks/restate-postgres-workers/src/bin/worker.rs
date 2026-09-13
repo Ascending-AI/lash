@@ -581,9 +581,10 @@ impl AppState {
         let event_type = lash_core::facade_support::process_signal_event_type(&signal.signal_name)
             .map_err(terminal_error)?;
         let append = ProcessEventAppendRequest::new(event_type, signal.payload.clone())
-            .with_replay_key(format!(
-                "process:{}:signal.{}:{}",
-                signal.process_id, signal.signal_name, signal.signal_id
+            .with_replay_key(lash_core::facade_support::process_signal_wait_key(
+                &signal.process_id,
+                &signal.signal_name,
+                &signal.signal_id,
             ));
         let scoped = controller
             .scoped_effect_controller(ExecutionScope::runtime_operation(format!(

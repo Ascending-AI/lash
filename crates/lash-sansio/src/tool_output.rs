@@ -118,6 +118,19 @@ pub struct ToolIntentIdentity {
     pub minting_emission_replay_key: Option<String>,
 }
 
+impl ToolIntentIdentity {
+    /// Process id a recorded start intent realizes under.
+    ///
+    /// The declaration's replay key *is* the process id, so a re-submitted
+    /// declaration starts the same process instead of a second one. Both
+    /// realization routes project it here — core's recorded-intent seam in
+    /// `tool_dispatch/intent_executor.rs` and the host facade's
+    /// `ProcessCommand` front door — so the two cannot drift apart (FIG-2876).
+    pub fn recorded_process_id(&self) -> ProcessId {
+        ProcessId::from(self.replay_key.clone())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum ToolIntentRefusalReason {

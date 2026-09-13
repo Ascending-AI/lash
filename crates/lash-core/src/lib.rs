@@ -542,7 +542,6 @@ pub mod facade_support {
     pub use crate::runtime::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
-    pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
@@ -555,6 +554,7 @@ pub mod facade_support {
     pub use crate::runtime::trigger_delivery_reconcile_scope;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
+    pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     #[doc(hidden)]
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
