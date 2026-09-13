@@ -32,6 +32,7 @@ runs:
     # the wrong runtime would either fail obscurely or quietly match nothing in
     # the pool, so fail here with the name that is missing.
     - name: Verify shared pool configuration
+      id: pool
       shell: bash
       run: |
         set -euo pipefail
@@ -47,9 +48,34 @@ runs:
             "the build-infra repository owns these secrets" >&2
           exit 1
         fi
-        echo "::add-mask::${CACHE_ENDPOINT}"
-        echo "::add-mask::${CACHE_INSTANCE}"
-        echo "::add-mask::${KILN_EXECUTOR_RUNTIME}"
+
+        # A secret is stored as text and routinely arrives with a trailing
+        # newline. Bazel would take one into the gRPC target and report only
+        # "Invalid DNS name" against a masked value, so normalize first and
+        # then check the shape rather than the value: an endpoint is the only
+        # one whose syntax we can assert without printing it.
+        endpoint="$(printf '%s' "${CACHE_ENDPOINT}" | tr -d '[:space:]')"
+        instance="$(printf '%s' "${CACHE_INSTANCE}" | tr -d '[:space:]')"
+        runtime="$(printf '%s' "${KILN_EXECUTOR_RUNTIME}" | tr -d '[:space:]')"
+        echo "::add-mask::${endpoint}"
+        echo "::add-mask::${instance}"
+        echo "::add-mask::${runtime}"
+        if ! [[ "${endpoint}" =~ ^grpcs?://[A-Za-z0-9.-]+:[0-9]+$ ]]; then
+          echo "::error::CACHE_ENDPOINT is not grpc[s]://host:port" \
+            "(${#endpoint} characters after trimming whitespace)" >&2
+          exit 1
+        fi
+        for pair in "CACHE_INSTANCE:${instance}" "KILN_EXECUTOR_RUNTIME:${runtime}"; do
+          if [ -z "${pair#*:}" ]; then
+            echo "::error::${pair%%:*} is whitespace only" >&2
+            exit 1
+          fi
+        done
+        {
+          echo "endpoint=${endpoint}"
+          echo "instance=${instance}"
+          echo "runtime=${runtime}"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Configure authenticated cache
       shell: bash
@@ -66,8 +92,15 @@ runs:
     # concurrent slots across two workers. `--remote_local_fallback=false`
     # keeps an unreachable pool a red job rather than a silent two-core
     # compile, which is the intended trust posture.
+    # The caller passes the raw secrets in this action's step `env`, and a step
+    # `env` outranks anything written to GITHUB_ENV, so the normalized values
+    # travel as outputs of the step above rather than as re-exported variables.
     - name: Export shared cache flags
       shell: bash
+      env:
+        POOL_ENDPOINT: ${{ steps.pool.outputs.endpoint }}
+        POOL_INSTANCE: ${{ steps.pool.outputs.instance }}
+        POOL_RUNTIME: ${{ steps.pool.outputs.runtime }}
       run: |
         set -euo pipefail
         {
@@ -75,13 +108,13 @@ runs:
           echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
           echo "--repository_cache=$RUNNER_TEMP/bazel-repository"
           echo "--disk_cache="
-          echo "--remote_executor=${CACHE_ENDPOINT}"
-          echo "--remote_cache=${CACHE_ENDPOINT}"
-          echo "--remote_instance_name=${CACHE_INSTANCE}"
+          echo "--remote_executor=${POOL_ENDPOINT}"
+          echo "--remote_cache=${POOL_ENDPOINT}"
+          echo "--remote_instance_name=${POOL_INSTANCE}"
           echo "--tls_certificate=$RUNNER_TEMP/build-cache/ca.crt"
           echo "--tls_client_certificate=$RUNNER_TEMP/build-cache/client.crt"
           echo "--tls_client_key=$RUNNER_TEMP/build-cache/client.key"
-          echo "--remote_default_exec_properties=kiln_executor_runtime=${KILN_EXECUTOR_RUNTIME}"
+          echo "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}"
           echo "--remote_default_exec_properties=cpu_count=4"
           echo "--remote_default_exec_properties=memory_kb=4194304"
           echo "--remote_local_fallback=false"

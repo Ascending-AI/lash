@@ -335,12 +335,16 @@ class BazelTestContractTests(unittest.TestCase):
                     "belongs in .kiln.bazelrc or a build-cache secret",
                 )
 
-    def test_the_shared_cache_action_fails_closed_on_a_missing_secret(self) -> None:
-        """A misconfigured environment must name what is missing, not build wrong.
+    def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
+        """A misconfigured environment must name what is wrong, not build wrong.
 
         A Bazel invocation with no executor falls back to a two-core runner
         compile and one advertising the wrong runtime matches nothing in the
-        pool, so an empty value can neither be defaulted nor ignored.
+        pool, so an empty value can neither be defaulted nor ignored. The
+        values are masked, so a malformed endpoint surfaces from Bazel only as
+        `Invalid DNS name: ***`; the shape is checked here instead. A secret is
+        stored as text and routinely arrives with a trailing newline, which is
+        normalized rather than rejected.
         """
         verify = job_step(shared_cache_action(), "Verify shared pool configuration")[
             "run"
@@ -354,36 +358,59 @@ class BazelTestContractTests(unittest.TestCase):
             "CACHE_KEY",
         ]
         supplied = {name: f"value-of-{name}" for name in names}
-        complete = subprocess.run(
-            ["bash", "-c", verify],
-            cwd=ROOT,
-            env=os.environ | supplied,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(0, complete.returncode, complete.stderr)
-        for name in names:
-            with self.subTest(missing=name):
+        supplied["CACHE_ENDPOINT"] = "grpcs://cache.example:8443"
+
+        def run_verify(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+            with tempfile.TemporaryDirectory() as temporary:
+                output = pathlib.Path(temporary) / "output"
                 result = subprocess.run(
                     ["bash", "-c", verify],
                     cwd=ROOT,
-                    env=os.environ | supplied | {name: ""},
+                    env=os.environ | environment | {"GITHUB_OUTPUT": str(output)},
                     capture_output=True,
                     text=True,
                 )
+                result.stdout = (
+                    output.read_text(encoding="utf-8") if output.exists() else ""
+                )
+                return result
+
+        complete = run_verify(supplied)
+        self.assertEqual(0, complete.returncode, complete.stderr)
+        self.assertIn("endpoint=grpcs://cache.example:8443", complete.stdout)
+
+        trailing = run_verify(
+            supplied
+            | {
+                "CACHE_ENDPOINT": "grpcs://cache.example:8443\n",
+                "KILN_EXECUTOR_RUNTIME": "kiln-runtime-sha256-abc\n",
+            }
+        )
+        self.assertEqual(0, trailing.returncode, trailing.stderr)
+        self.assertIn("endpoint=grpcs://cache.example:8443\n", trailing.stdout)
+        self.assertIn("runtime=kiln-runtime-sha256-abc\n", trailing.stdout)
+
+        for name in names:
+            with self.subTest(missing=name):
+                result = run_verify(supplied | {name: ""})
                 self.assertEqual(1, result.returncode)
                 self.assertIn(name, result.stderr)
 
+        for malformed in ("cache.example:8443", "grpcs://cache.example", "https://x:1"):
+            with self.subTest(endpoint=malformed):
+                result = run_verify(supplied | {"CACHE_ENDPOINT": malformed})
+                self.assertEqual(1, result.returncode)
+                self.assertIn("CACHE_ENDPOINT", result.stderr)
+
         # Masked before any flag carrying them is written.
-        for name in ("CACHE_ENDPOINT", "CACHE_INSTANCE", "KILN_EXECUTOR_RUNTIME"):
-            self.assertIn(f'echo "::add-mask::${{{name}}}"', verify)
+        for value in ("endpoint", "instance", "runtime"):
+            self.assertIn(f'echo "::add-mask::${{{value}}}"', verify)
         flags = job_step(shared_cache_action(), "Export shared cache flags")["run"]
-        self.assertIn("--remote_executor=${CACHE_ENDPOINT}", flags)
-        self.assertIn("--remote_cache=${CACHE_ENDPOINT}", flags)
-        self.assertIn("--remote_instance_name=${CACHE_INSTANCE}", flags)
+        self.assertIn("--remote_executor=${POOL_ENDPOINT}", flags)
+        self.assertIn("--remote_cache=${POOL_ENDPOINT}", flags)
+        self.assertIn("--remote_instance_name=${POOL_INSTANCE}", flags)
         self.assertIn(
-            "--remote_default_exec_properties=kiln_executor_runtime="
-            "${KILN_EXECUTOR_RUNTIME}",
+            "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}",
             flags,
         )
 
