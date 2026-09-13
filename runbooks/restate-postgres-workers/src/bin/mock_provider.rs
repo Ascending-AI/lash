@@ -687,9 +687,12 @@ finish {{
 
 fn process_llm_query_script(workflow_id: &str, fail_once: bool) -> String {
     let replay_probe = if fail_once {
+        // `peer_takeover: false`: this scenario proves journal replay on the
+        // reincarnated worker, so the crashed endpoint must come straight back
+        // rather than waiting on a peer that cedes (FIG-3030).
         format!(
             r#"
-  await tools.crash_once({{ workflow_id: "{workflow_id}" }})?"#
+  await tools.crash_once({{ workflow_id: "{workflow_id}", peer_takeover: false }})?"#
         )
     } else {
         String::new()

@@ -1,5 +1,7 @@
 use lash::ProcessId;
 use lash::SessionId;
+mod schema;
+pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
 use anyhow::{Context, Result, anyhow, bail};
 use lash::durability::EffectHost;
@@ -239,163 +241,6 @@ pub struct TurnResponse {
 pub struct HealthResponse {
     pub worker_id: String,
     pub ok: bool,
-}
-
-pub async fn ensure_e2e_schema(pool: &PgPool) -> Result<()> {
-    let mut tx = pool.begin().await.context("begin e2e schema transaction")?;
-    sqlx::query("SELECT pg_advisory_xact_lock(715421, 907002)")
-        .execute(&mut *tx)
-        .await
-        .context("acquire e2e schema lock")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_worker_events (
-            event_id BIGSERIAL PRIMARY KEY,
-            workflow_id TEXT NOT NULL,
-            worker_id TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            detail_json TEXT NOT NULL DEFAULT '{}',
-            created_at_ms BIGINT NOT NULL,
-            UNIQUE (workflow_id, worker_id, event_type)
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e worker events table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_terminal_results (
-            workflow_id TEXT PRIMARY KEY,
-            process_id TEXT NOT NULL,
-            worker_id TEXT NOT NULL,
-            attachment_id TEXT NOT NULL,
-            final_text TEXT NOT NULL,
-            submitted_json TEXT NOT NULL DEFAULT '{}',
-            queued_turn_ran BOOLEAN NOT NULL DEFAULT FALSE,
-            streamed_event_count BIGINT NOT NULL DEFAULT 0,
-            replay_cursor TEXT,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e terminal results table")?;
-    sqlx::query(
-        "ALTER TABLE lash_e2e_terminal_results ADD COLUMN IF NOT EXISTS submitted_json TEXT NOT NULL DEFAULT '{}'",
-    )
-    .execute(&mut *tx)
-    .await
-    .context("add e2e submitted_json column")?;
-    sqlx::query(
-        "ALTER TABLE lash_e2e_terminal_results ADD COLUMN IF NOT EXISTS queued_turn_ran BOOLEAN NOT NULL DEFAULT FALSE",
-    )
-    .execute(&mut *tx)
-    .await
-    .context("add e2e queued_turn_ran column")?;
-    sqlx::query(
-        "ALTER TABLE lash_e2e_terminal_results ADD COLUMN IF NOT EXISTS streamed_event_count BIGINT NOT NULL DEFAULT 0",
-    )
-    .execute(&mut *tx)
-    .await
-    .context("add e2e streamed_event_count column")?;
-    sqlx::query(
-        "ALTER TABLE lash_e2e_terminal_results ADD COLUMN IF NOT EXISTS replay_cursor TEXT",
-    )
-    .execute(&mut *tx)
-    .await
-    .context("add e2e replay_cursor column")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_failover_markers (
-            workflow_id TEXT PRIMARY KEY,
-            worker_id TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e failover markers table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_harness_signals (
-            signal_name TEXT PRIMARY KEY,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e harness signals table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_provider_calls (
-            call_id BIGSERIAL PRIMARY KEY,
-            request_id TEXT NOT NULL,
-            scenario TEXT NOT NULL,
-            workflow_id TEXT NOT NULL,
-            model TEXT NOT NULL,
-            request_json TEXT NOT NULL,
-            response_json TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e provider calls table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_tool_events (
-            event_id BIGSERIAL PRIMARY KEY,
-            workflow_id TEXT NOT NULL,
-            worker_id TEXT NOT NULL,
-            tool_name TEXT NOT NULL,
-            call_id TEXT,
-            args_json TEXT NOT NULL DEFAULT '{}',
-            result_json TEXT NOT NULL DEFAULT '{}',
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e tool events table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_tool_attempt_counts (
-            workflow_id TEXT NOT NULL,
-            step_id TEXT NOT NULL,
-            count BIGINT NOT NULL,
-            last_worker_id TEXT NOT NULL,
-            updated_at_ms BIGINT NOT NULL,
-            PRIMARY KEY (workflow_id, step_id)
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e tool attempt counts table")?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS lash_e2e_turn_events (
-            event_id BIGSERIAL PRIMARY KEY,
-            workflow_id TEXT NOT NULL,
-            worker_id TEXT NOT NULL,
-            stream_name TEXT NOT NULL,
-            cursor TEXT,
-            activity_json TEXT NOT NULL,
-            created_at_ms BIGINT NOT NULL
-        )
-        "#,
-    )
-    .execute(&mut *tx)
-    .await
-    .context("create e2e turn events table")?;
-    tx.commit().await.context("commit e2e schema transaction")?;
-    Ok(())
 }
 
 pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
@@ -966,7 +811,8 @@ fn e2e_tool_provider(
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "workflow_id": { "type": "string" }
+                        "workflow_id": { "type": "string" },
+                        "peer_takeover": { "type": "boolean" }
                     },
                     "required": ["workflow_id"],
                     "additionalProperties": false
@@ -1302,12 +1148,30 @@ impl E2eTools {
             result.clone(),
         )
         .await;
-        // This scenario proves peer takeover, not merely container restart.
-        // Once a logical worker claims the crash marker, every reincarnation
-        // of that same worker keeps exiting for this workflow until the proxy
-        // sends Restate's retry to the other worker.
+        // `peer_takeover` says which recovery this scenario is proving.
+        //
+        // `true` (the default) is the E2eTurnWorkflow failover scenario: the
+        // crash proves peer takeover, not merely container restart, so the
+        // reincarnated worker holds its endpoint down until the peer commits
+        // the terminal result.
+        //
+        // `false` is the process replay scenario, whose ratified witness is
+        // journal replay on the reincarnated worker itself (FIG-1671 cede
+        // semantics; see `assert_failover_convergence`). Holding the endpoint
+        // there waits on a terminal result only the held worker can produce.
+        let peer_takeover_expected = call
+            .args
+            .get("peer_takeover")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
         if self.fail_once
-            && should_exit_for_peer_failover(&self.pool, &workflow_id, &self.worker_id).await
+            && should_exit_for_peer_failover(
+                &self.pool,
+                &workflow_id,
+                &self.worker_id,
+                peer_takeover_expected,
+            )
+            .await
         {
             let _ = record_worker_event(
                 &self.pool,
@@ -1471,14 +1335,21 @@ async fn record_tool_attempt(
     Ok(count)
 }
 
-async fn should_exit_for_peer_failover(pool: &PgPool, workflow_id: &str, worker_id: &str) -> bool {
+async fn should_exit_for_peer_failover(
+    pool: &PgPool,
+    workflow_id: &str,
+    worker_id: &str,
+    peer_takeover_expected: bool,
+) -> bool {
     let inserted = match sqlx::query(
-        "INSERT INTO lash_e2e_failover_markers (workflow_id, worker_id, created_at_ms)
-         VALUES ($1, $2, $3)
+        "INSERT INTO lash_e2e_failover_markers
+             (workflow_id, worker_id, peer_takeover_expected, created_at_ms)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (workflow_id) DO NOTHING",
     )
     .bind(workflow_id)
     .bind(worker_id)
+    .bind(peer_takeover_expected)
     .bind(current_epoch_ms() as i64)
     .execute(pool)
     .await
