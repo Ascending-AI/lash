@@ -782,6 +782,10 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 payload: serde_json::json!({ "text": "hi" }),
             }],
             event_tail_sequence: 1,
+            state: lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+                record_sequence: 0,
+                event_tail_sequence: 1,
+            },
             kind: "external".to_string(),
             label: "External".to_string(),
         }],
@@ -2159,6 +2163,39 @@ fn observed_work_item_decode_rejects_a_mispaired_event_tail() {
     assert!(
         error.to_string().contains("event-tail sequence"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
+    let mut observed = observed_work_item();
+    observed
+        .events
+        .push(lash_core::facade_support::ObservedProcessEvent {
+            sequence: 1,
+            event_type: "process.completed".to_string(),
+            occurred_at_ms: 12,
+            payload: serde_json::json!({}),
+        });
+    observed.event_tail_sequence = 1;
+    observed.state = lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+        record_sequence: 0,
+        event_tail_sequence: 1,
+    };
+
+    let remote = RemoteProcessWorkItem::try_from(observed).expect("remote mismatch item");
+    remote
+        .validate("RemoteProcessWorkItem")
+        .expect("truthful mismatch state");
+    let core =
+        lash_core::facade_support::ObservedWorkItem::try_from(remote).expect("core mismatch item");
+
+    assert_eq!(
+        core.state,
+        lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
+            record_sequence: 0,
+            event_tail_sequence: 1,
+        }
     );
 }
 

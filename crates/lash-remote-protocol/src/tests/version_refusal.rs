@@ -59,18 +59,39 @@ fn immediate_predecessor_remote_protocol_generation_62_is_refused() {
 
 /// Captured by main's Envelope writer at 02339d7999b4; no hand-edited wire bytes.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_63_is_refused() {
+fn historical_remote_protocol_generation_63_is_refused() {
     const PREDECESSOR: u32 = 63;
-    assert_eq!(
-        PREDECESSOR + 1,
-        REMOTE_PROTOCOL_VERSION,
-        "remote-protocol generation adjacency pin"
-    );
+    assert_eq!(PREDECESSOR + 1, 64, "historical generation adjacency pin");
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v63.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
     let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
         Ok(_) => panic!("generation-63 remote envelope must be refused"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: PREDECESSOR,
+            expected: REMOTE_PROTOCOL_VERSION,
+        }
+    ));
+}
+
+/// Captured by the merged-main Envelope writer at 9bd3d967e05a; no hand-edited wire bytes.
+#[test]
+fn immediate_predecessor_remote_protocol_generation_64_is_refused() {
+    const PREDECESSOR: u32 = 64;
+    assert_eq!(
+        PREDECESSOR + 1,
+        REMOTE_PROTOCOL_VERSION,
+        "remote-protocol generation adjacency pin"
+    );
+    let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v64.json");
+    let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(predecessor["protocol_version"], PREDECESSOR);
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+        Ok(_) => panic!("generation-64 remote envelope must be refused"),
         Err(error) => error,
     };
     assert!(matches!(
@@ -88,7 +109,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 64,
+            expected: 65,
         })
     ));
 }

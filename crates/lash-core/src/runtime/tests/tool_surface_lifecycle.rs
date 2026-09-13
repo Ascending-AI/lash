@@ -385,6 +385,184 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
 }
 
 #[tokio::test]
+async fn tool_access_setter_changes_the_next_model_request_in_both_directions() {
+    let tool = DynamicToolSpec::new(
+        "tool:mutable-authority",
+        "mutable_authority",
+        "visible when the session authority permits it",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![tool.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface;
+    let plugin_host = dynamic_plugin_host(provider);
+    let env = runtime_environment(plugin_host);
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(&SessionId::from("mutable-authority-requests")),
+        Some(store),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("persistent runtime");
+    let requests = Arc::new(Mutex::new(Vec::<Vec<String>>::new()));
+    let captured_requests = Arc::clone(&requests);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .complete(move |request| {
+            let captured_requests = Arc::clone(&captured_requests);
+            async move {
+                captured_requests
+                    .lock_recover()
+                    .push(request.tools.iter().map(|tool| tool.name.clone()).collect());
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "done".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    set_runtime_provider(&mut runtime, transport.into_handle());
+
+    let narrowed = crate::SessionToolAccess::ambient()
+        .with_hidden_tools([tool.name])
+        .expect("valid hidden tool");
+    Box::pin(runtime.set_tool_access(narrowed))
+        .await
+        .expect("narrow persisted tool authority");
+    runtime
+        .run_turn_assembled(
+            TurnInput::text("observe the narrowed surface"),
+            CancellationToken::new(),
+            named_turn_scope(
+                &SessionId::from("mutable-authority-requests"),
+                &TurnId::from("narrowed-request"),
+            ),
+        )
+        .await
+        .expect("run with narrowed authority");
+
+    Box::pin(runtime.set_tool_access(crate::SessionToolAccess::ambient()))
+        .await
+        .expect("widen persisted tool authority");
+    runtime
+        .run_turn_assembled(
+            TurnInput::text("observe the widened surface"),
+            CancellationToken::new(),
+            named_turn_scope(
+                &SessionId::from("mutable-authority-requests"),
+                &TurnId::from("widened-request"),
+            ),
+        )
+        .await
+        .expect("run with widened authority");
+
+    let requests = requests.lock_recover();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        !requests[0].contains(&tool.name.to_string()),
+        "the first request must observe the narrowed authority: {:?}",
+        requests[0]
+    );
+    assert!(
+        requests[1].contains(&tool.name.to_string()),
+        "the next request must observe the widened authority: {:?}",
+        requests[1]
+    );
+}
+
+#[tokio::test]
+async fn updated_tool_access_survives_park_and_resume() {
+    let hidden = DynamicToolSpec::new(
+        "tool:updated-authority-hidden",
+        "updated_authority_hidden",
+        "hidden by an authority update before parking",
+    );
+    let surface = Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
+    let provider: Arc<dyn crate::ToolProvider> = surface;
+    let plugin_host = dynamic_plugin_host(provider);
+    let env = runtime_environment(plugin_host);
+    let store = Arc::new(RecordingStore::default());
+    let owner = crate::LeaseOwnerIdentity::opaque("updated-authority-worker", "boot");
+    let mut runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(&SessionId::from("updated-authority-resume")),
+        Some(store),
+        owner.clone(),
+    )
+    .await
+    .expect("persistent runtime");
+    let narrowed = crate::SessionToolAccess::ambient()
+        .with_hidden_tools([hidden.name])
+        .expect("valid hidden tool");
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
+        .await
+        .expect("settle updated authority");
+
+    let parked = Box::pin(runtime.park())
+        .await
+        .expect("park updated authority");
+    let resumed = LashRuntime::resume(parked, &env, owner)
+        .await
+        .expect("resume updated authority");
+
+    assert_eq!(resumed.state.authority.tool_access, narrowed);
+    assert!(
+        !catalog_names(&resumed).contains(&hidden.name.to_string()),
+        "the resumed tool surface must use the updated persisted authority"
+    );
+}
+
+#[tokio::test]
+async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
+    let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
+    let env = runtime_environment(plugin_host);
+    let store = Arc::new(RecordingStore::default());
+    let mut runtime = LashRuntime::from_environment(
+        &env,
+        standard_test_policy(),
+        root_state(&SessionId::from("tool-access-no-op")),
+        Some(store.clone()),
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("persistent runtime");
+    let narrowed = crate::SessionToolAccess::ambient()
+        .with_hidden_tools(["hidden-after-reload"])
+        .expect("valid hidden tool");
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
+        .await
+        .expect("settle initial authority");
+    let commits_after_change = *store.runtime_commit_count.lock_recover();
+
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
+        .await
+        .expect("equal authority is accepted");
+    assert_eq!(
+        *store.runtime_commit_count.lock_recover(),
+        commits_after_change,
+        "restating the resident value must not commit"
+    );
+
+    runtime.state.authority.tool_access = crate::SessionToolAccess::ambient();
+    runtime.invalidate_resident_session_state();
+    Box::pin(runtime.set_tool_access(narrowed.clone()))
+        .await
+        .expect("reload before comparing authority");
+    assert_eq!(runtime.state.authority.tool_access, narrowed);
+    assert_eq!(
+        *store.runtime_commit_count.lock_recover(),
+        commits_after_change,
+        "the setter must reload the durable equal value before deciding to commit"
+    );
+}
+
+#[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
     let session_id = "filter-session";
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());

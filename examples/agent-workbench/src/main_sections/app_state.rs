@@ -707,6 +707,7 @@ pub(crate) fn trace_work_item(item: &WorkItem) -> Value {
         "graph_key": item.process.graph_key.clone(),
         "kind": item.kind.clone(),
         "label": item.label.clone(),
+        "observation_state": item.state.clone(),
         "status_label": item.process.status_label.clone(),
         "terminal": item.process.terminal,
         "created_at_ms": item.process.created_at_ms,
@@ -1270,15 +1271,28 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
+    let mut process = work_process_from_observed(item.process);
+    process.status_label = work_item_status_label(item.state, process.status_label);
     WorkItem {
-        process: work_process_from_observed(item.process),
+        process,
         events: item
             .events
             .into_iter()
             .map(work_event_from_observed)
             .collect(),
+        state: item.state,
         kind: item.kind,
         label: item.label,
+    }
+}
+
+fn work_item_status_label(
+    state: lash::process::ObservedWorkItemState,
+    coherent_label: String,
+) -> String {
+    match state {
+        lash::process::ObservedWorkItemState::Coherent => coherent_label,
+        lash::process::ObservedWorkItemState::EventTailMismatch { .. } => "refreshing".to_string(),
     }
 }
 
@@ -1585,6 +1599,24 @@ fn workbench_attachment_acceptance() -> lash::provider::AttachmentCapabilitySnap
                     .collect(),
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod work_item_tests {
+    use super::*;
+
+    #[test]
+    fn a_mispaired_work_item_is_not_presented_as_running() {
+        let label = work_item_status_label(
+            lash::process::ObservedWorkItemState::EventTailMismatch {
+                record_sequence: 1,
+                event_tail_sequence: 2,
+            },
+            "running".to_string(),
+        );
+
+        assert_eq!(label, "refreshing");
     }
 }
 

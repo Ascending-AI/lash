@@ -224,7 +224,7 @@ pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
-    ObserverInheritance, OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION,
+    ObservedWorkItemState, ObserverInheritance, OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentScope, PersistedSegmentHandover,
     ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,

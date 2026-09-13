@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _};
+use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _, SessionCommitStore as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -902,6 +902,38 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
             .expect("app tool")
             .is_member(),
         "the host-removed tool is a non-member"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn config_admin_sets_persisted_tool_access() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("config-admin-tool-access").open().await?;
+    let access = lash_core::SessionToolAccess::ambient()
+        .with_hidden_tools(["app_lookup"])
+        .expect("valid hidden tool");
+
+    Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
+
+    let store = store_factory
+        .raw_store_for_testing(&SessionId::from("config-admin-tool-access"))
+        .expect("session store");
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("load session head")
+            .expect("session head")
+            .config
+            .tool_access,
+        access
     );
     Ok(())
 }

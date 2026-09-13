@@ -47,6 +47,11 @@ pub struct ApplyConfigPatch {
     pub generation: Option<crate::GenerationOverlay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_budget: Option<crate::TurnBudget>,
+    /// Session-owned tool authority. This durable fact lives beside the
+    /// protocol turn options on runtime state and replaces the whole access
+    /// value when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_access: Option<crate::SessionToolAccess>,
     /// Protocol-owned turn options. Unlike the other fields this durable fact
     /// lives on the runtime session state rather than inside
     /// [`crate::SessionPolicy`], but it settles through the same commanded
@@ -65,6 +70,7 @@ impl Default for ApplyConfigPatch {
             prompt: None,
             generation: None,
             turn_budget: None,
+            tool_access: None,
             protocol_turn_options: None,
         }
     }
@@ -122,6 +128,7 @@ impl ApplyConfigPatch {
             && self.prompt.is_none()
             && self.generation.is_none()
             && self.turn_budget.is_none()
+            && self.tool_access.is_none()
             && self.protocol_turn_options.is_none()
     }
 
@@ -132,6 +139,9 @@ impl ApplyConfigPatch {
     /// after the durable head accepted the same values.
     pub(super) fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
         self.apply_to(&mut state.policy);
+        if let Some(access) = self.tool_access.as_ref() {
+            state.authority.tool_access = access.clone();
+        }
         if let Some(options) = self.protocol_turn_options.as_ref() {
             state.protocol_turn_options = options.clone();
         }
@@ -384,6 +394,25 @@ impl LashRuntime {
         }
         self.settle_config_patch(ApplyConfigPatch {
             protocol_turn_options: Some(options),
+            ..ApplyConfigPatch::default()
+        })
+        .await
+    }
+
+    /// Replace this session's persisted tool authority through the commanded
+    /// durable write. A successful return makes the new surface authoritative
+    /// for the next model request and across park/resume.
+    pub async fn set_tool_access(
+        &mut self,
+        access: crate::SessionToolAccess,
+    ) -> Result<(), SessionError> {
+        self.reload_invalidated_resident_session_state_for_session()
+            .await?;
+        if self.state.authority.tool_access == access {
+            return Ok(());
+        }
+        self.settle_config_patch(ApplyConfigPatch {
+            tool_access: Some(access),
             ..ApplyConfigPatch::default()
         })
         .await
