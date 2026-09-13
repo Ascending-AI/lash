@@ -16,9 +16,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Barrier, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+mod attachment_normalization;
 mod directives;
 mod intent_drain;
 mod internal_activation;
+mod orchestrating;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
 mod settlement_order;
@@ -171,7 +173,7 @@ impl ToolProvider for OrderedBatchIntentTools {
             .expect("ordered batch calls carry ids");
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"completed": call.name})),
-            crate::ToolIntents::v1(
+            crate::ToolIntents::v2(
                 [0, 1]
                     .into_iter()
                     .map(|intent_index| {
@@ -483,7 +485,7 @@ impl ToolProvider for RetryingIntentTools {
 
     async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+        let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
                 session_id: SessionId::from("session"),
                 process_id: ProcessId::from("retry-intent-target"),
@@ -598,15 +600,18 @@ impl ToolProvider for AttemptIntentTools {
         );
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
-            crate::ToolIntents::v1(vec![
+            crate::ToolIntents::v2(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: SessionId::from("session"),
                     request: crate::ProcessStartRequest::external(
                         "provider-supplied-id-is-replaced",
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
                         json!({"source": "recorded-attempt"}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     session_id: SessionId::from("session"),
@@ -892,6 +897,18 @@ async fn dispatch_orchestrating_tool_call(
     tool_name: &str,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
+    Box::pin(dispatch_orchestrating_tool_call_with_prepared_name(
+        context, tool_name, tool_name, args,
+    ))
+    .await
+}
+
+async fn dispatch_orchestrating_tool_call_with_prepared_name(
+    context: &ToolDispatchContext<'_>,
+    tool_name: &str,
+    prepared_tool_name: &str,
+    args: serde_json::Value,
+) -> ToolDispatchOutcome {
     // The orchestration lane resolves its registration through the tool
     // registry, which the plain leaf-dispatch fixture leaves unset.
     let mut context = context.clone();
@@ -903,7 +920,7 @@ async fn dispatch_orchestrating_tool_call(
         manifest.id,
         crate::sansio::PendingToolCall {
             call_id: format!("orchestrating:{tool_name}"),
-            tool_name: tool_name.to_string(),
+            tool_name: prepared_tool_name.to_string(),
             args,
             replay: None,
         },
@@ -911,7 +928,12 @@ async fn dispatch_orchestrating_tool_call(
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .build();
-    crate::tool_dispatch::execute_orchestrating_tool(context, prepared, tool_context).await
+    Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+        context,
+        prepared,
+        tool_context,
+    ))
+    .await
 }
 
 use crate::testing::MockSessionManager;
@@ -1090,27 +1112,6 @@ impl ToolProvider for ExactDispatchTools {
                 .push(call.context.tool_execution_binding().clone());
         }
         ToolOutcome::ok(json!("host"))
-    }
-
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &crate::ToolExecutionGrant,
-        call: crate::ToolPrepareCall<'_>,
-    ) -> Result<crate::PreparedToolCall, ToolOutcome> {
-        Ok(crate::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &crate::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 
@@ -2239,6 +2240,24 @@ async fn batch_returns_explicit_errors_without_runtime_execution_context() {
 }
 
 #[tokio::test]
+async fn frameless_orchestrating_record_uses_manifest_name_when_prepared_call_is_renamed() {
+    let outcome = dispatch_orchestrating_tool_call_with_prepared_name(
+        &dispatch_context(),
+        "batch",
+        "provider_controlled_name",
+        json!({
+            "tool_calls": [
+                {"tool": "alpha", "parameters": {}}
+            ]
+        }),
+    )
+    .await;
+
+    assert!(outcome.record.output.is_success());
+    assert_eq!(outcome.record.tool, "batch");
+}
+
+#[tokio::test]
 async fn batch_rejects_nested_batch_as_partial_failure() {
     let outcome = dispatch_orchestrating_tool_call(
         &dispatch_context(),
@@ -2320,11 +2339,11 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
     );
 }
 
-/// The v1 provider seam law: an opted-in leaf is called through the public
+/// The v2 provider seam law: an opted-in leaf is called through the public
 /// coordinator path and every declared intent kind is realized after its final
 /// attempt is committed, in declaration order.
 #[tokio::test]
-async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinator() {
+async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinator() {
     let definition = named_beta_tool("attempt_intents");
     let calls = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {
@@ -2362,6 +2381,10 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
                 },
                 crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types(event_types),
             &[SessionId::from("session")],
@@ -2435,9 +2458,9 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
 }
 
 #[tokio::test]
-async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
+async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal() {
     let context = dispatch_context();
-    for recorded in [0, 2] {
+    for recorded in [0, 1, 3] {
         let outcomes = execute_final_tool_intents(
             &context,
             Some("empty-version-call"),

@@ -40,7 +40,7 @@ impl crate::ToolProvider for SignalIntentProvider {
         assert_eq!(call.context.session_id(), self.session_id);
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"signalled": true})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
                 crate::SignalProcessIntent {
                     session_id: self.session_id.clone(),
                     process_id: self.process_id.clone(),
@@ -73,6 +73,10 @@ pub async fn public_signal_intent_wakes_parked_process(
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "signal.resume".to_string(),

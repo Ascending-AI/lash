@@ -20,6 +20,7 @@ pub(super) struct RlmSnapshotRoot {
     engine: String,
     globals: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -157,9 +158,18 @@ enum RootNode {
     Globals,
     Global,
     Deferred,
+    DeferredTrigger,
     LinkKey,
     Resolutions,
     Resolution,
+    TriggerEventType,
+    TriggerTypeExpr,
+    TriggerObjectFields,
+    TriggerUnionTypes,
+    TriggerTypeField,
+    TriggerProcess,
+    TriggerProcessParams,
+    TriggerProcessParam,
     Definition,
     SchemaContract,
     Projection,
@@ -179,10 +189,28 @@ impl RootNode {
         match (self, segment.key()) {
             (Root, Some("globals")) => Globals,
             (Root, Some("deferred_resolutions")) => Deferred,
+            (Root, Some("deferred_trigger_resolutions")) => DeferredTrigger,
             (Globals, Some(_)) => Global,
             (Deferred, Some("link_key")) => LinkKey,
             (Deferred, Some("resolutions")) => Resolutions,
+            (DeferredTrigger, Some("link_key")) => LinkKey,
+            (DeferredTrigger, Some("resolutions")) => Resolutions,
             (Resolutions, Some(_)) => Resolution,
+            (Resolution, Some("input_type")) => TriggerTypeExpr,
+            (Resolution, Some("event_type")) => TriggerEventType,
+            (Resolution, Some("route")) => Json,
+            (TriggerEventType, Some("ty")) => TriggerTypeExpr,
+            (TriggerTypeExpr, Some("Object")) => TriggerObjectFields,
+            (TriggerTypeExpr, Some("List" | "TriggerHandle")) => TriggerTypeExpr,
+            (TriggerTypeExpr, Some("Union")) => TriggerUnionTypes,
+            (TriggerTypeExpr, Some("Process")) => TriggerProcess,
+            (TriggerObjectFields, None) => TriggerTypeField,
+            (TriggerUnionTypes, None) => TriggerTypeExpr,
+            (TriggerTypeField, Some("ty")) => TriggerTypeExpr,
+            (TriggerProcess, Some("params")) => TriggerProcessParams,
+            (TriggerProcess, Some("output")) => TriggerTypeExpr,
+            (TriggerProcessParams, None) => TriggerProcessParam,
+            (TriggerProcessParam, Some("ty")) => TriggerTypeExpr,
             (Resolution, Some("definition")) => Definition,
             (Resolution, Some("execution_binding")) => Json,
             (Definition, Some("bindings")) => Json,
@@ -215,8 +243,24 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
         Globals | Resolutions | Json => CanonicalMapOrder::Sorted,
         Global => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
         Deferred => CanonicalMapOrder::Declared(DEFERRED_RESOLUTION_FIELDS),
+        DeferredTrigger => CanonicalMapOrder::Declared(DEFERRED_TRIGGER_RESOLUTION_FIELDS),
         LinkKey => CanonicalMapOrder::Declared(DEFERRED_LINK_KEY_FIELDS),
-        Resolution => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
+        Resolution => {
+            let path_is_trigger = path.first().and_then(CanonicalPathSegment::key)
+                == Some("deferred_trigger_resolutions");
+            if path_is_trigger {
+                CanonicalMapOrder::Declared(TRIGGER_RESOLUTION_FIELDS)
+            } else {
+                CanonicalMapOrder::Declared(RESOLUTION_FIELDS)
+            }
+        }
+        TriggerEventType => CanonicalMapOrder::Declared(&["name", "ty"]),
+        TriggerTypeExpr => CanonicalMapOrder::Sorted,
+        TriggerTypeField => CanonicalMapOrder::Declared(&["name", "ty", "optional"]),
+        TriggerObjectFields | TriggerUnionTypes => CanonicalMapOrder::Sorted,
+        TriggerProcess => CanonicalMapOrder::Declared(&["kind", "params", "output"]),
+        TriggerProcessParam => CanonicalMapOrder::Declared(&["name", "ty"]),
+        TriggerProcessParams => CanonicalMapOrder::Sorted,
         Definition => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
         SchemaContract => CanonicalMapOrder::Fields(SCHEMA_CONTRACT_FIELDS),
         Projection => CanonicalMapOrder::Fields(SCHEMA_PROJECTION_FIELDS),
@@ -233,7 +277,13 @@ fn root_map_order(path: &[CanonicalPathSegment]) -> CanonicalMapOrder {
 fn root_map_required(path: &[CanonicalPathSegment]) -> bool {
     !matches!(
         root_node(path),
-        RootNode::Overrides | RootNode::Json | RootNode::Other
+        RootNode::Overrides
+            | RootNode::Json
+            | RootNode::Other
+            | RootNode::TriggerTypeExpr
+            | RootNode::TriggerObjectFields
+            | RootNode::TriggerUnionTypes
+            | RootNode::TriggerProcessParams
     )
 }
 
@@ -401,6 +451,7 @@ struct CaptureRollback {
 pub(super) struct RlmExecutionCheckpoint {
     rlm: FlowState,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -422,6 +473,9 @@ pub struct RlmExecutionState {
     /// a re-driven or recovered link replays the recorded grants and
     /// `NotAvailable` results without leaking them into a later code effect.
     pub(super) deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    /// Trigger-definition outcomes remain separate from tool grants so a
+    /// mixed link cannot execute one provider family through the other.
+    pub(super) deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -448,6 +502,8 @@ impl RlmExecutionState {
             linked_programs: lashlang::LinkedProgramCache::new(),
             stored_lashlang_modules: BTreeSet::new(),
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
+            deferred_trigger_resolutions:
+                lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
             persisted_globals: BTreeMap::new(),
             persisted_leaf_keys: BTreeSet::new(),
             dirty_globals: BTreeSet::new(),
@@ -484,6 +540,7 @@ impl RlmExecutionState {
         RlmExecutionCheckpoint {
             rlm: self.rlm.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
+            deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
             persisted_globals: self.persisted_globals.clone(),
             persisted_leaf_keys: self.persisted_leaf_keys.clone(),
             dirty_globals: self.dirty_globals.clone(),
@@ -498,6 +555,7 @@ impl RlmExecutionState {
     fn restore_execution_checkpoint(&mut self, checkpoint: RlmExecutionCheckpoint) {
         self.rlm = checkpoint.rlm;
         self.deferred_resolutions = checkpoint.deferred_resolutions;
+        self.deferred_trigger_resolutions = checkpoint.deferred_trigger_resolutions;
         self.persisted_globals = checkpoint.persisted_globals;
         self.persisted_leaf_keys = checkpoint.persisted_leaf_keys;
         self.dirty_globals = checkpoint.dirty_globals;
@@ -699,6 +757,7 @@ impl RlmExecutionState {
             engine: self.engine_id.to_string(),
             globals: next_globals.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
+            deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
             SessionError::Protocol(format!("failed to encode RLM snapshot root: {error}"))
@@ -858,6 +917,7 @@ impl RlmExecutionState {
         next_globals.retain(|name, _| next_live_names.contains(name));
         self.rlm = next_rlm;
         self.deferred_resolutions = parsed.deferred_resolutions;
+        self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
         self.persisted_globals = next_globals;
         self.persisted_leaf_keys = leaf_keys_for_values(&self.persisted_globals);
         self.root_dirty = pruned_reserved;

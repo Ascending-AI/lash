@@ -70,22 +70,10 @@ pub(crate) fn test_config_with_protocol_turn_options(
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: SessionId::from("test"),
+        agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination,
-        turn_limit_final_message: Arc::new(test_turn_limit_final_message),
-    }
-}
-
-pub(crate) fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: lash_sansio::shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -678,6 +666,7 @@ pub(crate) struct RlmProtocolExpectations {
     pub(crate) trajectory_omits_tool_call_ids: bool,
     pub(crate) system_message_contains: Vec<&'static str>,
     pub(crate) system_message_omits: Vec<&'static str>,
+    pub(crate) transcript_system_message_count: Option<usize>,
     pub(crate) assistant_reasoning_texts: Option<Vec<&'static str>>,
     pub(crate) assistant_visible_texts: Option<Vec<&'static str>>,
     pub(crate) assistant_message_count: Option<usize>,
@@ -789,6 +778,17 @@ impl RlmProtocolExpectations {
                             .any(|part| part.content.contains(omitted))
                 }),
                 "{scenario_name} found unexpected system feedback containing `{omitted}`"
+            );
+        }
+        if let Some(expected) = self.transcript_system_message_count {
+            assert_eq!(
+                machine
+                    .messages()
+                    .iter()
+                    .filter(|message| message.role == MessageRole::System)
+                    .count(),
+                expected,
+                "{scenario_name} transcript system-message count changed"
             );
         }
         if let Some(expected) = &self.assistant_reasoning_texts {

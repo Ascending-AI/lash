@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use lash_core::llm::types::{
     LlmContentBlock, LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmRole, LlmToolChoice,
-    LlmToolSpec, LlmUsage, ProviderRouteIdentity,
+    LlmToolSpec, LlmUsage, ProviderRouteIdentity, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection,
 };
 use lash_core::provider::Provider;
 use lash_sansio::sync::MutexExt;
@@ -59,6 +60,32 @@ fn request() -> LlmRequest {
 }
 
 #[test]
+fn fig1123_google_fallback_evicts_whole_genuine_user_segments() {
+    let mut req = request();
+    req.messages = vec![
+        LlmMessage::text(LlmRole::User, "old input").with_user_segment_start(),
+        LlmMessage::text(LlmRole::Assistant, "old answer"),
+        LlmMessage::text(LlmRole::User, "synthetic observation"),
+        LlmMessage::text(LlmRole::User, "new input").with_user_segment_start(),
+        LlmMessage::text(LlmRole::Assistant, "new answer"),
+    ];
+    *req.model_capability.reasoning_retention = ReasoningRetentionPolicy {
+        capability: Some(ReasoningRetentionCapability::ClientSideUserSegments),
+        selection: ReasoningRetentionSelection::ClientSideUserSegments {
+            max_segments: std::num::NonZeroUsize::new(1).expect("non-zero segment count"),
+        },
+    };
+
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&req, &[])
+        .expect("fallback request");
+
+    assert_eq!(contents.len(), 2);
+    assert_eq!(contents[0]["parts"][0]["text"], "new input");
+    assert_eq!(contents[1]["parts"][0]["text"], "new answer");
+}
+
+#[test]
 fn foreign_anthropic_reasoning_signature_is_not_forwarded_to_google() {
     let mut req = request();
     req.messages = vec![LlmMessage::new(
@@ -77,7 +104,9 @@ fn foreign_anthropic_reasoning_signature_is_not_forwarded_to_google() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&req, &[])
+        .expect("retention policy");
 
     assert_eq!(contents[0]["parts"][0]["text"], "neutral summary");
     assert!(contents[0]["parts"][0].get("thought").is_none());
@@ -98,7 +127,9 @@ fn raw_google_builder_drops_unstamped_reasoning_replay() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&req, &[])
+        .expect("retention policy");
     assert_eq!(contents[0]["parts"][0]["text"], "portable summary");
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
     assert!(
@@ -180,7 +211,9 @@ fn foreign_openai_chat_opaque_tool_replay_is_not_forwarded_to_google() {
         }],
     )];
 
-    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&req, &[])
+        .expect("retention policy");
 
     assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
 }
@@ -222,7 +255,9 @@ fn same_route_reasoning_and_tool_replay_are_forwarded_to_google() {
         ],
     )];
 
-    let contents = GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+    let contents = GoogleOAuthProvider::for_test()
+        .build_contents_with_attachment_parts(&req, &[])
+        .expect("retention policy");
 
     assert_eq!(
         contents[0]["parts"][0]["thoughtSignature"],
@@ -270,6 +305,7 @@ fn google_signature_only_thought_part_round_trips_from_streaming_and_batch() {
                     execution_evidence: &mut execution_evidence,
                     tool_call_parts: Some(&mut tool_call_parts),
                     output_parts: Some(&mut output_parts),
+                    reasoning_stream: None,
                     finish_event: &mut finish_event,
                 },
                 Some("gemini-test"),
@@ -358,6 +394,7 @@ fn google_signature_on_function_call_thought_part_yields_only_the_tool_call() {
                 execution_evidence: &mut execution_evidence,
                 tool_call_parts: Some(&mut tool_call_parts),
                 output_parts: Some(&mut output_parts),
+                reasoning_stream: None,
                 finish_event: &mut finish_event,
             },
             Some("gemini-test"),

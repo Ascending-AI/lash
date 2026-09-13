@@ -69,14 +69,13 @@ impl RuntimeExecutionContext<'_> {
                 }
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
-                let outcome = context
-                    .execute_prepared_tool_batch_child(
-                        child,
-                        parent_invocation.clone(),
-                        child_execution_trace_hook,
-                        None,
-                    )
-                    .await?;
+                let outcome = Box::pin(context.execute_prepared_tool_batch_child(
+                    child,
+                    parent_invocation.clone(),
+                    child_execution_trace_hook,
+                    None,
+                ))
+                .await?;
                 launches.push(outcome.launch);
                 triggers.extend(outcome.triggers);
                 context = context.with_cancellation_token(tool_cancel.clone());
@@ -569,27 +568,7 @@ mod tests {
                 .then(|| Arc::new(granted_tool_definition().contract()))
         }
 
-        async fn prepare_granted_tool_call(
-            &self,
-            _grant: &crate::ToolExecutionGrant,
-            call: crate::ToolPrepareCall<'_>,
-        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-            Ok(crate::PreparedToolCall::identity(
-                call.tool_id,
-                call.pending,
-            ))
-        }
-
         async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("catalog leaf"))
-        }
-
-        async fn execute_granted(
-            &self,
-            _grant: &crate::ToolExecutionGrant,
-            _args: &serde_json::Value,
-            _context: &crate::AttemptContext<'_>,
-        ) -> crate::ToolOutcome {
             crate::ToolOutcome::ok(serde_json::json!("granted leaf"))
         }
     }

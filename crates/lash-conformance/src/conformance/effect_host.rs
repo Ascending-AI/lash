@@ -2455,15 +2455,18 @@ fn replay_conformance_tool_attempt_outcome(
                 })),
                 duration_ms: 0,
             }),
-            intents: crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+            intents: crate::ToolIntents::v2(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
                     session_id: SessionId::from("replay-session"),
                     request: crate::ProcessStartRequest::external(
                         format!("{call_id}:intent-child"),
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),
                         serde_json::json!({"tool": tool_name}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 },
             ))]),
         }),

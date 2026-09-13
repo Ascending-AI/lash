@@ -209,30 +209,9 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         None
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &lash_core::ToolExecutionGrant,
-        call: lash_core::ToolPrepareCall<'_>,
-    ) -> std::result::Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
-        Ok(lash_core::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         assert_eq!(call.name, "frame_state_probe");
         lash_core::ToolOutcome::ok(serde_json::json!("recorded"))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &lash_core::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 

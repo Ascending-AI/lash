@@ -383,9 +383,6 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
         on_empty: CheckpointResumeAction,
     },
     AdvanceProtocolIteration,
-    ScheduleTurnLimitFinal {
-        message: Message,
-    },
     /// Finish for a cancellation whose host evidence was already observed.
     FinishCancelled {
         evidence: crate::TurnCancellationEvidence,
@@ -404,7 +401,6 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) turn_causes: &'a [TurnCause],
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
-    pub(super) termination: &'a TurnTerminationPolicyState,
     pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
 }
 
@@ -456,18 +452,6 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     pub fn autonomous(&self) -> bool {
         self.config.autonomous
-    }
-
-    pub fn should_force_exit_after_grace_turn(&self) -> bool {
-        self.termination.should_force_exit_after_grace_turn()
-    }
-
-    pub fn turn_limit_final_to_schedule(&self) -> Option<usize> {
-        self.termination.turn_limit_final_to_schedule(
-            self.protocol_iteration,
-            self.protocol_run_offset,
-            self.config.turn_budget,
-        )
     }
 
     pub fn messages(&self) -> &MessageSequence {
@@ -531,7 +515,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             generation: ctx.config.generation.clone(),
             scope: crate::llm::types::LlmRequestScope::new(
                 ctx.config.session_id.clone(),
-                format!("{}:frame:sansio", ctx.config.session_id),
+                ctx.config.agent_frame_id.clone(),
                 format!(
                     "{}:sansio:llm:{}",
                     ctx.config.session_id, ctx.protocol_iteration
@@ -627,10 +611,11 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
     pub session_id: SessionId,
+    /// The committed active frame whose history is being projected.
+    pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
-    pub turn_limit_final_message: crate::TurnLimitFinalMessage,
 }
 
 #[cfg(test)]

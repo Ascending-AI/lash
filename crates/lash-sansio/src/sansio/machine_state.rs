@@ -3,8 +3,10 @@ use super::*;
 /// Serialized schema version for [`TurnCheckpoint`].
 ///
 /// Version 1 is the historical unstamped checkpoint shape. Version 2 adds the
-/// host-reporting effect for tool calls refused before dispatch.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+/// host-reporting effect for tool calls refused before dispatch. Version 3
+/// removes the terminal-turn scheduling state; older checkpoints are not
+/// compatible because replaying them could re-enter the deleted extra turn.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1
@@ -59,6 +61,7 @@ pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     #[serde(default = "legacy_turn_checkpoint_schema_version")]
     pub(super) schema_version: u32,
@@ -76,7 +79,6 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
-    pub(super) termination: TurnTerminationPolicyState,
     pub(super) synced_protocol_iteration: Option<usize>,
 }
 
@@ -85,22 +87,58 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
     pub fn schema_version(&self) -> u32 {
         self.schema_version
     }
+
+    /// Decode a JSON checkpoint and refuse every non-current durable shape.
+    pub fn from_json_slice(bytes: &[u8]) -> Result<Self, TurnCheckpointRestoreError>
+    where
+        Self: serde::de::DeserializeOwned,
+    {
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+            TurnCheckpointRestoreError::IncompatibleFormat {
+                message: error.to_string(),
+            }
+        })?;
+        let actual = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|version| u32::try_from(version).ok())
+            .unwrap_or_else(legacy_turn_checkpoint_schema_version);
+        if actual != TURN_CHECKPOINT_SCHEMA_VERSION {
+            return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
+                actual,
+                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
+            });
+        }
+        serde_json::from_value(value).map_err(|error| {
+            TurnCheckpointRestoreError::IncompatibleFormat {
+                message: error.to_string(),
+            }
+        })
+    }
 }
 
-/// Failure to restore a checkpoint written by an unsupported future schema.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Failure to decode or restore an incompatible turn checkpoint.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TurnCheckpointRestoreError {
-    /// The checkpoint was written by a newer schema than this build can read.
-    UnsupportedSchemaVersion { actual: u32, supported: u32 },
+    /// The checkpoint was written by a different schema than this build reads.
+    IncompatibleSchemaVersion { actual: u32, expected: u32 },
+    /// The bytes do not match the current closed checkpoint shape.
+    IncompatibleFormat { message: String },
 }
 
 impl std::fmt::Display for TurnCheckpointRestoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnsupportedSchemaVersion { actual, supported } => write!(
+            Self::IncompatibleSchemaVersion { actual, expected } => write!(
                 formatter,
-                "turn checkpoint is schema version {actual}, but this build reads at most {supported}"
+                "turn checkpoint is schema version {actual}, but this build requires {expected}"
             ),
+            Self::IncompatibleFormat { message } => {
+                write!(
+                    formatter,
+                    "turn checkpoint has an incompatible format: {message}"
+                )
+            }
         }
     }
 }
@@ -265,7 +303,6 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: TokenUsage,
-    pub(super) termination: TurnTerminationPolicyState,
     pub(super) synced_protocol_iteration: Option<usize>,
     /// Cancellation evidence the host has observed for this turn, recorded
     /// before the machine is told the provider call was cancelled. Lets the

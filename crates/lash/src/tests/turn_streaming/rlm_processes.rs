@@ -269,13 +269,25 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(store);
     drop(durable);
 
+    let follow_on_requests = Arc::new(StdMutex::new(Vec::<LlmRequest>::new()));
+    let captured_follow_on_requests = Arc::clone(&follow_on_requests);
+    let follow_on_provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |request| {
+            captured_follow_on_requests.lock_recover().push(request);
+            async move {
+                Ok(text_response(&lashlang_block(
+                    r#"finish "completed after real SQLite cold reopen""#,
+                )))
+            }
+        })
+        .build()
+        .into_handle();
     let reopened_core = explicit_ephemeral_facets(LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"finish "unused after state inspection""#,
-    )]))
+    .provider(follow_on_provider)
     .model(mock_model_spec())
     .store_factory(sqlite_store_factory)
     .without_queued_work()
@@ -287,6 +299,38 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .snapshot_execution()
         .await?
         .expect("reopened RLM has an execution snapshot");
+
+    let follow_on = reopened_session
+        .queued_turn()
+        .run()
+        .await?
+        .expect("the durable frame handoff must remain claimable after cold reopen");
+    assert_eq!(
+        follow_on.final_value(),
+        Some(&serde_json::json!(
+            "completed after real SQLite cold reopen"
+        ))
+    );
+    assert!(
+        reopened_session.queued_turn().run().await?.ran().is_none(),
+        "the durable frame handoff must be delivered exactly once"
+    );
+    let follow_on_requests = follow_on_requests.lock_recover();
+    assert_eq!(follow_on_requests.len(), 1);
+    let follow_on_json = serde_json::to_string(&follow_on_requests[0])?;
+    assert_eq!(
+        follow_on_json.matches("finish after cold reopen").count(),
+        1,
+        "the committed continuation task must enter the reopened request exactly once: {follow_on_json}"
+    );
+    assert!(
+        follow_on_json.contains("seed:survives"),
+        "the explicit frame seed must enter the reopened request: {follow_on_json}"
+    );
+    assert!(
+        !follow_on_json.contains("switch away from the abandoned frame"),
+        "the previous frame's input must not enter the reopened request: {follow_on_json}"
+    );
 
     Ok(ColdReopenFrameState {
         switch_checkpoint_budget_bytes,

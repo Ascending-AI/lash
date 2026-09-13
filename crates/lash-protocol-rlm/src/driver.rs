@@ -138,7 +138,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         config.discovery.as_ref(),
         dialect.as_ref(),
     );
-    let turn_limit_dialect = Arc::clone(&dialect);
     TurnDriverPreamble {
         config: TurnDriverConfig {
             protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
@@ -153,13 +152,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 dialect: Arc::clone(&dialect),
             }),
             sync_execution_environment: true,
-            turn_limit_final_message: Arc::new(move |message_id, max_turns| {
-                crate::protocol::turn_limit_final_message(
-                    turn_limit_dialect.as_ref(),
-                    message_id,
-                    max_turns,
-                )
-            }),
         },
         tool_specs: Arc::new(Vec::new()),
         tool_names,
@@ -363,7 +355,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             model_capability: ctx.config.model_capability.clone(),
             scope: LlmRequestScope::new(
                 ctx.config.session_id.clone(),
-                format!("{}:frame:sansio", ctx.config.session_id),
+                ctx.config.agent_frame_id.clone(),
                 format!(
                     "{}:sansio:rlm:{}",
                     ctx.config.session_id, ctx.protocol_iteration

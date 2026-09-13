@@ -98,10 +98,11 @@ pub use controller::{
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
 pub use durable_wait::{
-    LashDurableWaitIndex, LashDurableWaitIndexClient, LashDurableWaitIndexImpl,
-    LashDurableWaitWorkflow, LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl,
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitClassification, RestateDurableWaitEffectRequest,
+    DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex, LashDurableWaitIndexClient,
+    LashDurableWaitIndexImpl, LashDurableWaitWorkflow, LashDurableWaitWorkflowClient,
+    LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitInput,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
+    RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRequest, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
     ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,

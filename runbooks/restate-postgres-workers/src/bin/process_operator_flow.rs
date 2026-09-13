@@ -82,6 +82,10 @@ fn registration(id: &str, disposition: RecoveryContract) -> ProcessRegistration 
         },
         disposition,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 

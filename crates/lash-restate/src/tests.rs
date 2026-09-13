@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
+use crate::controller::journal_budget::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
     restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
@@ -35,7 +36,7 @@ use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectAddress,
+    AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
     ProcessEffectOutcome, ProcessExecutionContext, ProcessExternalRef, ProcessRegistry,
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome,
@@ -46,7 +47,7 @@ use lash_core::{
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;
-use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, HttpTransportError};
+use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, LlmTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -63,7 +64,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
@@ -86,6 +87,7 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
+mod trigger_intent_cutover;
 mod turn_cancel_modes;
 use endpoint_protocol::{
     durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,
@@ -198,7 +200,9 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
             lash_core::RuntimeAttribution::none(),
             "restate-scope-admission-sleep",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms: 1 },
+        },
     );
 
     let error = scoped
@@ -239,7 +243,9 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
             lash_core::RuntimeAttribution::none(),
             "wrong-deployment-effect",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms: 1 },
+        },
     );
     let local_executions = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&local_executions);
@@ -921,12 +927,12 @@ impl HttpTransport for Fig779DurableCancelTransport {
         &self,
         _request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let cancellation_is_durable = self
             .registry
             .events_after(&self.process_id, 0)
             .await
-            .map_err(|error| HttpTransportError::new(error.to_string()))?
+            .map_err(|error| LlmTransportError::new(error.to_string()))?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested");
         if !cancellation_is_durable {
@@ -979,7 +985,9 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
                         "fig779-redrive-sleep",
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 60_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 60_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation.clone())
@@ -1034,7 +1042,9 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
                         "fig788-terminal-redrive-sleep",
                     ),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 60_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 60_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
@@ -1144,7 +1154,9 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
                         RuntimeEffectKind::Sleep,
                         "fig811-effectful-terminal-sleep",
                     ),
-                    RuntimeEffectCommand::Sleep { duration_ms: 1 },
+                    RuntimeEffectCommand::Sleep {
+                        spec: lash_core::SleepSpec::For { duration_ms: 1 },
+                    },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation).with_turn_cancel_observation(false),
             )
@@ -1283,6 +1295,105 @@ impl Fig793LlmGateRedrive for Fig793LlmGateRedriveImpl {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 struct Fig1126PendingToolRedriveInput;
+
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+struct Fig1128DeadlineRedriveInput;
+
+#[derive(Debug)]
+struct Fig1128DeadlineClock {
+    anchor: std::time::Instant,
+    wall_ms: AtomicU64,
+    monotonic_gap_ms: AtomicU64,
+    monotonic_reads: AtomicUsize,
+}
+
+impl Fig1128DeadlineClock {
+    fn new(wall_ms: u64, monotonic_gap_ms: u64) -> Self {
+        Self {
+            anchor: std::time::Instant::now(),
+            wall_ms: AtomicU64::new(wall_ms),
+            monotonic_gap_ms: AtomicU64::new(monotonic_gap_ms),
+            monotonic_reads: AtomicUsize::new(0),
+        }
+    }
+
+    fn begin_attempt(&self, wall_ms: u64, monotonic_gap_ms: u64) {
+        self.wall_ms.store(wall_ms, Ordering::SeqCst);
+        self.monotonic_gap_ms
+            .store(monotonic_gap_ms, Ordering::SeqCst);
+        self.monotonic_reads.store(0, Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl Clock for Fig1128DeadlineClock {
+    fn now(&self) -> std::time::Instant {
+        let read = self.monotonic_reads.fetch_add(1, Ordering::SeqCst);
+        self.anchor
+            + Duration::from_millis(if read == 0 {
+                0
+            } else {
+                self.monotonic_gap_ms.load(Ordering::SeqCst)
+            })
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + Duration::from_millis(self.wall_ms.load(Ordering::SeqCst)),
+        )
+    }
+
+    async fn sleep(&self, _duration: Duration) {}
+
+    async fn sleep_until(&self, _deadline: std::time::Instant) {}
+}
+
+#[restate_sdk::workflow]
+trait Fig1128DeadlineRedrive {
+    async fn run(input: Json<Fig1128DeadlineRedriveInput>) -> HandlerResult<Json<Resolution>>;
+}
+
+struct Fig1128DeadlineRedriveImpl {
+    clock: Arc<Fig1128DeadlineClock>,
+}
+
+impl Fig1128DeadlineRedrive for Fig1128DeadlineRedriveImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(_input): Json<Fig1128DeadlineRedriveInput>,
+    ) -> HandlerResult<Json<Resolution>> {
+        let key = test_restate_await_event_key(
+            &ExecutionScope::runtime_operation("fig1128-deadline-redrive"),
+            AwaitEventWaitIdentity::tool_completion("fig1128-deadline"),
+        )
+        .map_err(TerminalError::from_error)?;
+        let deadline = self.clock.now() + Duration::from_secs(60);
+        let controller = RestateRuntimeEffectController::new_for_test(ctx);
+        let outcome = controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline"),
+                    RuntimeEffectCommand::AwaitEvent { key },
+                ),
+                RuntimeEffectLocalExecutor::await_event_with_clock(
+                    tokio_util::sync::CancellationToken::new(),
+                    Some(deadline),
+                    self.clock.clone(),
+                )
+                .with_turn_cancel_observation(false),
+            )
+            .await
+            .map_err(TerminalError::from_error)?;
+        let RuntimeEffectOutcome::AwaitEvent { resolution } = outcome else {
+            return Err(TerminalError::new(
+                "FIG-1128 await-event effect returned the wrong outcome",
+            )
+            .into());
+        };
+        Ok(Json(resolution))
+    }
+}
 
 #[restate_sdk::workflow]
 trait Fig1126RevokedAwaitBoundary {

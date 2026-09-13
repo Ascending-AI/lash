@@ -14,8 +14,8 @@ use lash_core::{
 use lash_lashlang_runtime::{
     LASHLANG_ENGINE_KIND, TraceLanguageChildExecution, TraceLanguageExecution,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
-    prepare_lashlang_process_start, protocol_tool_output_to_lashlang_value,
-    resolve_lashlang_module_operation, sleep_duration_ms,
+    prepare_lashlang_process_start, process_sleep, protocol_tool_output_to_lashlang_value,
+    resolve_lashlang_module_operation,
 };
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProcessSignal, ProcessStart,
@@ -572,6 +572,15 @@ impl HostBridge<'_> {
                 std::sync::Arc::clone(&self.artifact_store),
                 &parent_start_seed,
                 start,
+                self.ctx.trigger_actor(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    self.ctx
+                        .child_process_parent_scope()
+                        .await
+                        .map_err(|error| ExecutionHostError::new(error.to_string()))?,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+                lash_core::RecoveryContract::Rerunnable,
             )
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?
@@ -579,7 +588,7 @@ impl HostBridge<'_> {
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.start");
             self.ctx
-                .start_child_process(prepared.registration, LASHLANG_ENGINE_KIND, prepared.label)
+                .start_child_process(prepared.request, LASHLANG_ENGINE_KIND, prepared.label)
                 .await
         };
         let (result, host_record) = self.consume_reply(reply);
@@ -658,10 +667,10 @@ impl HostBridge<'_> {
     }
 
     async fn sleep(&self, sleep: Sleep) -> Result<FlowValue, ExecutionHostError> {
-        let duration_ms = sleep_duration_ms(sleep.kind, &sleep.value)?;
+        let sleep = process_sleep(sleep.kind, &sleep.value)?;
         let sequence = self.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         self.ctx
-            .sleep_process("foreground", sequence, duration_ms)
+            .sleep_process("foreground", sequence, sleep)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
         Ok(FlowValue::Null)

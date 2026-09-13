@@ -713,7 +713,8 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
 }
 
 #[tokio::test]
-pub(super) async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_state() {
+pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_preserves_execution_state()
+ {
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -850,7 +851,8 @@ pub(super) async fn caller_supplied_key_colliding_with_existing_frame_preserves_
 }
 
 #[tokio::test]
-pub(super) async fn materialized_frame_switch_clears_checkpoint_and_resets_resident_executor() {
+pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_resets_resident_executor()
+ {
     let executor = Arc::new(FailingCaptureExecutor {
         dirty: AtomicBool::new(true),
         fail_capture: AtomicBool::new(false),
@@ -1580,15 +1582,18 @@ impl crate::ToolProvider for ParentEndFailureIntentTool {
     async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     request: crate::ProcessStartRequest::external(
                         "cancelled-turn-parent-end-child",
                         crate::ProcessOriginator::host_scoped("parent-end-failure-witness"),
                         serde_json::json!({"witness": true}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 },
             ))]),
         )
@@ -1623,7 +1628,7 @@ impl crate::ToolProvider for CasSurvivorIntentTools {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
                 crate::EmitProcessEventIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from("cas-survivor-intent-target"),

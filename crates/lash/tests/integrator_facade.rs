@@ -29,14 +29,13 @@ use lash::plugins::{
     HydratedExecutionState, LlmToolSpec, PersistedSegmentHandover, PluginAbort, PluginExtensions,
     PluginNamespaceState, PluginState, PrepareTurnRequest, ProcessEngine,
     ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessInfraError, ProcessRunOutcome, PromptFingerprint, ProtocolBeforeLlmCallContext,
-    ProtocolBuildInput, ProtocolDriverHandle, ProtocolDriverPlugin, ProtocolLlmCallAction,
-    ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-    ProtocolSessionPlugin, ProtocolTurnOptionsError, RuntimeExecutionContext, SegmentHandover,
-    SessionAuthorityContext, SessionContextOverlay, SessionPluginSource, ToolCatalog,
-    TurnDriverConfig, TurnDriverPreamble, TurnFinalization, TurnHookReport, TurnLimitFinalMessage,
-    TurnPreparation,
+    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError, ProcessRunOutcome,
+    PromptFingerprint, ProtocolBeforeLlmCallContext, ProtocolBuildInput, ProtocolDriverHandle,
+    ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
+    ProtocolSessionMaterialization, ProtocolSessionPlugin, ProtocolTurnOptionsError,
+    RuntimeExecutionContext, SegmentHandover, SessionAuthorityContext, SessionContextOverlay,
+    SessionPluginSource, ToolCatalog, TurnDriverConfig, TurnDriverPreamble, TurnFinalization,
+    TurnHookReport, TurnPreparation,
 };
 use lash::process::{
     ObserverInheritance, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
@@ -88,19 +87,12 @@ impl ProtocolDriverPlugin for Driver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let protocol: Arc<dyn ProtocolDriverHandle<HostTurnProtocol>> =
             Arc::new(lash_protocol_standard::StandardDriver::default());
-        let turn_limit_final_message: TurnLimitFinalMessage =
-            Arc::new(|message_id, _max_turns| lash::messages::Message {
-                id: message_id,
-                role: lash::messages::MessageRole::System,
-                parts: Arc::new(Vec::new()),
-                origin: None,
-            });
         let tool_specs: Arc<Vec<LlmToolSpec>> = input.tool_catalog.model_tool_specs();
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint: PromptFingerprint = input.tool_catalog.tool_names_fingerprint();
 
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(protocol, true, turn_limit_final_message),
+            config: TurnDriverConfig::chat(protocol, true),
             tool_specs,
             tool_names,
             tool_names_fingerprint,

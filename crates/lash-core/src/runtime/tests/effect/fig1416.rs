@@ -129,7 +129,9 @@ fn one_child_group() -> crate::RuntimeEffectGroup {
             crate::RuntimeAttribution::for_session("session"),
             "effect",
         ),
-        RuntimeEffectCommand::Sleep { duration_ms: 1 },
+        RuntimeEffectCommand::Sleep {
+            spec: crate::SleepSpec::For { duration_ms: 1 },
+        },
     );
     crate::RuntimeEffectGroup::try_new(
         RuntimeEffectInvocation::new(

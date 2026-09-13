@@ -15,8 +15,18 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/sqlite-expected.json",
+];
+const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-fe2964c7/sqlite-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-037d9999/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/sqlite-expected.json",
+];
+const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-7861e438/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-ee717fab/sqlite-expected.json",
 ];
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,9 +307,29 @@ fn checkpoint_files(root: &Path) {
 
 fn copy_sqlite_fixture(from: &Path, to: &Path) {
     for name in database_names() {
-        std::fs::copy(from.join(name), to.join(name))
+        let destination = to.join(name);
+        std::fs::copy(from.join(name), &destination)
             .unwrap_or_else(|error| panic!("copy committed SQLite fixture {name}: {error}"));
+        make_fixture_copy_writable(&destination);
     }
+}
+
+#[cfg(unix)]
+fn make_fixture_copy_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .unwrap_or_else(|error| panic!("make copied SQLite fixture writable: {error}"));
+}
+
+#[cfg(not(unix))]
+fn make_fixture_copy_writable(path: &Path) {
+    let mut permissions = std::fs::metadata(path)
+        .unwrap_or_else(|error| panic!("read copied SQLite fixture permissions: {error}"))
+        .permissions();
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions)
+        .unwrap_or_else(|error| panic!("make copied SQLite fixture writable: {error}"));
 }
 
 fn database_names() -> [&'static str; 4] {

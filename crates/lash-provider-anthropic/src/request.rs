@@ -12,6 +12,8 @@ pub(crate) struct BreakpointAddress {
     pub(crate) block_index: usize,
 }
 
+type BuiltMessages = (Option<String>, Vec<Value>, Option<BreakpointAddress>);
+
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
         match role {
@@ -56,36 +58,46 @@ impl AnthropicProvider {
     /// Translate one `LlmContentBlock` into the Anthropic wire shape.
     /// Returns `None` for blocks that have no valid wire form (e.g. an
     /// empty text block — Anthropic 400s on those).
-    fn content_block_value(req: &LlmRequest, block: &LlmContentBlock) -> Option<Value> {
+    fn content_block_value(
+        req: &LlmRequest,
+        block: &LlmContentBlock,
+    ) -> Result<Option<Value>, LlmTransportError> {
         match block {
             LlmContentBlock::Text { text, .. } => {
                 if text.trim().is_empty() {
-                    return None;
+                    return Ok(None);
                 }
-                Some(Self::text_block_value(text))
+                Ok(Some(Self::text_block_value(text)))
             }
-            LlmContentBlock::Attachment { source } => Self::attachment_block_value(req, source),
+            LlmContentBlock::Attachment { source } => Ok(Self::attachment_block_value(req, source)),
             LlmContentBlock::ToolCall {
                 call_id,
                 tool_name,
                 input_json,
                 ..
             } => {
-                let input: Value = serde_json::from_str(input_json).unwrap_or_else(|_| json!({}));
-                Some(json!({
+                let input: Value = serde_json::from_str(input_json).map_err(|err| {
+                    LlmTransportError::new(format!(
+                        "Anthropic tool_use input for `{tool_name}` is not JSON: {err}"
+                    ))
+                    .with_kind(ProviderFailureKind::Validation)
+                    .with_code("invalid_tool_call_input_json")
+                    .with_raw(input_json.clone())
+                })?;
+                Ok(Some(json!({
                     "type": "tool_use",
                     "id": normalize_tool_call_id(call_id),
                     "name": tool_name,
                     "input": input,
-                }))
+                })))
             }
             LlmContentBlock::ToolResult {
                 call_id, content, ..
-            } => Some(json!({
+            } => Ok(Some(json!({
                 "type": "tool_result",
                 "tool_use_id": normalize_tool_call_id(call_id),
                 "content": content.clone(),
-            })),
+            }))),
             LlmContentBlock::Reasoning { text, replay, .. } => {
                 // Anthropic requires a signature to replay a thinking
                 // block. If we don't have one (e.g. aborted stream, or
@@ -94,24 +106,24 @@ impl AnthropicProvider {
                 // back to plain text so the turn still validates.
                 let Some(sig) = replay.as_ref().and_then(|meta| meta.signature.as_deref()) else {
                     if text.trim().is_empty() {
-                        return None;
+                        return Ok(None);
                     }
-                    return Some(Self::text_block_value(text));
+                    return Ok(Some(Self::text_block_value(text)));
                 };
                 if replay.as_ref().is_some_and(|meta| meta.redacted) {
-                    return Some(json!({
+                    return Ok(Some(json!({
                         "type": "redacted_thinking",
                         "data": sig,
-                    }));
+                    })));
                 }
                 if text.trim().is_empty() {
-                    return None;
+                    return Ok(None);
                 }
-                Some(json!({
+                Ok(Some(json!({
                     "type": "thinking",
                     "thinking": text,
                     "signature": sig,
-                }))
+                })))
             }
         }
     }
@@ -157,7 +169,7 @@ impl AnthropicProvider {
     pub(crate) fn build_messages(
         &self,
         req: &LlmRequest,
-    ) -> (Option<String>, Vec<Value>, Option<BreakpointAddress>) {
+    ) -> Result<BuiltMessages, LlmTransportError> {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
@@ -204,7 +216,7 @@ impl AnthropicProvider {
                 msg.blocks.as_slice()
             };
             for block in source_blocks {
-                if let Some(value) = Self::content_block_value(req, block) {
+                if let Some(value) = Self::content_block_value(req, block)? {
                     if matches!(
                         block,
                         LlmContentBlock::Text {
@@ -272,7 +284,7 @@ impl AnthropicProvider {
             }
             blocks.sort_by_key(|block| !is_result(block));
         }
-        (system_prompt, out, breakpoint)
+        Ok((system_prompt, out, breakpoint))
     }
 
     fn projection_error(err: SchemaResolutionError) -> LlmTransportError {
@@ -427,7 +439,18 @@ impl AnthropicProvider {
         req: &LlmRequest,
     ) -> Result<(Value, bool), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                &serving_route,
+                "Anthropic Messages",
+                ProviderReasoningRetentionSupport::AnthropicClearThinking,
+            )
+            .map_err(|error: ReasoningRetentionValidationError| {
+                LlmTransportError::new(error.message)
+                    .with_kind(ProviderFailureKind::Unsupported)
+                    .with_code("unsupported_reasoning_retention")
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden)
+            })?;
         let req = safe_request.as_ref();
         for (message_index, message) in req.messages.iter().enumerate() {
             for source in message.blocks.iter().filter_map(|block| match block {
@@ -482,7 +505,7 @@ impl AnthropicProvider {
                 })?;
             }
         }
-        let (system_text, mut messages, breakpoint) = self.build_messages(req);
+        let (system_text, mut messages, breakpoint) = self.build_messages(req)?;
         let mut tools = self.build_tools(req)?;
 
         let thinking_config = Self::thinking_config(req);
@@ -516,6 +539,23 @@ impl AnthropicProvider {
             "max_tokens": policy.max_output_tokens,
             "messages": messages,
         });
+
+        if let ReasoningRetentionSelection::AnthropicClearThinking { keep } =
+            req.model_capability.reasoning_retention.selection
+        {
+            let keep = match keep {
+                AnthropicThinkingRetention::All => json!("all"),
+                AnthropicThinkingRetention::Turns(turns) => {
+                    json!({ "type": "thinking_turns", "value": turns.get() })
+                }
+            };
+            body["context_management"] = json!({
+                "edits": [{
+                    "type": "clear_thinking_20251015",
+                    "keep": keep,
+                }],
+            });
+        }
 
         if let Some(system_value) = system_value {
             body["system"] = system_value;

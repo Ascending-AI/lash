@@ -99,6 +99,14 @@ rust-version = "1.90"
 # one states why it is allowed and the expectation goes stale (and fails) the
 # moment the unsafe block disappears.
 unsafe_code = "deny"
+# Verification cfgs are expected names. A typo (`cfg(loomw)`) must not compile
+# as false and silently drop a proof (FIG-2974).
+unexpected_cfgs = { level = "deny", check-cfg = [
+    'cfg(loom)',
+    'cfg(kani)',
+    'cfg(miri)',
+    'cfg(fuzzing)',
+] }
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"

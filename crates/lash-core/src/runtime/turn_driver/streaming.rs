@@ -313,15 +313,15 @@ impl RuntimeTurnDriver<'_> {
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace =
             self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
+        // The projector is built from the physical turn's committed frame.
+        // A logical-turn follow-on may already have advanced beyond the
+        // boundary's resident snapshot, so keep that frame identity while
+        // replacing only the runtime-owned request correlation fields.
+        let projected_agent_frame_id = request.scope.agent_frame_id.clone();
         let mut llm_request = LlmRequest {
             scope: crate::LlmRequestScope::new(
                 self.session_id.clone(),
-                self.turn_pipeline
-                    .state()
-                    .current_frame_node_id
-                    .clone()
-                    .map(crate::FrameNodeId::into_inner)
-                    .unwrap_or_default(),
+                projected_agent_frame_id,
                 format!(
                     "{}:turn:{}:llm:{}",
                     self.session_id, self.turn_id, protocol_iteration
@@ -354,6 +354,7 @@ impl RuntimeTurnDriver<'_> {
         let attempt_started = self.host.core.clock.now();
         let mut assistant_prose_correlation = None;
         let mut reasoning_correlation = None;
+        let mut reasoning_publication = ReasoningPublicationState::default();
         let mut assistant_prose_attempt_correlations = Vec::new();
         let mut reasoning_attempt_correlations = Vec::new();
         let mut stream_state = LlmStreamState {
@@ -365,6 +366,7 @@ impl RuntimeTurnDriver<'_> {
             protocol_iteration,
             assistant_prose_correlation: &mut assistant_prose_correlation,
             reasoning_correlation: &mut reasoning_correlation,
+            reasoning_publication: &mut reasoning_publication,
             assistant_prose_attempt_correlations: &mut assistant_prose_attempt_correlations,
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
             abort_requested: &mut abort_requested,
@@ -733,6 +735,7 @@ impl RuntimeTurnDriver<'_> {
             self.llm_stream_summaries
                 .insert(protocol_iteration, debug.summary);
         }
+        self.reasoning_publication = reasoning_publication;
         (result, text_streamed, call_record)
     }
 
@@ -1000,6 +1003,9 @@ impl RuntimeTurnDriver<'_> {
             *state.abort_requested = true;
         }
         for reasoning_delta in outcome.reasoning_deltas {
+            if !reasoning_delta.is_empty() {
+                state.reasoning_publication.record_anonymous_part();
+            }
             fold_llm_stream_event(
                 state.stream_accumulator,
                 state.streamed_usage,
@@ -1081,6 +1087,7 @@ impl RuntimeTurnDriver<'_> {
                 *state.text_streamed = false;
                 *state.assistant_prose_correlation = None;
                 *state.reasoning_correlation = None;
+                *state.reasoning_publication = ReasoningPublicationState::default();
             }
             LlmStreamEvent::Delta(delta) => {
                 self.emit_visible_assistant_text(forwarder, delta, None, "delta", state)
@@ -1088,6 +1095,7 @@ impl RuntimeTurnDriver<'_> {
             }
             LlmStreamEvent::ReasoningDelta(delta) => {
                 if !delta.is_empty() {
+                    state.reasoning_publication.record_delta();
                     self.log_llm_stream_event(
                         state.debug,
                         LlmStreamEventLog {
@@ -1184,6 +1192,9 @@ impl RuntimeTurnDriver<'_> {
             }
             LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
                 let item_id = replay.as_ref().and_then(|meta| meta.item_id.as_deref());
+                let publish_completed_text = !state
+                    .reasoning_publication
+                    .reconcile_completed_part(item_id);
                 if !text.is_empty() {
                     self.log_llm_stream_event(
                         state.debug,
@@ -1191,25 +1202,28 @@ impl RuntimeTurnDriver<'_> {
                             protocol_iteration: state.protocol_iteration,
                             event_type: "reasoning_part",
                             text: LlmDebugText {
-                                raw: None,
-                                visible: Some(&text),
+                                raw: Some(&text),
+                                visible: publish_completed_text.then_some(text.as_str()),
                             },
                             item_id,
                             usage: None,
                             tool_call: None,
                         },
                     );
-                    let correlation_id =
-                        stream_correlation_id(state.reasoning_correlation, item_id);
-                    remember_attempt_correlation(
-                        state.reasoning_attempt_correlations,
-                        &correlation_id,
-                    );
-                    forwarder.forward_delta(
-                        ProviderDeltaClass::Reasoning,
-                        correlation_id,
-                        text.clone(),
-                    );
+                    if publish_completed_text {
+                        state.reasoning_publication.record_completed_part(item_id);
+                        let correlation_id =
+                            stream_correlation_id(state.reasoning_correlation, item_id);
+                        remember_attempt_correlation(
+                            state.reasoning_attempt_correlations,
+                            &correlation_id,
+                        );
+                        forwarder.forward_delta(
+                            ProviderDeltaClass::Reasoning,
+                            correlation_id,
+                            text.clone(),
+                        );
+                    }
                 }
                 fold_llm_stream_event(
                     state.stream_accumulator,

@@ -135,6 +135,10 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                         },
                         crate::RecoveryContract::ExternallyOwned,
                         crate::ProcessProvenance::host(),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
                     crate::ProcessIncarnation::from_registration_sequence(1),
                 );

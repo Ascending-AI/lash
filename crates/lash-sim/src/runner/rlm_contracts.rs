@@ -744,10 +744,10 @@ fn rlm_contract_config_with_turn_options(
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: SessionId::from("rlm-contract"),
+        agent_frame_id: "rlm-contract-frame".to_string(),
         turn_id: TurnId::from("rlm-contract-turn"),
         emit_llm_trace: false,
         termination,
-        turn_limit_final_message: Arc::new(contract_turn_limit_final_message),
     })
 }
 

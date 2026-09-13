@@ -217,6 +217,20 @@ pub mod store_backend_support {
             .join(", ")
     }
 
+    /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
+    pub fn terminal_turn_input_states_sql() -> String {
+        let terminal_states = crate::TurnInputState::ALL
+            .iter()
+            .copied()
+            .filter(|state| state.is_terminal())
+            .collect::<Vec<_>>();
+        if terminal_states.is_empty() {
+            // Admit no state rather than interpolating the invalid SQL `IN ()`.
+            return "FALSE".to_string();
+        }
+        state_sql_literal_list(&terminal_states)
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
@@ -317,7 +331,6 @@ pub mod facade_support {
     pub use crate::direct::DirectRole;
     pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
-    pub use crate::llm::transport::ProviderFailure;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
     pub use crate::plugin::AfterTurnPluginDirective;
@@ -1127,10 +1140,12 @@ pub(crate) use plugin::{
 };
 
 pub use provider::{
-    AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-    AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-    ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
-    SamplingCapability, StreamTermination,
+    AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+    AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+    InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+    ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+    ReasoningRetentionPolicy, ReasoningRetentionSelection, ReasoningRetentionValidationCategory,
+    ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
     EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,
@@ -1164,19 +1179,20 @@ pub use runtime::{
     LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
     LlmRequestSpec, LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
     NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
-    ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle,
+    OnParentEnd, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentScope,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineRegistration, ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInfraError,
+    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
     ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
     ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
     ProcessOutcomeObserver, ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport,
@@ -1204,7 +1220,7 @@ pub use runtime::{
     SessionDeleteExecution, SessionDrainOutcome, SessionId, SessionListFilter,
     SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
     SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
     StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
     TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,
@@ -1285,7 +1301,7 @@ pub(crate) use store::{
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, ProcessParentEndPolicy,
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
+    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
     ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
 };

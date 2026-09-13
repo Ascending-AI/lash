@@ -229,7 +229,8 @@ impl ProcessAdmissionScenario {
             CommitBudget::bounded(1024 * 1024, 512),
             QueuedWorkBatchingConfig::new(1),
         );
-        runtime_host.process_engines = ProcessEngineRegistry::new().with_engine(engine);
+        runtime_host.process_engines = ProcessEngineRegistry::new()
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(engine));
         let session_policy = SessionPolicy {
             provider_id: "sim-native-process-admission".to_string(),
             model: lash_core::ModelSpec::builder("sim-native-process-admission-model")
@@ -259,6 +260,10 @@ impl ProcessAdmissionScenario {
                         },
                         RecoveryContract::Rerunnable,
                         lash_core::ProcessProvenance::host(),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     )
                     .with_execution_env_ref(Some(env_ref.clone())),
                 )

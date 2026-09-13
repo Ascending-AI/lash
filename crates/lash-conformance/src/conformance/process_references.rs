@@ -96,6 +96,10 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
                     },
                     RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_identity(
                     ProcessIdentity::new("reference-test").with_definition(Some(definition)),

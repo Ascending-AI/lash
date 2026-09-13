@@ -1,5 +1,405 @@
 use super::*;
 
+#[derive(Clone)]
+struct TestDeferredTriggerResolver {
+    outcome: lash_lashlang_runtime::TriggerResolution,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredTriggerResolver for TestDeferredTriggerResolver {
+    async fn resolve(
+        &self,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::TriggerResolution> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        paths
+            .iter()
+            .map(|path| ((*path).to_string(), self.outcome.clone()))
+            .collect()
+    }
+}
+
+struct MixedTriggerResolver;
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredTriggerResolver for MixedTriggerResolver {
+    async fn resolve(
+        &self,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_lashlang_runtime::TriggerResolution> {
+        paths
+            .iter()
+            .map(|path| {
+                let outcome = if *path == "calendar.Changed" {
+                    lash_lashlang_runtime::TriggerResolution::Resolved(Box::new(
+                        calendar_trigger_grant("calendar-primary"),
+                    ))
+                } else {
+                    lash_lashlang_runtime::TriggerResolution::NotAvailable
+                };
+                ((*path).to_string(), outcome)
+            })
+            .collect()
+    }
+}
+
+struct MixedToolResolver;
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for MixedToolResolver {
+    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        paths
+            .iter()
+            .map(|path| {
+                let outcome = if *path == "web.fetch" {
+                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
+                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition()),
+                    ))
+                } else {
+                    lash_lashlang_runtime::Resolution::NotAvailable
+                };
+                ((*path).to_string(), outcome)
+            })
+            .collect()
+    }
+}
+
+fn calendar_trigger_grant(route: &str) -> lash_lashlang_runtime::TriggerGrant {
+    lash_lashlang_runtime::TriggerGrant::new(
+        ["calendar", "Changed"],
+        lashlang::TypeExpr::Object(vec![]),
+        lashlang::NamedDataType::object(
+            "calendar.Change",
+            vec![lashlang::TypeField {
+                name: "id".into(),
+                ty: lashlang::TypeExpr::Str,
+                optional: false,
+            }],
+        )
+        .expect("valid calendar event type"),
+    )
+    .with_provider_id("calendar-provider")
+    .with_route(serde_json::json!({"route": route}))
+}
+
+async fn execute_with_deferred_trigger(
+    language: &str,
+    code: &str,
+    resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver,
+) -> (RlmExecutionState, ExecResponse) {
+    let dialect = if language == "typescript" {
+        SourceDialect::Typescript
+    } else {
+        SourceDialect::Lashlang
+    };
+    let mut state = RlmExecutionState::for_engine(language);
+    let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
+        &mut state,
+        lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+            Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            lash_core::testing::exec_code_invocation(
+                "session",
+                "turn",
+                0,
+                0,
+                "exec-code",
+                format!("exec-code:deferred-trigger:{language}"),
+            ),
+        ),
+        ExecRequest {
+            language: language.to_string(),
+            code: code.to_string(),
+        },
+        Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+        LashlangSurface::new(
+            lashlang::LashlangAbilities::default()
+                .with_processes()
+                .with_triggers(),
+            lashlang::LashlangLanguageFeatures::default(),
+            lashlang::LashlangHostCatalog::new(),
+        ),
+        None,
+        Some(resolver),
+        RlmProjectedBindings::default(),
+        Arc::new(ProjectionRegistry::new()),
+        RlmLashlangExecutionTraceConfig::default(),
+        lashlang::ExecutionBounds::unbounded(),
+        RlmSourceContext::cell(dialect),
+    )
+    .await;
+    (state, response)
+}
+
+#[test]
+fn deferred_trigger_constructor_and_event_schema_link_for_both_frontends() {
+    block_on(async {
+        let cases = [
+            (
+                "lashlang",
+                r#"
+                    process remember(change: calendar.Change) { finish true }
+                    source = calendar.Changed({})
+                    handle = await triggers.register({
+                      source: source,
+                      target: remember,
+                      inputs: { change: trigger.event }
+                    })?
+                    finish handle
+                "#,
+            ),
+            (
+                "typescript",
+                r#"
+                    const remember = defineProcess({
+                      name: "remember", signals: {},
+                      run: async (change: calendar.Change) => true
+                    });
+                    const source = calendar.Changed({});
+                    finish(await registerTrigger({
+                      source, target: remember, inputs: { change: trigger.event }
+                    }));
+                "#,
+            ),
+        ];
+        for (language, code) in cases {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
+                Arc::new(TestDeferredTriggerResolver {
+                    outcome: lash_lashlang_runtime::TriggerResolution::Resolved(Box::new(
+                        calendar_trigger_grant("calendar-primary"),
+                    )),
+                    calls: Arc::clone(&calls),
+                });
+            let (state, response) = execute_with_deferred_trigger(language, code, resolver).await;
+            assert!(response.error.is_none(), "{language}: {:?}", response.error);
+            assert_eq!(
+                response.terminal_finish.as_ref().unwrap()["type"],
+                "trigger_handle"
+            );
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(state.deferred_resolutions.resolutions.is_empty());
+            assert!(matches!(
+                state.deferred_trigger_resolutions.resolutions["calendar.Changed"],
+                lash_lashlang_runtime::TriggerResolution::Resolved(ref grant)
+                    if grant.route == serde_json::json!({"route": "calendar-primary"})
+            ));
+        }
+    });
+}
+
+#[test]
+fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
+    block_on(async {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
+            Arc::new(TestDeferredTriggerResolver {
+                outcome: lash_lashlang_runtime::TriggerResolution::Resolved(Box::new(
+                    calendar_trigger_grant("snapshot-route"),
+                )),
+                calls,
+            });
+        let (mut state, response) = execute_with_deferred_trigger(
+            "lashlang",
+            r#"
+                process remember(change: calendar.Change) { finish true }
+                source = calendar.Changed({})
+                finish await triggers.register({
+                  source: source, target: remember,
+                  inputs: { change: trigger.event }
+                })?
+            "#,
+            resolver,
+        )
+        .await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+
+        let hydration = hydrate_snapshot(
+            state
+                .snapshot_execution_state()
+                .expect("trigger-bearing state snapshots"),
+        );
+        let mut restored = RlmExecutionState::for_engine("lashlang");
+        restored
+            .restore_execution_state(&hydration)
+            .expect("trigger-bearing state restores");
+
+        assert!(matches!(
+            restored.deferred_trigger_resolutions.resolutions["calendar.Changed"],
+            lash_lashlang_runtime::TriggerResolution::Resolved(ref grant)
+                if grant.provider_id == "calendar-provider"
+                    && grant.route == serde_json::json!({"route": "snapshot-route"})
+        ));
+        assert!(restored.deferred_resolutions.resolutions.is_empty());
+    });
+}
+
+#[test]
+fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
+    block_on(async {
+        let cases = [
+            (
+                "lashlang",
+                r#"
+                    process remember(change: calendar.Change) { finish true }
+                    process install() {
+                      source = calendar.Changed({})
+                      await triggers.register({
+                        source: source, target: remember,
+                        inputs: { change: trigger.event }
+                      })?
+                      finish true
+                    }
+                    finish true
+                "#,
+            ),
+            (
+                "typescript",
+                r#"
+                    const sourceInput = () => ({});
+                    const remember = defineProcess({
+                      name: "remember", signals: {},
+                      run: async (change: calendar.Change) => true
+                    });
+                    finish(await registerTrigger({
+                      source: calendar.Changed(sourceInput()), target: remember,
+                      inputs: { change: trigger.event }
+                    }));
+                "#,
+            ),
+        ];
+        for (language, code) in cases {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
+                Arc::new(TestDeferredTriggerResolver {
+                    outcome: lash_lashlang_runtime::TriggerResolution::Resolved(Box::new(
+                        calendar_trigger_grant("helper-route"),
+                    )),
+                    calls: Arc::clone(&calls),
+                });
+            let (_, response) = execute_with_deferred_trigger(language, code, resolver).await;
+            assert!(response.error.is_none(), "{language}: {:?}", response.error);
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        }
+    });
+}
+
+#[test]
+fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
+    block_on(async {
+        let code = r#"
+            process wrong(value: int) { finish true }
+            await triggers.register({
+              source: calendar.Changed({}), target: wrong,
+              inputs: { value: trigger.event }
+            })?
+            finish true
+        "#;
+        for (outcome, expected) in [
+            (
+                lash_lashlang_runtime::TriggerResolution::NotAvailable,
+                "unknown name `calendar`",
+            ),
+            (
+                lash_lashlang_runtime::TriggerResolution::Ambiguous {
+                    provider_ids: vec!["a".to_string(), "b".to_string()],
+                },
+                "ambiguous across providers",
+            ),
+        ] {
+            let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
+                Arc::new(TestDeferredTriggerResolver {
+                    outcome,
+                    calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                });
+            let (_, response) = execute_with_deferred_trigger("lashlang", code, resolver).await;
+            let error = response
+                .error
+                .expect("link must reject unavailable definition");
+            assert!(error.message.contains(expected), "{}", error.message);
+            assert!(
+                !error.message.contains("trigger event"),
+                "{}",
+                error.message
+            );
+        }
+    });
+}
+
+#[test]
+fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
+    block_on(async {
+        let mut state = RlmExecutionState::for_engine("lashlang");
+        let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
+            &mut state,
+            lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+                Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+                lash_core::testing::exec_code_invocation(
+                    "session",
+                    "turn",
+                    0,
+                    0,
+                    "exec-code",
+                    "exec-code:mixed-deferred-definitions",
+                ),
+            ),
+            ExecRequest {
+                language: "lashlang".to_string(),
+                code: r#"
+                    process remember(change: calendar.Change) { finish true }
+                    process unused() {
+                      source = calendar.Changed({})
+                      await web.fetch({})?
+                      await triggers.register({
+                        source: source, target: remember,
+                        inputs: { change: trigger.event }
+                      })?
+                      finish true
+                    }
+                    finish true
+                "#
+                .to_string(),
+            },
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
+            LashlangSurface::new(
+                lashlang::LashlangAbilities::default()
+                    .with_processes()
+                    .with_triggers(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            ),
+            Some(Arc::new(MixedToolResolver)),
+            Some(Arc::new(MixedTriggerResolver)),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            RlmSourceContext::cell(SourceDialect::Lashlang),
+        )
+        .await;
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert!(matches!(
+            state.deferred_trigger_resolutions.resolutions["calendar.Changed"],
+            lash_lashlang_runtime::TriggerResolution::Resolved(_)
+        ));
+        assert!(matches!(
+            state.deferred_trigger_resolutions.resolutions["web.fetch"],
+            lash_lashlang_runtime::TriggerResolution::NotAvailable
+        ));
+        assert!(matches!(
+            state.deferred_resolutions.resolutions["web.fetch"],
+            lash_lashlang_runtime::Resolution::Resolved(_)
+        ));
+        assert!(
+            !state
+                .deferred_resolutions
+                .resolutions
+                .contains_key("calendar.Changed")
+        );
+    });
+}
+
 pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
@@ -351,7 +751,11 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
     block_on(async {
         async fn capture(code: &str) -> Vec<(String, String, String)> {
             let controller = CapturingTriggerEffectController::default();
-            let response = execute_with_capturing_trigger_effects(code, controller.clone()).await;
+            let response = Box::pin(execute_with_capturing_trigger_effects(
+                code,
+                controller.clone(),
+            ))
+            .await;
             assert!(response.error.is_none(), "{:?}", response.error);
             controller
                 .envelopes
@@ -537,6 +941,10 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         );
         let context = lash_core::testing::code_execution_context_for_process(&registration);
         let owner_error = context
@@ -629,10 +1037,14 @@ async fn execute_trigger_process_with_originator(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn.clone());
     let worker = lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
@@ -807,6 +1219,10 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         );
         let context = lash_core::testing::code_execution_context_for_process(&registration);
         let owner_error = context
@@ -999,7 +1415,7 @@ pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() 
 pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
     block_on(async {
         let scalar = CapturingTriggerEffectController::default();
-        let response = execute_with_capturing_trigger_effects(
+        let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
                 process remember(tick: timer.Tick) { finish true }
                 source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
@@ -1030,7 +1446,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 finish len(listed)
                 "#,
             scalar.clone(),
-        )
+        ))
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(
@@ -1068,7 +1484,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
         );
 
         let batched = CapturingTriggerEffectController::default();
-        let response = execute_with_capturing_trigger_effects(
+        let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
                 process remember(tick: timer.Tick) { finish true }
                 source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
@@ -1115,7 +1531,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 finish len(results.listed)
                 "#,
             batched.clone(),
-        )
+        ))
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(

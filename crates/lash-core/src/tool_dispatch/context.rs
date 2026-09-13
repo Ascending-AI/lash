@@ -183,6 +183,23 @@ impl ToolDispatchContext<'_> {
             .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
     }
 
+    pub(crate) fn attempt_may_defer(
+        &self,
+        tool_id: &crate::ToolId,
+        grant: Option<&crate::ToolExecutionGrant>,
+    ) -> bool {
+        // A registry's pinned catalog deliberately omits out-of-catalog grant
+        // routes. Only the live source named by the grant can declare deferral;
+        // an unresolved route must not borrow the answer from a same-id catalog
+        // tool. Direct non-registry providers retain their ordinary lookup.
+        if let Some(grant) = grant
+            && let Some(registry) = self.tool_registry.as_deref()
+        {
+            return registry.attempt_may_defer_for_grant(tool_id, grant.source_id.as_deref());
+        }
+        self.tools.attempt_may_defer(tool_id)
+    }
+
     /// Attribution available without a causal parent comes only from the
     /// admitted execution scope. `CurrentSession` also hosts process and
     /// runtime-operation work, so its descriptive session id is not provenance
@@ -346,20 +363,14 @@ pub(super) fn completed_preparation(outcome: ToolDispatchOutcome) -> ToolPrepara
 pub(super) fn outcome(
     tool_name: String,
     args: serde_json::Value,
-    result: ToolOutcome,
+    result: super::retry::NormalizedToolOutput,
     duration_ms: u64,
 ) -> ToolDispatchOutcome {
     let record = ToolCallRecord {
         call_id: None,
         tool: tool_name,
         args,
-        output: result.into_done_output().unwrap_or_else(|_| {
-            crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "pending_tool_not_finalized",
-                "pending tool result reached a completed-output projection path",
-            ))
-        }),
+        output: result.into_output(),
         duration_ms,
     };
     ToolDispatchOutcome {

@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 use std::sync::{Arc, LazyLock};
 
-use lash_core::llm::types::LlmRequest;
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::types::{LlmRequest, ReasoningRetentionValidationError};
 use lash_core::provider::{ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection};
 use lash_llm_transport::{LlmHttpTransport, ReqwestLlmHttpTransport};
 
@@ -43,6 +44,15 @@ pub(crate) fn reasoning_intent(req: &LlmRequest) -> Option<ReasoningWireIntent> 
             ReasoningDisableEncoding::ToggleFalse => Some(ReasoningWireIntent::ToggleFalse),
         },
     }
+}
+
+pub(crate) fn reasoning_retention_transport_error(
+    error: ReasoningRetentionValidationError,
+) -> LlmTransportError {
+    LlmTransportError::new(error.message)
+        .with_kind(ProviderFailureKind::Unsupported)
+        .with_code("unsupported_reasoning_retention")
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
 pub(crate) static DEFAULT_HTTP_TRANSPORT: LazyLock<Arc<dyn LlmHttpTransport>> =

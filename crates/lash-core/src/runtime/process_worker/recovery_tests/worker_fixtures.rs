@@ -165,7 +165,8 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_engine(engine);
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new()
+        .with_registration(crate::ProcessEngineRegistration::accepting(engine));
     if let Some(lease_timings) = lease_timings {
         runtime_host = runtime_host.with_lease_timings(lease_timings);
     }
@@ -200,4 +201,134 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         .set(worker.clone())
         .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
     (worker, registry, run_handle, env_ref, test_registry)
+}
+
+pub(super) fn engine_registration(
+    id: impl Into<ProcessId>,
+    kind: &str,
+    env_ref: ProcessExecutionEnvRef,
+    payload: serde_json::Value,
+) -> ProcessRegistration {
+    ProcessRegistration::new(
+        id,
+        ProcessInput::Engine {
+            kind: kind.to_string(),
+            payload,
+        },
+        RecoveryContract::Rerunnable,
+        crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+    )
+    .with_execution_env_ref(Some(env_ref))
+}
+
+pub(super) async fn terminal_count(registry: &Arc<dyn ProcessRegistry>) -> usize {
+    registry
+        .list_processes(&ProcessListFilter {
+            status: crate::ProcessStatusFilter::Any,
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list processes")
+        .into_iter()
+        .filter(ProcessRecord::is_terminal)
+        .count()
+}
+
+pub(super) async fn wait_for_terminal_count(
+    registry: &Arc<dyn ProcessRegistry>,
+    expected: usize,
+    description: &str,
+) {
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        while terminal_count(registry).await < expected {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    if result.is_err() {
+        let records = registry
+            .list_processes(&ProcessListFilter {
+                status: crate::ProcessStatusFilter::Any,
+                ..ProcessListFilter::default()
+            })
+            .await
+            .expect("list timed-out processes");
+        panic!(
+            "timed out waiting for {description}: {}",
+            records
+                .iter()
+                .map(|record| format!("{}={}", record.id, record.status.label()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+}
+
+pub(super) fn native_worker(
+    registry: Arc<dyn ProcessRegistry>,
+    lease_owner: LeaseOwnerIdentity,
+) -> DurableProcessWorker {
+    native_worker_with_trigger_store(
+        registry,
+        lease_owner,
+        Arc::new(crate::InMemoryTriggerStore::default()),
+    )
+}
+
+pub(super) fn native_worker_with_trigger_store(
+    registry: Arc<dyn ProcessRegistry>,
+    lease_owner: LeaseOwnerIdentity,
+    trigger_store: Arc<dyn TriggerStore>,
+) -> DurableProcessWorker {
+    let watched = crate::watch_process_registry(registry);
+    DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(Vec::new())),
+            RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
+            Arc::new(InMemorySessionStoreFactory),
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
+            lease_owner,
+        )
+        .with_trigger_store(trigger_store),
+    )
+    .expect("valid test native substrate config")
+}
+
+/// A worker whose trigger-delivery reconcile can re-enter the work driver: the
+/// driver's run handle drives this same worker, which is the shape the facade
+/// builds and the shape that produced the "a call reports its own admission as
+/// `Busy`" defect.
+pub(super) fn reentrant_worker_with_trigger_store(
+    registry: Arc<dyn ProcessRegistry>,
+    lease_owner: LeaseOwnerIdentity,
+    trigger_store: Arc<dyn TriggerStore>,
+    run_handle: Arc<LateBoundProcessWork>,
+) -> DurableProcessWorker {
+    let (_driver_registry, _driver_hub, process_work) =
+        late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
+    let worker = DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(Vec::new())),
+            RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
+            Arc::new(InMemorySessionStoreFactory),
+            crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
+            lease_owner,
+        )
+        .with_trigger_store(trigger_store),
+    )
+    .expect("valid test native substrate config");
+    run_handle
+        .worker
+        .set(worker.clone())
+        .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
+    worker
 }

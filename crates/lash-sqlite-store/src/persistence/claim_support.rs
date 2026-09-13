@@ -13,13 +13,9 @@ pub(super) fn cancel_pending_turn_input_row_conn(
         lash_core::TurnInputState::Completed => Ok(
             lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),
         ),
-        lash_core::TurnInputState::Accepted => {
-            Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                claim: pending_turn_input_claim_diagnostics_from_row(&row, input.state),
-                input,
-            })
-        }
-        lash_core::TurnInputState::PendingActive | lash_core::TurnInputState::DeferredNextTurn => {
+        lash_core::TurnInputState::PendingActive
+        | lash_core::TurnInputState::DeferredNextTurn
+        | lash_core::TurnInputState::Accepted => {
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()

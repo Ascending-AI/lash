@@ -473,8 +473,9 @@ fn assembler_ignores_stale_max_turn_message() {
         None,
         &TerminationPolicy::default(),
     );
+
     assert!(matches!(
-        &out.outcome,
+        out.outcome,
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. })
     ));
 }
@@ -496,10 +497,10 @@ fn assembler_uses_typed_max_turn_fact_despite_reworded_message() {
             origin: None,
         },
     );
-    let mut assembler = TurnAssembler {
-        turn_limit_final_scheduled: true,
-        ..Default::default()
-    };
+    let mut assembler = TurnAssembler::default();
+    assembler.push(&SessionStreamEvent::TurnOutcome {
+        outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
+    });
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
@@ -507,10 +508,8 @@ fn assembler_uses_typed_max_turn_fact_despite_reworded_message() {
         None,
         &TerminationPolicy::default(),
     );
-    assert!(matches!(
-        &out.outcome,
-        TurnOutcome::Stopped(TurnStop::MaxTurns)
-    ));
+
+    assert_eq!(out.outcome, TurnOutcome::Stopped(TurnStop::MaxTurns));
 }
 
 #[test]

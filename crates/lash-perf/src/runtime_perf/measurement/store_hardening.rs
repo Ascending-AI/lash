@@ -342,6 +342,10 @@ fn measure_hardening_identity_phases(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))?;
     let (_, phase) =
         measure_runtime_perf_phase("store_hardening.identity.process_registration", || {
@@ -545,6 +549,10 @@ async fn measure_process_prune(
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     &prune_scope,
                 )),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await?;
         registry
@@ -643,6 +651,10 @@ mod store_hardening_tests {
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     "unrelated",
                 )),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register unrelated process");

@@ -30,7 +30,13 @@ impl OpenAiCompatibleProvider {
         stream: bool,
         serving_route: &ProviderRouteIdentity,
     ) -> Result<(Value, bool), LlmTransportError> {
-        let safe_request = req.replay_safe_for(serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                serving_route,
+                "OpenAI Responses",
+                ProviderReasoningRetentionSupport::OpenAiContext,
+            )
+            .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Responses")?;
         let compat = self.resolved_compat(CompletionEndpoint::Responses);
@@ -82,6 +88,14 @@ impl OpenAiCompatibleProvider {
                     reasoning_encode_transport_error(CompletionEndpoint::Responses, &intent, error)
                 })?;
         }
+        if let ReasoningRetentionSelection::OpenAiContext { context } =
+            req.model_capability.reasoning_retention.selection
+        {
+            if !body["reasoning"].is_object() {
+                body["reasoning"] = json!({});
+            }
+            body["reasoning"]["context"] = json!(context.as_str());
+        }
         if policy.expose_thinking && body["reasoning"].is_object() {
             body["reasoning"]["summary"] = json!("auto");
         }
@@ -117,10 +131,6 @@ impl OpenAiCompatibleProvider {
             body["prompt_cache_retention"] = json!("24h");
         }
         Ok((body, cache_control_emitted))
-    }
-
-    pub(crate) fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
-        shared::response_parts_from_value(value)
     }
 
     pub(crate) fn process_sse_event(

@@ -198,7 +198,7 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
         ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
@@ -240,8 +240,8 @@ pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver,
-        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant,
+        RecordedGrantInstallError, Resolution as DeferredToolResolution,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
     };
     /// Author a fixed-tool provider without hand-rolling `tool_manifests` /
     /// `resolve_contract`: supply the [`ToolDefinition`]s once and an
@@ -431,8 +431,8 @@ pub mod plugins {
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
-        PersistedSegmentHandover, ProcessEngine, ProcessEngineRunContext,
-        ProcessEngineValidationContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
+        PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+        ProcessEngineRunContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
         ProtocolDriverState, ProtocolTurnExtension, ProtocolTurnOptionsError, SegmentHandover,
         SessionContextOverlay, SessionPluginSource, TurnDriverPreamble,
     };
@@ -488,8 +488,6 @@ pub mod plugins {
     /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
     /// [`HostTurnProtocol`] as its protocol parameter.
     pub use lash_sansio::ProtocolDriverHandle;
-    /// Callback used by [`TurnDriverConfig`] to materialize the terminal turn-limit message.
-    pub use lash_sansio::TurnLimitFinalMessage;
     /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
     pub use lash_sansio::llm::types::LlmToolSpec;
 }
@@ -534,21 +532,24 @@ pub mod remote {
     /// output specs, and provider metadata.
     pub mod llm {
         pub use lash_remote_protocol::llm::{
-            RemoteAttachmentAcceptanceRule, RemoteAttachmentAcceptor,
-            RemoteAttachmentCapabilitySnapshot, RemoteAttachmentMimeSource, RemoteAttachmentRef,
-            RemoteAttachmentSource, RemoteAttachmentTypeMetadata, RemoteAttemptOutcome,
-            RemoteAttemptRecord, RemoteDiagnostic, RemoteExecutionEvidence,
+            RemoteAnthropicThinkingRetention, RemoteAttachmentAcceptanceRule,
+            RemoteAttachmentAcceptor, RemoteAttachmentCapabilitySnapshot,
+            RemoteAttachmentMimeSource, RemoteAttachmentRef, RemoteAttachmentSource,
+            RemoteAttachmentTypeMetadata, RemoteAttemptOutcome, RemoteAttemptRecord,
+            RemoteDiagnostic, RemoteExecutionEvidence,
             RemoteExecutionEvidenceCollectionInterruption, RemoteGenerationOptionOutcome,
             RemoteGenerationOptions, RemoteGenerationReceipt, RemoteGoogleDialect,
             RemoteInstructionRole, RemoteLlmCallRecord, RemoteLlmContentBlock, RemoteLlmMessage,
             RemoteLlmOutputPart, RemoteLlmOutputSpec, RemoteLlmRequest, RemoteLlmRequestScope,
             RemoteLlmResponse, RemoteLlmRole, RemoteLlmTerminalReason, RemoteLlmToolChoice,
             RemoteLlmToolSpec, RemoteModelCapability, RemoteModelIntent, RemoteNormalizedError,
-            RemoteProtocolPosition, RemoteProviderFailureKind, RemoteProviderFileScope,
-            RemoteProviderMetadata, RemoteProviderReasoningReplay, RemoteProviderReplayDrop,
-            RemoteProviderReplayDropReason, RemoteProviderReplayKind, RemoteProviderReplayMeta,
-            RemoteProviderRouteIdentity, RemoteReasoningCapability, RemoteReasoningDisableEncoding,
-            RemoteReasoningEncoding, RemoteReasoningSelection, RemoteResponseTextMeta,
+            RemoteOpenAiReasoningContext, RemoteProtocolPosition, RemoteProviderFailureKind,
+            RemoteProviderFileScope, RemoteProviderMetadata, RemoteProviderReasoningReplay,
+            RemoteProviderReplayDrop, RemoteProviderReplayDropReason, RemoteProviderReplayKind,
+            RemoteProviderReplayMeta, RemoteProviderRouteIdentity, RemoteReasoningCapability,
+            RemoteReasoningDisableEncoding, RemoteReasoningEncoding,
+            RemoteReasoningRetentionCapability, RemoteReasoningRetentionPolicy,
+            RemoteReasoningRetentionSelection, RemoteReasoningSelection, RemoteResponseTextMeta,
             RemoteRetryDecision, RemoteSchemaProjectionOverride,
         };
     }
@@ -571,20 +572,21 @@ pub mod remote {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
             RemoteLeaseOwnerIdentity, RemoteObservedProcess, RemoteObservedProcessEvent,
-            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
-            RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
-            RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteOnParentEnd, RemoteParentScope, RemotePersistProcessEnvReceipt,
+            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
+            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
-            RemoteProcessHandleView, RemoteProcessInput, RemoteProcessListFilter,
-            RemoteProcessListResponse, RemoteProcessModelLimits, RemoteProcessModelSpec,
-            RemoteProcessOriginator, RemoteProcessPluginOptions, RemoteProcessProvenance,
-            RemoteProcessRef, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
-            RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
-            RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
-            RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+            RemoteProcessHandleView, RemoteProcessInput, RemoteProcessLifecyclePolicy,
+            RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
+            RemoteProcessModelSpec, RemoteProcessOriginator, RemoteProcessPluginOptions,
+            RemoteProcessProvenance, RemoteProcessRef, RemoteProcessSignalReceipt,
+            RemoteProcessSignalRequest, RemoteProcessStartReceipt, RemoteProcessStartRequest,
+            RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
+            RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
+            RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
             RemoteProcessToolCancellation, RemoteProcessToolFailure,
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
@@ -685,30 +687,31 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork,
-        ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind,
-        ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
+        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork, OnParentEnd,
+        ParentScope, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
+        ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
         ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog, ProcessEventType,
         ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
         ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
         ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeases,
-        ProcessLifecycle, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
-        ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-        ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
-        ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessService,
-        ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
-        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessToolIntents,
-        ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate,
-        ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
-        RecoveryContract, SessionScope, WatchedRegistry, facade_support::ObservedProcess,
-        facade_support::ObservedProcessEvent, facade_support::ObservedWorkItem,
-        facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionIntake,
-        facade_support::ProcessAdmissionReport, facade_support::ProcessChangeHub,
-        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
-        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
+        ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
+        ProcessOriginator, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
+        ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention,
+        ProcessService, ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest,
+        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
+        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
+        ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
+        ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
+        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
+        facade_support::ObservedWorkItem, facade_support::ProcessAdmissionDeferred,
+        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
+        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
+        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
+        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
@@ -795,9 +798,9 @@ pub mod runtime {
         RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
         RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
         RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
-        TurnContext, TurnControlBinding, TurnControlParticipation, WorkCadencePolicy,
-        WorkerSweepPolicy,
+        SessionWorkTarget, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
+        ToolIntentSubmissionGuard, TurnContext, TurnControlBinding, TurnControlParticipation,
+        WorkCadencePolicy, WorkerSweepPolicy,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for
@@ -874,11 +877,15 @@ pub mod provider {
         RequestTimeout,
     };
     pub use lash_core::{
-        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
-        AttachmentMimeSource, CacheControlDialect, GoogleDialect, InstructionRole, ModelCapability,
-        ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,
-        SamplingCapability, StreamTermination, facade_support::GenerationRetryGuarantee,
-        facade_support::LlmTimeouts, facade_support::Provider, facade_support::ProviderComponents,
+        AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
+        AttachmentCapabilitySnapshot, AttachmentMimeSource, CacheControlDialect, GoogleDialect,
+        InstructionRole, ModelCapability, OpenAiReasoningContext, ReasoningCapability,
+        ReasoningDisableEncoding, ReasoningEncoding, ReasoningRetentionCapability,
+        ReasoningRetentionPolicy, ReasoningRetentionSelection,
+        ReasoningRetentionValidationCategory, ReasoningRetentionValidationError,
+        ReasoningSelection, SamplingCapability, StreamTermination,
+        facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
+        facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderHandle, facade_support::ProviderOptions,
         facade_support::ReconciledUsage,
     };

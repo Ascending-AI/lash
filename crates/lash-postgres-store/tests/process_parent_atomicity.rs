@@ -313,6 +313,12 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -325,15 +331,20 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .expect("literal process-parent emit");
         let intents = if emit {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "ignored-derived-child-id",
-                        lash_core::ProcessOriginator::host_scoped("postgres-process-parent-law"),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            lash_core::SessionId::from(call.context.session_id()),
+                        )),
                         serde_json::json!({"process_parent_child": child}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            parent_scope.clone(),
+                            lash_core::OnParentEnd::Cancel,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             ))])
         } else {
@@ -366,11 +377,13 @@ fn process_worker(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     runtime_host.control.effect_host = effect_host;
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
@@ -455,6 +468,10 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register concurrent parent-end child");
@@ -474,6 +491,10 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )

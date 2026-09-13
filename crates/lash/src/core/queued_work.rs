@@ -28,7 +28,24 @@ impl NativeQueuedWorkRunHandle {
         Self { config }
     }
 
-    async fn drive_queued_work(
+    fn drive_queued_work(
+        &self,
+        request: QueuedWorkRunRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = std::result::Result<
+                        facade_support::QueuedWorkRunProgress,
+                        facade_support::QueuedWorkRunError,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(self.drive_queued_work_inner(request))
+    }
+
+    async fn drive_queued_work_inner(
         &self,
         request: QueuedWorkRunRequest,
     ) -> std::result::Result<

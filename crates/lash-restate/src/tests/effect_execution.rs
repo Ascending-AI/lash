@@ -702,12 +702,12 @@ impl HttpTransport for ScriptedHttpTransport {
         &self,
         request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         self.requests.lock_recover().push(request);
         self.responses
             .lock_recover()
             .pop_front()
-            .ok_or_else(|| HttpTransportError::new("scripted transport exhausted"))
+            .ok_or_else(|| LlmTransportError::new("scripted transport exhausted"))
     }
 }
 
@@ -723,7 +723,7 @@ impl HttpTransport for AuthorizationTransport {
         &self,
         mut request: HttpRequest,
         timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let token = self.token.read_recover().clone();
         request
             .headers

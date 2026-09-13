@@ -246,15 +246,18 @@ impl RuntimeBoundaryHarness {
         let scripted_result = requested_result.clone();
         let call_id = effect_id.clone();
         let recorded_intents =
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(event.actor_alias.clone()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("{effect_id}:intent-child"),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 },
             ))]);
         let controller = self.ensure_effect_controller().await?;
@@ -932,7 +935,9 @@ impl RuntimeBoundaryHarness {
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
         runtime_host.process_engines = lash_core::facade_support::ProcessEngineRegistry::new()
-            .with_engine(Arc::new(LifecycleSuccessEngine));
+            .with_registration(lash_core::ProcessEngineRegistration::accepting(Arc::new(
+                LifecycleSuccessEngine,
+            )));
         let policy = lash_core::SessionPolicy {
             provider_id: "sim-lifecycle".to_string(),
             model: lash_core::ModelSpec::builder("sim-lifecycle-model")
@@ -1235,6 +1240,10 @@ impl RuntimeBoundaryHarness {
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("register process: {err}")))?;

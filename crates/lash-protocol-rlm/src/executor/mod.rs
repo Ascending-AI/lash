@@ -123,6 +123,38 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
     execution_bounds: lashlang::ExecutionBounds,
     source: RlmSourceContext,
 ) -> ExecResponse {
+    execute_code_with_dialect_and_bounds_with_trigger_resolver(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        None,
+        session_projected_bindings,
+        projection_resolver,
+        lashlang_execution_trace_config,
+        execution_bounds,
+        source,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_dialect_and_bounds_with_trigger_resolver(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    projection_resolver: Arc<dyn ProjectionResolver>,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+    source: RlmSourceContext,
+) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
     Box::pin(execute_code_inner(
@@ -133,6 +165,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
         artifact_store,
         lashlang_surface,
         deferred_tool_resolver,
+        deferred_trigger_resolver,
         session_projected_bindings,
         projection_resolver,
         lashlang_execution_trace_config,
@@ -251,6 +284,7 @@ async fn execute_code_inner(
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
@@ -261,49 +295,100 @@ async fn execute_code_inner(
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
-    let mut host_environment = match lashlang_surface.host_environment(ctx.tool_catalog().as_ref())
-    {
-        Ok(host_environment) => host_environment,
-        Err(err) => {
-            emit_step_trace(
-                &ctx,
-                &lashlang_execution_trace_config,
-                Err(&format!("invalid Lashlang host tool surface: {err}")),
-            );
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                format!("invalid Lashlang host tool surface: {err}"),
-                start,
-                Vec::new(),
-            );
-        }
+    let parsed_program = match source.dialect {
+        SourceDialect::Lashlang => lashlang::parse(code).ok(),
+        SourceDialect::Typescript => lash_typescript::parse(code).ok(),
     };
 
-    // gather → resolve → link: fold any deferred call-paths the program
-    // references into the host environment before compiling. The resolution
-    // record lives in the (snapshotted) execution state, so a re-driven or
-    // recovered link replays it without re-calling the resolver. The flat Tool
-    // Catalog is never mutated — resolution is link-scoped only. A resolver is
-    // present only under hosts that configure RLM deferral; most hosts ship
-    // none and this is a no-op.
-    if deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty() {
-        let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
-        let program = match source.dialect {
-            SourceDialect::Lashlang => lashlang::parse(code).ok(),
-            SourceDialect::Typescript => lash_typescript::parse(code).ok(),
-        };
-        if let Some(program) = program {
-            host_environment = lash_lashlang_runtime::resolve_and_fold_deferred(
-                &program,
-                host_environment,
-                deferred_tool_resolver.as_ref(),
-                &mut state.deferred_resolutions,
-            )
-            .await;
+    // gather → journal → mask → fold: every parsed resource-bearing cell first
+    // consults the deferred journal, even if no live resolver and no checkpoint
+    // projection are available. This is what closes the postcommit / before-
+    // projection crash window. Journal outcomes then mask exact paths while the
+    // ambient Tool Catalog is built, before its collision validation can
+    // preempt recorded authority. Unrelated catalog errors remain ordinary host
+    // failures.
+    let mut effective_surface = lashlang_surface;
+    let referenced = parsed_program
+        .as_ref()
+        .map(lashlang::referenced_receiver_call_paths)
+        .unwrap_or_default();
+    if !referenced.is_empty() && state.deferred_trigger_resolutions.link_key.is_some() {
+        let _phase = ctx.named_phase("rlm_lashlang.deferred_trigger_resolve");
+        match lash_lashlang_runtime::resolve_and_fold_deferred_triggers(
+            &referenced,
+            effective_surface,
+            deferred_trigger_resolver.as_ref(),
+            &state.deferred_trigger_resolutions,
+            &ctx,
+        )
+        .await
+        {
+            Ok((surface, record)) => {
+                effective_surface = surface;
+                state.deferred_trigger_resolutions = record;
+            }
+            Err(error) => {
+                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                    start,
+                    Vec::new(),
+                );
+            }
         }
     }
+
+    let mut host_environment = if let Some(_program) = parsed_program
+        .as_ref()
+        .filter(|_| state.deferred_resolutions.link_key.is_some())
+    {
+        let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
+        match lash_lashlang_runtime::resolve_and_build_deferred_environment_from_references(
+            &referenced,
+            &effective_surface,
+            ctx.tool_catalog().as_ref(),
+            deferred_tool_resolver.as_ref(),
+            &mut state.deferred_resolutions,
+            &ctx,
+        )
+        .await
+        {
+            Ok(environment) => environment,
+            Err(error) => {
+                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                    start,
+                    Vec::new(),
+                );
+            }
+        }
+    } else {
+        match effective_surface.host_environment(ctx.tool_catalog().as_ref()) {
+            Ok(environment) => environment,
+            Err(error) => {
+                emit_step_trace(
+                    &ctx,
+                    &lashlang_execution_trace_config,
+                    Err(&format!("invalid Lashlang host tool surface: {error}")),
+                );
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    format!("invalid Lashlang host tool surface: {error}"),
+                    start,
+                    Vec::new(),
+                );
+            }
+        }
+    };
 
     let mut live_global_names = state
         .rlm
@@ -749,16 +834,19 @@ fn select_deferred_resolution_link(
 ) {
     let Some(invocation) = ctx.parent_invocation() else {
         state.deferred_resolutions.clear_link();
+        state.deferred_trigger_resolutions.clear_link();
         return;
     };
     let Some(link_key) =
         lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
     else {
         state.deferred_resolutions.clear_link();
+        state.deferred_trigger_resolutions.clear_link();
         return;
     };
 
-    state.deferred_resolutions.select_link(link_key);
+    state.deferred_resolutions.select_link(link_key.clone());
+    state.deferred_trigger_resolutions.select_link(link_key);
 }
 
 fn deferred_execution_grants(

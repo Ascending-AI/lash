@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_http_transport::{
-    HttpMethod, HttpRequest, HttpResponse, HttpTransport, HttpTransportError, ReqwestClient,
+    HttpMethod, HttpRequest, HttpResponse, HttpTransport, LlmTransportError, ReqwestClient,
     ReqwestHttpTransport, read_http_body_bytes,
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -167,7 +167,7 @@ pub enum RestateHttpError {
     Request {
         operation: &'static str,
         url: String,
-        source: HttpTransportError,
+        source: LlmTransportError,
     },
     #[error("{operation} returned status {status} for {url}: {body}")]
     Status {

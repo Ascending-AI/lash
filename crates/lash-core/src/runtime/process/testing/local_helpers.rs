@@ -53,6 +53,21 @@ impl TestLocalProcessRegistry {
                 registration.id, existing.record.registration_fingerprint, registration_fingerprint
             )));
         }
+        // FIG-2963: ledger-based refusal replaces this
+        if registration.lifecycle.on_parent_end == crate::OnParentEnd::Cancel
+            && let crate::ParentScope::Process {
+                process_id,
+                incarnation,
+            } = &registration.lifecycle.parent
+            && let Some(parent) = managed.get(process_id).map(|managed| &managed.record)
+            && parent.incarnation == *incarnation
+            && parent.is_terminal()
+        {
+            return Err(crate::PluginError::ParentEnded {
+                process_id: registration.id.clone(),
+                parent: registration.lifecycle.parent.clone(),
+            });
+        }
         let id = registration.id.clone();
         let wake_session_id = registration.wake_session_id.clone();
         let change_seq = self.next_change_seq().await;

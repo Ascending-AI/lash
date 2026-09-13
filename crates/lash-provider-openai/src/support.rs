@@ -12,7 +12,8 @@ pub(crate) use lash_core::llm::transport::{
 pub(crate) use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmEventSender, LlmOutputPart,
     LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
-    LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderReplayMeta, ProviderRouteIdentity,
+    LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderReasoningRetentionSupport,
+    ProviderReplayMeta, ProviderRouteIdentity, ReasoningRetentionSelection,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,

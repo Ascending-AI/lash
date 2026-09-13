@@ -60,7 +60,7 @@ pub async fn durable_queued_drain_wait_contract(
 /// Vector 2 (live holder): the first observed row has already renewed three
 /// times, then one more renewal is detected as alive on the next observation;
 /// the drain gives up and leaves the holder row byte-identical to that renewal.
-pub(super) async fn durable_queued_drain_wait_store_laws(
+pub async fn durable_queued_drain_wait_store_laws(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
 ) {

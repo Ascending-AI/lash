@@ -234,12 +234,11 @@ fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
     assert_eq!(state.protocol_turn_options, checkpoint_options);
 }
 
-/// Refusal witness: both parents independently used version 8 for incompatible
-/// effect-identity and resident-tool-authority payloads, so the combined build
-/// rejects that immediate predecessor through every store backend's strict fence.
+/// Refusal witness (FIG-1123): the immediate predecessor head is refused by
+/// the strict schema-version fence every store backend decodes through.
 #[test]
-fn immediate_predecessor_head_meta_v8_is_refused() {
-    const PREDECESSOR: u32 = 8;
+fn immediate_predecessor_head_meta_v9_is_refused() {
+    const PREDECESSOR: u32 = 9;
     assert_eq!(
         PREDECESSOR + 1,
         SESSION_HEAD_META_SCHEMA_VERSION,
@@ -250,7 +249,7 @@ fn immediate_predecessor_head_meta_v8_is_refused() {
         "SessionHeadMeta",
         SESSION_HEAD_META_SCHEMA_VERSION,
     )
-    .expect_err("v8 session head must be refused");
+    .expect_err("v9 session head must be refused");
     assert!(matches!(
         err,
         StoreError::UnsupportedRecordSchemaVersion {
@@ -259,4 +258,44 @@ fn immediate_predecessor_head_meta_v8_is_refused() {
             expected: SESSION_HEAD_META_SCHEMA_VERSION
         }
     ));
+}
+
+#[test]
+fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
+    let retention = crate::ReasoningRetentionPolicy {
+        capability: Some(crate::ReasoningRetentionCapability::OpenAiContext {
+            supported: vec![crate::OpenAiReasoningContext::CurrentTurn],
+        }),
+        selection: crate::ReasoningRetentionSelection::OpenAiContext {
+            context: crate::OpenAiReasoningContext::CurrentTurn,
+        },
+    };
+    let mut config = crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded);
+    config.model = crate::ModelSpec::builder("model")
+        .context_window_tokens(200_000)
+        .build()
+        .expect("model")
+        .with_capability(crate::ModelCapability {
+            reasoning_retention: Box::new(retention.clone()),
+            ..Default::default()
+        });
+    let payload = SessionHeadPayload {
+        schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+        session_id: SessionId::from("retention-cold-reopen"),
+        config,
+        current_frame_node_id: None,
+    };
+
+    let json = serde_json::to_string(&payload).expect("head JSON");
+    let decoded = decode_versioned_json_record::<SessionHeadPayload>(
+        &json,
+        "SessionHeadMeta",
+        SESSION_HEAD_META_SCHEMA_VERSION,
+    )
+    .expect("current head decodes");
+
+    assert_eq!(
+        *decoded.config.model.capability.reasoning_retention,
+        retention
+    );
 }

@@ -12,6 +12,8 @@ mod provider_trace_tests;
 #[cfg(test)]
 mod replay_provenance_tests;
 mod request;
+#[cfg(test)]
+mod runtime_reasoning_tests;
 mod stream;
 mod support;
 #[cfg(feature = "testing")]
@@ -487,7 +489,9 @@ mod tests {
                 secret: "oauth-client-secret".into(),
             },
         );
-        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let contents = provider
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("schema projection")
     }
@@ -542,6 +546,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(exposed_deltas, ["plan é", "carefully"]);
+        let exposed_boundaries = exposed_events
+            .iter()
+            .filter(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })))
+            .count();
+        assert_eq!(exposed_boundaries, 2);
         let reasoning = exposed
             .parts
             .iter()
@@ -588,11 +597,11 @@ mod tests {
         assert_eq!(hidden.parts, exposed.parts);
         assert!(!hidden.full_text().contains("plan é"));
         assert!(!hidden.full_text().contains("carefully"));
-        assert!(
-            hidden_events
-                .iter()
-                .all(|event| !matches!(event, LlmStreamEvent::ReasoningDelta(_)))
-        );
+        assert!(hidden_events.iter().all(|event| !matches!(
+            event,
+            LlmStreamEvent::ReasoningDelta(_)
+                | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
+        )));
         for events in [&exposed_events, &hidden_events] {
             assert!(events.iter().all(|event| {
                 !matches!(
@@ -637,7 +646,7 @@ mod tests {
                 "finishReason":"STOP"
             }]}}),
         ];
-        let (response, _) = streaming_reasoning_response(&wire_events, true).await;
+        let (response, events) = streaming_reasoning_response(&wire_events, true).await;
         assert!(matches!(
             response.parts.as_slice(),
             [LlmOutputPart::Reasoning {
@@ -646,6 +655,17 @@ mod tests {
             }] if text == "signed unsigned tail"
                 && replay.signature.as_deref() == Some(REASONING_SIGNATURE_1)
         ));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
+                ))
+                .count(),
+            1,
+            "incremental chunks of one thought close as one reasoning part"
+        );
     }
 
     #[tokio::test]
@@ -703,7 +723,7 @@ mod tests {
                 "finishReason":"STOP"
             }]}}),
         ];
-        let (response, _) = streaming_reasoning_response(&wire_events, true).await;
+        let (response, events) = streaming_reasoning_response(&wire_events, true).await;
         let signatures = response
             .parts
             .iter()
@@ -716,6 +736,25 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(signatures, [REASONING_SIGNATURE_1, REASONING_SIGNATURE_2]);
+        let boundary_order = events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ReasoningDelta(_) => Some("reasoning_delta"),
+                LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. }) => Some("reasoning_part"),
+                LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. }) => Some("tool_call"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            boundary_order,
+            [
+                "reasoning_delta",
+                "reasoning_part",
+                "tool_call",
+                "reasoning_delta",
+                "reasoning_part"
+            ]
+        );
     }
 
     fn effort_capability(efforts: &[&str]) -> ModelCapability {
@@ -735,6 +774,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -763,6 +803,7 @@ mod tests {
             cache_control: None,
             stream_termination: None,
             sampling: lash_core::SamplingCapability::Configurable,
+            reasoning_retention: Default::default(),
         }
     }
 
@@ -961,6 +1002,7 @@ mod tests {
                         execution_evidence: &mut execution_evidence,
                         tool_call_parts: None,
                         output_parts: None,
+                        reasoning_stream: None,
                         finish_event: &mut finish_event,
                     },
                     None,
@@ -997,6 +1039,7 @@ mod tests {
                     execution_evidence: &mut execution_evidence,
                     tool_call_parts: None,
                     output_parts: None,
+                    reasoning_stream: None,
                     finish_event: &mut finish_event,
                 },
                 None,
@@ -1297,7 +1340,9 @@ mod tests {
         }]);
 
         let provider = GoogleOAuthProvider::for_test();
-        let contents = provider.build_contents_with_attachment_parts(&req, &[]);
+        let contents = provider
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         let body = GoogleOAuthProvider::build_request(&provider, &req, contents, None)
             .expect("schema projection");
         assert!(
@@ -1353,8 +1398,9 @@ mod tests {
                 cache_breakpoint: false,
             }],
         )];
-        let contents =
-            GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+        let contents = GoogleOAuthProvider::for_test()
+            .build_contents_with_attachment_parts(&req, &[])
+            .expect("retention policy");
         assert_eq!(contents[0]["parts"][0]["thoughtSignature"], signature);
     }
 
@@ -1394,6 +1440,7 @@ mod tests {
                     execution_evidence: &mut execution_evidence,
                     tool_call_parts: Some(&mut streaming_parts),
                     output_parts: Some(&mut output_parts),
+                    reasoning_stream: None,
                     finish_event: &mut finish_event,
                 },
                 Some("gemini-test"),
@@ -1467,8 +1514,9 @@ mod tests {
                     cache_breakpoint: false,
                 }],
             )];
-            let contents =
-                GoogleOAuthProvider::for_test().build_contents_with_attachment_parts(&req, &[]);
+            let contents = GoogleOAuthProvider::for_test()
+                .build_contents_with_attachment_parts(&req, &[])
+                .expect("retention policy");
             assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
         }
     }

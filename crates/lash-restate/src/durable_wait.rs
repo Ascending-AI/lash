@@ -29,6 +29,7 @@
 use lash_sansio::SessionId;
 use std::time::Duration;
 
+use lash_core::ClockWallTime as _;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome, RuntimeError,
 };
@@ -122,6 +123,13 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
     )
 }
 const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
+/// Current wire version of a deadline carried by a durable-wait request.
+///
+/// Version 1 was the unversioned `timeout_ms` field. Version 2 carries the
+/// absolute deadline first journaled by the invoking handler. The request
+/// decoder rejects the version-1 field instead of silently granting a fresh
+/// relative timeout after a worker replacement.
+pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 7;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
@@ -247,11 +255,64 @@ pub enum RestateDurableWaitClassification {
     TurnControl,
 }
 
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RestateDurableWaitAwaitRequest {
     pub key: AwaitEventKey,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<RestateDurableWaitDeadline>,
+}
+
+/// Decoder for the durable-wait workflow's clean-cutover request boundary.
+///
+/// The predecessor is decoded only so the handler can return the same typed,
+/// actionable incompatibility as an unsupported stamped deadline. It is never
+/// executed or translated into the current absolute-deadline request.
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum RestateDurableWaitAwaitInput {
+    Current(RestateDurableWaitAwaitRequest),
+    Predecessor { key: AwaitEventKey, timeout_ms: u64 },
+}
+
+impl From<RestateDurableWaitAwaitRequest> for RestateDurableWaitAwaitInput {
+    fn from(request: RestateDurableWaitAwaitRequest) -> Self {
+        Self::Current(request)
+    }
+}
+
+/// Absolute deadline carried by the version-2 durable-wait request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestateDurableWaitDeadline {
+    pub version: u8,
+    pub unix_epoch_ms: u64,
+}
+
+impl RestateDurableWaitDeadline {
+    fn validate(self) -> Result<(), TerminalError> {
+        if self.version != DURABLE_WAIT_REQUEST_VERSION {
+            return Err(incompatible_durable_wait_request(format!(
+                "version {}",
+                self.version
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remaining(self, now_ms: u64) -> Result<Duration, TerminalError> {
+        self.validate()?;
+        Ok(Duration::from_millis(
+            self.unix_epoch_ms.saturating_sub(now_ms),
+        ))
+    }
+}
+
+fn incompatible_durable_wait_request(observed: impl std::fmt::Display) -> TerminalError {
+    TerminalError::new(format!(
+        "Lash Restate durable-wait request {observed} is incompatible with version {DURABLE_WAIT_REQUEST_VERSION}; drain deadline-bearing waits before opening this deployment"
+    ))
 }
 
 #[cfg(test)]
@@ -403,13 +464,18 @@ pub(crate) fn restate_durable_wait_request(
     deadline: Option<std::time::Instant>,
     clock: &dyn lash_core::Clock,
 ) -> RestateDurableWaitAwaitRequest {
-    let timeout_ms = deadline.map(|deadline| {
-        u64::try_from(deadline.saturating_duration_since(clock.now()).as_millis())
-            .unwrap_or(u64::MAX)
+    let deadline = deadline.map(|deadline| {
+        let remaining_ms =
+            u64::try_from(deadline.saturating_duration_since(clock.now()).as_millis())
+                .unwrap_or(u64::MAX);
+        RestateDurableWaitDeadline {
+            version: DURABLE_WAIT_REQUEST_VERSION,
+            unix_epoch_ms: clock.timestamp_ms().saturating_add(remaining_ms),
+        }
     });
     RestateDurableWaitAwaitRequest {
         key: key.clone(),
-        timeout_ms,
+        deadline,
     }
 }
 /// How one wait raced against durable turn cancellation ended.
@@ -496,7 +562,7 @@ where
 pub trait LashDurableWaitWorkflow {
     #[shared]
     async fn await_resolution(
-        request: Json<RestateDurableWaitAwaitRequest>,
+        request: Json<RestateDurableWaitAwaitInput>,
     ) -> HandlerResult<Json<Resolution>>;
 
     #[shared]
@@ -515,8 +581,19 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateDurableWaitAwaitRequest>,
+        Json(input): Json<RestateDurableWaitAwaitInput>,
     ) -> HandlerResult<Json<Resolution>> {
+        let request = match input {
+            RestateDurableWaitAwaitInput::Current(request) => request,
+            RestateDurableWaitAwaitInput::Predecessor { .. } => {
+                return Err(
+                    incompatible_durable_wait_request("predecessor field `timeout_ms`").into(),
+                );
+            }
+        };
+        if let Some(deadline) = request.deadline {
+            deadline.validate()?;
+        }
         let address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         let index_key = durable_wait_index_object_key(&address);
         let registration = ctx
@@ -535,36 +612,40 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
             RestateDurableWaitRegistration::Registered => {}
         }
 
-        let resolution = if let Some(payload) =
-            ctx.peek_promise::<String>(DURABLE_WAIT_PROMISE_KEY).await?
-        {
-            serde_json::from_str(&payload).map_err(TerminalError::from_error)?
-        } else if let Some(timeout_ms) = request.timeout_ms {
-            let promise = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
-            let timer =
-                restate_sdk::context::ContextTimers::sleep(&ctx, Duration::from_millis(timeout_ms));
-            restate_sdk::select! {
-                payload = promise => {
-                    let payload = payload?;
-                    serde_json::from_str(&payload).map_err(TerminalError::from_error)?
-                },
-                _ = timer => {
-                    let payload = serde_json::to_string(&Resolution::Timeout)
-                        .map_err(TerminalError::from_error)?;
-                    ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
-                    Resolution::Timeout
-                },
-                on_cancel => {
-                    let payload = serde_json::to_string(&Resolution::Cancelled)
-                        .map_err(TerminalError::from_error)?;
-                    ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
-                    Resolution::Cancelled
+        let resolution =
+            if let Some(payload) = ctx.peek_promise::<String>(DURABLE_WAIT_PROMISE_KEY).await? {
+                serde_json::from_str(&payload).map_err(TerminalError::from_error)?
+            } else if let Some(deadline) = request.deadline {
+                let promise = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY);
+                let remaining =
+                    deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;
+                // The workflow input is the stable absolute deadline. Restate's
+                // SleepCommand deliberately excludes its calculated wake time from
+                // replay comparison, so deriving only the remaining delay here
+                // preserves the original budget without another compared payload.
+                let timer = restate_sdk::context::ContextTimers::sleep(&ctx, remaining);
+                restate_sdk::select! {
+                    payload = promise => {
+                        let payload = payload?;
+                        serde_json::from_str(&payload).map_err(TerminalError::from_error)?
+                    },
+                    _ = timer => {
+                        let payload = serde_json::to_string(&Resolution::Timeout)
+                            .map_err(TerminalError::from_error)?;
+                        ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
+                        Resolution::Timeout
+                    },
+                    on_cancel => {
+                        let payload = serde_json::to_string(&Resolution::Cancelled)
+                            .map_err(TerminalError::from_error)?;
+                        ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
+                        Resolution::Cancelled
+                    }
                 }
-            }
-        } else {
-            let payload = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY).await?;
-            serde_json::from_str(&payload).map_err(TerminalError::from_error)?
-        };
+            } else {
+                let payload = ctx.promise::<String>(DURABLE_WAIT_PROMISE_KEY).await?;
+                serde_json::from_str(&payload).map_err(TerminalError::from_error)?
+            };
 
         // A workflow that wakes after a deployment upgrade must cross the
         // index epoch gate before it can return a resolution. Restate replays

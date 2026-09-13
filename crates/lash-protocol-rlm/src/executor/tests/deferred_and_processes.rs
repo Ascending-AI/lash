@@ -1,9 +1,119 @@
 use super::*;
 
+struct FailingDeferredJournalController;
+
+impl lash_core::AwaitEventResolver for FailingDeferredJournalController {}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        if matches!(
+            &envelope.command,
+            lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
+                if operation.starts_with("deferred_tool_resolution:v1:")
+        ) {
+            local_executor.execute(envelope).await?;
+            Err(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                "injected deferred journal commit failure",
+            ))
+        } else {
+            local_executor.execute(envelope).await
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SqliteDeferredFault {
+    AfterResolverReturn,
+    AfterDurableRecord,
+}
+
+struct FaultingSqliteDeferredController {
+    inner: lash_sqlite_store::SqliteRuntimeEffectController,
+    fault: SqliteDeferredFault,
+}
+
+impl lash_core::AwaitEventResolver for FaultingSqliteDeferredController {}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let is_deferred = matches!(
+            &envelope.command,
+            lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation }
+                if operation.starts_with("deferred_tool_resolution:v1:")
+        );
+        if !is_deferred {
+            return self.inner.execute_effect(envelope, local_executor).await;
+        }
+        match self.fault {
+            SqliteDeferredFault::AfterResolverReturn => {
+                local_executor.execute(envelope).await?;
+            }
+            SqliteDeferredFault::AfterDurableRecord => {
+                self.inner.execute_effect(envelope, local_executor).await?;
+            }
+        }
+        Err(lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RuntimeStore,
+            match self.fault {
+                SqliteDeferredFault::AfterResolverReturn => "injected crash after resolver return",
+                SqliteDeferredFault::AfterDurableRecord => "injected crash after durable record",
+            },
+        ))
+    }
+}
+
 pub(super) struct CountingDeferredResolver {
     calls: Arc<AtomicUsize>,
     batches: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
     installed: Arc<AtomicUsize>,
+}
+
+struct RetryOnceInstallResolver {
+    calls: Arc<AtomicUsize>,
+    installs: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_lashlang_runtime::DeferredToolResolver for RetryOnceInstallResolver {
+    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        paths
+            .iter()
+            .map(|path| {
+                (
+                    (*path).to_string(),
+                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
+                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition()),
+                    )),
+                )
+            })
+            .collect()
+    }
+
+    fn install_recorded_grant(
+        &self,
+        _path: &str,
+        _grant: &lash_lashlang_runtime::ToolGrant,
+    ) -> Result<(), lash_lashlang_runtime::RecordedGrantInstallError> {
+        if self.installs.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err(lash_lashlang_runtime::RecordedGrantInstallError::transient(
+                "injected crash before registration",
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub(super) fn deferred_fetch_definition() -> lash_core::ToolDefinition {
@@ -15,6 +125,22 @@ pub(super) fn deferred_fetch_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"))
+}
+
+fn ambient_definition(
+    id: &str,
+    name: &str,
+    module: &str,
+    operation: &str,
+) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        id,
+        name,
+        "Ambient replacement",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "boolean" }),
+    )
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new([module], operation))
 }
 
 #[async_trait::async_trait]
@@ -39,9 +165,14 @@ impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
             .collect()
     }
 
-    fn install_recorded_grant(&self, path: &str, _grant: &lash_lashlang_runtime::ToolGrant) {
+    fn install_recorded_grant(
+        &self,
+        path: &str,
+        _grant: &lash_lashlang_runtime::ToolGrant,
+    ) -> Result<(), lash_lashlang_runtime::RecordedGrantInstallError> {
         assert_eq!(path, "web.fetch");
         self.installed.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 }
 
@@ -91,9 +222,17 @@ fn restricted_empty_deferred_context(
         "the separately grantable tool is absent from resident membership"
     );
     (
-        lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             session.tools(),
             catalog.as_ref().clone(),
+            lash_core::testing::exec_code_invocation(
+                session_id,
+                "test-turn",
+                0,
+                0,
+                "exec-code",
+                "exec-code:0",
+            ),
         ),
         registry,
     )
@@ -115,33 +254,12 @@ impl lash_core::ToolProvider for BindingRecordingDeferredProvider {
         None
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &lash_core::ToolExecutionGrant,
-        call: lash_core::ToolPrepareCall<'_>,
-    ) -> Result<lash_core::PreparedToolCall, lash_core::ToolOutcome> {
-        Ok(lash_core::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
         self.observed_bindings
             .lock_recover()
             .push(call.context.tool_execution_binding().clone());
         lash_core::ToolOutcome::ok(serde_json::json!("deferred ok"))
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &lash_core::ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &lash_core::AttemptContext<'_>,
-    ) -> lash_core::ToolOutcome {
-        self.execute_by_id(&grant.manifest().id, args, context)
-            .await
     }
 }
 
@@ -220,7 +338,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(first.error.is_some(), "mystery.x must remain unresolved");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "one batch per link");
-        assert_eq!(installed.load(Ordering::SeqCst), 0);
+        assert_eq!(installed.load(Ordering::SeqCst), 1);
         assert!(matches!(
             state.deferred_resolutions.get("web.fetch"),
             Some(lash_lashlang_runtime::Resolution::Resolved(_))
@@ -257,7 +375,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(replay.error.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 1, "same link must replay");
-        assert_eq!(installed.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.load(Ordering::SeqCst), 2);
 
         // A second code effect in the same logical turn is a different link
         // and must resolve the same paths against current authority.
@@ -285,7 +403,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(second_link.error.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(installed.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.load(Ordering::SeqCst), 3);
         assert!(second_ctx.tool_catalog().tools.is_empty());
 
         // A new logical turn also selects a fresh record, even when the
@@ -314,7 +432,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         .await;
         assert!(next_turn.error.is_some());
         assert_eq!(calls.load(Ordering::SeqCst), 3);
-        assert_eq!(installed.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.load(Ordering::SeqCst), 4);
         assert!(next_turn_ctx.tool_catalog().tools.is_empty());
         assert_eq!(restored.deferred_resolutions.resolutions.len(), 2);
         assert_eq!(
@@ -413,6 +531,640 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
 }
 
 #[test]
+pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
+    block_on(async {
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let executions = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Arc::clone(&executions),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::default(),
+            Arc::new(FailingDeferredJournalController),
+            lash_core::testing::exec_code_invocation(
+                "deferred-journal-failure",
+                "turn-1",
+                0,
+                0,
+                "exec-code",
+                "exec-code:0",
+            ),
+        );
+        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+            Arc::new(BindingDeferredResolver {
+                calls: Arc::clone(&resolver_calls),
+            });
+
+        let response = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            ctx,
+            ExecRequest {
+                language: "lashlang".into(),
+                code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(resolver),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+
+        let error = response.error.expect("journal failure must abort linking");
+        assert!(
+            error
+                .message
+                .contains("injected deferred journal commit failure"),
+            "the journal commit failure must not be shadowed: {error:?}"
+        );
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
+    });
+}
+
+async fn run_sqlite_deferred_fault_boundary(
+    fault: SqliteDeferredFault,
+    expected_resolver_calls_after_reopen: usize,
+) {
+    let dir = tempfile::tempdir().expect("temporary effect journal");
+    let file_name = match fault {
+        SqliteDeferredFault::AfterResolverReturn => "after-resolver.sqlite",
+        SqliteDeferredFault::AfterDurableRecord => "after-record.sqlite",
+    };
+    let path = dir.path().join(file_name);
+    let session_id = format!("sqlite-{file_name}");
+    let turn_id = "turn-1";
+    let replay_key = "exec-code:fault";
+    let scope = lash_core::ExecutionScope::turn(&session_id, turn_id);
+    let resolver_calls = Arc::new(AtomicUsize::new(0));
+    let installs = Arc::new(AtomicUsize::new(0));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+        Arc::new(CountingDeferredResolver {
+            calls: Arc::clone(&resolver_calls),
+            batches: Default::default(),
+            installed: Arc::clone(&installs),
+        });
+    let provider: Arc<dyn lash_core::ToolProvider> = Arc::new(BindingRecordingDeferredProvider {
+        executions: Arc::clone(&executions),
+        observed_bindings: Default::default(),
+        enumerations: Default::default(),
+    });
+    let request = ExecRequest {
+        language: "lashlang".into(),
+        code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+    };
+    let controller = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+        .await
+        .expect("open SQLite effect controller");
+    let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+        Arc::clone(&provider),
+        lash_core::ToolCatalog::default(),
+        lash_core::ScopedEffectController::shared(
+            Arc::new(FaultingSqliteDeferredController { inner: controller, fault }),
+            scope.clone(),
+        )
+        .expect("admit SQLite fault controller scope"),
+        lash_core::testing::exec_code_invocation(
+            &session_id, turn_id, 0, 0, "faulting exec", replay_key,
+        ),
+    );
+    let first = execute_code_unbounded_for_tests(
+        &mut RlmExecutionState::new(),
+        first_ctx,
+        request.clone(),
+        lashlang::global_in_memory_lashlang_artifact_store(),
+        LashlangSurface::default(),
+        Some(resolver.clone()),
+        RlmProjectedBindings::default(),
+        Arc::new(ProjectionRegistry::new()),
+        RlmLashlangExecutionTraceConfig::default(),
+    )
+    .await;
+    assert!(first.error.is_some(), "boundary fault must stop execution");
+    assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(installs.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        0,
+        "a failed resolution boundary must prevent the dependent tool effect"
+    );
+
+    let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+        .await
+        .expect("cold-reopen SQLite effect controller");
+    let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+        provider,
+        lash_core::ToolCatalog::default(),
+        lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+            .expect("admit reopened SQLite controller scope"),
+        lash_core::testing::exec_code_invocation(
+            &session_id, turn_id, 0, 0, "faulting exec", replay_key,
+        ),
+    );
+    let replay = execute_code_unbounded_for_tests(
+        &mut RlmExecutionState::new(),
+        replay_ctx,
+        request,
+        lashlang::global_in_memory_lashlang_artifact_store(),
+        LashlangSurface::default(),
+        Some(resolver),
+        RlmProjectedBindings::default(),
+        Arc::new(ProjectionRegistry::new()),
+        RlmLashlangExecutionTraceConfig::default(),
+    )
+    .await;
+    assert!(replay.error.is_none(), "{:?}", replay.error);
+    assert_eq!(
+        resolver_calls.load(Ordering::SeqCst),
+        expected_resolver_calls_after_reopen
+    );
+    assert_eq!(installs.load(Ordering::SeqCst), 1);
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+pub(super) fn sqlite_fault_after_resolver_return_repeats_discovery_after_reopen() {
+    block_on(run_sqlite_deferred_fault_boundary(
+        SqliteDeferredFault::AfterResolverReturn,
+        2,
+    ));
+}
+
+#[test]
+pub(super) fn sqlite_fault_after_durable_record_never_reresolves_after_reopen() {
+    block_on(run_sqlite_deferred_fault_boundary(
+        SqliteDeferredFault::AfterDurableRecord,
+        1,
+    ));
+}
+
+#[test]
+pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_reopen() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("temporary effect journal");
+        let path = dir.path().join("before-registration.sqlite");
+        let session_id = "sqlite-before-registration";
+        let turn_id = "turn-1";
+        let replay_key = "exec-code:registration";
+        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let installs = Arc::new(AtomicUsize::new(0));
+        let executions = Arc::new(AtomicUsize::new(0));
+        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+            Arc::new(RetryOnceInstallResolver {
+                calls: Arc::clone(&resolver_calls),
+                installs: Arc::clone(&installs),
+            });
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Arc::clone(&executions),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+        let request = ExecRequest {
+            language: "lashlang".into(),
+            code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+        };
+        let first_controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("open SQLite effect controller");
+        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+                .expect("admit SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id, turn_id, 0, 0, "registration exec", replay_key,
+            ),
+        );
+        let first = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            first_ctx,
+            request.clone(),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(resolver.clone()),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        assert!(first.error.is_some());
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(installs.load(Ordering::SeqCst), 1);
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
+
+        let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+            .await
+            .expect("cold-reopen SQLite effect controller");
+        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+                .expect("admit reopened SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id, turn_id, 0, 0, "registration exec", replay_key,
+            ),
+        );
+        let replay = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            replay_ctx,
+            request,
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(resolver),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        assert!(replay.error.is_none(), "{:?}", replay.error);
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(installs.load(Ordering::SeqCst), 2);
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+    });
+}
+
+#[test]
+pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("temporary effect journal");
+        let path = dir.path().join("ambient-failure.sqlite");
+        let session_id = "sqlite-ambient-failure";
+        let turn_id = "turn-1";
+        let replay_key = "exec-code:ambient-failure";
+        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
+        let invocation = lash_core::testing::exec_code_invocation(
+            session_id,
+            turn_id,
+            0,
+            0,
+            "ambient failure",
+            replay_key,
+        );
+        let program = lashlang::parse(r#"await web.fetch({})?"#).expect("parse");
+        let collision = lash_core::ToolCatalog::from_tool_definitions(vec![
+            ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
+            ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
+        ]);
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Default::default(),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("open SQLite effect controller"),
+        );
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            collision.clone(),
+            lash_core::ScopedEffectController::shared(Arc::clone(&controller), scope.clone())
+                .expect("admit SQLite controller scope"),
+            invocation.clone(),
+        );
+        let mut record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+        record.select_link(
+            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
+                &invocation,
+            )
+            .expect("effect invocation has a link identity"),
+        );
+        let live = lash_lashlang_runtime::resolve_and_build_deferred_environment(
+            &program,
+            &LashlangSurface::default(),
+            &collision,
+            None,
+            &mut record,
+            &ctx,
+        )
+        .await
+        .expect_err("duplicate live bindings must fail ambient classification");
+        let live_message = match live {
+            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
+            other => panic!("live failure was not Ambient: {other:?}"),
+        };
+
+        drop(ctx);
+        drop(controller);
+        let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+            .await
+            .expect("cold-reopen SQLite effect controller");
+        reopened.start_replay();
+        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            provider,
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+                .expect("admit reopened SQLite controller scope"),
+            invocation,
+        );
+        let mut replay_record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+        replay_record.select_link(
+            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
+                replay_ctx.parent_invocation().expect("parent invocation"),
+            )
+            .expect("effect invocation has a link identity"),
+        );
+        let replay = lash_lashlang_runtime::resolve_and_build_deferred_environment(
+            &program,
+            &LashlangSurface::default(),
+            &lash_core::ToolCatalog::default(),
+            None,
+            &mut replay_record,
+            &replay_ctx,
+        )
+        .await
+        .expect_err("cold replay must preserve the ambient failure");
+        let replay_message = match replay {
+            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
+            other => panic!("replayed failure was not Ambient: {other:?}"),
+        };
+
+        assert_eq!(replay_message, live_message);
+    });
+}
+
+#[test]
+pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_resolver() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("temporary effect journal");
+        let path = dir.path().join("positive-deferred.sqlite");
+        let session_id = "sqlite-positive-deferred";
+        let turn_id = "turn-1";
+        let replay_key = "exec-code:positive";
+        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let installed = Arc::new(AtomicUsize::new(0));
+        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+            Arc::new(CountingDeferredResolver {
+                calls: Arc::clone(&resolver_calls),
+                batches: Default::default(),
+                installed: Arc::clone(&installed),
+            });
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Default::default(),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+        let request = ExecRequest {
+            language: "lashlang".into(),
+            code: r#"
+                if false {
+                    ignored = await web.fetch({ url: "https://example.test" })?
+                }
+                finish "journaled-positive"
+            "#
+            .into(),
+        };
+
+        let first_controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("open SQLite effect controller");
+        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+                .expect("admit SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                0,
+                0,
+                "original descriptive label",
+                replay_key,
+            ),
+        );
+        let first = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            first_ctx,
+            request.clone(),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(resolver),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        assert!(first.error.is_none(), "{:?}", first.error);
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.load(Ordering::SeqCst), 1);
+
+        let collision_controller = lash_sqlite_store::SqliteRuntimeEffectController::open(
+            &path,
+            lash_core::ExecutionScope::turn(session_id, turn_id),
+        )
+        .await
+        .expect("reopen SQLite effect controller for unrelated collision");
+        collision_controller.start_replay();
+        let unrelated_collision_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![
+                ambient_definition("tool:other_a", "other_a", "other", "run"),
+                ambient_definition("tool:other_b", "other_b", "other", "run"),
+            ]),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(collision_controller),
+                lash_core::ExecutionScope::turn(session_id, turn_id),
+            )
+            .expect("admit unrelated collision replay scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                98,
+                42,
+                "another descriptive label",
+                replay_key,
+            ),
+        );
+        let unrelated_collision = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            unrelated_collision_ctx,
+            ExecRequest {
+                language: "lashlang".into(),
+                code: r#"
+                    if false {
+                        ignored = await web.fetch({ url: "https://example.test" })?
+                    }
+                    finish "journaled-positive"
+                "#
+                .into(),
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        let error = unrelated_collision
+            .error
+            .expect("unrelated ambient collision remains an ordinary host failure");
+        assert!(
+            !error
+                .message
+                .contains("failed to commit deferred resolution"),
+            "the deferred journal replay succeeded before the unrelated collision: {error:?}"
+        );
+
+        // Reopen from the file-backed production journal with an empty state
+        // projection, no resolver/installer, changed parent attribution and a
+        // changed descriptive label. Two new ambient claimants would collide
+        // if catalog construction ran before the recorded path was masked.
+        let replay_controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("reopen SQLite effect controller");
+        replay_controller.start_replay();
+        let changed_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
+            ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
+            ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
+        ]);
+        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            provider,
+            changed_catalog,
+            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), scope)
+                .expect("admit reopened SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id,
+                turn_id,
+                97,
+                41,
+                "renamed descriptive label",
+                replay_key,
+            ),
+        );
+        let replay = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            replay_ctx,
+            request,
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        assert!(replay.error.is_none(), "{:?}", replay.error);
+        assert_eq!(
+            replay.terminal_finish,
+            Some(serde_json::json!("journaled-positive"))
+        );
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.load(Ordering::SeqCst), 1);
+    });
+}
+
+#[test]
+pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_resolver() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("temporary effect journal");
+        let path = dir.path().join("negative-deferred.sqlite");
+        let session_id = "sqlite-negative-deferred";
+        let turn_id = "turn-1";
+        let replay_key = "exec-code:negative";
+        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+            Arc::new(CountingDeferredResolver {
+                calls: Arc::clone(&resolver_calls),
+                batches: Default::default(),
+                installed: Default::default(),
+            });
+        let request = deferred_matrix_request();
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Default::default(),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+        let first_controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("open SQLite effect controller");
+        let first_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(first_controller), scope.clone())
+                .expect("admit SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id, turn_id, 0, 0, "negative original", replay_key,
+            ),
+        );
+        let first = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            first_ctx,
+            request.clone(),
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(resolver),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        assert!(first.error.is_some(), "mystery.x is durably unavailable");
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+
+        let replay_controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("reopen SQLite effect controller");
+        replay_controller.start_replay();
+        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            provider,
+            lash_core::ToolCatalog::from_tool_definitions(vec![ambient_definition(
+                "tool:ambient_mystery",
+                "ambient_mystery",
+                "mystery",
+                "x",
+            )]),
+            lash_core::ScopedEffectController::shared(Arc::new(replay_controller), scope)
+                .expect("admit reopened SQLite controller scope"),
+            lash_core::testing::exec_code_invocation(
+                session_id, turn_id, 12, 33, "negative renamed", replay_key,
+            ),
+        );
+        let replay = execute_code_unbounded_for_tests(
+            &mut RlmExecutionState::new(),
+            replay_ctx,
+            request,
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+        )
+        .await;
+        let error = replay
+            .error
+            .expect("journaled negative must mask the newly live ambient tool");
+        assert!(error.message.contains("mystery.x"), "{error:?}");
+        assert!(
+            !error
+                .message
+                .contains("failed to commit deferred resolution")
+        );
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+    });
+}
+
+#[test]
 pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
     block_on(async {
         let resolver_calls = Arc::new(AtomicUsize::new(0));
@@ -497,10 +1249,19 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                 observed_bindings: Arc::clone(&observed_bindings),
                 enumerations,
             });
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-            provider,
-            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-        );
+        let ctx =
+            lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                provider,
+                lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+                lash_core::testing::exec_code_invocation(
+                    "runtime-output-retention",
+                    "turn-1",
+                    0,
+                    0,
+                    "exec-code",
+                    "exec-code:0",
+                ),
+            );
 
         let response = execute_code_unbounded_for_tests(
             &mut RlmExecutionState::new(),
@@ -856,6 +1617,12 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                     Some(session_id.clone()),
                 )
             });
+        if self.originator_override.is_some()
+            && matches!(originator, lash_core::ProcessOriginator::Host { .. })
+        {
+            // This fixture's override emulates a host-admin start, including its host parent.
+            registration.lifecycle.parent = lash_core::ParentScope::Host;
+        }
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
@@ -1039,10 +1806,14 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1126,6 +1897,16 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     let [record] = records.as_slice() else {
         panic!("expected exactly one started TypeScript process, got {records:?}");
     };
+    assert_eq!(
+        record.lifecycle,
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Turn {
+                session_id: SessionId::from("test-session"),
+                turn_id: lash_core::TurnId::from("test-turn")
+            },
+            lash_core::OnParentEnd::Abandon,
+        )
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let terminal = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
@@ -1180,10 +1961,14 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
@@ -1246,27 +2031,30 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
     assert_eq!(turn_n.terminal_finish, Some(serde_json::json!("started")));
 
-    let (turn_n_plus_one, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        tokio::join!(
-            execute_code_with_dialect_and_bounds(
-                &mut state,
-                ctx,
-                ExecRequest {
-                    language: "typescript".to_string(),
-                    code: "finish(await handle);".to_string(),
-                },
-                artifact_store,
-                surface,
-                None,
-                RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
-                RlmLashlangExecutionTraceConfig::default(),
-                lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(SourceDialect::Typescript),
-            ),
-            worker.drive_pending_processes()
-        )
-    })
+    let (turn_n_plus_one, _) = Box::pin(tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        async {
+            tokio::join!(
+                execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    ctx,
+                    ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "finish(await handle);".to_string(),
+                    },
+                    artifact_store,
+                    surface,
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    RlmSourceContext::cell(SourceDialect::Typescript),
+                ),
+                worker.drive_pending_processes()
+            )
+        },
+    ))
     .await
     .expect("turn N+1 process-handle await must not hang");
     assert!(
@@ -1321,10 +2109,14 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
-    .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
-        artifact_store.clone(),
-        surface.clone(),
-    )));
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store.clone(),
+                surface.clone(),
+            ),
+        ),
+    );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let _worker = lash_core::facade_support::DurableProcessWorker::new(

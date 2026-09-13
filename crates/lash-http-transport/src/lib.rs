@@ -2,7 +2,7 @@ mod error;
 mod http;
 
 pub use error::{
-    HttpFailureContext, HttpTransportError, TransportRetryVerdict, retry_after_from_headers,
+    HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
 };
 pub use http::{
     ByteStream, HttpMethod, HttpRequest, HttpResponse, HttpResponseBody, HttpTransport,

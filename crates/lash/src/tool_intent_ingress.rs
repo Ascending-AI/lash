@@ -8,10 +8,37 @@ use tracing::Instrument;
 ///
 /// Its identity is exactly `(session_id, execution_scope_id, tool_call_id,
 /// intent_index)`; the replay key is derived by Lash and validated again at
-/// submission.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct ToolIntentIngressKey(lash_core::ToolIntentIdentity);
+/// submission. The required protocol version rejects keys issued before the
+/// current admission-and-realization contract.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ToolIntentIngressKey {
+    /// Version selecting the admission and realization contract.
+    protocol_version: u16,
+    #[serde(flatten)]
+    identity: lash_core::ToolIntentIdentity,
+}
+
+#[derive(serde::Deserialize)]
+struct ToolIntentIngressKeyWire {
+    protocol_version: Option<u16>,
+    #[serde(flatten)]
+    identity: lash_core::ToolIntentIdentity,
+}
+
+impl<'de> serde::Deserialize<'de> for ToolIntentIngressKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = <ToolIntentIngressKeyWire as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self {
+            // The unversioned predecessor shape is retained only as an
+            // explicit v1 refusal carrier. It never inherits current behavior.
+            protocol_version: wire.protocol_version.unwrap_or(1),
+            identity: wire.identity,
+        })
+    }
+}
 
 impl ToolIntentIngressKey {
     /// Derive the only valid key for an identity quadruple.
@@ -38,21 +65,15 @@ impl ToolIntentIngressKey {
             replay_key: String::new(),
             minting_emission_replay_key: None,
         });
-        Self(identity)
-    }
-
-    /// Rehydrate a transport-decoded identity for typed validation by
-    /// [`ToolIntentIngress::submit`].
-    ///
-    /// Construction does not trust the embedded replay key; submission returns
-    /// `MalformedKey` if it was forged or corrupted.
-    pub fn from_identity(identity: lash_core::ToolIntentIdentity) -> Self {
-        Self(identity)
+        Self {
+            protocol_version: lash_core::TOOL_INTENT_PROTOCOL_V2,
+            identity,
+        }
     }
 
     /// Read the validated identity fields carried by this key.
     pub fn identity(&self) -> &lash_core::ToolIntentIdentity {
-        &self.0
+        &self.identity
     }
 }
 
@@ -63,6 +84,11 @@ impl ToolIntentIngressKey {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum ToolIntentIngressRefusal {
+    /// Refuses a predecessor or unknown admission-and-realization protocol.
+    UnsupportedProtocolVersion {
+        /// Protocol version carried by the submitted ingress key or durable row.
+        recorded: u16,
+    },
     /// Refuses a submission whose replay key does not match its recorded key.
     MalformedKey {
         /// Replay key derived from the submitted intent identity.
@@ -349,9 +375,10 @@ impl ToolIntentIngress {
     /// do not key-replay submissions, so the host must avoid resubmitting an
     /// identity as a new invocation.
     ///
-    /// A `StartProcess` submission does not retain the host-chosen
-    /// `request.id`: Lash replaces it with the derived intent replay key, and
-    /// that derived key is the process id returned in the observable result.
+    /// `StartProcess` and `EmitTrigger` submissions do not retain their
+    /// host-chosen realization identifiers. Lash replaces a start's
+    /// `request.id` and a trigger's `request.idempotency_key` with the derived
+    /// intent replay key before either command reaches its durable store.
     pub async fn submit(
         &self,
         key: ToolIntentIngressKey,
@@ -385,7 +412,7 @@ impl ToolIntentIngress {
         if let Some(refusal) = self.validate(&key, &intent) {
             return ToolIntentIngressOutcome::Refused { refusal };
         }
-        let identity = key.0;
+        let identity = key.identity;
         let submitted_intent = intent.clone();
         let (outcome, replayed) = match self.realize(&identity, intent).await {
             Ok((result, parent_end, replayed)) => (
@@ -470,6 +497,9 @@ impl ToolIntentIngress {
 
     fn refusal_kind(refusal: &ToolIntentIngressRefusal) -> &'static str {
         match refusal {
+            ToolIntentIngressRefusal::UnsupportedProtocolVersion { .. } => {
+                "unsupported_protocol_version"
+            }
             ToolIntentIngressRefusal::MalformedKey { .. } => "malformed_key",
             ToolIntentIngressRefusal::ForeignSession { .. } => "foreign_session",
             ToolIntentIngressRefusal::ForeignExecutionScope { .. } => "foreign_execution_scope",
@@ -546,6 +576,11 @@ impl ToolIntentIngress {
         key: &ToolIntentIngressKey,
         intent: &lash_core::ToolIntent,
     ) -> Option<ToolIntentIngressRefusal> {
+        if key.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+            return Some(ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                recorded: key.protocol_version,
+            });
+        }
         let identity = key.identity();
         let expected = Self::expected_identity(identity);
         let expected_replay_key = expected
@@ -643,6 +678,13 @@ impl ToolIntentIngress {
                 match admission {
                     lash_core::ToolIntentSubmissionAdmission::Admitted => intent,
                     lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
+                        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+                            return Err(RealizationFailure::Refused(
+                                ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                                    recorded: existing.protocol_version,
+                                },
+                            ));
+                        }
                         if existing.kind != kind {
                             return Err(RealizationFailure::Refused(
                                 ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
@@ -849,12 +891,16 @@ impl ToolIntentIngress {
         let mut parent_end_policy = None;
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {
-                parent_end_policy = Some(intent.on_parent_end);
+                parent_end_policy = Some(match intent.request.lifecycle.on_parent_end {
+                    lash_core::OnParentEnd::Abandon => lash_core::ProcessParentEndPolicy::Abandon,
+                    lash_core::OnParentEnd::Cancel => lash_core::ProcessParentEndPolicy::Cancel,
+                });
                 let mut request = intent.request;
                 request.id = lash_core::ProcessId::from(identity.replay_key.clone());
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
-                let registration = self.admit_engine_start(request.into_registration(None))?;
+                let registration =
+                    self.admit_engine_start(request.into_registration(None), env_spec.as_ref())?;
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
@@ -907,10 +953,13 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::EmitTrigger(intent) => {
-                let report = self.emit_recorded_trigger(intent.request).await?;
-                // The occurrence's idempotency key, not an effect-journal key,
-                // is the dedupe point for a re-submitted trigger emission, so
-                // this route never reports a journal replay.
+                let mut request = intent.request;
+                request.idempotency_key = identity.replay_key.clone();
+                let report = self.emit_recorded_trigger(request).await?;
+                // The replay-derived occurrence idempotency key, not an
+                // effect-journal key, is the dedupe point for a re-submitted
+                // trigger emission, so this route never reports a journal
+                // replay.
                 return Ok((RealizedIntent::Trigger(report), None, false));
             }
         };
@@ -953,24 +1002,14 @@ impl ToolIntentIngress {
             .map_err(Into::into)
     }
 
-    /// Run the catalog-free part of the engine-admission gate (see
-    /// `ProcessEngineRegistry::require`) over a host-submitted start: refuse an
-    /// engine kind this host never registered, and stamp the engine identity on
-    /// the row. Nothing here reads mutable state, so it is safe to repeat when a
-    /// redrive re-submits the same identity.
-    ///
-    /// The gate's payload-validation part is deliberately not run here. It
-    /// judges a payload against the *starting session's* resolved tool catalog,
-    /// and ingress is a front door for a session this process is not running —
-    /// the catalog it could build is the host's declared surface, not that
-    /// session's. Validating against the wrong surface would risk a durable
-    /// refusal for a start the session can in fact run, which is worse than
-    /// deferring to `ProcessEngine::run`: run re-resolves the engine and
-    /// re-reads its inputs, so an invalid payload still cannot execute — it
-    /// fails retryably instead of being refused forever.
+    /// Run the engine's pure admission gate over a host-submitted start using
+    /// the exact execution environment recorded on the request. The gate may
+    /// use that immutable environment to derive identity, but cannot inspect a
+    /// live catalog or artifact store, so replaying the same intent is safe.
     fn admit_engine_start(
         &self,
         registration: lash_core::ProcessRegistration,
+        env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
     ) -> crate::Result<lash_core::ProcessRegistration> {
         let lash_core::ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
             return Ok(registration);
@@ -981,8 +1020,7 @@ impl ToolIntentIngress {
         // open does, or a plugin-contributed kind would be refused here as
         // unregistered.
         let engines = self.resolved_process_engines()?;
-        let engine = engines.require(kind)?;
-        let identity = engine.identity(payload);
+        let identity = engines.admit(kind, payload, env_spec)?;
         Ok(registration.with_identity(identity))
     }
 

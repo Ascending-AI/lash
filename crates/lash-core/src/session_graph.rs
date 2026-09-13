@@ -234,10 +234,13 @@ pub struct SessionNodeRecord {
 /// Older readers would collapse equal replay keys from distinct execution
 /// scopes, so the node-body fence rejects them rather than losing authority.
 ///
+/// Version 14 records genuine-user-segment boundaries on projected LLM
+/// messages so client-side retention can make deterministic whole-segment cuts.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 13;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 14;
 
 /// Generation of a body written before the stamp existed.
 ///

@@ -6,11 +6,10 @@ use futures_util::FutureExt as _;
 
 use super::context::ToolDispatchOutcome;
 use super::context::{
-    PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, launch_done, outcome,
-    runtime_failure,
+    PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, launch_done, runtime_failure,
 };
 use super::directives::apply_after_tool_directives;
-use super::retry::execute_leaf_tool_attempt;
+use super::retry::{execute_leaf_tool_attempt, normalized_outcome};
 
 /// The authority a prepared tool attempt runs under, resolved once at dispatch
 /// entry and then carried through the single attempt path.
@@ -19,8 +18,8 @@ use super::retry::execute_leaf_tool_attempt;
 /// deferred-resolution call carries its own out-of-catalog
 /// [`crate::ToolExecutionGrant`]. Both admit exactly one tool manifest, and
 /// every downstream difference between the two routes — the identifier guard,
-/// the execution binding, the execution seam, the attachment producer name —
-/// is a method on this value rather than a forked dispatch body.
+/// the execution binding, the source route, the attachment producer name — is
+/// a method on this value rather than a forked dispatch body.
 pub(super) enum AttemptAuthority<'grant> {
     /// Tool Catalog membership admitted the call; the manifest was resolved by
     /// the prepared tool id.
@@ -96,9 +95,9 @@ impl<'grant> AttemptAuthority<'grant> {
     fn apply_execution_binding<'run>(&self, tool_context: ToolContext<'run>) -> ToolContext<'run> {
         match self {
             Self::Catalog(_) => tool_context,
-            Self::Granted(grant) => {
-                tool_context.with_tool_execution_binding(grant.execution_binding.clone())
-            }
+            Self::Granted(grant) => tool_context
+                .with_tool_execution_binding(grant.execution_binding.clone())
+                .with_granted_source_id(grant.source_id.clone()),
         }
     }
 }
@@ -146,7 +145,12 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let Some(tool_name) =
+        super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
+            .map(|manifest| manifest.name)
+    else {
+        return unavailable_prepared_tool_outcome(context, prepared).await;
+    };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let orchestration_context =
@@ -179,26 +183,17 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
         duration_ms,
     )
     .await;
-    let output = match result {
-        ToolOutcome::Done(output) => *output,
-        ToolOutcome::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+    let result = match result {
+        result @ ToolOutcome::Done(_) => result,
+        ToolOutcome::Pending(_) => ToolOutcome::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "orchestrating_tool_returned_pending",
             "orchestrating tools must immediately await journaled actions and return a completed result",
         )),
     };
-    ToolDispatchOutcome {
-        record: crate::ToolCallRecord {
-            call_id: Some(prepared.call_id),
-            tool: tool_name,
-            args,
-            output,
-            duration_ms,
-        },
-        attempts: Vec::new(),
-        intents: crate::ToolIntents::default(),
-        intent_outcomes: Vec::new(),
-    }
+    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    outcome.record.call_id = Some(prepared.call_id);
+    outcome
 }
 
 /// Runs an internal process-body tool without creating a `ToolAttempt` frame.
@@ -212,7 +207,12 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
     let started = context.clock.now();
-    let tool_name = prepared.tool_name.clone();
+    let Some(tool_name) =
+        super::preparation::resolve_internal_manifest_by_id(context, &prepared.tool_id)
+            .map(|manifest| manifest.name)
+    else {
+        return unavailable_prepared_tool_outcome(context, prepared).await;
+    };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let internal_context = crate::InternalProcessContext::new(tool_context);
@@ -241,26 +241,42 @@ pub(crate) async fn execute_internal_process_tool<'run>(
         duration_ms,
     )
     .await;
-    let output = match result {
-        ToolOutcome::Done(output) => *output,
-        ToolOutcome::Pending(_) => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+    let result = match result {
+        result @ ToolOutcome::Done(_) => result,
+        ToolOutcome::Pending(_) => ToolOutcome::failure(crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
             "internal_process_tool_returned_pending",
             "internal process-body tools must return a completed result",
         )),
     };
-    ToolDispatchOutcome {
-        record: crate::ToolCallRecord {
-            call_id: Some(prepared.call_id),
-            tool: tool_name,
-            args,
-            output,
-            duration_ms,
-        },
-        attempts: Vec::new(),
-        intents: crate::ToolIntents::default(),
-        intent_outcomes: Vec::new(),
-    }
+    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    outcome.record.call_id = Some(prepared.call_id);
+    outcome
+}
+
+async fn unavailable_prepared_tool_outcome(
+    context: &ToolDispatchContext<'_>,
+    prepared: PreparedToolCall,
+) -> ToolDispatchOutcome {
+    let tool_name = context
+        .tools
+        .resolve_manifest_by_id(&prepared.tool_id)
+        .map(|manifest| manifest.name)
+        .unwrap_or(prepared.tool_name);
+    let mut unavailable = normalized_outcome(
+        context,
+        tool_name,
+        prepared.args,
+        runtime_failure(
+            ToolFailureClass::Unavailable,
+            "tool_unavailable",
+            "Tool is unavailable in this session",
+        ),
+        0,
+    )
+    .await;
+    unavailable.record.call_id = Some(prepared.call_id);
+    unavailable
 }
 
 #[cfg(test)]
@@ -269,14 +285,14 @@ pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     prepared: PreparedToolCall,
     tool_context: ToolContext<'run>,
 ) -> ToolDispatchOutcome {
-    coordinate_prepared_tool_call_launch_with_execution_context(
+    let launch = coordinate_prepared_tool_call_launch_with_execution_context(
         context,
         prepared,
         None,
         tool_context,
     )
-    .await
-    .into_done_or_runtime_failure()
+    .await;
+    tool_call_launch_into_done_or_runtime_failure(context, launch).await
 }
 
 #[cfg(test)]
@@ -335,20 +351,24 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
 ) -> ToolCallLaunch {
     let args = prepared.args.clone();
     let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
-        return launch_done(outcome(
-            prepared.tool_name.clone(),
-            args,
-            runtime_failure(
-                ToolFailureClass::Unavailable,
-                "tool_unavailable",
-                "Tool is unavailable in this session",
-            ),
-            0,
-        ));
+        return launch_done(
+            normalized_outcome(
+                context,
+                prepared.tool_name.clone(),
+                args,
+                runtime_failure(
+                    ToolFailureClass::Unavailable,
+                    "tool_unavailable",
+                    "Tool is unavailable in this session",
+                ),
+                0,
+            )
+            .await,
+        );
     };
     let tool_name = authority.manifest().name.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
-        return launch_done(outcome(tool_name, args, failure, 0));
+        return launch_done(normalized_outcome(context, tool_name, args, failure, 0).await);
     }
 
     let tool_start = context.clock.now();
@@ -371,10 +391,12 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
             (ToolOutcome::from_output(result.into_output()), intents)
         }
         crate::ToolAttemptOutcome::Pending(pending) => {
-            let key = match completion_context.take_completion_key() {
-                Some(key) => key,
-                None => {
-                    return launch_done(outcome(
+            let key =
+                match completion_context.take_completion_key() {
+                    Some(key) => key,
+                    None => {
+                        return launch_done(normalized_outcome(
+                        context,
                         tool_name,
                         args,
                         runtime_failure(
@@ -383,13 +405,15 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                             "tool returned Pending without first obtaining a completion key",
                         ),
                         duration_ms,
-                    ));
-                }
-            };
+                    ).await);
+                    }
+                };
             let pending = match announce_pending_park(&completion_context, pending).await {
                 Ok(pending) => pending,
                 Err(failure) => {
-                    return launch_done(outcome(tool_name, args, failure, duration_ms));
+                    return launch_done(
+                        normalized_outcome(context, tool_name, args, failure, duration_ms).await,
+                    );
                 }
             };
             return ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
@@ -412,7 +436,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
 
-    let mut outcome = outcome(tool_name, args, result, duration_ms);
+    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
     outcome.intents = intents;
     launch_done(outcome)
 }
@@ -487,16 +511,15 @@ pub(crate) async fn finalize_tool_result_with_execution_context(
 }
 
 #[cfg(test)]
-trait ToolCallLaunchExt {
-    fn into_done_or_runtime_failure(self) -> ToolDispatchOutcome;
-}
-
-#[cfg(test)]
-impl ToolCallLaunchExt for ToolCallLaunch {
-    fn into_done_or_runtime_failure(self) -> ToolDispatchOutcome {
-        match self {
-            ToolCallLaunch::Done(outcome) => *outcome,
-            ToolCallLaunch::Pending(pending) => outcome(
+async fn tool_call_launch_into_done_or_runtime_failure(
+    context: &ToolDispatchContext<'_>,
+    launch: ToolCallLaunch,
+) -> ToolDispatchOutcome {
+    match launch {
+        ToolCallLaunch::Done(outcome) => *outcome,
+        ToolCallLaunch::Pending(pending) => {
+            normalized_outcome(
+                context,
                 pending.tool_name,
                 pending.args,
                 runtime_failure(
@@ -505,8 +528,12 @@ impl ToolCallLaunchExt for ToolCallLaunch {
                     "pending tool completion is not supported on this dispatch path",
                 ),
                 pending.duration_ms,
-            ),
-            ToolCallLaunch::ControllerAborted(error) => outcome(
+            )
+            .await
+        }
+        ToolCallLaunch::ControllerAborted(error) => {
+            normalized_outcome(
+                context,
                 "runtime_effect_controller".to_string(),
                 serde_json::Value::Null,
                 runtime_failure(
@@ -515,7 +542,8 @@ impl ToolCallLaunchExt for ToolCallLaunch {
                     error.message,
                 ),
                 0,
-            ),
+            )
+            .await
         }
     }
 }

@@ -17,6 +17,7 @@ struct ResponseContext {
     stream_termination: StreamTermination,
     responses_resume: Option<ResponsesResumeCheckpoint>,
     request_key: ResponsesRequestKey,
+    tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 }
 
 pub(crate) type ResponsesRequestFingerprint = [u8; 32];
@@ -275,29 +276,46 @@ pub(crate) async fn complete(
         responses_resume: None,
     };
     let build_route = origin_route.clone();
-    let (body_bytes, generation_disposition, fingerprint, request_body_for_error) =
-        run(blocking, move || {
-            let mut req = req;
-            // Sanitize the owned request before the builders borrow it, avoiding
-            // replay_safe_for cloning the resolved-stored byte cache.
-            req.drop_foreign_replay(&build_route);
-            let (body, cache_control_emitted) =
-                build_request_body(&builder, &req, endpoint, stream, &build_route)?;
-            let disposition = Some(generation_disposition(&req, &body, cache_control_emitted));
-            let bytes = serialize_body(&body).map_err(|e| {
-                LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error()))
-            })?;
-            let fingerprint = request_fingerprint(&bytes);
-            let diagnostic = body_excerpt(std::str::from_utf8(&bytes).expect("JSON is UTF-8"));
-            emit_provider_request_trace(
-                req.provider_trace.as_ref(),
-                "openai_compatible",
-                endpoint.request_trace_name(),
-                &bytes,
-            );
-            Ok::<_, LlmTransportError>((bytes, disposition, fingerprint, diagnostic))
-        })
-        .await??;
+    let (
+        body_bytes,
+        generation_disposition,
+        fingerprint,
+        request_body_for_error,
+        tool_argument_decoder,
+    ) = run(blocking, move || {
+        let mut req = req;
+        // Sanitize the owned request before the builders borrow it, avoiding
+        // reasoning_retention_safe_for cloning the resolved-stored byte cache.
+        req.drop_foreign_replay(&build_route);
+        let (body, cache_control_emitted) =
+            build_request_body(&builder, &req, endpoint, stream, &build_route)?;
+        let disposition = Some(generation_disposition(&req, &body, cache_control_emitted));
+        let bytes = serialize_body(&body)
+            .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
+        let fingerprint = request_fingerprint(&bytes);
+        let diagnostic = body_excerpt(std::str::from_utf8(&bytes).expect("JSON is UTF-8"));
+        emit_provider_request_trace(
+            req.provider_trace.as_ref(),
+            "openai_compatible",
+            endpoint.request_trace_name(),
+            &bytes,
+        );
+        let compat = builder.resolved_compat(endpoint);
+        let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+            endpoint.provider_kind(),
+            &req,
+            compat.strict_tools,
+            &compat.schema_capabilities,
+        )?;
+        Ok::<_, LlmTransportError>((
+            bytes,
+            disposition,
+            fingerprint,
+            diagnostic,
+            tool_argument_decoder,
+        ))
+    })
+    .await??;
     let request_key = ResponsesRequestKey {
         request_id: request_id.clone(),
         fingerprint,
@@ -504,6 +522,7 @@ pub(crate) async fn complete(
         stream_termination,
         responses_resume,
         request_key,
+        tool_argument_decoder,
     };
     let response = if is_sse {
         drive_streaming_response(
@@ -624,6 +643,7 @@ async fn complete_buffered_response(
         url,
         http_summary,
         stream_termination,
+        tool_argument_decoder,
         ..
     } = context;
     let stream_termination = stream_events.is_some().then_some(stream_termination);
@@ -637,10 +657,16 @@ async fn complete_buffered_response(
             stream_events,
             http_summary,
             stream_termination,
+            tool_argument_decoder,
         ),
-        CompletionEndpoint::ChatCompletions => {
-            complete_buffered_chat(provider, text, stream_events, url, stream_termination)
-        }
+        CompletionEndpoint::ChatCompletions => complete_buffered_chat(
+            provider,
+            text,
+            stream_events,
+            url,
+            stream_termination,
+            tool_argument_decoder,
+        ),
     }
 }
 
@@ -650,8 +676,9 @@ fn complete_buffered_responses(
     stream_events: Option<LlmEventSender>,
     http_summary: String,
     stream_termination: Option<StreamTermination>,
+    tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let mut state = ResponsesStreamState::default();
+    let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
@@ -662,7 +689,10 @@ fn complete_buffered_responses(
         state.capture_execution_evidence(&value, true)?;
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
-        state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
+        state.parts = crate::responses_shared::response_parts_from_value_with_decoder(
+            &value,
+            &state.tool_argument_decoder,
+        );
         state.completed_status_seen =
             value.get("status").and_then(Value::as_str) == Some("completed");
         state.final_response = Some(value);
@@ -712,6 +742,7 @@ fn complete_buffered_responses(
                     && !text.is_empty()
                 {
                     tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
+                    tx.send(LlmStreamEvent::Part(part.clone()));
                 }
             }
         }
@@ -740,8 +771,9 @@ fn complete_buffered_chat(
     stream_events: Option<LlmEventSender>,
     url: String,
     stream_termination: Option<StreamTermination>,
+    tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let mut state = ChatStreamState::default();
+    let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
@@ -753,7 +785,10 @@ fn complete_buffered_chat(
         state.capture_response_value(&value)?;
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
-        let parts = OpenAiCompatibleProvider::chat_response_parts_from_value(&value);
+        let parts = OpenAiCompatibleProvider::chat_response_parts_from_value_with_decoder(
+            &value,
+            &state.tool_argument_decoder,
+        );
         let terminal_reason = terminal_reason_from_chat_value(&value, &parts);
         state.full_text = parts
             .iter()
@@ -881,15 +916,17 @@ async fn drive_streaming_responses(
         stream_termination,
         responses_resume,
         request_key,
+        tool_argument_decoder,
     } = context;
     let resume_after = responses_resume
         .as_ref()
         .map(|resume| resume.starting_after);
     let mut last_sequence_number = resume_after;
     let mut sequence_cursor_valid = true;
-    let mut state = responses_resume
-        .map(|resume| resume.state)
-        .unwrap_or_default();
+    let mut state = responses_resume.map_or_else(
+        || ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder),
+        |resume| resume.state,
+    );
     let mut emitted_parts = Vec::new();
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
@@ -1035,9 +1072,10 @@ async fn drive_streaming_chat(
         url,
         http_summary: _,
         stream_termination,
+        tool_argument_decoder,
         ..
     } = context;
-    let mut state = ChatStreamState::default();
+    let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
         body,

@@ -11,6 +11,7 @@ use super::*;
 mod identity_tests;
 #[path = "tests/process_validation.rs"]
 mod process_validation_tests;
+mod reasoning_retention;
 
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
@@ -22,6 +23,27 @@ fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolErro
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
+/// Refusal witness (FIG-1123): the generation-61 decoder rejects its immediate
+/// predecessor before attempting to decode the envelope body.
+#[test]
+fn immediate_predecessor_remote_protocol_generation_60_is_refused() {
+    const PREDECESSOR: u32 = 60;
+    assert_eq!(
+        PREDECESSOR + 1,
+        REMOTE_PROTOCOL_VERSION,
+        "remote-protocol generation adjacency pin"
+    );
+    let error = decode_empty_envelope(PREDECESSOR)
+        .expect_err("generation-60 remote envelope must be refused");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: PREDECESSOR,
+            expected: REMOTE_PROTOCOL_VERSION,
+        }
+    ));
+}
+
 #[derive(Clone)]
 struct VecRegistry(Vec<RemoteToolGrant>);
 
@@ -29,41 +51,6 @@ impl RemoteToolRegistry for VecRegistry {
     fn grants(&self) -> Vec<RemoteToolGrant> {
         self.0.clone()
     }
-}
-
-#[test]
-fn remote_llm_request_json_round_trips() {
-    let request = RemoteLlmRequest {
-        instructions: None,
-        request_id: "request-1".to_string(),
-        scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-1"),
-        model_intent: RemoteModelIntent::new("gpt-test"),
-        messages: vec![RemoteLlmMessage {
-            role: RemoteLlmRole::User,
-            content: vec![RemoteLlmContentBlock::Text {
-                text: "hello".to_string(),
-                response_meta: None,
-                cache_breakpoint: false,
-            }],
-        }],
-        tools: Vec::new(),
-        tool_choice: RemoteLlmToolChoice::Auto,
-        output_spec: Some(RemoteLlmOutputSpec::JsonObject),
-        generation: RemoteGenerationOptions {
-            output_token_cap: Some(128),
-            temperature: Some(serde_json::Number::from_f64(0.25).expect("finite")),
-            seed: Some(-9),
-            stop_sequences: Vec::new(),
-        },
-        metadata: HashMap::new(),
-    };
-
-    request.validate().expect("valid request");
-    let wire = request.encode_json().expect("serialize envelope");
-    let decoded = RemoteLlmRequest::decode_json(&wire).expect("version-first decode");
-    assert_eq!(decoded.request_id, request.request_id);
-    assert_eq!(decoded.scope, request.scope);
-    assert_eq!(decoded.messages, request.messages);
 }
 
 #[test]
@@ -105,44 +92,6 @@ fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
 }
 
 #[test]
-fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
-    let request = RemoteLlmRequest {
-        instructions: None,
-        request_id: "request-userinfo".to_string(),
-        scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
-        model_intent: RemoteModelIntent::new("gpt-test"),
-        messages: vec![RemoteLlmMessage {
-            role: RemoteLlmRole::Assistant,
-            content: vec![RemoteLlmContentBlock::Text {
-                text: "portable answer".to_string(),
-                response_meta: Some(RemoteResponseTextMeta {
-                    origin: Some(RemoteProviderRouteIdentity {
-                        provider: "openai-compatible".to_string(),
-                        endpoint: "https://route-user:route-secret@gateway.example/v1".to_string(),
-                        model: "gpt-test".to_string(),
-                    }),
-                    ..Default::default()
-                }),
-                cache_breakpoint: false,
-            }],
-        }],
-        tools: Vec::new(),
-        tool_choice: RemoteLlmToolChoice::Auto,
-        output_spec: None,
-        generation: RemoteGenerationOptions::default(),
-        metadata: HashMap::new(),
-    };
-    let wire = request
-        .encode_json()
-        .expect("serialize adversarial request envelope");
-
-    let error = RemoteLlmRequest::decode_json(&wire)
-        .expect_err("userinfo-bearing replay routes must fail closed");
-    assert!(matches!(error, RemoteProtocolError::InvalidEnvelope { .. }));
-    assert!(!error.to_string().contains("route-secret"));
-}
-
-#[test]
 fn removed_generation_options_are_rejected_rather_than_discarded() {
     for (key, value) in [
         ("top_p", serde_json::json!("0.9")),
@@ -175,6 +124,7 @@ fn remote_attachment_media_types_are_validated_syntactically() {
                     url: "https://example.test/file".to_string(),
                 }),
             }],
+            starts_user_segment: true,
         }],
         tools: Vec::new(),
         tool_choice: RemoteLlmToolChoice::Auto,
@@ -1267,7 +1217,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 60,
+            expected: 61,
         }
     ));
 
@@ -1457,7 +1407,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 60,
+            "protocol_version": 61,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1472,7 +1422,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 60,
+            actual: 61,
             expected: 41,
         }
     ));
@@ -1518,7 +1468,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 60,
+            expected: 61,
         }
     ));
 
@@ -1535,10 +1485,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(
-        REMOTE_PROTOCOL_VERSION, 60,
-        "turn-cancel policy-conflict wire-shape pin"
-    );
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 61, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1578,8 +1525,18 @@ fn remote_process_dtos_json_round_trip() {
         wake_session_id: Some(SessionId::from("session")),
         observers: vec![SessionId::from("session".to_string())],
         event_types: vec![remote_process_event_type()],
+        lifecycle: Some(crate::RemoteProcessLifecyclePolicy {
+            parent: crate::RemoteParentScope::Host,
+            on_parent_end: crate::RemoteOnParentEnd::Abandon,
+        }),
     };
     start.validate().expect("valid process start request");
+    let mut missing_lifecycle = start.clone();
+    assert!(missing_lifecycle.lifecycle.take().is_some());
+    assert!(
+        matches!(missing_lifecycle.validate(), Err(RemoteProtocolError::InvalidEnvelope { message, .. }) if message.contains("lifecycle"))
+    );
+
     let mut invalid_max_attempts = start.clone();
     invalid_max_attempts.max_attempts = Some(0);
     assert!(matches!(
@@ -1776,7 +1733,7 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
     let draft = RemoteTriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref:
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         wake_target: Some(RemoteSessionScope::new("session")),
@@ -1871,7 +1828,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 60,
+            expected: 61,
         })
     ));
 }
@@ -1910,7 +1867,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1946,7 +1903,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -2001,7 +1958,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2033,7 +1990,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2101,9 +2058,9 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
     for invalid in [
         "",
         "process-env:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "process-env:v5:blake3:abc",
-        "process-env:v5:blake3:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "process-env:v6:blake3:abc",
+        "process-env:v6:blake3:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "tool-authority:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ] {
         assert!(
@@ -2321,7 +2278,7 @@ fn remote_turn_request_schema_has_no_model_intent() {
 }
 
 fn canonical_env_ref() -> &'static str {
-    "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
 
 fn remote_trigger_input_template() -> RemoteTriggerInputTemplate {
@@ -2390,7 +2347,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             caused_by: None,
         },
         env_ref: Some(
-            "process-env:v5:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
         ),
@@ -2414,7 +2371,8 @@ fn remote_process_record() -> RemoteProcessRecord {
         }),
         status: RemoteProcessStatus::Running,
         outcome: None,
-    }
+    lifecycle: crate::RemoteProcessLifecyclePolicy { parent: crate::RemoteParentScope::Host, on_parent_end: crate::RemoteOnParentEnd::Abandon },
+}
 }
 
 fn remote_process_event() -> RemoteProcessEvent {

@@ -789,6 +789,10 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(ProcessIdentity::new("recent-pushdown-kind")),
         )
@@ -1284,18 +1288,12 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     );
 }
 
-lash_conformance::runtime_persistence_reopenable_tests!(
-    sqlite_store_satisfies_runtime_persistence_conformance
-);
-
-async fn sqlite_store_satisfies_runtime_persistence_conformance(
-    law: lash_conformance::RuntimePersistenceLaw,
-) {
+lash_conformance::runtime_persistence_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
-    lash_conformance::runtime_persistence_reopenable(
-        move |session_id| {
+    (
+        move |session_id: &str| {
             let dir = tempfile::tempdir().expect("runtime-persistence conformance tempdir");
             let factory_dir = dir.path().to_path_buf();
             let session_id = SessionId::from(session_id.to_string());
@@ -1327,10 +1325,8 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance(
             let clock = Arc::clone(&clock);
             move |duration_ms| clock.advance(duration_ms)
         }),
-        law,
     )
-    .await;
-}
+});
 
 #[tokio::test]
 async fn sqlite_unbound_session_reads_resolve_the_same_session() {
@@ -2197,7 +2193,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
                 })),
                 duration_ms: 7,
             }),
-            intents: lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::EmitProcessEvent(
+            intents: lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from("sqlite-intent-session"),
                     process_id: ProcessId::from("sqlite-intent-target"),

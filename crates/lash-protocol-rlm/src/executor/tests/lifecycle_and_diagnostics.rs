@@ -807,8 +807,11 @@ pub(super) async fn execute_continue_as_with_trace_sink(
 #[test]
 pub(super) fn resource_call_identity_is_trace_sink_independent() {
     block_on(async {
-        let without_trace = execute_continue_as_with_trace_sink(None).await;
-        let with_trace = execute_continue_as_with_trace_sink(Some(Arc::new(NoopTraceSink))).await;
+        let without_trace = Box::pin(execute_continue_as_with_trace_sink(None)).await;
+        let with_trace = Box::pin(execute_continue_as_with_trace_sink(Some(Arc::new(
+            NoopTraceSink,
+        ))))
+        .await;
 
         // Semantic hash v8 deliberately rekeys the module-rooted execution
         // site and the frame key derived from its call ID. Keep both literal

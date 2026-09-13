@@ -104,6 +104,9 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessAlreadyTerminal { .. } => {
                 Self::new(RuntimeErrorCode::ProcessAlreadyTerminal, err.to_string())
             }
+            err @ PluginError::ParentEnded { .. } => {
+                Self::new(RuntimeErrorCode::ProcessParentEnded, err.to_string())
+            }
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
@@ -162,6 +165,23 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
 mod tests {
     use super::*;
     use crate::ProcessId;
+
+    #[test]
+    fn parent_ended_refusal_stays_typed_and_terminal_through_effect_controller() {
+        let error = PluginError::ParentEnded {
+            process_id: ProcessId::from("late-child"),
+            parent: crate::ParentScope::Process {
+                process_id: ProcessId::from("ended-parent"),
+                incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            },
+        };
+        assert!(error.is_terminal());
+        assert!(!error.is_retryable());
+        let runtime = RuntimeEffectControllerError::from(error).into_runtime_error();
+        assert_eq!(runtime.code.as_str(), "process_parent_ended");
+        assert!(runtime.is_terminal());
+        assert!(!runtime.is_retryable());
+    }
 
     #[test]
     fn process_target_discriminators_survive_the_effect_controller_boundary() {

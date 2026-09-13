@@ -36,6 +36,16 @@ paths = ["crates/lash-remote-protocol/src/*.rs"]
 must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "RemoteTurnReport"]
 
 [[surface]]
+constant = "DURABLE_WAIT_REQUEST_VERSION"
+constant_path = "crates/lash-restate/src/durable_wait.rs"
+description = "Restate durable-wait nested workflow request wire"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/durable_wait.rs"]
+symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
+
+[[surface]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
@@ -698,10 +708,11 @@ kind = "rust_serde_shapes"
 paths = [
   "crates/lash-protocol-rlm/src/executor/state.rs",
   "crates/lash-lashlang-runtime/src/deferred.rs",
+  "crates/lash-lashlang-runtime/src/deferred_triggers.rs",
   "crates/lash-protocol-rlm/src/protocol/state.rs",
   "crates/lash-protocol-rlm/src/projection/bindings.rs",
 ]
-must_cover = ["RlmSnapshotRoot", "RlmDriverState"]
+must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRecord"]
 
 [[surface.guard]]
 kind = "rust_items"
@@ -914,7 +925,7 @@ symbols = [
 # pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
 # LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
 # SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
-# TOOL_INTENT_PROTOCOL_V1 is a permanently named v1 discriminator, not a mutable
+# TOOL_INTENT_PROTOCOL_V2 is a permanently named v2 discriminator, not a mutable
 # current-version constant.
 
 [[surface]]

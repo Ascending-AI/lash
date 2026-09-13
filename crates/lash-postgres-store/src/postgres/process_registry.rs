@@ -245,6 +245,21 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 registration.id, existing.registration_fingerprint, registration_fingerprint
             )));
         }
+        // FIG-2963: ledger-based refusal replaces this
+        if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
+            && let lash_core::ParentScope::Process {
+                process_id,
+                incarnation,
+            } = &registration.lifecycle.parent
+            && let Some(parent) = load_process_tx(&mut tx, process_id).await?.as_ref()
+            && parent.incarnation == *incarnation
+            && parent.is_terminal()
+        {
+            return Err(lash_core::PluginError::ParentEnded {
+                process_id: registration.id.clone(),
+                parent: registration.lifecycle.parent.clone(),
+            });
+        }
         let now = self.clock.timestamp_ms();
         let change_seq = next_process_change_seq_tx(&mut tx).await?;
         let mut record = ProcessRecord::from_prepared_registration(

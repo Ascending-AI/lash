@@ -25,9 +25,11 @@ mod execution_context_builder;
 mod live_replay;
 pub mod sansio_transcript;
 pub mod tool_fixtures;
+mod trigger_context;
 
 pub(crate) use execution_context_builder::*;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
+pub use trigger_context::*;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -621,7 +623,13 @@ pub fn code_execution_context_with_process_dependencies(
         .tool_catalog(tool_catalog)
         .trigger_router(trigger_router)
         .processes(processes)
-        .shared_effect_controller(effect_controller)
+        .borrowed_effect_controller(
+            crate::ScopedEffectController::shared(
+                effect_controller,
+                crate::ExecutionScope::turn("test-session", "test-turn"),
+            )
+            .expect("foreground process fixture has an admitted turn"),
+        )
         .process_env_store(process_env_store)
         .execution_env_spec(execution_env_spec)
         .build()
@@ -679,6 +687,20 @@ pub fn code_execution_context_with_invocation(
         .into_runtime()
 }
 
+/// Build an empty code-execution context with a caller-supplied effect
+/// controller and stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_effect_controller_and_invocation(
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
 /// Build a code-execution context with a concrete tool surface and the stable
 /// parent invocation production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
@@ -689,6 +711,44 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
     TestExecutionContextBuilder::new()
         .provider(provider)
         .tool_catalog(tool_catalog)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with caller-supplied tool and
+/// effect hosts plus the stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with an already admitted effect
+/// scope. Durable-controller tests use this instead of the shared-controller
+/// shortcut, whose intentionally synthetic runtime-operation scope is suitable
+/// only for scope-agnostic fakes.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: crate::ScopedEffectController<'static>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .borrowed_effect_controller(effect_controller)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()
@@ -714,34 +774,6 @@ pub fn exec_code_invocation(
         crate::RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
         effect_id,
     )
-}
-
-pub fn code_execution_context_with_trigger_store(
-    trigger_store: Arc<dyn crate::TriggerStore>,
-) -> crate::RuntimeExecutionContext<'static> {
-    TestExecutionContextBuilder::new()
-        .trigger_router(Some(test_trigger_router(trigger_store)))
-        .build()
-        .into_runtime()
-}
-
-/// Build a code-execution context whose trigger operations pass through the
-/// supplied effect controller before reaching `trigger_store`.
-pub fn code_execution_context_with_trigger_store_and_effect_controller(
-    trigger_store: Arc<dyn crate::TriggerStore>,
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
-) -> crate::RuntimeExecutionContext<'static> {
-    TestExecutionContextBuilder::new()
-        .trigger_router(Some(test_trigger_router(trigger_store)))
-        .shared_effect_controller(effect_controller)
-        .build()
-        .into_runtime()
-}
-
-fn test_trigger_router(trigger_store: Arc<dyn crate::TriggerStore>) -> crate::TriggerRouter {
-    let registry: Arc<dyn crate::ProcessRegistry> =
-        Arc::new(crate::TestLocalProcessRegistry::default());
-    crate::TriggerRouter::new(trigger_store, process_work_wiring_for_registry(registry))
 }
 
 /// Builds the production-shaped `ToolContext` installed while a controller-owned
@@ -917,6 +949,74 @@ pub async fn execute_tool_intents_with_services(
     tool_call_id: &str,
     intents: &crate::ToolIntents,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook(
+        scoped_effect_controller,
+        processes,
+        session_id,
+        tool_call_id,
+        intents,
+        None,
+    )
+    .await
+}
+
+/// Execute a recorded tool-intent drain with the production trigger router.
+///
+/// Durable-adapter tests use this narrow seam to prove replay refusal before
+/// trigger-store ingestion.
+#[doc(hidden)]
+pub async fn execute_tool_intents_with_services_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: crate::TriggerRouter,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        Some(trigger_router),
+        session_id,
+        tool_call_id,
+        intents,
+        None,
+    )
+    .await
+}
+
+/// Execute a recorded tool-intent drain through the production process-command
+/// route and notify a test hook after a child Start has committed.
+#[doc(hidden)]
+pub async fn execute_tool_intents_with_services_and_hook(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        None,
+        session_id,
+        tool_call_id,
+        intents,
+        child_trace_hook,
+    )
+    .await
+}
+
+async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(
             scoped_effect_controller.execution_scope().clone(),
@@ -931,6 +1031,7 @@ pub async fn execute_tool_intents_with_services(
             .session_id(session_id)
             .session_lifecycle(Arc::new(MockSessionManager::default()))
             .processes(processes)
+            .trigger_router(trigger_router)
             .borrowed_effect_controller(scoped_effect_controller)
             .dispatch_parent_invocation(parent_invocation),
     );
@@ -938,9 +1039,61 @@ pub async fn execute_tool_intents_with_services(
         dispatch.as_ref(),
         Some(tool_call_id),
         intents,
-        None,
+        child_trace_hook,
     )
     .await
+}
+
+/// Build the real engine run context used by validation-path tests that are
+/// expected to settle before constructing a nested runtime context.
+#[doc(hidden)]
+pub fn process_engine_run_context_for_validation(
+    registration: crate::ProcessRegistration,
+    tool_catalog: Arc<crate::ToolCatalog>,
+    process_registry_available: bool,
+) -> crate::ProcessEngineRunContext<'static> {
+    let process_id = registration.id.clone();
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    let process_work = process_work_wiring_for_registry(registry);
+    let plugins = crate::PluginHost::new(test_standard_protocol_factories())
+        .build_session("engine-validation-test")
+        .expect("test protocol session builds");
+    let effect_host = crate::facade_support::NativeEffectHost::default();
+    let scoped_effect_controller = crate::EffectHost::scoped_static(
+        &effect_host,
+        crate::ExecutionScope::process(process_id.clone()),
+    )
+    .expect("valid process scope")
+    .expect("native effect host owns a static controller");
+    let execution_context = crate::ProcessExecutionContext::default()
+        .with_execution_write_authority(crate::ProcessExecutionWriteAuthority::invocation(
+            process_id,
+            "engine-validation-test-execution",
+        ));
+    crate::ProcessEngineRunContext::new(
+        registration,
+        execution_context,
+        process_work,
+        SessionId::from("engine-validation-test"),
+        plugins,
+        tool_catalog,
+        None,
+        None,
+        Arc::new(crate::NoQueuedWork::new()),
+        crate::DeliveryPolicy::EarliestSafeBoundary,
+        Arc::new(crate::SystemClock),
+        process_registry_available,
+        tokio_util::sync::CancellationToken::new(),
+        None,
+        scoped_effect_controller,
+        None,
+        Box::new(|_| {
+            Err(crate::PluginError::Session(
+                "validation test unexpectedly entered the nested runtime".to_string(),
+            ))
+        }),
+    )
 }
 
 /// A `ProcessService` that applies the production command-runner guard, then
@@ -2194,29 +2347,13 @@ mod test_protocol_fakes {
             let tool_names = input.tool_catalog.tool_names();
             let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
             TurnDriverPreamble {
-                config: TurnDriverConfig::chat(
-                    Arc::new(TestDriver),
-                    false,
-                    Arc::new(test_turn_limit_final_message),
-                ),
+                config: TurnDriverConfig::chat(Arc::new(TestDriver), false),
                 tool_specs: input.tool_catalog.model_tool_specs(),
                 tool_names,
                 tool_names_fingerprint,
                 execution_prompt: Arc::from(""),
                 prompt_contributions: input.extra_prompt_contributions,
             }
-        }
-    }
-
-    fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> crate::Message {
-        crate::Message {
-            id: message_id.clone(),
-            role: crate::MessageRole::System,
-            parts: crate::shared_parts(vec![crate::Part::error(
-                format!("{message_id}.p0"),
-                format!("Turn limit reached ({max_turns}) before a final test response."),
-            )]),
-            origin: None,
         }
     }
 
@@ -2462,15 +2599,6 @@ mod test_protocol_fakes {
             if let Some(max_turns) = ctx.turn_budget().max_turns()
                 && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
             {
-                let message_id = format!(
-                    "m_standard_{}_{next_protocol_iteration}_turn_limit",
-                    ctx.turn_id()
-                );
-                actions.push(DriverAction::AppendEvents(vec![
-                    SessionHistoryRecord::Conversation(ConversationRecord::from_message(
-                        test_turn_limit_final_message(message_id, max_turns),
-                    )),
-                ]));
                 actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                     TurnStop::MaxTurns,
                 )));

@@ -269,8 +269,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     runtime_host.durability.attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
         attachment_backend.clone(),
     ));
-    runtime_host.process_engines =
-        crate::ProcessEngineRegistry::new().with_engine(Arc::new(AttachmentWritingEngine));
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(AttachmentWritingEngine)),
+    );
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
         model: crate::ModelSpec::builder("test-model")
@@ -309,6 +310,10 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
                 },
                 RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )

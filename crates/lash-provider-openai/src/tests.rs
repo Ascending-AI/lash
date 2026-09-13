@@ -3,6 +3,10 @@ mod runtime_feedback;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
+use lash_core::llm::types::{
+    OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionPolicy,
+    ReasoningRetentionSelection,
+};
 use lash_core::provider::{
     CacheControlDialect, CacheRetention, ModelCapability, ProviderHandle, ProviderReliability,
     ReasoningCapability, ReasoningEncoding, RequestTimeout,
@@ -22,9 +26,11 @@ mod error_classification_tests;
 mod generation_tests;
 mod openrouter_execution_evidence_tests;
 mod output_started_tests;
+mod reasoning_retention_tests;
 mod replay_provenance_tests;
 mod request_work_tests;
 mod responses_text_slot_tests;
+mod strict_tool_omission_tests;
 mod usage_reconciliation_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);
@@ -171,6 +177,7 @@ fn reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 
@@ -192,6 +199,7 @@ fn budget_reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 
@@ -210,6 +218,7 @@ fn toggle_false_reasoning_capability() -> ModelCapability {
         cache_control: None,
         stream_termination: None,
         sampling: lash_core::SamplingCapability::Configurable,
+        reasoning_retention: Default::default(),
     }
 }
 
@@ -1669,7 +1678,10 @@ fn non_streaming_chat_parser_captures_text_tool_and_usage() {
         }
     });
 
-    let parts = OpenAiCompatibleProvider::chat_response_parts_from_value(&value);
+    let parts = OpenAiCompatibleProvider::chat_response_parts_from_value_with_decoder(
+        &value,
+        &crate::responses_shared::ToolArgumentDecoder::default(),
+    );
     let usage = lash_llm_transport::openai_usage_from_response_value(&value);
 
     assert!(matches!(&parts[0], LlmOutputPart::Reasoning { text, .. } if text == "think"));

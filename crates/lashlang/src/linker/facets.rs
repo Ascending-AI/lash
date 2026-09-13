@@ -241,7 +241,7 @@ impl<'module> Linker<'module> {
         };
         let expected_type_facts = expected_type_facts.borrow();
         let mut calls = Vec::new();
-        collect_receiver_calls(workflow_node_value(expr), &mut calls);
+        crate::introspection::receiver_calls_in_expr(workflow_node_value(expr), &mut calls);
         let multiple_calls = calls.len() > 1;
         let mut arguments = Vec::new();
         for (call_index, call) in calls.into_iter().enumerate() {
@@ -297,15 +297,6 @@ pub(super) fn recover_workflow_binding(expr: &Expr, scope: &mut Scope) {
         && target.steps.is_empty()
     {
         scope.bind(target.root.as_str(), any_binding());
-    }
-}
-
-fn collect_receiver_calls<'a>(expr: &'a Expr, calls: &mut Vec<&'a Expr>) {
-    if matches!(expr, Expr::ReceiverCall { .. }) {
-        calls.push(expr);
-    }
-    for child in expr.children() {
-        collect_receiver_calls(child, calls);
     }
 }
 

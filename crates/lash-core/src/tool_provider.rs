@@ -17,6 +17,7 @@ mod completion_support;
 mod direct_completion;
 mod dispatch;
 pub(crate) mod orchestration;
+mod parent_scope;
 mod process;
 pub(crate) mod process_events;
 mod session;
@@ -112,10 +113,27 @@ struct CapturedResidentRoute {
     source_name: String,
 }
 
+/// Runtime-only route selected by the dispatcher for one authorized call.
+///
+/// The route is deliberately private to the core so provider authors observe
+/// only the ordinary prepare/execute APIs and their existing execution
+/// binding. Registry-backed granted calls still need their live source id,
+/// however, because that source is intentionally outside the pinned catalog.
+#[derive(Clone, Default)]
+pub(crate) enum ToolExecutionRoute {
+    #[default]
+    Catalog,
+    Granted {
+        source_id: Option<String>,
+    },
+}
+
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
     session_id: SessionId,
+    parent_scope: crate::ExecutionScope,
+    parent_process_query: Option<Arc<dyn crate::ProcessQuery>>,
     execution_scope_id: String,
     agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
@@ -145,9 +163,38 @@ pub struct AttemptContext<'run> {
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     captured_resident_route: Option<CapturedResidentRoute>,
+    tool_execution_route: ToolExecutionRoute,
 }
 
 impl<'run> AttemptContext<'run> {
+    /// Resolve the runtime-owned parent scope for an explicit child lifecycle declaration.
+    pub async fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
+        match &self.parent_scope {
+            crate::ExecutionScope::Turn {
+                session_id,
+                turn_id,
+            } => Ok(crate::ParentScope::Turn {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            }),
+            crate::ExecutionScope::Process { process_id } => {
+                let query = self.parent_process_query.as_ref().ok_or_else(|| {
+                    PluginError::Session(
+                        "process parent scope requires process query authority".to_string(),
+                    )
+                })?;
+                let parent = query.resolve_process_ref(process_id).await?;
+                Ok(crate::ParentScope::Process {
+                    process_id: parent.process_id,
+                    incarnation: parent.incarnation,
+                })
+            }
+            crate::ExecutionScope::QueueDrain { .. }
+            | crate::ExecutionScope::SessionDelete { .. }
+            | crate::ExecutionScope::RuntimeOperation { .. } => Ok(crate::ParentScope::Host),
+        }
+    }
+
     pub(crate) fn from_tool_context(
         context: &ToolContext<'run>,
         execution_scope_id: String,
@@ -163,6 +210,21 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(|dispatch| dispatch.turn_context.provider().cloned());
         Self {
+            parent_scope: context.effect_controller.scoped().execution_scope().clone(),
+            parent_process_query: context
+                .process_events
+                .as_ref()
+                .map(|events| {
+                    let query: Arc<dyn crate::ProcessQuery> =
+                        events.process_work.registry().clone();
+                    query
+                })
+                .or_else(|| {
+                    context
+                        .runtime_execution_context
+                        .as_ref()
+                        .and_then(crate::RuntimeExecutionContext::child_process_query)
+                }),
             session_id: context.session_id.clone(),
             execution_scope_id,
             agent_frame_id: context.agent_frame_id.clone(),
@@ -202,6 +264,7 @@ impl<'run> AttemptContext<'run> {
             completion_support,
             phase_probe,
             captured_resident_route: None,
+            tool_execution_route: context.tool_execution_route.clone(),
         }
     }
     pub(crate) fn with_captured_resident_route(
@@ -222,6 +285,10 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .filter(|route| route.tool_id == *tool_id)
             .map(|route| route.source_name.as_str())
+    }
+
+    pub(crate) fn execution_route(&self) -> &ToolExecutionRoute {
+        &self.tool_execution_route
     }
 
     /// Integrator class 3 identity for the session that owns this recorded attempt.
@@ -411,6 +478,7 @@ pub struct ToolContext<'run> {
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) prepared_payload: serde_json::Value,
     pub(crate) tool_execution_binding: serde_json::Value,
+    tool_execution_route: ToolExecutionRoute,
     /// The id of the in-flight tool call that is invoking this tool.
     pub(crate) tool_call_id: Option<String>,
     pub(crate) attempt_number: u32,
@@ -484,6 +552,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     direct_completions: crate::DirectCompletionClient<'run>,
     prepared_payload: serde_json::Value,
     tool_execution_binding: serde_json::Value,
+    tool_execution_route: ToolExecutionRoute,
     tool_call_id: Option<String>,
     completion: ToolCompletionState,
     parent_invocation: Option<crate::RuntimeInvocation>,
@@ -513,6 +582,7 @@ impl<'run> ToolContextBuilder<'run> {
             direct_completions: dispatch.direct_completions.clone(),
             prepared_payload: serde_json::Value::Null,
             tool_execution_binding: serde_json::Value::Null,
+            tool_execution_route: ToolExecutionRoute::Catalog,
             tool_call_id: None,
             completion: ToolCompletionState::default(),
             parent_invocation: dispatch.parent_invocation.clone(),
@@ -627,6 +697,7 @@ impl<'run> ToolContextBuilder<'run> {
             direct_completions: self.direct_completions,
             prepared_payload: self.prepared_payload,
             tool_execution_binding: self.tool_execution_binding,
+            tool_execution_route: self.tool_execution_route,
             tool_call_id: self.tool_call_id,
             attempt_number: 1,
             max_attempts: 1,
@@ -675,6 +746,7 @@ impl<'run> ToolContext<'run> {
             direct_completions: self.direct_completions.to_static()?,
             prepared_payload: self.prepared_payload.clone(),
             tool_execution_binding: self.tool_execution_binding.clone(),
+            tool_execution_route: self.tool_execution_route.clone(),
             tool_call_id: self.tool_call_id.clone(),
             attempt_number: self.attempt_number,
             max_attempts: self.max_attempts,
@@ -720,6 +792,7 @@ impl<'run> ToolContext<'run> {
             direct_completions,
             prepared_payload: serde_json::Value::Null,
             tool_execution_binding: serde_json::Value::Null,
+            tool_execution_route: ToolExecutionRoute::Catalog,
             tool_call_id: None,
             completion: ToolCompletionState::default(),
             parent_invocation: None,
@@ -1025,6 +1098,11 @@ impl<'run> ToolContext<'run> {
         self
     }
 
+    pub(crate) fn with_granted_source_id(mut self, source_id: Option<String>) -> Self {
+        self.tool_execution_route = ToolExecutionRoute::Granted { source_id };
+        self
+    }
+
     pub(crate) fn with_attempt_dispatch(
         mut self,
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
@@ -1249,6 +1327,7 @@ pub struct ToolPrepareContext {
     turn_context: crate::TurnContext,
     tool_call_id: Option<String>,
     tool_execution_binding: serde_json::Value,
+    tool_execution_route: ToolExecutionRoute,
 }
 
 impl ToolPrepareContext {
@@ -1265,7 +1344,17 @@ impl ToolPrepareContext {
             turn_context,
             tool_call_id,
             tool_execution_binding,
+            tool_execution_route: ToolExecutionRoute::Catalog,
         }
+    }
+
+    pub(crate) fn with_granted_source_id(mut self, source_id: Option<String>) -> Self {
+        self.tool_execution_route = ToolExecutionRoute::Granted { source_id };
+        self
+    }
+
+    pub(crate) fn execution_route(&self) -> &ToolExecutionRoute {
+        &self.tool_execution_route
     }
 
     /// Exposes session id to protocol and process-engine implementors while preparing or executing
@@ -1381,17 +1470,6 @@ pub trait ToolProvider: Send + Sync + 'static {
     ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
-    async fn prepare_granted_tool_call(
-        &self,
-        grant: &ToolExecutionGrant,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        let _ = call;
-        Err(ToolOutcome::err_fmt(format_args!(
-            "Granted execution is unsupported for tool id `{}`",
-            grant.manifest.id
-        )))
-    }
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome;
     /// Execute an owner-bound internal process body.
     ///
@@ -1451,32 +1529,6 @@ pub trait ToolProvider: Send + Sync + 'static {
             context,
         })
         .await
-    }
-    async fn execute_granted(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let _ = (args, context);
-        ToolOutcome::err_fmt(format_args!(
-            "Granted execution is unsupported for tool id `{}`",
-            grant.manifest.id
-        ))
-    }
-    /// Execute a granted recorded leaf attempt that may declare typed intents.
-    ///
-    /// Defaults to the pure [`execute_granted`](Self::execute_granted) body,
-    /// which receives the same sealed [`AttemptContext`].
-    async fn execute_granted_attempt(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &serde_json::Value,
-        context: &AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        crate::ToolAttemptOutcome::from_tool_result(
-            self.execute_granted(grant, args, context).await,
-        )
     }
     async fn execute_by_id(
         &self,

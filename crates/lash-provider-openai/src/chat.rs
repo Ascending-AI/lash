@@ -410,7 +410,13 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<(Value, CacheBreakpointDiagnostics), LlmTransportError> {
         let serving_route = self.route_identity(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+        let safe_request = req
+            .reasoning_retention_safe_for(
+                &serving_route,
+                "OpenAI Chat Completions",
+                ProviderReasoningRetentionSupport::ClientSideUserSegments,
+            )
+            .map_err(reasoning_retention_transport_error)?;
         let req = safe_request.as_ref();
         Self::validate_chat_attachments(req)?;
         let compat = self.resolved_compat(CompletionEndpoint::ChatCompletions);
@@ -515,7 +521,10 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    pub(crate) fn chat_response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
+    pub(crate) fn chat_response_parts_from_value_with_decoder(
+        value: &Value,
+        tool_argument_decoder: &shared::ToolArgumentDecoder,
+    ) -> Vec<LlmOutputPart> {
         let mut parts = Vec::new();
         let Some(choice) = value
             .get("choices")
@@ -586,7 +595,7 @@ impl OpenAiCompatibleProvider {
                         .map(str::to_string)
                         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     tool_name: name.to_string(),
-                    input_json: arguments,
+                    input_json: tool_argument_decoder.decode(name, arguments),
                     replay: tool_call
                         .get("id")
                         .and_then(Value::as_str)
@@ -814,9 +823,19 @@ pub(crate) struct ChatStreamState {
     /// stand in for a missing `finish_reason`.
     pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
+    pub(crate) tool_argument_decoder: shared::ToolArgumentDecoder,
 }
 
 impl ChatStreamState {
+    pub(crate) fn with_tool_argument_decoder(
+        tool_argument_decoder: shared::ToolArgumentDecoder,
+    ) -> Self {
+        Self {
+            tool_argument_decoder,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn capture_response_value(
         &mut self,
         value: &Value,
@@ -958,14 +977,16 @@ impl ChatStreamState {
             if tool_call.call_id.is_empty() {
                 tool_call.call_id = uuid::Uuid::new_v4().to_string();
             }
+            let tool_name = tool_call.tool_name.clone();
+            let input_json = if tool_call.input_json.is_empty() {
+                "{}".to_string()
+            } else {
+                tool_call.input_json.clone()
+            };
             parts.push(LlmOutputPart::ToolCall {
                 call_id: tool_call.call_id.clone(),
-                tool_name: tool_call.tool_name.clone(),
-                input_json: if tool_call.input_json.is_empty() {
-                    "{}".to_string()
-                } else {
-                    tool_call.input_json.clone()
-                },
+                input_json: self.tool_argument_decoder.decode(&tool_name, input_json),
+                tool_name,
                 replay: tool_call
                     .signature
                     .clone()
@@ -1008,18 +1029,20 @@ impl ChatStreamState {
             if tool_call.tool_name.is_empty() {
                 continue;
             }
+            let tool_name = tool_call.tool_name.clone();
+            let input_json = if tool_call.input_json.is_empty() {
+                "{}".to_string()
+            } else {
+                tool_call.input_json.clone()
+            };
             parts.push(LlmOutputPart::ToolCall {
                 call_id: if tool_call.call_id.is_empty() {
                     uuid::Uuid::new_v4().to_string()
                 } else {
                     tool_call.call_id.clone()
                 },
-                tool_name: tool_call.tool_name.clone(),
-                input_json: if tool_call.input_json.is_empty() {
-                    "{}".to_string()
-                } else {
-                    tool_call.input_json.clone()
-                },
+                input_json: self.tool_argument_decoder.decode(&tool_name, input_json),
+                tool_name,
                 replay: tool_call
                     .signature
                     .clone()
@@ -1036,7 +1059,10 @@ impl ChatStreamState {
                 .as_deref()
                 .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
         {
-            parts = OpenAiCompatibleProvider::chat_response_parts_from_value(&final_response);
+            parts = OpenAiCompatibleProvider::chat_response_parts_from_value_with_decoder(
+                &final_response,
+                &self.tool_argument_decoder,
+            );
         }
         parts
     }

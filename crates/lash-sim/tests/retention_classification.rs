@@ -159,7 +159,7 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     (
         "pending_turn_inputs",
         LifecycleOwned {
-            scope: "terminal-input vacuum and session deletion; accepted-row gap FIG-1511",
+            scope: "dead-claim cancellation, terminal-input vacuum, and session deletion",
         },
     ),
     (

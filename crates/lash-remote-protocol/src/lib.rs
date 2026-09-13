@@ -143,7 +143,11 @@ pub use usage_activity::*;
 // and token-ledger rows (unreported holes with their attempt identities,
 // reconciled corrections) plus the report's unreported/reconciled attempt
 // counts. Peers must adopt 57.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 60;
+// Window 60: FIG-1123 carries explicit reasoning-retention capabilities,
+// selections, and genuine-user-segment boundaries. Exact-match negotiation
+// refuses peers that cannot preserve the retention contract.
+// Window 61: FIG-2960 requires an explicit lifecycle policy on process starts and records.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 61;
 
 /// One versioned remote-protocol message.
 ///

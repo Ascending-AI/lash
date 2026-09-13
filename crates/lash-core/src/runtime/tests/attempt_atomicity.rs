@@ -181,6 +181,10 @@ async fn fixtures() -> Fixtures {
                     },
                     disposition,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types(event_types.clone()),
                 &[SessionId::from(SESSION.to_string())],
@@ -490,7 +494,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
         scoped,
         &fixtures,
         Arc::clone(&provider) as Arc<dyn crate::ToolProvider>,
-        Vec::new(),
+        vec![PureLeafProbeProvider::definition()],
         true,
     );
 
@@ -511,13 +515,17 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     .as_ref()
                     .expect("tool context carries runtime dispatch"),
             );
-            let result = crate::tool_dispatch::execute_once(
-                dispatch.as_ref(),
-                &prepared_tool_call(),
-                tool,
-                None,
-            )
-            .await;
+            let prepared = prepared_tool_call();
+            assert!(
+                crate::tool_dispatch::resolve_callable_manifest_by_id(
+                    dispatch.as_ref(),
+                    &prepared.tool_id,
+                )
+                .is_some(),
+                "the attempt is admitted through the production catalog authority"
+            );
+            let result =
+                crate::tool_dispatch::execute_once(dispatch.as_ref(), &prepared, tool, None).await;
             // Assert the provider's sentinel value at the test level, not just
             // the Done shape. A recorded attempt body runs under
             // `catch_unwind`, so an assertion that panics *inside* the provider
@@ -677,7 +685,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     );
 }
 
-/// Each admitted v1 declaration realizes exactly one controller command, and
+/// Each admitted v2 declaration realizes exactly one controller command, and
 /// the sentinel attributes that command to the literal stable intent id.
 #[tokio::test]
 async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
@@ -703,15 +711,18 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         "intent-drain",
     ));
 
-    let intents = crate::ToolIntents::v1(vec![
+    let intents = crate::ToolIntents::v2(vec![
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             request: crate::ProcessStartRequest::external(
                 "ignored-by-stable-intent-id",
                 crate::ProcessOriginator::host_scoped("intent-test"),
                 serde_json::json!({"step": "start"}),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ),
-            on_parent_end: crate::ProcessParentEndPolicy::Abandon,
         })),
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
@@ -785,7 +796,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = crate::ToolIntents::v1(
+    let intents = crate::ToolIntents::v2(
         (0..=crate::TOOL_INTENT_MAX_COUNT)
             .map(|index| {
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
@@ -851,6 +862,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "structural.note".to_string(),
@@ -944,7 +959,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+    let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             process_id: ProcessId::from(LIVE_PROCESS.to_string()),
@@ -1220,7 +1235,9 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
         &tier,
         crate::RuntimeEffectEnvelope::new(
             follow_on_invocation(),
-            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            crate::RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 0 },
+            },
         ),
         crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
             Ok(crate::RuntimeEffectOutcome::Sleep)
@@ -1261,7 +1278,9 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
         &tier,
         crate::RuntimeEffectEnvelope::new(
             follow_on_invocation(),
-            crate::RuntimeEffectCommand::Sleep { duration_ms: 0 },
+            crate::RuntimeEffectCommand::Sleep {
+                spec: crate::SleepSpec::For { duration_ms: 0 },
+            },
         ),
         crate::RuntimeEffectLocalExecutor::testing(|_envelope| async {
             Ok(crate::RuntimeEffectOutcome::Sleep)

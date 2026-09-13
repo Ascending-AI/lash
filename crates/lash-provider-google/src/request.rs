@@ -16,6 +16,24 @@ pub(crate) enum GoogleThinkingConfig {
 }
 
 impl GoogleOAuthProvider {
+    pub(crate) fn reasoning_retention_safe_request<'a>(
+        &self,
+        req: &'a LlmRequest,
+    ) -> Result<std::borrow::Cow<'a, LlmRequest>, LlmTransportError> {
+        let serving_route = self.route_identity_for_model(&req.model);
+        req.reasoning_retention_safe_for(
+            &serving_route,
+            "Google Gemini",
+            ProviderReasoningRetentionSupport::ClientSideUserSegments,
+        )
+        .map_err(|error: ReasoningRetentionValidationError| {
+            LlmTransportError::new(error.message)
+                .with_kind(ProviderFailureKind::Unsupported)
+                .with_code("unsupported_reasoning_retention")
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        })
+    }
+
     pub(crate) const PROVIDER_KIND: &'static str = "google_oauth";
 
     pub(crate) fn inline_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
@@ -102,9 +120,8 @@ impl GoogleOAuthProvider {
         &self,
         req: &LlmRequest,
         attachment_parts: &[(AttachmentSource, Value)],
-    ) -> Vec<Value> {
-        let serving_route = self.route_identity_for_model(&req.model);
-        let safe_request = req.replay_safe_for(&serving_route);
+    ) -> Result<Vec<Value>, LlmTransportError> {
+        let safe_request = self.reasoning_retention_safe_request(req)?;
         let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
         let missing_signature = match req.model_capability.google_dialect {
@@ -250,7 +267,7 @@ impl GoogleOAuthProvider {
                     .sort_by_key(|part| part.get("functionResponse").is_none());
             }
         }
-        out
+        Ok(out)
     }
 
     /// Strip the JSON-Schema meta keys the Vertex `parameters` field rejects for

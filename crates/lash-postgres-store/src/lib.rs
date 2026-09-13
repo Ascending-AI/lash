@@ -326,22 +326,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // backend put settles, and explicit recovery can remove exactly that attempt's
 // intent, so component-83 stores are rejected rather than running the old unsafe
 // re-put lifecycle.
-// Version 85 requires pending-input claim identity and token to be either both
-// NULL or both populated. Component-84 stores are recreated.
-// Version 86 composes that contract with the monotonic turn-cancel intent revision
-// used by cancellation publication CAS. Component-85 stores are rejected rather
-// than admitting either half of the composed schema.
-// Version 87 adds the selected turn-control binding and non-overwritable exact
-// closure authorization. Component-86 stores cannot recover these obligations
-// across owner failure and are rejected rather than silently adopting them.
-// Version 88 persists retired physical scopes under the same advisory fence as
-// cancellation authorization.
-// Version 89 registers every cancellation-closure catalog with the actual
-// effect owner so direct retirement cannot bypass an outstanding catalog pin.
-// Version 90 composes that owner-wide lifecycle fence with the truthful admitted
-// effect identity carried by the other component-86 parent. Both parent shapes
-// are rejected rather than interpreting either incomplete contract.
-const SCHEMA_VERSION: i32 = 90;
+// Version 86 combines full admitted effect addresses and truthful attribution with
+// all-or-none pending-input claim identity and token fencing. Both incompatible
+// component-85 parent shapes are rejected and recreated.
+// Required lifecycle policy changes record_json: older components require recreation.
+const SCHEMA_VERSION: i32 = 87;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

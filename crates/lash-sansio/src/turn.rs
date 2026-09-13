@@ -9,6 +9,7 @@ use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub session_id: SessionId,
+    pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub autonomous: bool,
     pub model: String,
@@ -56,14 +57,10 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             tool_specs: input.turn_driver_preamble.tool_specs.clone(),
             system_prompt: Arc::clone(&input.prepared_prompt.system_prompt),
             session_id: input.session_id,
+            agent_frame_id: input.agent_frame_id,
             turn_id: input.turn_id,
             emit_llm_trace: input.emit_llm_trace,
             termination: input.termination,
-            turn_limit_final_message: input
-                .turn_driver_preamble
-                .config
-                .turn_limit_final_message
-                .clone(),
         },
         input.messages,
         input.events,
@@ -151,11 +148,7 @@ mod tests {
             "read_file",
         )]));
         let turn_driver_preamble = Arc::new(TurnDriverPreamble {
-            config: TurnDriverConfig::chat(
-                Arc::new(NoopDriver),
-                false,
-                Arc::new(test_turn_limit_final_message),
-            ),
+            config: TurnDriverConfig::chat(Arc::new(NoopDriver), false),
             tool_specs: tool_catalog.model_tool_specs(),
             tool_names: tool_catalog.tool_names(),
             tool_names_fingerprint: tool_catalog.tool_names_fingerprint(),
@@ -178,6 +171,7 @@ mod tests {
         });
         let prepared = build_turn(SansIoTurnInput {
             session_id: SessionId::from("session".to_string()),
+            agent_frame_id: "frame-test".to_string(),
             turn_id: TurnId::from("turn"),
             autonomous: false,
             model: "gpt-5".to_string(),
@@ -205,17 +199,5 @@ mod tests {
                 .contains("Be precise.")
         );
         assert_eq!(prepared.turn_driver_preamble.tool_specs.len(), 1);
-    }
-
-    fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> crate::Message {
-        crate::Message {
-            id: message_id.clone(),
-            role: crate::MessageRole::System,
-            parts: crate::shared_parts(vec![crate::Part::error(
-                format!("{message_id}.p0"),
-                format!("Turn limit reached ({max_turns}) before a final test response."),
-            )]),
-            origin: None,
-        }
     }
 }

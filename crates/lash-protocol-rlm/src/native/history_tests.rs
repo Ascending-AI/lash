@@ -79,6 +79,40 @@ fn ids(messages: &[LlmMessage]) -> (Vec<String>, Vec<String>) {
     );
     (calls, results)
 }
+
+#[test]
+fn fig1123_native_history_marks_only_real_turn_inputs_as_segment_boundaries() {
+    let events = vec![
+        SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord {
+            id: "real".to_string(),
+            role: lash_core::MessageRole::User,
+            parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
+            origin: Some(lash_core::MessageOrigin::TurnInput {
+                turn_id: TurnId::from("turn"),
+                input_id: None,
+            }),
+        }),
+        SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord {
+            id: "synthetic".to_string(),
+            role: lash_core::MessageRole::User,
+            parts: vec![Part::text(
+                "synthetic.p0".to_string(),
+                "synthetic".to_string(),
+                None,
+            )]
+            .into(),
+            origin: Some(lash_core::MessageOrigin::Plugin {
+                plugin_id: "plugin".to_string(),
+                transient: false,
+            }),
+        }),
+    ];
+
+    let messages = render(&events);
+
+    assert!(messages[0].starts_user_segment);
+    assert!(!messages[1].starts_user_segment);
+}
 #[test]
 fn reload_preserves_replay_and_observation_bytes() {
     let entry = step("reload", None, false);

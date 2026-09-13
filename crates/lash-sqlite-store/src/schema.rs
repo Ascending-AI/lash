@@ -883,7 +883,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 33 persists full admitted effect addresses and optional truthful
 /// attribution in process registration and wake payloads. Older registries are
 /// rejected rather than fabricating an execution scope or session owner.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 33;
+/// Version 34 requires the host-declared lifecycle policy in every process record.
+/// Earlier process registries are rejected rather than inventing a policy.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 34;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

@@ -4,6 +4,12 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ToolBindingError {
+    /// A durable deferred-resolution journal replayed an ambient catalog failure.
+    ///
+    /// The controller error retains the failure's typed runtime code and
+    /// display message, but not the process-local catalog error value.
+    #[error("{message}")]
+    JournaledAmbient { message: String },
     /// A tool manifest omits the binding required by a dialect.
     #[error("tool `{tool}` is missing an explicit `{binding_key}` binding")]
     MissingBinding {
@@ -43,6 +49,9 @@ pub enum ToolBindingError {
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum LashlangRuntimeError {
+    /// A process artifact or live host environment refused admission.
+    #[error(transparent)]
+    ProcessAdmission(#[from] crate::LashlangProcessAdmissionRefusal),
     /// A projected tool or host resource conflicts with another Lashlang catalog entry.
     #[error("invalid Lashlang host catalog: {source}")]
     HostCatalog {
@@ -147,15 +156,6 @@ pub enum LashlangRuntimeError {
     /// A loaded module artifact does not verify against its content identity.
     #[error("invalid lashlang module artifact `{module_ref}`: {message}")]
     InvalidArtifact { module_ref: String, message: String },
-    /// The module artifact's host requirements differ from the process request.
-    #[error(
-        "lashlang module artifact `{module_ref}` host requirements mismatch: process requested {requested}, artifact has {actual}"
-    )]
-    ArtifactRequirementsMismatch {
-        module_ref: String,
-        requested: String,
-        actual: String,
-    },
     /// The module artifact does not export the requested process reference.
     #[error(
         "lashlang module artifact `{module_ref}` does not export process `{process}` as requested ref {process_ref}"

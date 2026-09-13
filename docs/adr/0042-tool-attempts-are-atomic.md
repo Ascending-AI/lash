@@ -1,5 +1,10 @@
 # Tool attempts are atomic
 
+Status: accepted, superseded in part by [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
+
+ADR 0094 replaces the parent-end policy and settlement design described below.
+The atomic-attempt and recorded-intent decisions remain accepted.
+
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
 effect performed while a tool runs. Pretending that those operations compose
@@ -157,6 +162,16 @@ it as a separate admission fact. The laws
 journal-first boundary: environment state is written only after admission, and
 a failed environment write cannot leave a registered process behind.
 
+Protocol v2 makes the declaration replay key the store-side idempotency key for
+an `EmitTrigger` occurrence. The caller-supplied key remains recorded payload,
+but it cannot collapse two distinct declarations; redriving one declaration
+reuses its replay-derived key. Protocol-v1 attempt batches, predecessor host
+keys, and predecessor runtime-owned submission rows are refused before
+realization because resuming them after the cutover could create a second
+occurrence beside one committed under the old caller-key rule. An unversioned
+host key or submission row is classified explicitly as v1 only to produce that
+refusal; it is never upgraded to current behavior.
+
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only
 `Abandon` and `Cancel`, with `Cancel` as the default: `Abandon` is a recorded
@@ -204,9 +219,10 @@ is a deliberate replay-format cutover from the pre-emission-scoped
 its v2 successor returns the typed
 `tool_intent_replay_key_format_cutover` refusal and requires a fresh
 post-cutover invocation; it never treats that row as absent and executes the
-command again. Restate retains the legacy ordinal lookup label long enough to
-consume and validate an in-flight v1 row, while the canonical envelope and all
-newly captured corpus outcomes carry v2 identities. The law
+command again. Restate commands now use the current replay key as their name,
+so in-flight v1/v2 Restate journals encounter the SDK's opaque journal-mismatch
+refusal and must drain before this deployment. Lash's typed guard separately
+refuses the pre-incarnation bare-`process_id` payload shape. The law
 `crash_after_admission_redrives_to_exactly_one_realization` durably records the
 mock admission's canonical envelope hash before its injected crash, rejects a
 changed-payload redrive, and realizes the originally admitted command once, while
@@ -261,3 +277,12 @@ whole attempt runs again. In-attempt effects are consequently at-least-once;
 an LLM call can be billed again. Tool authors must make external writes
 idempotent when needed and move independently durable boundaries into process
 steps.
+
+Engine starts apply a narrower rule at the journal boundary. A
+`ProcessEngineRegistration` carries a store-free admission descriptor: a static
+kind and non-capturing function pointer that can inspect only the recorded
+payload and execution-environment spec and returns the process identity or a
+typed refusal. Artifact loads, catalog resolution, and compatibility checks are
+world readiness and run only in prepare or `ProcessEngine::run`. Consequently a
+temporary world failure while replaying a committed `Start` remains retryable
+and cannot be recorded as a `CommandFailed` tool-intent refusal.

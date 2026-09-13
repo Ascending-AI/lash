@@ -346,6 +346,10 @@ fn wake_registration(process_id: &ProcessId, wake_session_id: &SessionId) -> Pro
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(
         ProcessIdentity::new("version-bump")

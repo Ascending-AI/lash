@@ -294,32 +294,55 @@ fn trigger_source(
 pub fn referenced_module_call_paths(
     program: &crate::ast::Program,
 ) -> std::collections::BTreeSet<String> {
-    let mut paths = std::collections::BTreeSet::new();
-    collect_module_call_paths(&program.main, &mut paths);
-    for declaration in &program.declarations {
-        if let crate::ast::Declaration::Process(process) = declaration {
-            collect_module_call_paths(&process.body, &mut paths);
-        }
-    }
-    paths
+    referenced_receiver_call_paths(program)
 }
 
-fn collect_module_call_paths(
-    expr: &crate::ast::Expr,
-    paths: &mut std::collections::BTreeSet<String>,
+/// Collect every syntactic receiver-call path once, for consumers that resolve
+/// different kinds of callable host definitions. Deferred tools and deferred
+/// trigger constructors deliberately share this collector while retaining
+/// separate provider and replay state.
+pub fn referenced_receiver_call_paths(
+    program: &crate::ast::Program,
+) -> std::collections::BTreeSet<String> {
+    let mut calls = Vec::new();
+    receiver_calls_in_expr(&program.main, &mut calls);
+    for declaration in &program.declarations {
+        match declaration {
+            crate::ast::Declaration::Process(process) => {
+                receiver_calls_in_expr(&process.body, &mut calls);
+            }
+            crate::ast::Declaration::Function(function) => {
+                receiver_calls_in_expr(&function.body, &mut calls);
+            }
+            crate::ast::Declaration::Type(_) => {}
+        }
+    }
+    calls.into_iter().filter_map(receiver_call_path).collect()
+}
+
+pub(crate) fn receiver_calls_in_expr<'expr>(
+    expr: &'expr crate::ast::Expr,
+    calls: &mut Vec<&'expr crate::ast::Expr>,
 ) {
-    if let crate::ast::Expr::ReceiverCall {
+    if matches!(expr, crate::ast::Expr::ReceiverCall { .. }) {
+        calls.push(expr);
+    }
+    for child in expr.children() {
+        receiver_calls_in_expr(child, calls);
+    }
+}
+
+fn receiver_call_path(expr: &crate::ast::Expr) -> Option<String> {
+    let crate::ast::Expr::ReceiverCall {
         receiver,
         operation,
         ..
     } = expr
-        && let Some(module_path) = module_call_receiver_path(receiver)
-    {
-        paths.insert(format!("{}.{}", module_path.join("."), operation.as_str()));
-    }
-    for child in expr.children() {
-        collect_module_call_paths(child, paths);
-    }
+    else {
+        return None;
+    };
+    let module_path = module_call_receiver_path(receiver)?;
+    Some(format!("{}.{}", module_path.join("."), operation.as_str()))
 }
 
 fn module_call_receiver_path(expr: &crate::ast::Expr) -> Option<Vec<String>> {

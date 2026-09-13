@@ -14,9 +14,9 @@ use async_trait::async_trait;
 use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
-    SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall,
-    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolExecutionGrant, ToolId,
-    ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolPrepareCall, ToolProvider,
+    RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
+    ToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolId,
+    ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -179,12 +179,7 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
             .iter()
             .map(|path| {
                 let resolution = match self.store.load(path) {
-                    Ok(Some(grant)) => {
-                        self.installed
-                            .lock_recover()
-                            .insert((*path).to_string(), grant.clone());
-                        DeferredToolResolution::Resolved(Box::new(grant))
-                    }
+                    Ok(Some(grant)) => DeferredToolResolution::Resolved(Box::new(grant)),
                     Ok(None) => DeferredToolResolution::NotAvailable,
                     Err(err) => {
                         // The resolver seam has no error channel; surface the
@@ -202,10 +197,15 @@ impl DeferredToolResolver for WorkbenchDeferredToolResolver {
             .collect()
     }
 
-    fn install_recorded_grant(&self, path: &str, grant: &DeferredToolGrant) {
+    fn install_recorded_grant(
+        &self,
+        path: &str,
+        grant: &DeferredToolGrant,
+    ) -> Result<(), RecordedGrantInstallError> {
         self.installed
             .lock_recover()
             .insert(path.to_string(), grant.clone());
+        Ok(())
     }
 }
 
@@ -380,17 +380,6 @@ impl ToolProvider for DeferredExecutionProvider {
             .map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn prepare_granted_tool_call(
-        &self,
-        _grant: &ToolExecutionGrant,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<lash::tools::PreparedToolCall, ToolOutcome> {
-        Ok(lash::tools::PreparedToolCall::identity(
-            call.tool_id,
-            call.pending,
-        ))
-    }
-
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let Some(definition) = self
             .definitions
@@ -401,21 +390,6 @@ impl ToolProvider for DeferredExecutionProvider {
         };
         self.execute_definition(definition, call.args, call.context)
             .await
-    }
-
-    async fn execute_granted(
-        &self,
-        grant: &ToolExecutionGrant,
-        args: &Value,
-        context: &lash::tools::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(definition) = self.definition_by_id(&grant.manifest().id) else {
-            return ToolOutcome::err_fmt(format_args!(
-                "unknown deferred tool id `{}`",
-                grant.manifest().id
-            ));
-        };
-        self.execute_definition(definition, args, context).await
     }
 }
 
@@ -712,6 +686,10 @@ mod tests {
             turn_two.get("text.sha256"),
             Some(DeferredToolResolution::Resolved(_))
         ));
+        assert!(
+            first.resolver.installed.lock_recover().is_empty(),
+            "discovery must stay side-effect free until the journal commits"
+        );
         drop(first);
 
         let reopened = WorkbenchDeferredTools::open(&path).expect("reopen SQLite grant store");
@@ -725,10 +703,15 @@ mod tests {
             "workbench:deferred:text_sha256"
         );
         assert_eq!(restored.source_id.as_deref(), Some(DEFERRED_SOURCE_ID));
+        assert!(
+            reopened.resolver.installed.lock_recover().is_empty(),
+            "restart discovery must not install before replay commitment"
+        );
 
         reopened
             .resolver
-            .install_recorded_grant("text.sha256", restored);
+            .install_recorded_grant("text.sha256", restored)
+            .expect("recorded grant route reinstalls");
         assert_eq!(
             reopened
                 .resolver

@@ -84,7 +84,9 @@ fn spawn_parked_sleep(
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, effect_id),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: 300_000,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: 300_000,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(cancellation)

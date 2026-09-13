@@ -89,7 +89,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::await_event_coordinator::{AwaitEventBackend, AwaitEventCoordinator};
-use super::envelope::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome};
+use super::envelope::{
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectOutcome, SleepSpec,
+};
 
 use super::executor::{
     AwaitEventKey, AwaitEventWaitIdentity, EffectJournalRetirement, ExecutionScope, Resolution,
@@ -337,9 +339,10 @@ impl EffectRowStatus {
 
 /// Everything a backend needs to claim `(scope_id, replay_key)`.
 ///
-/// The request carries the *sleep duration* rather than a due timestamp: the
+/// The request carries the *sleep intent* rather than a due timestamp: the
 /// due time is derived from the same authoritative instant that stamps the
-/// lease, which the backend reads inside its own transaction.
+/// lease, which the backend reads inside its own transaction. An absolute
+/// `Until` deadline needs no derivation and is recorded as-is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectClaimRequest {
     /// Durable journal identity of the executing scope.
@@ -358,9 +361,8 @@ pub struct EffectClaimRequest {
     pub lease_token: String,
     /// Lease lifetime, added to the claim instant to form the expiry.
     pub lease_ttl_ms: u64,
-    /// `Some` only for `Sleep` effects: how long past the claim instant the
-    /// effect is due.
-    pub sleep_duration_ms: Option<u64>,
+    /// `Some` only for `Sleep` effects: the journaled sleep intent.
+    pub sleep: Option<SleepSpec>,
     /// `Some` only for a child of a durable effect group: the group whose
     /// counter this child's finalize will allocate a settlement rank from
     /// (FIG-1416).
@@ -657,9 +659,10 @@ pub fn decide_effect_claim(
     request: &EffectClaimRequest,
     now_ms: u64,
 ) -> EffectClaimDecision {
-    let fresh_due_at_ms = request
-        .sleep_duration_ms
-        .map(|duration_ms| now_ms.saturating_add(duration_ms));
+    let fresh_due_at_ms = request.sleep.map(|spec| match spec {
+        SleepSpec::For { duration_ms } => now_ms.saturating_add(duration_ms),
+        SleepSpec::Until { deadline_ms } => deadline_ms,
+    });
     let stamp = |due_at_ms: Option<u64>| EffectLeaseStamp {
         lease_expires_at_ms: now_ms.saturating_add(request.lease_ttl_ms),
         due_at_ms,
@@ -1480,7 +1483,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             owner_id: self.owner_id.clone(),
             lease_token: self.next_lease_token(),
             lease_ttl_ms: self.lease_timings.ttl_ms(),
-            sleep_duration_ms: sleep_duration_ms(envelope),
+            sleep: sleep_spec(envelope),
             group_key: envelope
                 .group
                 .as_deref()
@@ -1752,9 +1755,9 @@ fn upgrade_legacy_journaled_llm_response(response: &mut serde_json::Value) {
     );
 }
 
-fn sleep_duration_ms(envelope: &RuntimeEffectEnvelope) -> Option<u64> {
+fn sleep_spec(envelope: &RuntimeEffectEnvelope) -> Option<SleepSpec> {
     match envelope.command {
-        RuntimeEffectCommand::Sleep { duration_ms } => Some(duration_ms),
+        RuntimeEffectCommand::Sleep { spec } => Some(spec),
         _ => None,
     }
 }

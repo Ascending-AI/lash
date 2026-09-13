@@ -1,6 +1,11 @@
 //! Cross-backend conformance for the durable process registry.
 
 use lash_sansio::ProcessId;
+mod event_replay;
+use event_replay::{
+    canonical_process_event_payload_replay, long_cancellation_reason_replay_is_backend_safe,
+};
+mod lifecycle;
 mod status_filters;
 use status_filters::list_filters_match_extracted_and_json_fields;
 
@@ -24,12 +29,13 @@ use pretty_assertions::assert_eq;
 
 // The shared registry fixture leaves 59 modeled registrations after its
 // compaction probes; the cold refold fixture below adds the 60th. The
-// incarnation-reuse contract contributes two registrations and one prune;
+// incarnation-reuse contract contributes four registrations and two prunes
+// across its raw and watched modes;
 // three more registrations and two more prunes come from the append-arm
 // contract, whose two completed rows are terminal and prune-eligible by the
 // time retention runs.
-const REOPEN_BASELINE_SPAWNS: usize = 60;
-const REOPEN_BASELINE_PRUNED: usize = 7;
+const REOPEN_BASELINE_SPAWNS: usize = 62;
+const REOPEN_BASELINE_PRUNED: usize = 8;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
@@ -60,6 +66,8 @@ where
     let second = make();
     assert_fresh_instances(&first, &second, "process_registry");
     drop((first, second));
+    lifecycle::registration_contract(make()).await;
+    lifecycle::empty_tool_call_identifiers_leave_no_row(make()).await;
     super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
@@ -69,6 +77,8 @@ pub async fn process_registry_reopenable<F>(make: F)
 where
     F: Fn() -> ReopenableProcessRegistry,
 {
+    lifecycle::registration_contract(make().open).await;
+    lifecycle::empty_tool_call_identifiers_leave_no_row(make().open).await;
     super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(
@@ -98,6 +108,10 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register leased replay repair process");
@@ -403,6 +417,10 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(
         ProcessIdentity::new("conformance")
@@ -463,7 +481,10 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     .await;
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
-    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry)).await;
+    reused_process_ids_refuse_superseded_incarnations(Arc::clone(&registry), "raw").await;
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
+    reused_process_ids_refuse_superseded_incarnations(Arc::clone(watched.registry()), "watched")
+        .await;
     lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
     process_event_append_arms_are_ordered(probe).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
@@ -471,10 +492,17 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
 }
 
-async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("incarnation-reuse-conformance");
+async fn reused_process_ids_refuse_superseded_incarnations(
+    registry: Arc<dyn ProcessRegistry>,
+    mode: &str,
+) {
+    let expected_process_id = format!("incarnation-reuse-conformance-{mode}");
+    let process_id = ProcessId::from(expected_process_id.clone());
+    let event_type = "signal.incarnation-stale";
     let first = registry
-        .register_process(registration(&process_id))
+        .register_process(
+            registration(&process_id).with_extra_event_types([plain_event_type(event_type)]),
+        )
         .await
         .expect("register first process incarnation");
     registry
@@ -492,13 +520,26 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
         .expect("prune first process incarnation");
 
     let second = registry
-        .register_process(registration(&process_id))
+        .register_process(
+            registration(&process_id).with_extra_event_types([plain_event_type(event_type)]),
+        )
         .await
         .expect("register second process incarnation");
     assert_ne!(first.incarnation, second.incarnation);
     let first_ref = ProcessRef::from_record(&first);
     for refusal in [
+        registry
+            .append_event_ref(
+                &first_ref,
+                ProcessEventAppendRequest::new(event_type, serde_json::Value::Null),
+            )
+            .await
+            .map(|_| ()),
         registry.events_after_ref(&first_ref, 0).await.map(|_| ()),
+        registry
+            .count_events_through_ref(&first_ref, event_type, u64::MAX)
+            .await
+            .map(|_| ()),
         registry
             .add_observer_ref(
                 &SessionId::from("incarnation-stale-observer"),
@@ -514,7 +555,7 @@ async fn reused_process_ids_refuse_superseded_incarnations(registry: Arc<dyn Pro
                     ref process_id,
                     requested_incarnation,
                     current_incarnation,
-                }) if process_id == "incarnation-reuse-conformance"
+                }) if process_id == &expected_process_id
                     && requested_incarnation == first.incarnation
                     && current_incarnation == second.incarnation
             ),
@@ -755,6 +796,10 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register parent-end-plan process");
@@ -1085,61 +1130,6 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     );
 }
 
-async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("canonical-process-event-payload-replay");
-    registry
-        .register_process(
-            registration(&process_id).with_extra_event_types([plain_event_type("signal.zero")]),
-        )
-        .await
-        .expect("register canonical-payload process");
-    let replay_key = format!("process:{process_id}:signal.zero:1");
-    let first = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": -0.0}))
-                .with_replay_key(&replay_key),
-        )
-        .await
-        .expect("append negative-zero payload");
-    let replay = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new("signal.zero", serde_json::json!({"value": 0.0}))
-                .with_replay_key(replay_key),
-        )
-        .await
-        .expect("canonical positive-zero retry must be idempotent");
-    assert_eq!(
-        replay.event.sequence, first.event.sequence,
-        "canonically equal zero payloads must share the replayed event"
-    );
-}
-
-async fn long_cancellation_reason_replay_is_backend_safe(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("long-cancellation-reason-replay");
-    registry
-        .register_process(registration(&process_id))
-        .await
-        .expect("register long-cancellation process");
-    let reason = (0..800)
-        .map(|index| format!("{index:08x}"))
-        .collect::<String>();
-    let request = ProcessEventAppendRequest::cancel_requested(&process_id, Some(reason));
-    let first = registry
-        .append_event(&process_id, request.clone())
-        .await
-        .expect("append cancellation with long reason");
-    let replay = registry
-        .append_event(&process_id, request)
-        .await
-        .expect("replay cancellation with long reason");
-    assert_eq!(
-        replay.event.sequence, first.event.sequence,
-        "long cancellation reason retries must remain idempotent on every backend"
-    );
-}
-
 async fn refolded_process_record_matches_stored_projection(
     writer: Arc<dyn ProcessRegistry>,
     reader: Arc<dyn ProcessRegistry>,
@@ -1155,6 +1145,10 @@ async fn refolded_process_record_matches_stored_projection(
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
                 "process-env:{process_id}"
@@ -1292,6 +1286,10 @@ async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_max_attempts(Some(1)),
         )
@@ -1483,6 +1481,10 @@ async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn Pro
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(
                 ProcessIdentity::new("waiting-recovery-worklist")

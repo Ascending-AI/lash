@@ -1742,6 +1742,10 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "intent.survivor.committed".to_string(),

@@ -555,22 +555,10 @@ fn standard_config() -> TurnMachineConfig {
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
         session_id: lash_core::SessionId::from("standard-protocol-scenario"),
+        agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
-        turn_limit_final_message: Arc::new(test_turn_limit_final_message),
-    }
-}
-
-fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: lash_core::facade_support::shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -824,15 +812,18 @@ impl lash_core::ToolProvider for StandardIntentProvider {
         let session_id = call.context.session_id().to_string();
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
-            lash_core::ToolIntents::v1(vec![
+            lash_core::ToolIntents::v2(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
                     request: lash_core::ProcessStartRequest::external(
                         "standard-intent-child",
                         lash_core::ProcessOriginator::host_scoped("standard-scenario"),
                         serde_json::json!({"kind": "start"}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
@@ -868,6 +859,10 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([
                 lash_core::ProcessEventType {

@@ -323,6 +323,10 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(ProcessIdentity::new("test")),
         )
@@ -596,6 +600,10 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
                     },
                     RecoveryContract::ExternallyOwned,
                     ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_identity(ProcessIdentity::new("test")),
             )
@@ -671,6 +679,10 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(ProcessIdentity::new("test")),
         )
@@ -742,6 +754,10 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(ProcessIdentity::new("test"))
     };
@@ -803,6 +819,10 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
                             },
                             RecoveryContract::ExternallyOwned,
                             ProcessProvenance::host(),
+                            lash_core::ProcessLifecyclePolicy::new(
+                                lash_core::ParentScope::Host,
+                                lash_core::OnParentEnd::Abandon,
+                            ),
                         )
                         .with_identity(ProcessIdentity::new("test")),
                     )

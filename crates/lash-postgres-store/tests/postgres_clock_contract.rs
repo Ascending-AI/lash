@@ -579,6 +579,10 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register process for clock contract");

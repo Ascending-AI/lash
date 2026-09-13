@@ -68,6 +68,11 @@ impl<'run> OrchestrationContext<'run> {
         self.context.triggers()
     }
 
+    /// Resolve the enclosing durable parent for an orchestrated child start.
+    pub async fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
+        self.context.child_process_parent_scope().await
+    }
+
     pub async fn start_process(
         &self,
         request: crate::ProcessStartRequest,

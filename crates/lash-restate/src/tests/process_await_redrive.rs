@@ -892,7 +892,9 @@ impl Fig1631SleepGate for Fig1631SleepGateImpl {
                 RuntimeEffectEnvelope::new(
                     runtime_invocation(RuntimeEffectKind::Sleep, "fig1631-sleep-gate"),
                     RuntimeEffectCommand::Sleep {
-                        duration_ms: input.duration_ms,
+                        spec: lash_core::SleepSpec::For {
+                            duration_ms: input.duration_ms,
+                        },
                     },
                 ),
                 RuntimeEffectLocalExecutor::sleep(tokio_util::sync::CancellationToken::new())
@@ -1946,19 +1948,27 @@ pub(super) fn durable_wait_index_k_effect_measurements_are_linear() {
 
 #[test]
 pub(super) fn restate_effect_name_uses_lash_replay_key() {
+    let identity = lash_core::derive_tool_intent_identity(
+        &lash_sansio::SessionId::from("session"),
+        "turn",
+        Some("call"),
+        0,
+    )
+    .expect("derive tool-intent identity");
     let invocation = lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             durable_turn_scope("session", "turn"),
-            "session:turn:1:2:tool_attempt:effect",
+            identity.replay_key.clone(),
         )
         .expect("valid Restate effect-name address"),
         lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 2),
         "effect",
-    );
+    )
+    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(identity));
 
     assert_eq!(
         restate_effect_name(&invocation),
-        "lash:session:turn:1:2:tool_attempt:effect"
+        format!("lash:{}", invocation.replay_key())
     );
 }
 

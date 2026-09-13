@@ -403,7 +403,7 @@ fn push_process_language_bullets(
     abilities: &lashlang::LashlangAbilities,
 ) {
     bullets.push(r#"- Processes: `process name(p: T) { … }` declares a definition; `h = start name(p: v)` starts a run and returns its handle. Pass what the body needs as typed parameters, including module authorities: `process notify(mail: Gmail, body: str) { await mail.send({ body: body })? finish true }`, then `start notify(mail: gmail.work, body: "Hello")`."#.into());
-    bullets.push(r#"- Inside a process: `yield value` reports progress, `wake value` re-enters the model with `value`, `finish value` / `fail value` complete the run (falling off the end is `finish null`). `print` is foreground-only. Start all independent runs first, then join: `results = await [h1, h2]`; `(await h)?` unwraps the `{ ok, value }` wrapper. `cancel h` is best-effort."#.into());
+    bullets.push(r#"- Inside a process: `yield value` reports progress, `wake value` re-enters the model with `value`, `finish value` / `fail value` complete the run (falling off the end is `finish null`). `print` is foreground-only. Start all independent runs first, then join: `results = await [h1, h2]`; `(await h)?` unwraps the `{ ok, value }` wrapper. `cancel h` is best-effort. A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#.into());
     if abilities.process_signals {
         bullets.push(r#"- Signals: declare inbound payloads with `process worker() signals { approve: { ok: bool } } { payload = wait_signal("approve") finish payload }`; `signal_run(h, "approve", { ok: true })` sends from foreground or process code; `wait_signal` is process-only."#.into());
     }

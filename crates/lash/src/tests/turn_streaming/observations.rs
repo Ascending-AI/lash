@@ -26,6 +26,324 @@ pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Resul
 }
 
 #[tokio::test]
+async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Result<()> {
+    let streamed_reasoning = LlmOutputPart::Reasoning {
+        text: "**Planning single shell command execution**".to_string(),
+        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-streamed".to_string()),
+            encrypted_content: Some("opaque-streamed".to_string()),
+            summary: vec!["**Planning single shell command execution**".to_string()],
+            ..Default::default()
+        }),
+    };
+    let completed_only_reasoning = LlmOutputPart::Reasoning {
+        text: "**Completed-only summary**".to_string(),
+        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some("reasoning-completed-only".to_string()),
+            encrypted_content: Some("opaque-completed-only".to_string()),
+            summary: vec!["**Completed-only summary**".to_string()],
+            ..Default::default()
+        }),
+    };
+    let provider = crate::testing::TestProvider::builder()
+        .kind("reasoning-delta-then-completed-part")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let streamed_reasoning = streamed_reasoning.clone();
+            let completed_only_reasoning = completed_only_reasoning.clone();
+            async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::ReasoningDelta(
+                    "**Planning single ".to_string(),
+                ));
+                stream.send(LlmStreamEvent::ReasoningDelta(
+                    "shell command execution**".to_string(),
+                ));
+                stream.send(LlmStreamEvent::Part(streamed_reasoning.clone()));
+                stream.send(LlmStreamEvent::Part(completed_only_reasoning.clone()));
+                stream.send(LlmStreamEvent::Delta("done".to_string()));
+                Ok(LlmResponse {
+                    parts: vec![
+                        streamed_reasoning,
+                        completed_only_reasoning,
+                        LlmOutputPart::Text {
+                            text: "done".to_string(),
+                            response_meta: None,
+                        },
+                    ],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("reasoning-single-publication").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("run one command"))
+        .run()
+        .await?;
+
+    let reasoning = output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasoning,
+        vec![
+            "**Planning single ",
+            "shell command execution**",
+            "**Completed-only summary**",
+        ],
+        "incremental chunks stay distinct, their completed snapshot is not republished, and a completed-only summary remains visible",
+    );
+
+    let read_view = output
+        .result
+        .state
+        .read_view()
+        .expect("test runtime frame scope resolves");
+    let durable_reasoning = read_view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| matches!(part.kind, lash_core::PartKind::Reasoning))
+        .map(|part| part.content.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        durable_reasoning,
+        vec![
+            "**Planning single shell command execution**",
+            "**Completed-only summary**",
+        ],
+        "completed reasoning parts remain authoritative durable response state",
+    );
+    Ok(())
+}
+
+fn reasoning_output_part(text: &str, item_id: &str) -> LlmOutputPart {
+    LlmOutputPart::Reasoning {
+        text: text.to_string(),
+        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+            item_id: Some(item_id.to_string()),
+            encrypted_content: Some(format!("opaque-{item_id}")),
+            summary: vec![text.to_string()],
+            ..Default::default()
+        }),
+    }
+}
+
+fn reasoning_activities(output: &crate::turn::TurnOutput) -> Vec<&str> {
+    output
+        .activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("reasoning-tool-publication")
+        .requires_streaming(true)
+        .complete({
+            let calls = Arc::clone(&calls);
+            move |request| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let stream = request.stream_events.expect("stream events");
+                    match call {
+                        0 => {
+                            let reasoning = reasoning_output_part("inspect once", "reasoning-tool");
+                            let tool = LlmOutputPart::ToolCall {
+                                call_id: "lookup-once".to_string(),
+                                tool_name: "app_lookup".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            };
+                            stream.send(LlmStreamEvent::ReasoningDelta("inspect once".to_string()));
+                            stream.send(LlmStreamEvent::Part(reasoning.clone()));
+                            stream.send(LlmStreamEvent::Part(tool.clone()));
+                            Ok(LlmResponse {
+                                parts: vec![reasoning, tool],
+                                response_metadata: Default::default(),
+                                ..LlmResponse::default()
+                            })
+                        }
+                        1 => {
+                            stream.send(LlmStreamEvent::Delta("done".to_string()));
+                            Ok(text_response("done"))
+                        }
+                        _ => panic!("unexpected provider call {call}"),
+                    }
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("reasoning-tool-publication").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("inspect with a tool"))
+        .run()
+        .await?;
+
+    assert_eq!(reasoning_activities(&output), vec!["inspect once"]);
+    assert_eq!(output.assistant_message(), Some("done"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reasoning() -> Result<()>
+{
+    let streamed = reasoning_output_part("streamed A", "reasoning-a");
+    let completed = reasoning_output_part("completed-only B", "reasoning-b");
+    let provider = crate::testing::TestProvider::builder()
+        .kind("mixed-reasoning-publication")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let streamed = streamed.clone();
+            let completed = completed.clone();
+            async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::ReasoningDelta("streamed A".to_string()));
+                stream.send(LlmStreamEvent::Part(streamed.clone()));
+                Ok(LlmResponse {
+                    parts: vec![streamed, completed],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("mixed-reasoning-publication").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("keep every distinct reasoning item"))
+        .run()
+        .await?;
+
+    assert_eq!(
+        reasoning_activities(&output),
+        vec!["streamed A", "completed-only B"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Result<()> {
+    let reasoning = reasoning_output_part("reasoning once", "reasoning-before-text");
+    let provider = crate::testing::TestProvider::builder()
+        .kind("reasoning-then-buffered-text")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let reasoning = reasoning.clone();
+            async move {
+                let stream = request.stream_events.expect("stream events");
+                stream.send(LlmStreamEvent::ReasoningDelta("reasoning once".to_string()));
+                stream.send(LlmStreamEvent::Part(reasoning.clone()));
+                Ok(LlmResponse {
+                    parts: vec![
+                        reasoning,
+                        LlmOutputPart::Text {
+                            text: "buffered answer".to_string(),
+                            response_meta: None,
+                        },
+                    ],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("reasoning-buffered-text").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("answer after reasoning"))
+        .run()
+        .await?;
+
+    assert_eq!(reasoning_activities(&output), vec!["reasoning once"]);
+    assert_eq!(assistant_prose(&output.activities), "buffered answer");
+    assert_eq!(output.assistant_message(), Some("buffered answer"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_turns() -> Result<()>
+{
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("identical-reasoning-publication")
+        .requires_streaming(true)
+        .complete({
+            let calls = Arc::clone(&calls);
+            move |_request| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    Ok(LlmResponse {
+                        parts: vec![
+                            reasoning_output_part("repeat legitimately", &format!("{call}-a")),
+                            reasoning_output_part("repeat legitimately", &format!("{call}-b")),
+                        ],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("identical-reasoning-publication")
+        .open()
+        .await?;
+
+    for prompt in ["first turn", "second turn"] {
+        let output = session.turn(TurnInput::text(prompt)).run().await?;
+        assert_eq!(
+            reasoning_activities(&output),
+            vec!["repeat legitimately", "repeat legitimately"]
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    Ok(())
+}
+
+#[tokio::test]
 pub(super) async fn session_observation_replays_live_activity_and_commit() -> Result<()> {
     let core = standard_core();
     let session = core.session("session-observation-replay").open().await?;

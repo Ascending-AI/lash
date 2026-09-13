@@ -191,6 +191,7 @@ impl GoogleOAuthProvider {
             });
         let mut output_parts: Vec<LlmOutputPart> = Vec::new();
         let mut tool_call_parts: Vec<LlmOutputPart> = Vec::new();
+        let mut reasoning_stream_state = ReasoningStreamState::default();
         let mut finish_event: Option<Value> = None;
         let origin_model = request
             .get("model")
@@ -207,6 +208,7 @@ impl GoogleOAuthProvider {
                 emit_provider_trace(provider_trace.as_ref(), "google", raw);
                 let mut text_deltas = Vec::new();
                 let mut reasoning_deltas = Vec::new();
+                let mut reasoning_events = Vec::new();
                 let prev_usage = usage.clone();
                 let prev_execution_evidence = execution_evidence.clone();
                 let first_new_tool_call = tool_call_parts.len();
@@ -221,6 +223,10 @@ impl GoogleOAuthProvider {
                         execution_evidence: &mut execution_evidence,
                         tool_call_parts: Some(&mut tool_call_parts),
                         output_parts: Some(&mut output_parts),
+                        reasoning_stream: Some(ReasoningStreamSink {
+                            state: &mut reasoning_stream_state,
+                            events: &mut reasoning_events,
+                        }),
                         finish_event: &mut finish_event,
                     },
                     origin_model.as_deref(),
@@ -228,8 +234,8 @@ impl GoogleOAuthProvider {
                 if let Some(tx) = stream_events.as_ref()
                     && self.options.expose_thinking
                 {
-                    for delta in reasoning_deltas {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
+                    for event in reasoning_events {
+                        tx.send(event);
                     }
                 }
                 if let Some(tx) = stream_events.as_ref() {
@@ -261,6 +267,15 @@ impl GoogleOAuthProvider {
             },
         )
         .await;
+
+        if stream_result.is_ok()
+            && self.options.expose_thinking
+            && let Some(index) = reasoning_stream_state.open_output_part_index.take()
+            && let Some(part @ LlmOutputPart::Reasoning { .. }) = output_parts.get(index)
+            && let Some(tx) = stream_events.as_ref()
+        {
+            tx.send(LlmStreamEvent::Part(part.clone()));
+        }
 
         let partial_response = || {
             let mut parts = output_parts.clone();
@@ -450,13 +465,13 @@ impl GoogleOAuthProvider {
             })
             .collect::<Vec<_>>();
         let inline_contents =
-            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts);
+            self.build_contents_with_attachment_parts(&req, &inline_attachment_parts)?;
 
         let (attachment_parts, used_uploaded_files) = self
             .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
             .await?;
         let contents = if used_uploaded_files {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
         } else {
             inline_contents.clone()
         };
@@ -571,6 +586,7 @@ impl Provider for GoogleOAuthProvider {
                     .with_kind(ProviderFailureKind::Validation)
                     .with_code("invalid_provider_endpoint")
             })?;
+        let req = self.reasoning_retention_safe_request(&req)?.into_owned();
         Self::validate_attachments(&req)?;
         let manager = Arc::clone(&self.credentials);
         let mut context = GoogleCredentialCallContext {
@@ -763,5 +779,47 @@ mod error_detail_tests {
             json!("resolved-project")
         );
         assert_eq!(transport.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn unsupported_retention_is_refused_before_project_resolution() {
+        let transport = Arc::new(ProjectResolutionTransport {
+            calls: AtomicUsize::new(0),
+        });
+        let mut provider = GoogleOAuthProvider::new(
+            "access",
+            "refresh",
+            u64::MAX,
+            crate::GoogleOAuthClient {
+                id: "oauth-client-id".into(),
+                secret: "oauth-client-secret".into(),
+            },
+        )
+        .with_transport(transport.clone());
+        let mut request = completion_request();
+        *request.model_capability.reasoning_retention = lash_core::ReasoningRetentionPolicy {
+            capability: Some(lash_core::ReasoningRetentionCapability::OpenAiContext {
+                supported: vec![lash_core::OpenAiReasoningContext::CurrentTurn],
+            }),
+            selection: lash_core::ReasoningRetentionSelection::OpenAiContext {
+                context: lash_core::OpenAiReasoningContext::CurrentTurn,
+            },
+        };
+
+        let error = provider
+            .complete(request)
+            .await
+            .expect_err("provider-native retention must be refused");
+
+        assert_eq!(error.kind, ProviderFailureKind::Unsupported);
+        assert_eq!(
+            error.code.as_deref(),
+            Some("unsupported_reasoning_retention")
+        );
+        assert_eq!(
+            transport.calls.load(Ordering::SeqCst),
+            0,
+            "retention refusal must precede project-resolution HTTP"
+        );
     }
 }

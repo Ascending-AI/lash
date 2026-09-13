@@ -34,7 +34,9 @@ use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 
 const HISTORY_EXCHANGES: usize = 18;
-const RUNTIME_PERF_MAX_TURNS: usize = 1;
+// `deep_turn_composition` performs two provider iterations: one runs the
+// process/tool work, and the second incorporates queued active-turn input and finishes.
+const RUNTIME_PERF_MAX_TURNS: usize = 2;
 
 mod observation;
 

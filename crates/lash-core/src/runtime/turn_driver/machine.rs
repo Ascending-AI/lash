@@ -54,14 +54,14 @@ impl RuntimeTurnDriver<'_> {
         event_tx: mpsc::Sender<RuntimeStreamEvent>,
         cancel: CancellationToken,
         run_offset: usize,
-    ) -> Result<(crate::MessageSequence, usize, bool), RuntimeError> {
+    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         self.protocol_reply.mark_run_start(messages.iter());
         let machine = match self
             .prepare_turn_machine(messages, &event_tx, run_offset)
             .await
         {
             Ok(prepared) => prepared,
-            Err((messages, iteration)) => return Ok((messages, iteration, false)),
+            Err((messages, iteration)) => return Ok((messages, iteration)),
         };
         self.run_machine(machine, event_tx, cancel, run_offset)
             .await
@@ -73,7 +73,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: mpsc::Sender<RuntimeStreamEvent>,
         cancel: CancellationToken,
         run_offset: usize,
-    ) -> Result<(crate::MessageSequence, usize, bool), RuntimeError> {
+    ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         macro_rules! emit {
             ($event:expr) => {
                 send_session_event(&event_tx, $event).await
@@ -111,11 +111,7 @@ impl RuntimeTurnDriver<'_> {
                     self.turn_pipeline.record_protocol_terminal_output(
                         self.protocol_reply.terminal_output(messages.iter()),
                     );
-                    return Ok((
-                        messages,
-                        protocol_iteration,
-                        machine.turn_limit_final_scheduled(),
-                    ));
+                    return Ok((messages, protocol_iteration));
                 }
                 Effect::LlmCall { id, request } => {
                     self.protocol_reply
@@ -167,7 +163,7 @@ impl RuntimeTurnDriver<'_> {
             }
         }
 
-        Ok((crate::MessageSequence::default(), run_offset, false))
+        Ok((crate::MessageSequence::default(), run_offset))
     }
 
     async fn apply_progress_boundary(

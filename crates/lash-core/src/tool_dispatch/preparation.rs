@@ -11,11 +11,12 @@ use crate::{
 #[cfg(test)]
 use super::context::ToolDispatchOutcome;
 use super::context::{
-    ToolDispatchContext, ToolPreparationOutcome, completed_preparation, outcome, runtime_failure,
+    ToolDispatchContext, ToolPreparationOutcome, completed_preparation, runtime_failure,
 };
 use super::directives::apply_before_tool_directives;
 #[cfg(test)]
 use super::execution::dispatch_prepared_tool_call_with_execution_context;
+use super::retry::normalized_outcome;
 
 #[cfg(test)]
 pub(crate) async fn dispatch_tool_call(
@@ -75,16 +76,20 @@ pub(crate) async fn prepare_tool_call_with_context(
 ) -> ToolPreparationOutcome {
     let tool_name = pending.tool_name.clone();
     let Some(definition) = resolve_callable_definition(context, &tool_name) else {
-        return completed_preparation(outcome(
-            tool_name,
-            pending.args,
-            runtime_failure(
-                ToolFailureClass::Unavailable,
-                "tool_unavailable",
-                "Tool is unavailable in this session",
-            ),
-            0,
-        ));
+        return completed_preparation(
+            normalized_outcome(
+                context,
+                tool_name,
+                pending.args,
+                runtime_failure(
+                    ToolFailureClass::Unavailable,
+                    "tool_unavailable",
+                    "Tool is unavailable in this session",
+                ),
+                0,
+            )
+            .await,
+        );
     };
     prepare_authorized_tool_call_with_context(
         context,
@@ -151,31 +156,41 @@ async fn prepare_authorized_tool_call_with_context(
     {
         Ok(directives) => directives,
         Err(err) => {
-            return completed_preparation(outcome(
-                tool_name,
-                args,
-                runtime_failure(
-                    ToolFailureClass::Internal,
-                    "before_tool_call_failed",
-                    err.to_string(),
-                ),
-                0,
-            ));
+            return completed_preparation(
+                normalized_outcome(
+                    context,
+                    tool_name,
+                    args,
+                    runtime_failure(
+                        ToolFailureClass::Internal,
+                        "before_tool_call_failed",
+                        err.to_string(),
+                    ),
+                    0,
+                )
+                .await,
+            );
         }
     };
 
     let applied = apply_before_tool_directives(context, args, directives).await;
     args = applied.args;
     if let Some(result) = applied.short_circuit {
-        return completed_preparation(outcome(tool_name, args, result, 0));
+        return completed_preparation(
+            normalized_outcome(context, tool_name, args, result, 0).await,
+        );
     }
     if let Err(err) = validate_tool_input(&contract, &args) {
-        return completed_preparation(outcome(
-            tool_name,
-            args,
-            runtime_failure(ToolFailureClass::InvalidRequest, "invalid_tool_args", err),
-            0,
-        ));
+        return completed_preparation(
+            normalized_outcome(
+                context,
+                tool_name,
+                args,
+                runtime_failure(ToolFailureClass::InvalidRequest, "invalid_tool_args", err),
+                0,
+            )
+            .await,
+        );
     }
 
     pending.args = args.clone();
@@ -189,37 +204,57 @@ async fn prepare_authorized_tool_call_with_context(
         tool_call_id,
         execution_binding,
     );
+    let prepare_context = match grant {
+        Some(grant) => prepare_context.with_granted_source_id(grant.source_id.clone()),
+        None => prepare_context,
+    };
     let prepare_call = ToolPrepareCall {
         tool_id: manifest.id.clone(),
         pending,
         context: &prepare_context,
     };
-    let prepared = if let Some(grant) = grant {
-        context
-            .tools
-            .prepare_granted_tool_call(grant, prepare_call)
-            .await
-    } else {
-        context.tools.prepare_tool_call(prepare_call).await
-    };
+    let prepared = context.tools.prepare_tool_call(prepare_call).await;
     match prepared {
-        Ok(prepared) if prepared.tool_id == manifest.id => {
+        Ok(prepared) if prepared.tool_id == manifest.id && prepared.tool_name == manifest.name => {
             ToolPreparationOutcome::Prepared(Box::new(prepared))
         }
-        Ok(prepared) => completed_preparation(outcome(
-            tool_name,
-            args,
-            runtime_failure(
-                ToolFailureClass::Internal,
-                "prepared_tool_id_mismatch",
-                format!(
-                    "Tool provider prepared id `{}` for tool `{}`, expected `{}`",
-                    prepared.tool_id, prepared.tool_name, manifest.id
+        Ok(prepared) if prepared.tool_id != manifest.id => completed_preparation(
+            normalized_outcome(
+                context,
+                tool_name,
+                args,
+                runtime_failure(
+                    ToolFailureClass::Internal,
+                    "prepared_tool_id_mismatch",
+                    format!(
+                        "Tool provider prepared id `{}` for tool `{}`, expected `{}`",
+                        prepared.tool_id, prepared.tool_name, manifest.id
+                    ),
                 ),
-            ),
-            0,
-        )),
-        Err(result) => completed_preparation(outcome(tool_name, args, result, 0)),
+                0,
+            )
+            .await,
+        ),
+        Ok(prepared) => completed_preparation(
+            normalized_outcome(
+                context,
+                tool_name,
+                args,
+                runtime_failure(
+                    ToolFailureClass::Internal,
+                    "prepared_tool_name_mismatch",
+                    format!(
+                        "Tool provider prepared name `{}` for tool `{}`, expected `{}`",
+                        prepared.tool_name, prepared.tool_id, manifest.name
+                    ),
+                ),
+                0,
+            )
+            .await,
+        ),
+        Err(result) => {
+            completed_preparation(normalized_outcome(context, tool_name, args, result, 0).await)
+        }
     }
 }
 

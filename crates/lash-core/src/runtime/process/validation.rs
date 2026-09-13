@@ -668,11 +668,8 @@ pub fn prepare_process_registration(
 // additive and every pre-existing preimage encodes byte-identically.
 // Bumped to 5 (FIG-2828): effect causes now encode their admitted execution
 // scope and replay key instead of descriptive session/effect fields.
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 5;
-
-fn process_registration_family_version(_registration: &ProcessRegistration) -> u8 {
-    PROCESS_REGISTRATION_FAMILY_VERSION
-}
+// Bumped to 6 (FIG-2960): required lifecycle policy joins the resolved attempt bound.
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 6;
 
 /// Permanent tag registry for the process-registration definition fingerprint.
 ///
@@ -684,16 +681,18 @@ fn process_registration_family_version(_registration: &ProcessRegistration) -> u
 /// static, 2 from-input-schema. Value selectors: 1
 /// payload, 2 pointer, 3 const, 4 template, 5 present. Process statuses: 1
 /// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned,
-/// 7 caller departed. Retired tags remain burned.
+/// 7 caller departed. Parent scopes: 1 turn, 2 process, 3 host.
+/// Parent-end actions: 1 abandon, 2 cancel. Retired tags remain burned.
 fn process_registration_fingerprint_preimage(
     registration: &ProcessRegistration,
     observers: &[SessionId],
 ) -> Vec<u8> {
-    let family_version = process_registration_family_version(registration);
+    let family_version = PROCESS_REGISTRATION_FAMILY_VERSION;
     let ProcessRegistration {
         id: _,
         input,
         disposition,
+        lifecycle,
         max_attempts,
         identity,
         event_types,
@@ -729,9 +728,7 @@ fn process_registration_fingerprint_preimage(
                 } = replay;
                 identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
                 identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
-                if family_version == PROCESS_REGISTRATION_FAMILY_VERSION {
-                    identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-                }
+                identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
             });
             project_registration_payload_leaf(&mut fingerprint, prepared_payload);
         }
@@ -761,6 +758,29 @@ fn process_registration_fingerprint_preimage(
         super::model::RecoveryContract::ExternallyOwned => 3,
     });
     fingerprint.optional(*max_attempts, crate::stable_identity::IdentityEncoder::u32);
+    match &lifecycle.parent {
+        super::model::ParentScope::Turn {
+            session_id,
+            turn_id,
+        } => {
+            fingerprint.tag(1);
+            fingerprint.string(session_id.as_str());
+            fingerprint.string(turn_id.as_str());
+        }
+        super::model::ParentScope::Process {
+            process_id,
+            incarnation,
+        } => {
+            fingerprint.tag(2);
+            fingerprint.string(process_id.as_str());
+            fingerprint.u64(incarnation.registration_sequence());
+        }
+        super::model::ParentScope::Host => fingerprint.tag(3),
+    }
+    fingerprint.tag(match lifecycle.on_parent_end {
+        super::model::OnParentEnd::Abandon => 1,
+        super::model::OnParentEnd::Cancel => 2,
+    });
 
     let super::model::ProcessIdentity {
         kind,
@@ -1006,7 +1026,7 @@ pub fn process_registration_fingerprint(
     registration: &ProcessRegistration,
     observers: &[SessionId],
 ) -> String {
-    let family_version = process_registration_family_version(registration);
+    let family_version = PROCESS_REGISTRATION_FAMILY_VERSION;
     let preimage = process_registration_fingerprint_preimage(registration, observers);
     crate::stable_identity::rendered_hash(
         "process-registration-definition",
@@ -1063,6 +1083,27 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
 pub(super) fn validate_process_registration(
     registration: &ProcessRegistration,
 ) -> Result<(), PluginError> {
+    match &registration.lifecycle.parent {
+        super::model::ParentScope::Host
+            if registration.lifecycle.on_parent_end == super::model::OnParentEnd::Cancel =>
+        {
+            return Err(PluginError::Session(
+                "Host parent scope cannot declare Cancel: a host scope never ends".to_string(),
+            ));
+        }
+        super::model::ParentScope::Turn { session_id, .. }
+            if !matches!(
+                &registration.provenance.originator,
+                super::model::ProcessOriginator::Session { session_id: originator, .. }
+                    if originator == session_id
+            ) =>
+        {
+            return Err(PluginError::Session(
+                "turn parent session must match the process originator session".to_string(),
+            ));
+        }
+        _ => {}
+    }
     if let Some(reason) = crate::store::process_key::invalid_process_key_reason(&registration.id) {
         return Err(PluginError::Session(reason.into()));
     }
@@ -1073,7 +1114,27 @@ pub(super) fn validate_process_registration(
         )));
     }
     match registration.input.as_ref() {
-        super::model::ProcessInput::ToolCall { .. } | super::model::ProcessInput::Engine { .. } => {
+        super::model::ProcessInput::ToolCall { call } => {
+            if call.call_id.trim().is_empty() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` tool call must carry a call id",
+                    registration.id
+                )));
+            }
+            if call.tool_name.trim().is_empty() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` tool call must carry a tool name",
+                    registration.id
+                )));
+            }
+            if registration.env_ref.is_none() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` requires a captured execution env",
+                    registration.id
+                )));
+            }
+        }
+        super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
                 return Err(PluginError::Session(format!(
                     "process `{}` requires a captured execution env",

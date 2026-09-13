@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use lash_core::facade_support::{
     InMemorySessionStoreFactory, LashRuntime, LlmTransportError, NativeRuntimeEffectController,
     Provider, ProviderComponents, ProviderHandle, ProviderOptions, SessionTurnRequest,
-    SingleProviderResolver, TurnFinish, TurnOutcome, shared_parts,
+    SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, PluginSpec,
@@ -298,19 +298,7 @@ struct MinimalProtocolDriver;
 impl ProtocolDriverPlugin for MinimalProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(
-                Arc::new(MinimalProtocolDriver),
-                false,
-                Arc::new(|message_id, max_turns| lash_core::Message {
-                    id: message_id,
-                    role: lash_core::MessageRole::System,
-                    parts: shared_parts(vec![lash_core::Part::error(
-                        "turn-limit".to_string(),
-                        format!("turn limit {max_turns}"),
-                    )]),
-                    origin: None,
-                }),
-            ),
+            config: TurnDriverConfig::chat(Arc::new(MinimalProtocolDriver), false),
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names: input.tool_catalog.tool_names(),
             tool_names_fingerprint: input.tool_catalog.tool_names_fingerprint(),

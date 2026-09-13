@@ -692,7 +692,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         });
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "echo": line })),
-            lash_core::ToolIntents::v1(vec![intent]),
+            lash_core::ToolIntents::v2(vec![intent]),
         )
     }
 }
@@ -806,11 +806,13 @@ pub(super) fn recovery_worker_with_plugins(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(process_env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
@@ -868,6 +870,12 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -880,15 +888,20 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("ignored-{child}"),
-                        lash_core::ProcessOriginator::host_scoped("process-parent-law"),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            SessionId::from(call.context.session_id()),
+                        )),
                         serde_json::json!({"process_parent_child": child}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            parent_scope.clone(),
+                            lash_core::OnParentEnd::Cancel,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             ))])
         } else {
@@ -942,11 +955,13 @@ pub(super) fn process_parent_worker(
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_env_store(process_env_store)
-    .with_process_engine(Arc::new(
-        lash_lashlang_runtime::LashlangProcessEngine::in_memory(
-            lash_lashlang_runtime::LashlangSurface::default(),
+    .with_process_engine_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+                lash_lashlang_runtime::LashlangSurface::default(),
+            ),
         ),
-    ));
+    );
     let plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
             as Arc<dyn lash_core::facade_support::PluginFactory>,
@@ -1022,6 +1037,10 @@ pub(super) async fn process_parent_lashlang_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1076,6 +1095,10 @@ pub(super) async fn segmented_child_await_registration(
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
             "segmented-child-await-root",
         )),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1409,6 +1432,10 @@ pub(super) async fn process_parents_teardown_after_durable_end_across_segments_a
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_execution_env_ref(Some(env_ref));
     registry
@@ -1576,6 +1603,10 @@ pub(super) async fn snapshot_lashlang_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1634,6 +1665,10 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(creator_scope.clone()),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types([process_wake_event_type()])
     .with_execution_env_ref(Some(env_ref))

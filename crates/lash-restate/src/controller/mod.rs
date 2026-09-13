@@ -25,7 +25,7 @@ use lash_core::{
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, ScopedEffectController, TurnControlParticipation,
+    RuntimeErrorCode, ScopedEffectController, SleepSpec, TurnControlParticipation,
     facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
     facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
@@ -50,6 +50,7 @@ use crate::effect_group::{
 };
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
+use context::journaled_restate_durable_wait_request;
 
 pub use context::RestateControllerContext;
 
@@ -568,8 +569,16 @@ where
         }
         self.require_active_session(key.scope.session_id()).await?;
         let clock = lash_core::facade_support::SystemClock;
+        let request = journaled_restate_durable_wait_request(&self.context, key, deadline, &clock)
+            .await
+            .map_err(|err| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RestateEffectController,
+                    err.to_string(),
+                )
+            })?;
         self.context
-            .await_event(restate_durable_wait_request(key, deadline, &clock), cancel)
+            .await_event(request, cancel)
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -1026,19 +1035,23 @@ where
                 )
                 .await
             }
-            RestateEffectExecution::Timer {
-                invocation,
-                duration_ms,
-            } => {
-                self.emit_trace(Some(&invocation), || {
-                    lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
-                });
-                let duration = Duration::from_millis(duration_ms);
+            RestateEffectExecution::Timer { invocation, spec } => {
                 let RuntimeSleepOptions {
                     cancellation,
                     observe_turn_cancel,
                     turn_cancel_scope,
+                    clock,
                 } = local_executor.into_sleep_options();
+                let duration_ms = match spec {
+                    SleepSpec::For { duration_ms } => duration_ms,
+                    SleepSpec::Until { deadline_ms } => {
+                        deadline_ms.saturating_sub(clock.timestamp_ms())
+                    }
+                };
+                self.emit_trace(Some(&invocation), || {
+                    lash_trace::TraceEvent::DurableTimerStarted { duration_ms }
+                });
+                let duration = Duration::from_millis(duration_ms);
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
                     &self.authority_id,
                     &invocation,
@@ -1129,13 +1142,22 @@ where
                         wait_kind: "await_event".to_string(),
                     }
                 });
+                let request = journaled_restate_durable_wait_request(
+                    &self.context,
+                    &key,
+                    deadline,
+                    clock.as_ref(),
+                )
+                .await
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateEffectController,
+                        err.to_string(),
+                    )
+                })?;
                 match self
                     .context
-                    .await_event_or_turn_cancel(
-                        restate_durable_wait_request(&key, deadline, clock.as_ref()),
-                        turn_cancel,
-                        cancellation.clone(),
-                    )
+                    .await_event_or_turn_cancel(request, turn_cancel, cancellation.clone())
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
@@ -1381,7 +1403,10 @@ pub(crate) enum RestateEffectExecution {
     },
     Timer {
         invocation: RuntimeEffectInvocation,
-        duration_ms: u64,
+        /// The journaled sleep intent. The Restate SDK wait duration is derived
+        /// from it against the injected clock at execution time, so an absolute
+        /// deadline keeps its envelope identity across redrive (FIG-2968).
+        spec: SleepSpec,
     },
     AwaitEvent {
         invocation: RuntimeEffectInvocation,
@@ -1483,12 +1508,9 @@ pub(crate) fn restate_effect_execution(
                 group,
             },
         },
-        RuntimeEffectCommand::Sleep { duration_ms } => {
+        RuntimeEffectCommand::Sleep { spec } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate timer")?;
-            RestateEffectExecution::Timer {
-                invocation,
-                duration_ms,
-            }
+            RestateEffectExecution::Timer { invocation, spec }
         }
         RuntimeEffectCommand::AwaitEvent { key } => {
             refuse_unhonored_group_membership(group.as_deref(), "restate await event")?;
@@ -1519,13 +1541,7 @@ pub(crate) fn restate_effect_execution(
 }
 
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
-    // Restate consumes commands by journal ordinal before Lash can inspect the
-    // recorded envelope. Keep the pre-cutover lookup label for v2 tool intents
-    // so an in-flight v1 row reaches the shared validation seam and is refused
-    // as a typed format cutover instead of as an opaque SDK command mismatch.
-    let replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(invocation)
-        .unwrap_or_else(|| invocation.replay_key().to_string());
-    format!("lash:{replay_key}")
+    format!("lash:{}", invocation.replay_key())
 }
 
 pub(crate) fn validate_recorded_effect_envelope(

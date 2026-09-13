@@ -433,6 +433,10 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         );
         if process_id == "filtered-process" {
             registration = registration
@@ -683,6 +687,10 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "signal.ready".to_string(),
@@ -824,6 +832,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 ),
                 options,
                 crate::ProcessOpScope::new(named_turn_scope(
@@ -864,6 +876,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register observer test process");
@@ -1670,8 +1686,7 @@ async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing()
     );
 }
 
-/// Engine that admits exactly one payload shape, so a start that skips
-/// [`crate::ProcessEngine::validate_start`] is observable.
+/// Engine whose store-free admission function accepts exactly one payload shape.
 struct PayloadGatedEngine;
 
 const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
@@ -1680,20 +1695,6 @@ const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
 impl crate::ProcessEngine for PayloadGatedEngine {
     fn kind(&self) -> &'static str {
         PAYLOAD_GATED_ENGINE_KIND
-    }
-
-    async fn validate_start(
-        &self,
-        _context: crate::ProcessEngineValidationContext<'_>,
-        payload: &serde_json::Value,
-        _env_spec: Option<&crate::ProcessExecutionEnvSpec>,
-    ) -> Result<(), crate::PluginError> {
-        if payload.get("program").and_then(serde_json::Value::as_str) == Some("known") {
-            return Ok(());
-        }
-        Err(crate::PluginError::Session(format!(
-            "unknown {PAYLOAD_GATED_ENGINE_KIND} program"
-        )))
     }
 
     async fn run(
@@ -1708,12 +1709,32 @@ impl crate::ProcessEngine for PayloadGatedEngine {
             .into(),
         )
     }
+}
 
-    fn identity(&self, payload: &serde_json::Value) -> crate::ProcessIdentity {
-        crate::ProcessIdentity::new(PAYLOAD_GATED_ENGINE_KIND)
+fn admit_payload_gated_engine(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    _env_spec: Option<&crate::ProcessExecutionEnvSpec>,
+) -> Result<crate::ProcessIdentity, crate::PluginError> {
+    if payload.get("program").and_then(serde_json::Value::as_str) == Some("known") {
+        return Ok(crate::ProcessIdentity::new(PAYLOAD_GATED_ENGINE_KIND)
             .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-            .with_definition(Some(payload.clone()))
+            .with_definition(Some(payload.clone())));
     }
+    Err(crate::PluginError::Session(format!(
+        "unknown {PAYLOAD_GATED_ENGINE_KIND} program"
+    )))
+}
+
+#[test]
+fn process_engine_registration_rejects_a_kind_mismatch() {
+    assert!(matches!(
+        crate::ProcessEngineRegistration::new(
+            Arc::new(PayloadGatedEngine),
+            crate::ProcessEngineAdmission::accepting("different-kind"),
+        ),
+        Err(crate::PluginError::Registration(_))
+    ));
 }
 
 /// Shared fixture: a runtime whose only process engine is
@@ -1722,9 +1743,16 @@ async fn payload_gated_engine_runtime(
     session_id: &SessionId,
 ) -> (Arc<crate::TestLocalProcessRegistry>, LashRuntime) {
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    let core = test_host_config()
-        .core
-        .with_process_engine(Arc::new(PayloadGatedEngine));
+    let core = test_host_config().core.with_process_engine_registration(
+        crate::ProcessEngineRegistration::new(
+            Arc::new(PayloadGatedEngine),
+            crate::ProcessEngineAdmission::new(
+                PAYLOAD_GATED_ENGINE_KIND,
+                admit_payload_gated_engine,
+            ),
+        )
+        .expect("payload-gated engine and admission share a fixed kind"),
+    );
     let env = crate::RuntimeEnvironment::builder(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
@@ -1769,6 +1797,7 @@ fn payload_gated_request(
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
     .with_env_spec(crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
@@ -1872,7 +1901,8 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         )
         .await
         .expect("valid recorded-intent engine start");
-    let expected = PayloadGatedEngine.identity(&valid_payload);
+    let expected = admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
+        .expect("known payload");
     assert_eq!(started_row_identity(&registry, &direct.id).await, expected);
     assert_eq!(
         started_row_identity(&registry, &recorded.id).await,
@@ -1969,7 +1999,8 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .expect("a direct start captures the live session env for itself");
     assert_eq!(
         started_row_identity(&registry, &direct_no_env.id).await,
-        PayloadGatedEngine.identity(&valid_payload)
+        admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
+            .expect("known payload")
     );
     let recorded_no_env = service
         .start_from_recorded_intent(

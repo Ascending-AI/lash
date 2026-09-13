@@ -105,18 +105,13 @@ where
             // status. FIG-1126 keeps await-event key minting pure and performs
             // the revocation observation at the unconditional await boundary.
             //
-            // FIG-1488 adds a pre-journal engine-admission gate on the start
-            // routes that hold a live session: engine kind, payload validation,
-            // and the identity stamp all resolve before the Start command is
-            // emitted, so an admitted entry is always one whose engine this host
-            // accepted. The gate reads no mutable state, but it is not free of
-            // this class: it runs ahead of the journal, so on a redrive it runs
-            // again before the recorded Start replays, and an engine whose
-            // `validate_start` touches infrastructure can therefore fail a
-            // command that already committed. Kind resolution and the identity
-            // stamp are pure and cannot; `validate_start` is the open edge, and
-            // the host front door (`ToolIntentIngress`) deliberately runs only
-            // the pure part for that reason.
+            // FIG-1521 makes the pre-journal engine-admission gate mechanically
+            // pure: its descriptor contains only a static kind and a
+            // non-capturing function pointer over recorded payload/env inputs.
+            // World readiness belongs to ProcessEngine::run, after the Start
+            // command replays, so temporary store/catalog failure remains a
+            // retryable process-infrastructure failure rather than a durable
+            // command refusal.
             //
             // This existence guard remains an explicit retention exposure, not
             // a proof: registration precedes the effect, and terminal events

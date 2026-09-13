@@ -70,6 +70,10 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -144,7 +148,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
 // command-only `None`. Runtime Scenarios own the store-level command-before
 // turn-work gate and command-only drain invariants.
 #[tokio::test]
-pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
+pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
     let store = Arc::new(RecordingStore::default());
     let captured_store = Arc::clone(&store);
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -173,7 +177,10 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
                                 call_id: "switch-call".to_string(),
                                 tool_name: "terminal_tool_0".to_string(),
                                 input_json: serde_json::json!({}).to_string(),
-                                replay: None,
+                                replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
+                                    opaque: Some("prior-frame-opaque".to_string()),
+                                    ..Default::default()
+                                }),
                             }],
                             response_metadata: Default::default(),
                             ..LlmResponse::default()
@@ -256,8 +263,24 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
     ));
     assert!(!request_contains_text(
         &requests_after_follow[1],
+        "first queued turn"
+    ));
+    assert!(!request_contains_text(
+        &requests_after_follow[1],
         "second queued turn"
     ));
+    assert!(
+        !serde_json::to_string(&requests_after_follow[1])
+            .expect("request JSON")
+            .contains("prior-frame-opaque"),
+        "opaque replay from the prior frame must not enter the follow-on request"
+    );
+    let follow_frame = runtime
+        .state
+        .current_frame_node_id
+        .as_deref()
+        .expect("follow-on frame is active");
+    assert_eq!(requests_after_follow[1].scope.agent_frame_id, follow_frame);
 
     let second_result = runtime
         .stream_next_queued_work(TurnOptions::new(
@@ -291,7 +314,8 @@ pub(super) async fn queued_frame_switch_finishes_follow_on_before_next_queued_tu
 }
 
 #[tokio::test]
-pub(super) async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_it() {
+pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_it()
+ {
     let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
     let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2057,6 +2081,10 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),

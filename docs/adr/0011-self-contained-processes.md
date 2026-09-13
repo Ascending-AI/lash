@@ -17,6 +17,12 @@ process chain propagate the root session's observer edge, so the root session
 observes the whole chain. Observer edges remain explicit and orthogonal
 otherwise: a host-originated start still implies no observer.
 
+Amended 2026-09-12 (FIG-2959): provenance remains cleanup-free except for the
+explicit Lifecycle Relation defined by
+[ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md).
+Every process records a Lifecycle Policy and Parent Scope at registration;
+originator, observer, wake, and session relations still imply no cleanup.
+
 ## Considered Options
 
 - **Live session binding (status quo)**: the worker rebuilt the owner session's runtime

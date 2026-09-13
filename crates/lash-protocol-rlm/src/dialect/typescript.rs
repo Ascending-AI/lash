@@ -30,6 +30,7 @@ impl TypescriptDialect {
                 ),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -273,21 +274,22 @@ impl TypescriptDialect {
 pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities) -> String {
     let mut lines = Vec::new();
     if abilities.processes {
-        lines.push(r#"interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown> { readonly name: string }
-defineProcess(c: {name: string; run: Function; signals?: Record<string, null>}): Process;
-start(p: Process, args?: Record<string, unknown>): Promise<unknown> & {id: string};
-wake(value: unknown): void;
-Use top-level const, literal name, async run; start keys match run parameter names. Return succeeds after finally; throw fails."#);
+        lines.push(r#"interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown>{readonly name:string}
+defineProcess(c:{name:string;run:Function; signals?: Record<string, null>}):Process;
+start(p:Process,args?:Record<string,unknown>):Promise<unknown>&{id: string};
+wake(value:unknown):void;
+Literal name, top-level const, async run; start keys match parameter names. Return after finally succeeds; throw fails.
+A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#);
         if abilities.process_signals {
             lines.push(
-                r#"waitSignal(name: string): Promise<unknown>;
-wake(handle: {id: string}, signal: string, payload: unknown): void;
-Signals: {go: null}; waitSignal is run-only."#,
+                r#"waitSignal(name:string):Promise<unknown>;
+wake(handle:{id:string},signal:string,payload:unknown):void;
+Signals: {go:null}; waitSignal is run-only."#,
             );
         }
         if abilities.triggers {
             lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
-Literal target; inputs match run parameters."#);
+Literal target; inputs match params."#);
         }
     }
     if abilities.sleep {
@@ -459,12 +461,6 @@ impl RlmDialect for TypescriptDialect {
         }
     }
 
-    fn turn_limit_final_copy(&self, max_turns: usize) -> String {
-        format!(
-            "Turn limit reached ({max_turns}). Reply in plain prose with accomplishments, remaining work, and next steps; do not emit a TypeScript block."
-        )
-    }
-
     fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
             "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
@@ -537,6 +533,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -595,6 +592,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -656,6 +654,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -706,6 +705,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -745,6 +745,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -806,6 +807,7 @@ mod tests {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
+                deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -942,6 +944,7 @@ mod tests {
                         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                         deferred_tool_resolver: None,
+                        deferred_trigger_resolver: None,
                         execution_trace_config:
                             crate::executor::RlmLashlangExecutionTraceConfig::default(),
                         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),

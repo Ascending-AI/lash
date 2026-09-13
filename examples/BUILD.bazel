@@ -1,0 +1,5 @@
+filegroup(
+    name = "shared_rust_sources",
+    srcs = glob(["shared/**/*.rs"]),
+    visibility = ["//visibility:public"],
+)

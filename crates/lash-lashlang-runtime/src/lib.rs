@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -379,13 +380,56 @@ impl LashlangSurface {
         &self,
         catalog: &lash_core::ToolCatalog,
     ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        self.host_environment_masking(catalog, &BTreeSet::new())
+    }
+
+    /// Builds the link-time environment while excluding exact ambient call
+    /// paths already decided by the deferred-resolution journal.
+    ///
+    /// Filtering happens before the flat Tool Catalog and contributed surface
+    /// resources are merged and validated. Thus a recorded authority can mask
+    /// every later ambient claimant for its path, while unrelated collisions
+    /// and malformed definitions retain their normal failures.
+    pub fn host_environment_masking(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        masked_call_paths: &BTreeSet<String>,
+    ) -> Result<LashlangHostEnvironment, ToolBindingError> {
+        let mut resources = self.resources.clone();
+        for path in masked_call_paths {
+            if let Some((module_path, operation)) = path.rsplit_once('.') {
+                resources.mask_module_operation(module_path, operation);
+            }
+        }
         lashlang_host_environment_from_tool_catalog(
-            catalog,
+            &filtered_tool_catalog(catalog, masked_call_paths),
             self.abilities,
             self.language_features,
-            self.resources.clone(),
+            resources,
         )
     }
+}
+
+fn filtered_tool_catalog(
+    catalog: &lash_core::ToolCatalog,
+    masked_call_paths: &BTreeSet<String>,
+) -> lash_core::ToolCatalog {
+    if masked_call_paths.is_empty() {
+        return catalog.clone();
+    }
+    let mut filtered = catalog.clone();
+    filtered.tools.retain(|entry| {
+        let Ok(binding) = required_tool_lashlang_executable(&entry.manifest) else {
+            // Preserve ordinary validation for malformed unrelated entries.
+            return true;
+        };
+        !masked_call_paths.contains(&format!(
+            "{}.{}",
+            binding.module_path.join("."),
+            binding.operation
+        ))
+    });
+    filtered
 }
 
 pub fn lashlang_host_environment_from_tool_catalog(
@@ -623,6 +667,118 @@ pub struct LashlangProcessInput {
     pub args: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Whether a caller can and must check the live host environment.
+pub enum LashlangHostEnvironmentCheck<'a> {
+    /// Prepare validates immutable artifact claims and deliberately omits live-host checks.
+    OmitHostEnvironment,
+    /// Run validates against the environment it resolved for this attempt.
+    CheckHostEnvironment(Result<&'a LashlangHostEnvironment, String>),
+}
+
+/// Typed refusal shared by prepare and the authoritative run-time recheck.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LashlangProcessAdmissionRefusal {
+    HostRequirementsMismatch {
+        process: String,
+        requested: String,
+        actual: String,
+    },
+    ProcessRefMismatch {
+        module_ref: String,
+        process: String,
+        process_ref: String,
+    },
+    HostEnvironmentInvalid {
+        message: String,
+    },
+    HostEnvironmentIncompatible {
+        process: String,
+        message: String,
+    },
+}
+
+impl LashlangProcessAdmissionRefusal {
+    pub const fn failure_code(&self) -> LashlangProcessFailureCode {
+        match self {
+            Self::HostRequirementsMismatch { .. } => {
+                LashlangProcessFailureCode::ProcessHostRequirementsMismatch
+            }
+            Self::ProcessRefMismatch { .. } => LashlangProcessFailureCode::ProcessRefMismatch,
+            Self::HostEnvironmentInvalid { .. } => {
+                LashlangProcessFailureCode::ProcessHostEnvironmentInvalid
+            }
+            Self::HostEnvironmentIncompatible { .. } => {
+                LashlangProcessFailureCode::ProcessHostEnvironmentIncompatible
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for LashlangProcessAdmissionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HostRequirementsMismatch {
+                process,
+                requested,
+                actual,
+            } => write!(
+                formatter,
+                "lashlang process `{process}` requested surface {requested}, artifact has {actual}"
+            ),
+            Self::ProcessRefMismatch {
+                module_ref,
+                process,
+                process_ref,
+            } => write!(
+                formatter,
+                "lashlang module `{module_ref}` does not export process `{process}` as requested ref {process_ref}"
+            ),
+            Self::HostEnvironmentInvalid { message } => formatter.write_str(message),
+            Self::HostEnvironmentIncompatible { process, message } => write!(
+                formatter,
+                "lashlang process `{process}` is incompatible with this host surface: {message}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LashlangProcessAdmissionRefusal {}
+
+pub fn validate_lashlang_process_admission(
+    artifact: &lashlang::ModuleArtifact,
+    input: &LashlangProcessInput,
+    host: LashlangHostEnvironmentCheck<'_>,
+) -> Result<(), LashlangProcessAdmissionRefusal> {
+    if artifact.host_requirements_ref != input.host_requirements_ref {
+        return Err(LashlangProcessAdmissionRefusal::HostRequirementsMismatch {
+            process: input.process_name.clone(),
+            requested: input.host_requirements_ref.to_string(),
+            actual: artifact.host_requirements_ref.to_string(),
+        });
+    }
+    if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
+        return Err(LashlangProcessAdmissionRefusal::ProcessRefMismatch {
+            module_ref: input.module_ref.to_string(),
+            process: input.process_name.clone(),
+            process_ref: format!("{:?}", input.process_ref),
+        });
+    }
+    if let LashlangHostEnvironmentCheck::CheckHostEnvironment(host) = host {
+        let host =
+            host.map_err(
+                |message| LashlangProcessAdmissionRefusal::HostEnvironmentInvalid { message },
+            )?;
+        lashlang_host_environment_satisfies_requirements(&artifact.host_requirements, host)
+            .map_err(
+                |error| LashlangProcessAdmissionRefusal::HostEnvironmentIncompatible {
+                    process: input.process_name.clone(),
+                    message: error.to_string(),
+                },
+            )?;
+    }
+    Ok(())
+}
+
 impl LashlangProcessInput {
     pub fn process_identity(&self) -> lash_core::ProcessIdentity {
         lashlang_process_identity(self)
@@ -695,7 +851,7 @@ impl TryFrom<LashlangProcessInput> for lash_remote_protocol::RemoteProcessInput 
 
 #[derive(Clone, Debug)]
 pub struct PreparedLashlangProcessStart {
-    pub registration: lash_core::ProcessRegistration,
+    pub request: lash_core::ProcessStartRequest,
     pub label: Option<String>,
 }
 
@@ -703,6 +859,9 @@ pub async fn prepare_lashlang_process_start(
     artifact_store: Arc<dyn LashlangArtifactStore>,
     parent_start_seed: &str,
     start: lashlang::ProcessStart,
+    originator: lash_core::ProcessOriginator,
+    lifecycle: lash_core::ProcessLifecyclePolicy,
+    disposition: lash_core::RecoveryContract,
 ) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
     let artifact = artifact_store
@@ -719,20 +878,18 @@ pub async fn prepare_lashlang_process_start(
             module_ref: start.module_ref.to_string(),
             message: source.to_string(),
         })?;
-    if artifact.host_requirements_ref != start.host_requirements_ref {
-        return Err(LashlangRuntimeError::ArtifactRequirementsMismatch {
-            module_ref: start.module_ref.to_string(),
-            requested: start.host_requirements_ref.to_string(),
-            actual: artifact.host_requirements_ref.to_string(),
-        });
-    }
-    if artifact.process_ref(&start.process_name) != Some(&start.process_ref) {
-        return Err(LashlangRuntimeError::ArtifactProcessMismatch {
-            module_ref: start.module_ref.to_string(),
-            process: start.process_name.clone(),
-            process_ref: format!("{:?}", start.process_ref),
-        });
-    }
+    let admission_input = LashlangProcessInput {
+        module_ref: start.module_ref.clone(),
+        process_ref: start.process_ref.clone(),
+        host_requirements_ref: start.host_requirements_ref.clone(),
+        process_name: start.process_name.clone(),
+        args: serde_json::Map::new(),
+    };
+    validate_lashlang_process_admission(
+        &artifact,
+        &admission_input,
+        LashlangHostEnvironmentCheck::OmitHostEnvironment,
+    )?;
     let process = artifact
         .canonical_ir
         .process(&start.process_name)
@@ -796,13 +953,12 @@ pub async fn prepare_lashlang_process_start(
     let process_input = process_input
         .into_process_input()
         .map_err(|source| LashlangRuntimeError::EncodeProcessInput { source })?;
-    let registration = lash_core::ProcessRegistration::new(
+    let request = lash_core::ProcessStartRequest::new(
         process_id,
         process_input,
-        // Lashlang engine rows are journaled and idempotent by process id, so
-        // recovery may re-execute them (ADR 0019).
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessProvenance::host(),
+        disposition,
+        originator,
+        lifecycle,
     )
     .with_identity(identity)
     .with_extra_event_types(
@@ -811,7 +967,7 @@ pub async fn prepare_lashlang_process_start(
             .chain(signal_event_types),
     );
     Ok(PreparedLashlangProcessStart {
-        registration,
+        request,
         label: display_name,
     })
 }
@@ -1050,58 +1206,6 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         LASHLANG_ENGINE_KIND
     }
 
-    async fn validate_start(
-        &self,
-        context: lash_core::ProcessEngineValidationContext<'_>,
-        payload: &serde_json::Value,
-        _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
-    ) -> Result<(), lash_core::PluginError> {
-        let input: LashlangProcessInput =
-            serde_json::from_value(payload.clone()).map_err(|err| {
-                lash_core::PluginError::Session(format!("invalid lashlang process payload: {err}"))
-            })?;
-        let artifact = self
-            .artifact_store
-            .get_module_artifact(&input.module_ref)
-            .await
-            .map_err(|err| lash_core::PluginError::Session(format!("load module artifact: {err}")))?
-            .ok_or_else(|| {
-                lash_core::PluginError::Session(format!(
-                    "missing lashlang module artifact `{}`",
-                    input.module_ref
-                ))
-            })?;
-        if artifact.host_requirements_ref != input.host_requirements_ref {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang process `{}` requested surface {}, artifact has {}",
-                input.process_name, input.host_requirements_ref, artifact.host_requirements_ref
-            )));
-        }
-        if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang module `{}` does not export process `{}` as requested ref {:?}",
-                input.module_ref, input.process_name, input.process_ref
-            )));
-        }
-        let surface = self
-            .surface
-            .clone()
-            .for_process_registry(context.process_registry_available());
-        let host_environment = surface
-            .host_environment(context.tool_catalog())
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))?;
-        if let Err(err) = lashlang_host_environment_satisfies_requirements(
-            &artifact.host_requirements,
-            &host_environment,
-        ) {
-            return Err(lash_core::PluginError::Session(format!(
-                "lashlang process `{}` is incompatible with this host surface: {err}",
-                input.process_name
-            )));
-        }
-        Ok(())
-    }
-
     async fn run(
         &self,
         context: lash_core::ProcessEngineRunContext<'_>,
@@ -1114,13 +1218,27 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         ))
         .await
     }
+}
 
-    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
-        match LashlangProcessInput::from_payload(payload.clone()) {
-            Ok(input) => lashlang_process_identity(&input),
-            Err(_) => lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND),
-        }
-    }
+pub fn admit_lashlang_process(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
+) -> Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    let input = LashlangProcessInput::from_payload(payload.clone()).map_err(|err| {
+        lash_core::PluginError::Session(format!("invalid lashlang process payload: {err}"))
+    })?;
+    Ok(lashlang_process_identity(&input))
+}
+
+pub fn lashlang_process_engine_registration(
+    engine: LashlangProcessEngine,
+) -> lash_core::ProcessEngineRegistration {
+    lash_core::ProcessEngineRegistration::new(
+        Arc::new(engine),
+        lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
+    )
+    .expect("lashlang engine and admission share a fixed kind")
 }
 
 mod bridge;
@@ -1128,12 +1246,13 @@ mod bridge;
 mod catalog_tests;
 mod catalogue_preview;
 mod deferred;
+mod deferred_triggers;
 mod process;
 mod typed_output;
 
 pub use bridge::{
-    lashlang_value_to_json, process_event_payload, protocol_tool_output_to_lashlang_value,
-    protocol_tool_reply_to_lashlang_value, sleep_duration_ms,
+    lashlang_value_to_json, process_event_payload, process_sleep,
+    protocol_tool_output_to_lashlang_value, protocol_tool_reply_to_lashlang_value,
 };
 pub use catalogue_preview::{
     CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
@@ -1145,9 +1264,16 @@ pub use catalogue_preview::{
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
 pub use deferred::{
-    DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver, Resolution,
+    DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
+    DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
     SharedDeferredToolResolver, ToolGrant, link_with_deferred_resolution,
+    resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
+};
+pub use deferred_triggers::{
+    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
+    DeferredTriggerResolutionRecord, DeferredTriggerResolver, SharedDeferredTriggerResolver,
+    TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
 };
 pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,

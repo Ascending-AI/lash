@@ -409,7 +409,7 @@ impl LiveConformanceHarness {
                     "await_resolution",
                     &RestateDurableWaitAwaitRequest {
                         key: retired_key,
-                        timeout_ms: None,
+                        deadline: None,
                     },
                 )
                 .await
@@ -587,6 +587,10 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(lash_core::ProcessIdentity::new("test"))
     };

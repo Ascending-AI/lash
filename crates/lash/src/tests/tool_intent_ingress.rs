@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessQuery as _};
+use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessToolIntents as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -36,6 +36,10 @@ async fn ingress_core_with_effect_host_and_env_store(
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types(vec![lash_core::ProcessEventType {
                 name: EVENT.to_string(),
@@ -102,6 +106,7 @@ async fn ingress_core_with_trigger_store(
     LashCore,
     Arc<lash_core::facade_support::InMemoryTriggerStore>,
     lash_core::TriggerSubscriptionRecord,
+    Arc<TestLocalProcessRegistry>,
 )> {
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let subscription = register_ingress_trigger_subscription(&store).await?;
@@ -116,11 +121,11 @@ async fn ingress_core_with_trigger_store(
         .process_env_store(Arc::new(
             lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
         .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
-    Ok((core, store, subscription))
+    Ok((core, store, subscription, registry))
 }
 
 fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
@@ -141,7 +146,7 @@ fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     use lash_core::TriggerStore as _;
 
-    let (core, store, subscription) =
+    let (core, store, subscription, _) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-trigger-call", 0);
@@ -166,6 +171,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
         .await?;
     assert_eq!(occurrences.len(), 1);
+    assert_eq!(occurrences[0].idempotency_key, key.identity().replay_key);
     assert_eq!(
         result["occurrence_id"].as_str(),
         Some(occurrences[0].occurrence_id.as_str())
@@ -223,6 +229,140 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
+-> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _subscription, _) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let first_key = ingress.key("host-trigger-call-a", 0);
+    let second_key = ingress.key("host-trigger-call-b", 0);
+
+    let mut first_outcomes = Vec::new();
+    for key in [&first_key, &second_key] {
+        let outcome = ingress
+            .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert!(matches!(
+            outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted { .. }
+        ));
+        first_outcomes.push(outcome);
+    }
+    let occurrences = store
+        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .await?;
+    assert_eq!(occurrences.len(), 2);
+    assert_eq!(
+        occurrences
+            .iter()
+            .map(|occurrence| occurrence.idempotency_key.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            first_key.identity().replay_key.clone(),
+            second_key.identity().replay_key.clone(),
+        ]
+        .into_iter()
+        .collect()
+    );
+
+    for (key, first) in [first_key, second_key].into_iter().zip(first_outcomes) {
+        let redriven = ingress
+            .submit(key, trigger_intent(&SessionId::from(SESSION)))
+            .await;
+        assert_eq!(redriven, first, "redrive returns the byte-stable outcome");
+    }
+    assert_eq!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .len(),
+        2,
+        "redriving both identities must not add occurrences"
+    );
+    assert_eq!(store.list_deliveries().await?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _, _) =
+        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let mut predecessor = serde_json::to_value(ingress.key("predecessor-trigger-call", 0))?;
+    predecessor
+        .as_object_mut()
+        .expect("versioned ingress key")
+        .remove("protocol_version");
+    let predecessor = serde_json::from_value(predecessor)?;
+
+    assert!(matches!(
+        ingress
+            .submit(predecessor, trigger_intent(&SessionId::from(SESSION)))
+            .await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                recorded: 1
+            }
+        }
+    ));
+    assert!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .is_empty()
+    );
+    assert!(store.list_deliveries().await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn predecessor_runtime_owned_trigger_submission_is_refused_before_store_ingress() -> Result<()>
+{
+    use lash_core::TriggerStore as _;
+
+    let (core, store, _, registry) =
+        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
+            .await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let key = ingress.key("predecessor-runtime-trigger-call", 0);
+    let intent = trigger_intent(&SessionId::from(SESSION));
+    let mut predecessor = serde_json::to_value(lash_core::ToolIntentSubmissionRecord::new(
+        key.identity().clone(),
+        intent.clone(),
+    )?)?;
+    predecessor
+        .as_object_mut()
+        .expect("versioned submission row")
+        .remove("protocol_version");
+    let predecessor = serde_json::from_value(predecessor)?;
+    assert!(matches!(
+        registry.admit_tool_intent_submission(predecessor).await?,
+        lash_core::ToolIntentSubmissionAdmission::Admitted
+    ));
+
+    assert!(matches!(
+        ingress.submit(key, intent).await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                recorded: 1
+            }
+        }
+    ));
+    assert!(
+        store
+            .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+            .await?
+            .is_empty()
+    );
+    assert!(store.list_deliveries().await?.is_empty());
+    Ok(())
+}
+
 /// A runtime-owned host has no journal to replay the emission from, so the
 /// submission row is the whole record: the first submit realizes the emission
 /// and completes its row, and the second is refused against that row rather
@@ -231,7 +371,7 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
 async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<()> {
     use lash_core::TriggerStore as _;
 
-    let (core, store, _subscription) =
+    let (core, store, _subscription, _) =
         ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -570,8 +710,11 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
             "ingress-start",
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ),
-        on_parent_end: Default::default(),
     }))
 }
 
@@ -592,6 +735,10 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -600,7 +747,6 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
                 ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
             },
         )),
-        on_parent_end: Default::default(),
     }))
 }
 
@@ -1111,15 +1257,14 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     let (core, registry) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
-    let malformed =
-        crate::tools::ToolIntentIngressKey::from_identity(lash_core::ToolIntentIdentity {
-            session_id: SessionId::from(SESSION.to_string()),
-            execution_scope_id: SCOPE.to_string(),
-            tool_call_id: "host-call".to_string(),
-            intent_index: 0,
-            replay_key: "forged".to_string(),
-            minting_emission_replay_key: None,
-        });
+    let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
+        SESSION,
+        SCOPE,
+        "host-call",
+        0,
+    ))?;
+    malformed["replay_key"] = serde_json::json!("forged");
+    let malformed = serde_json::from_value(malformed)?;
 
     assert!(matches!(
         ingress
@@ -1155,13 +1300,25 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
         let mut stripped = key_value.clone();
         stripped
             .as_object_mut()
-            .expect("transparent identity object")
+            .expect("versioned identity object")
             .remove(field);
         assert!(
             serde_json::from_value::<crate::tools::ToolIntentIngressKey>(stripped).is_err(),
             "ingress key field `{field}` must not acquire a serde default"
         );
     }
+
+    let mut predecessor = key_value;
+    predecessor
+        .as_object_mut()
+        .expect("versioned identity object")
+        .remove("protocol_version");
+    let predecessor: crate::tools::ToolIntentIngressKey =
+        serde_json::from_value(predecessor).expect("decode predecessor ingress key shape");
+    assert_eq!(
+        serde_json::to_value(predecessor).expect("re-encode predecessor ingress key")["protocol_version"],
+        serde_json::json!(1)
+    );
 
     let admitted = crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome: lash_core::ToolIntentExecutionOutcome::ProtocolRefused {
@@ -1473,16 +1630,53 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     Ok(())
 }
 
+#[test]
+fn ingress_start_without_lifecycle_is_refused_before_submission() {
+    let mut payload =
+        serde_json::to_value(start_intent(&SessionId::from(SESSION))).expect("encode intent");
+    fn remove_lifecycle(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                if object.remove("lifecycle").is_some() {
+                    return true;
+                }
+                object.values_mut().any(remove_lifecycle)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        remove_lifecycle(&mut payload),
+        "valid start had a required policy"
+    );
+    let error = serde_json::from_value::<lash_core::ToolIntent>(payload)
+        .expect_err("missing lifecycle must not decode");
+    assert!(error.to_string().contains("lifecycle"));
+}
+
 #[tokio::test]
-async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
+async fn ingress_start_process_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
     let (core, registry) = ingress_core().await?;
+    let parent = registry
+        .get_process(&ProcessId::from(PROCESS))
+        .await?
+        .expect("registered parent process");
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
     let key = ingress.key("parent-end-retention", 0);
     let child_id = key.identity().replay_key.clone();
+    let mut intent = start_intent(&SessionId::from(SESSION));
+    let lash_core::ToolIntent::StartProcess(start) = &mut intent else {
+        unreachable!("start_intent always returns StartProcess")
+    };
+    start.request.lifecycle = lash_core::ProcessLifecyclePolicy::new(
+        lash_core::ParentScope::Process {
+            process_id: parent.id,
+            incarnation: parent.incarnation,
+        },
+        lash_core::OnParentEnd::Cancel,
+    );
 
-    let started = ingress
-        .submit(key, start_intent(&SessionId::from(SESSION)))
-        .await;
+    let started = ingress.submit(key, intent).await;
     assert!(matches!(
         started,
         crate::tools::ToolIntentIngressOutcome::Admitted {
@@ -1511,7 +1705,7 @@ async fn ingress_start_default_cancel_is_retained_and_settled_after_scope_rebind
             .await?
             .iter()
             .any(|event| event.event_type == "process.cancel_requested"),
-        "default Cancel reaches child"
+        "Process/Cancel reaches the child after rebuilding the ingress scope"
     );
     assert!(
         redriven_scope.settle_parent_end().await?.is_empty(),
@@ -1544,12 +1738,25 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
             .into(),
         )
     }
+}
 
-    fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {
-        lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
-            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-            .with_definition(Some(payload.clone()))
-    }
+fn admit_ingress_engine(
+    _kind: &'static str,
+    payload: &serde_json::Value,
+    env: Option<&lash_core::ProcessExecutionEnvSpec>,
+) -> std::result::Result<lash_core::ProcessIdentity, lash_core::PluginError> {
+    let env = env.ok_or_else(|| {
+        lash_core::PluginError::Session(
+            "ingress admission requires the recorded execution environment".to_string(),
+        )
+    })?;
+    Ok(lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
+        .with_label(payload.get("program").and_then(serde_json::Value::as_str))
+        .with_definition(Some(serde_json::json!({
+            "payload": payload,
+            "model": env.policy.model.id,
+            "provider": env.policy.provider_id,
+        }))))
 }
 
 struct IngressAdmissionEnginePlugin;
@@ -1577,8 +1784,12 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     fn process_engine_contributions(
         &self,
         _ctx: &lash_core::ProcessEngineContributionContext<'_>,
-    ) -> std::result::Result<Vec<Arc<dyn lash_core::ProcessEngine>>, lash_core::PluginError> {
-        Ok(vec![Arc::new(IngressAdmissionEngine)])
+    ) -> std::result::Result<Vec<lash_core::ProcessEngineRegistration>, lash_core::PluginError>
+    {
+        Ok(vec![lash_core::ProcessEngineRegistration::new(
+            Arc::new(IngressAdmissionEngine),
+            lash_core::ProcessEngineAdmission::new(INGRESS_ENGINE_KIND, admit_ingress_engine),
+        )?])
     }
 
     fn build(
@@ -1616,6 +1827,10 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -1624,8 +1839,17 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                 ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
             },
         )),
-        on_parent_end: Default::default(),
     }))
+}
+
+fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
+    lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy {
+            model: mock_model_spec(),
+            ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
+        },
+    )
 }
 
 /// FIG-1488: the host front door is a start route too. A submitted intent naming
@@ -1696,8 +1920,95 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         .expect("admitted start registers its row");
     assert_eq!(
         started.identity,
-        lash_core::ProcessEngine::identity(&IngressAdmissionEngine, &payload),
+        admit_ingress_engine(
+            INGRESS_ENGINE_KIND,
+            &payload,
+            Some(&ingress_engine_env_spec())
+        )
+        .expect("known payload and recorded environment"),
         "the admitted row must carry the engine identity stamp"
+    );
+    Ok(())
+}
+
+/// FIG-1838: host ingress and session-owned recorded-intent execution must feed
+/// the same immutable request environment into engine admission. Otherwise an
+/// environment-derived identity changes solely with the route used to start it.
+#[tokio::test]
+async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
+-> Result<()> {
+    let (core, registry) = ingress_engine_core().await?;
+    let payload = serde_json::json!({"program": "environment-sensitive"});
+
+    let ingress = core.tool_intents(
+        SESSION,
+        lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
+    )?;
+    let ingress_key = ingress.key("environment-sensitive-host", 0);
+    let ingress_process_id = ProcessId::from(ingress_key.identity().replay_key.clone());
+    let host_outcome = ingress
+        .submit(
+            ingress_key,
+            engine_start_intent(INGRESS_ENGINE_KIND, payload.clone()),
+        )
+        .await;
+    assert!(
+        matches!(
+            host_outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed { .. },
+                ..
+            }
+        ),
+        "host ingress must admit the environment-sensitive engine"
+    );
+    let ingress_identity = registry
+        .get_process(&ingress_process_id)
+        .await?
+        .expect("host ingress registers a process")
+        .identity;
+
+    let session = core.session(SESSION).open().await?;
+    let effect_host = session.effect_host();
+    let scoped = effect_host.scoped(lash_core::ExecutionScope::turn(
+        SESSION,
+        "session-recorded-intent-route",
+    ))?;
+    let processes = {
+        let writer = session.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.process_service()?
+    };
+    let intents =
+        lash_core::ToolIntents::v2(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
+    let outcomes = lash_core::testing::execute_tool_intents_with_services(
+        scoped,
+        processes,
+        &SessionId::from(SESSION),
+        "environment-sensitive-session",
+        &intents,
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    let [lash_core::ToolIntentExecutionOutcome::Executed { identity, .. }] = outcomes.as_slice()
+    else {
+        panic!("session recorded-intent route must execute: {outcomes:?}")
+    };
+    let session_identity = registry
+        .get_process(&ProcessId::from(identity.replay_key.clone()))
+        .await?
+        .expect("session route registers a process")
+        .identity;
+
+    assert_eq!(ingress_identity, session_identity);
+    assert_eq!(
+        ingress_identity.definition,
+        Some(serde_json::json!({
+            "payload": {"program": "environment-sensitive"},
+            "model": mock_model_spec().id,
+            "provider": "",
+        })),
+        "the shared identity must prove the recorded environment reached admission"
     );
     Ok(())
 }

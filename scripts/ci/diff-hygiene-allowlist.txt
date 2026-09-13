@@ -1,3 +1,5 @@
 # One Git pathspec glob per line exempts matching added files from checks A and B.
 # Remove entries when they stop matching tracked files; an immediately preceding
 # "# keep: reason" comment preserves an entry intentionally reserved for future use.
+# Bazel's generated module lock records the complete pinned dependency graph.
+MODULE.bazel.lock

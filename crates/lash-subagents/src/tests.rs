@@ -1163,7 +1163,9 @@ async fn run_seed_probe_inner(
         );
         config = config
             .with_process_env_store(process_env_store.clone())
-            .with_process_engine(process_engine.clone());
+            .with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
+                process_engine.clone(),
+            ));
         config
     });
     let policy = SessionPolicy {
@@ -1194,7 +1196,9 @@ async fn run_seed_probe_inner(
                 );
                 config = config
                     .with_process_env_store(process_env_store)
-                    .with_process_engine(process_engine);
+                    .with_process_engine_registration(
+                        lash_core::ProcessEngineRegistration::accepting(process_engine),
+                    );
                 config
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
@@ -1313,6 +1317,14 @@ impl SeedProbe {
             "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
         );
         let process = matching[0];
+        assert_eq!(
+            process.lifecycle.on_parent_end,
+            lash_core::OnParentEnd::Abandon
+        );
+        assert!(
+            matches!(&process.lifecycle.parent, lash_core::ParentScope::Turn { session_id, .. } if session_id.as_str() == "root"),
+            "spawn_agent retains its originating turn scope"
+        );
         let observers = lash_core::ProcessObserverRegistry::observers_for_process(
             self.process_registry.as_ref(),
             &process.id,

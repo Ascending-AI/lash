@@ -153,6 +153,12 @@ fn project_iteration_request_with_generation(
     })
 }
 
+#[test]
+fn fig1123_cell_projector_uses_committed_agent_frame_id() {
+    let request = project_iteration_request(&projector(1024), &[], 0, "model");
+    assert_eq!(request.scope.agent_frame_id, "prefix-stability-frame");
+}
+
 pub(super) fn projection_test_config(
     model: &str,
     generation: lash_core::GenerationOptions,
@@ -173,14 +179,11 @@ pub(super) fn projection_test_config(
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from("stable RLM system prompt"),
         session_id: SessionId::from("prefix-stability"),
+        agent_frame_id: "prefix-stability-frame".to_string(),
         turn_id: TurnId::from("prefix-stability-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
             .expect("RLM options"),
-        turn_limit_final_message: Arc::new(|message_id, max_turns| {
-            let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
-            crate::protocol::turn_limit_final_message(&dialect, message_id, max_turns)
-        }),
     }
 }
 

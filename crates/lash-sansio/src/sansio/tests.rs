@@ -38,22 +38,10 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
         session_id: SessionId::from("test".to_string()),
+        agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
         termination: (),
-        turn_limit_final_message: Arc::new(test_turn_limit_final_message),
-    }
-}
-
-fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: crate::shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 
@@ -175,7 +163,7 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
 }
 
 #[test]
-fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
+fn turn_checkpoint_stamps_v3() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -184,19 +172,11 @@ fn turn_checkpoint_stamps_v2_and_identifies_the_legacy_unstamped_shape_as_v1() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 2);
-
-    let mut legacy = serde_json::to_value(checkpoint).expect("checkpoint json");
-    legacy
-        .as_object_mut()
-        .expect("checkpoint object")
-        .remove("schema_version");
-    let legacy: TurnCheckpoint = serde_json::from_value(legacy).expect("legacy checkpoint");
-    assert_eq!(legacy.schema_version(), 1);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 3);
 }
 
 #[test]
-fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
+fn turn_checkpoint_restore_refuses_every_non_current_version() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -205,11 +185,11 @@ fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
 
-    for actual in [99, u32::MAX] {
-        let mut newer = encoded.clone();
-        newer["schema_version"] = serde_json::json!(actual);
+    for actual in [1, 2, 99, u32::MAX] {
+        let mut incompatible = encoded.clone();
+        incompatible["schema_version"] = serde_json::json!(actual);
         let checkpoint: TurnCheckpoint =
-            serde_json::from_value(newer).expect("well-formed newer checkpoint");
+            serde_json::from_value(incompatible).expect("well-formed incompatible checkpoint");
         let Err(error) =
             TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
         else {
@@ -217,33 +197,54 @@ fn turn_checkpoint_restore_refuses_newer_versions_and_accepts_older_history() {
         };
         assert_eq!(
             error,
-            TurnCheckpointRestoreError::UnsupportedSchemaVersion {
+            TurnCheckpointRestoreError::IncompatibleSchemaVersion {
                 actual,
-                supported: TURN_CHECKPOINT_SCHEMA_VERSION,
+                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
             }
         );
     }
+}
 
-    for explicit_version in [Some(1), None] {
-        let mut older = encoded.clone();
-        match explicit_version {
-            Some(version) => older["schema_version"] = serde_json::json!(version),
-            None => {
-                older
-                    .as_object_mut()
-                    .expect("checkpoint object")
-                    .remove("schema_version");
-            }
+#[test]
+fn v2_checkpoint_with_terminal_turn_state_is_a_typed_incompatible_version() {
+    let bytes = include_bytes!("fixtures/turn_checkpoint_v2_with_terminal_turn_state.json");
+    let fixture: serde_json::Value = serde_json::from_slice(bytes).expect("fixture is JSON");
+    assert_eq!(fixture["schema_version"], 2);
+    assert_eq!(
+        fixture["termination"]["turn_limit_final_scheduled"], false,
+        "negative fixture must carry the deleted field"
+    );
+
+    let error = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(bytes)
+        .expect_err("v2 checkpoint must be refused");
+    assert_eq!(
+        error,
+        TurnCheckpointRestoreError::IncompatibleSchemaVersion {
+            actual: 2,
+            expected: TURN_CHECKPOINT_SCHEMA_VERSION,
         }
-        let checkpoint: TurnCheckpoint =
-            serde_json::from_value(older).expect("well-formed older checkpoint");
-        assert_eq!(checkpoint.schema_version(), 1);
-        assert!(
-            TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint)
-                .is_ok(),
-            "v1 and unstamped checkpoints remain readable"
-        );
-    }
+    );
+}
+
+#[test]
+fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
+    let machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint JSON");
+    encoded["termination"] = serde_json::json!({"turn_limit_final_scheduled": false});
+    let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
+
+    let error = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(&bytes)
+        .expect_err("unknown fields must not be ignored");
+    assert!(
+        matches!(error, TurnCheckpointRestoreError::IncompatibleFormat { .. }),
+        "unexpected error: {error:?}"
+    );
+    assert!(error.to_string().contains("unknown field `termination`"));
 }
 
 fn empty_exec_response() -> crate::ExecResponse {
@@ -412,6 +413,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         protocol_iteration: 0,
         use_tools: false,
     });
+    assert_eq!(active_request.scope.agent_frame_id, "test-frame");
     assert!(active_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
             && message_text(message).contains("=== TURN EVENTS ===")
@@ -549,6 +551,304 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
+}
+
+struct CellEveryIterationDriver;
+
+impl ProtocolDriverHandle for CellEveryIterationDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        vec![DriverAction::StartLlm {
+            request: ctx.project_llm_request(false),
+            driver_state: None,
+        }]
+    }
+
+    fn handle_llm_success(
+        &self,
+        ctx: DriverContextView<'_>,
+        _waiting: WaitingLlmState,
+        _llm_response: LlmResponse,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        vec![DriverAction::StartExec {
+            language: "test".to_string(),
+            code: format!("effect-at-iteration-{}", ctx.protocol_iteration()),
+            driver_state: serde_json::Value::Null,
+        }]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingExecState,
+        _result: Result<crate::ExecResponse, String>,
+    ) -> Vec<DriverAction> {
+        vec![
+            DriverAction::AdvanceProtocolIteration,
+            DriverAction::StartCheckpoint {
+                checkpoint: CheckpointKind::AfterWork,
+                on_empty: CheckpointResumeAction::PrepareIteration,
+            },
+        ]
+    }
+}
+
+fn machine_at_protocol_iteration(
+    turn_budget: crate::TurnBudget,
+    protocol_run_offset: usize,
+    protocol_iteration: usize,
+) -> TurnMachine {
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = turn_budget;
+    let machine = TurnMachine::new(
+        config,
+        vec![user_message("keep running")],
+        Arc::new(Vec::new()),
+        protocol_run_offset,
+    );
+    let mut checkpoint = machine.checkpoint();
+    checkpoint.protocol_iteration = protocol_iteration;
+
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = turn_budget;
+    TurnMachine::restore_from_checkpoint(config, checkpoint).expect("current checkpoint")
+}
+
+#[test]
+fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
+    let mut config = test_config(Arc::new(CellEveryIterationDriver));
+    config.turn_budget = crate::TurnBudget::bounded(1);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run one cell")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects)
+        .expect("iteration zero provider call")
+        .0;
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::LlmCall { .. }))
+            .count(),
+        1
+    );
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (exec_id, code) = find_exec_call(&effects).expect("allowed iteration effect");
+    assert_eq!(code, "effect-at-iteration-0");
+    machine.handle_response(Response::ExecResult {
+        id: *exec_id,
+        result: Ok(empty_exec_response()),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("iteration checkpoint");
+    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        find_llm_call(&effects).is_none(),
+        "no provider call at iteration one"
+    );
+    assert!(
+        find_exec_call(&effects).is_none(),
+        "no effect at iteration one"
+    );
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    let (messages, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 1);
+    assert_eq!(messages.len(), 1, "no synthetic transcript message");
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.role != MessageRole::System)
+    );
+}
+
+#[test]
+fn bounded_turn_budget_exhausts_exactly_at_n_iterations() {
+    let mut below_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 6);
+    let effects = drain_effects(&mut below_limit);
+    assert!(
+        find_llm_call(&effects).is_some(),
+        "iteration 6 is still inside a budget of 3 beginning at offset 4"
+    );
+    assert!(find_done(&effects).is_none());
+
+    let mut at_limit = machine_at_protocol_iteration(crate::TurnBudget::bounded(3), 4, 7);
+    let effects = drain_effects(&mut at_limit);
+    assert!(
+        find_llm_call(&effects).is_none(),
+        "iteration 7 must stop before the provider"
+    );
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    let (_, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 7);
+}
+
+#[test]
+fn unbounded_turn_budget_never_schedules_a_limit_stop() {
+    for iteration in [0, 1, 10_000, usize::MAX] {
+        let mut machine = machine_at_protocol_iteration(crate::TurnBudget::Unbounded, 0, iteration);
+        let effects = drain_effects(&mut machine);
+
+        assert!(
+            find_llm_call(&effects).is_some(),
+            "iteration {iteration} must still call the provider"
+        );
+        assert!(effects.iter().all(|effect| !matches!(
+            effect,
+            Effect::Emit(SessionStreamEvent::TurnOutcome {
+                outcome: TurnOutcome::Stopped(TurnStop::MaxTurns),
+            })
+        )));
+        assert!(find_done(&effects).is_none());
+    }
+}
+
+struct NoProgressFeedbackAtBudgetDriver;
+
+impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        if ctx.protocol_iteration() == 0 {
+            return vec![DriverAction::StartLlm {
+                request: ctx.project_llm_request(false),
+                driver_state: None,
+            }];
+        }
+        vec![
+            DriverAction::AppendEvents(vec![conversation_event(text_message(
+                MessageRole::System,
+                "synthetic no-progress feedback",
+            ))]),
+            DriverAction::Finish(TurnOutcome::Stopped(TurnStop::MaxTurns)),
+        ]
+    }
+
+    fn handle_llm_success(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingLlmState,
+        _llm_response: LlmResponse,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        vec![
+            DriverAction::AdvanceProtocolIteration,
+            DriverAction::StartCheckpoint {
+                checkpoint: CheckpointKind::AfterWork,
+                on_empty: CheckpointResumeAction::PrepareIteration,
+            },
+        ]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _waiting: WaitingExecState,
+        _result: Result<crate::ExecResponse, String>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn sansio_simultaneous_turn_and_no_progress_exhaustion_preempts_conversation_feedback() {
+    let mut config = test_config(Arc::new(NoProgressFeedbackAtBudgetDriver));
+    config.turn_budget = crate::TurnBudget::bounded(1);
+    config.no_progress_budget = crate::NoProgressBudget::bounded(1);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("run one attempt")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects)
+        .expect("iteration zero provider call")
+        .0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("attempt checkpoint");
+    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: CheckpointDelivery::default(),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert_eq!(
+        effects.iter().find_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        }),
+        Some(&TurnOutcome::Stopped(TurnStop::MaxTurns))
+    );
+    assert!(
+        machine
+            .events()
+            .iter()
+            .all(|event| !matches!(event, SessionHistoryRecord::Conversation(_)))
+    );
+    let (messages, iteration) = find_done(&effects).expect("typed terminal boundary");
+    assert_eq!(iteration, 1);
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.role != MessageRole::System),
+        "turn-budget exhaustion must preempt synthetic feedback"
+    );
+    assert!(
+        done_event_delta(&effects)
+            .expect("done delta")
+            .iter()
+            .all(|event| !matches!(event, SessionHistoryRecord::Conversation(_)))
+    );
 }
 
 struct ToolBatchDriver;

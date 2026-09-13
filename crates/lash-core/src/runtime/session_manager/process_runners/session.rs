@@ -446,6 +446,10 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         );
         let foreign_cancellation = tokio_util::sync::CancellationToken::new();
         foreign_cancellation.cancel();
@@ -486,6 +490,10 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         );
         let replay_registration = registration.clone();
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -676,6 +684,10 @@ mod tests {
                     },
                     crate::RecoveryContract::Rerunnable,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 );
                 let cancellation = tokio_util::sync::CancellationToken::new();
                 let mut run = Box::pin(services.run_process_session_turn(

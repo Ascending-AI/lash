@@ -59,9 +59,10 @@ pub use sansio::{
     WaitingLlmState, render_turn_causes_prompt,
 };
 pub use schema_contract::{
-    ProjectionMode, ProviderSchemaCapabilities, ResolvedSchema, SchemaContract, SchemaDialect,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError,
-    SchemaResolutionRequest, project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
+    OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
+    ResolvedSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SchemaPurpose, SchemaResolutionError, SchemaResolutionRequest,
+    project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
     CellFailure, CellFailureKind, DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome,
@@ -102,9 +103,8 @@ pub use tool_output::{
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{
-    TurnDriverConfig, TurnDriverPreamble, TurnLimitFinalMessage, append_assistant_text_part,
-    normalized_response_parts, reasoning_part, visible_response_parts,
-    visible_response_text_from_parts,
+    TurnDriverConfig, TurnDriverPreamble, append_assistant_text_part, normalized_response_parts,
+    reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 
 pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {

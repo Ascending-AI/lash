@@ -752,6 +752,35 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
 }
 
 #[test]
+fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
+    let messages = vec![
+        Message {
+            id: "genuine".to_string(),
+            role: MessageRole::User,
+            parts: vec![part(PartKind::Text, "genuine")].into(),
+            origin: Some(MessageOrigin::TurnInput {
+                turn_id: TurnId::from("turn"),
+                input_id: None,
+            }),
+        },
+        Message {
+            id: "synthetic".to_string(),
+            role: MessageRole::User,
+            parts: vec![part(PartKind::ToolResult, "synthetic")].into(),
+            origin: Some(MessageOrigin::Plugin {
+                plugin_id: "plugin".to_string(),
+                transient: false,
+            }),
+        },
+    ];
+
+    let rendered = render_prompt(&messages);
+
+    assert!(rendered.messages[0].starts_user_segment);
+    assert!(!rendered.messages[1].starts_user_segment);
+}
+
+#[test]
 fn turn_output_origin_wire_shape_preserves_typed_source() {
     let origin = MessageOrigin::TurnOutput {
         turn_id: TurnId::from("queued-drain-1"),

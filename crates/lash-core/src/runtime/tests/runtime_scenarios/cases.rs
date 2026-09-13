@@ -519,15 +519,18 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
         let session_id = call.context.session_id().to_string();
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
-            crate::ToolIntents::v1(vec![
+            crate::ToolIntents::v2(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: SessionId::from(session_id.clone()),
                     request: crate::ProcessStartRequest::external(
                         "runtime-scenario-intent-child",
                         crate::ProcessOriginator::host_scoped("runtime-scenario"),
                         serde_json::json!({"kind": "start"}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     session_id: SessionId::from(session_id.clone()),
@@ -607,6 +610,10 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([
                 crate::ProcessEventType {

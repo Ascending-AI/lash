@@ -117,7 +117,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
         &self,
         request: HttpRequest,
         _timeout: Option<Duration>,
-    ) -> Result<HttpResponse, HttpTransportError> {
+    ) -> Result<HttpResponse, LlmTransportError> {
         let request_index = {
             let mut requests = self.request_urls.lock_recover();
             let index = requests.len();
@@ -126,7 +126,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
         };
         match request_index {
             0 => Err(
-                HttpTransportError::new("conformance attachment ceiling elapsed")
+                LlmTransportError::new("conformance attachment ceiling elapsed")
                     .with_kind(lash_core::ProviderFailureKind::Timeout)
                     .with_code("timeout")
                     .with_retry_verdict(
@@ -141,7 +141,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
                         .expect("serialize conformance process terminal"),
                 ),
             }),
-            _ => Err(HttpTransportError::new(
+            _ => Err(LlmTransportError::new(
                 "conformance process wait exceeded one reattachment",
             )),
         }
@@ -1239,7 +1239,7 @@ pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
         err.summary.expect("mismatch summary"),
         lash_core::RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
-            first_divergent_paths: vec!["command.duration_ms".to_string()],
+            first_divergent_paths: vec!["command.spec.duration_ms".to_string()],
         }
     );
 }
@@ -1264,7 +1264,9 @@ pub(super) fn recorded_runtime_effect_hash_match_returns_replayed_outcome() {
 pub(super) fn test_sleep_envelope(duration_ms: u64) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         turn_effect_invocation("session", "turn", 0, 0, "sleep:test", "sleep:test"),
-        RuntimeEffectCommand::Sleep { duration_ms },
+        RuntimeEffectCommand::Sleep {
+            spec: lash_core::SleepSpec::For { duration_ms },
+        },
     )
 }
 
@@ -1330,6 +1332,10 @@ pub(super) fn external_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1341,6 +1347,10 @@ pub(super) fn rerunnable_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1359,6 +1369,10 @@ pub(super) fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistrat
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1370,6 +1384,10 @@ pub(super) fn owner_bound_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 

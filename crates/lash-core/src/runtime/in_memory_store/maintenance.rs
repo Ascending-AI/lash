@@ -76,11 +76,7 @@ impl crate::store::StoreMaintenance for InMemorySessionStore {
         let mut pending = self.pending_turn_inputs.lock_recover();
         let before = pending.len();
         pending.retain(|entry| {
-            !(entry.input.session_id == session_id
-                && matches!(
-                    entry.input.state,
-                    crate::TurnInputState::Cancelled | crate::TurnInputState::Completed
-                ))
+            !(entry.input.session_id == session_id && entry.input.state.is_terminal())
         });
         // Cancellation rows include unresolved recovery intent. They remain
         // until session deletion, which is the only safe reclamation boundary
