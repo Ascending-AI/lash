@@ -1719,7 +1719,7 @@ fn remote_process_dtos_json_round_trip() {
         process_id: ProcessId::from("process:1"),
         incarnation: 1,
         status: RemoteProcessStatus::Cancelled,
-        record: Some(remote_process_record()),
+        record: Some(cancelled_remote_process_record()),
     };
     cancel_result.validate().expect("valid cancel result");
 
@@ -2429,6 +2429,24 @@ fn remote_process_record() -> RemoteProcessRecord {
         outcome: None,
     lifecycle: crate::RemoteProcessLifecyclePolicy { parent: crate::RemoteParentScope::Host, on_parent_end: crate::RemoteOnParentEnd::Abandon },
 }
+}
+
+fn cancelled_remote_process_record() -> RemoteProcessRecord {
+    let mut record = remote_process_record();
+    record.wait = None;
+    record.status = RemoteProcessStatus::Cancelled;
+    record.outcome = Some(RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                origin: None,
+                message: "cancelled".to_string(),
+                source: RemoteProcessToolFailureSource::Cancellation,
+                raw: None,
+            }),
+            control: None,
+        },
+    });
+    record
 }
 
 fn remote_process_event() -> RemoteProcessEvent {
