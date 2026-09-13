@@ -824,6 +824,23 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
         };
         let process_id = registration.id.clone();
+        // The registry row, not the caller's pin, is the durable truth for a
+        // child's attempt bound: a redrive that re-registers the same
+        // deterministic child id after the host default moved must re-register
+        // with the recorded value or the registration fingerprint conflicts
+        // forever. Only a child with no row yet takes the caller's resolution.
+        let registration = match self
+            .dispatch
+            .processes
+            .recorded_max_attempts(&self.session_id, &process_id)
+            .await
+        {
+            Ok(Some(recorded)) => registration.with_max_attempts(Some(recorded)),
+            Ok(None) => registration,
+            Err(err) => {
+                return crate::ToolInvocationReply::error(serde_json::json!(err.to_string()));
+            }
+        };
         let mut options = crate::ProcessStartOptions::new()
             .with_initial_observers(self.child_process_observers());
         if let Some(spawn) = self.process_spawn_provenance() {

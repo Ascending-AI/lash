@@ -181,6 +181,58 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
 }
 
 #[test]
+fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejection() {
+    // The shipped v10 VM fixture was re-pinned to the current envelope version,
+    // so it no longer exercises the envelope mismatch. Synthesize the immediate
+    // predecessor instead: a v6 payload is exactly a v7 payload with the
+    // attempt bound absent.
+    let program = lashlang::compile("finish null").expect("compile predecessor program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
+        .expect("construct predecessor VM");
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: vm.suspend().expect("capture predecessor VM continuation"),
+        sleep_sequence: 0,
+        event_sequence: 0,
+        signal_send_sequence: 0,
+        signal_wait_ordinals: Default::default(),
+        parent_end_actions: Vec::new(),
+        started_process_ids: Vec::new(),
+        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+    };
+    let mut wire = serde_json::to_value(segment_state).expect("serialize predecessor writer");
+    let object = wire
+        .as_object_mut()
+        .expect("segment state is a JSON object");
+    object.remove("child_max_attempts");
+    object.insert(
+        "version".to_string(),
+        serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION - 1),
+    );
+    let encoded = serde_json::to_vec(&wire).expect("serialize v6 predecessor");
+
+    let Err(error) = decode_lashlang_segment_state(&encoded) else {
+        panic!("a v6 handover must not decode against the v7 envelope");
+    };
+    assert!(
+        matches!(
+            &error,
+            LashlangSegmentStateError::VersionMismatch {
+                expected: LASHLANG_SEGMENT_STATE_VERSION,
+                found,
+            } if *found == LASHLANG_SEGMENT_STATE_VERSION - 1
+        ),
+        "unexpected error: {error}"
+    );
+    let message = error.to_string();
+    assert!(message.contains("drain in-flight sessions on the old build"));
+    assert!(message.contains("recreate development/test stores"));
+}
+
+#[test]
 fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
     let program = lashlang::compile("finish null").expect("compile pinning program");
     let mut state = lashlang::State::new();

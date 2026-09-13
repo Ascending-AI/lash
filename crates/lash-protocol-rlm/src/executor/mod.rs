@@ -561,7 +561,6 @@ async fn execute_code_inner(
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
     let print_projector = Arc::new(crate::rlm_support::print_history_projector());
-    let child_max_attempts = state.pin_child_max_attempts(ctx.engine_child_max_attempts());
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         print_projector,
@@ -569,7 +568,8 @@ async fn execute_code_inner(
         host_environment,
         deferred_execution_grants,
         artifact_store: Arc::clone(&artifact_store),
-        child_max_attempts,
+        child_max_attempts: state.child_max_attempts(),
+        child_max_attempts_default: ctx.engine_child_max_attempts(),
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
@@ -585,6 +585,7 @@ async fn execute_code_inner(
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());
     }
+    state.adopt_child_max_attempts(host.pinned_child_max_attempts());
     drop(env);
     let terminal_finish = match result {
         Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value).await),
