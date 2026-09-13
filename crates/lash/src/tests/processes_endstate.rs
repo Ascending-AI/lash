@@ -216,16 +216,14 @@ impl LinkedTestProcess {
     }
 
     fn process_identity(&self) -> lash_core::ProcessIdentity {
-        let input = lash_lashlang_runtime::LashlangProcessInput {
+        lash_lashlang_runtime::LashlangProcessInput {
             module_ref: self.module_ref.clone(),
             process_ref: self.process_ref.clone(),
             host_requirements_ref: self.host_requirements_ref.clone(),
             process_name: self.process_name.clone(),
             args: serde_json::Map::new(),
-        };
-        lash_core::ProcessIdentity::new(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
-            .with_label(Some(self.process_name.clone()))
-            .with_definition(Some(input.definition()))
+        }
+        .process_identity()
     }
 
     fn start_request(&self, process_id: &ProcessId) -> lash_core::ProcessStartRequest {

@@ -30,6 +30,13 @@ impl ProcessDefinitionIdentity {
         }
     }
 
+    /// Decodes the one marked encoding of a Lashlang process definition value.
+    ///
+    /// [`Self::to_process_value`] and this decoder are the only codec for that
+    /// value: the record a cell holds for `p`, the `definition` a started
+    /// process stores in its `ProcessIdentity`, and the `definition` filter
+    /// `processes.list` compares are all the same bytes, so equality over them
+    /// is meaningful. Any other encoding of the same four fields is a defect.
     pub fn from_process_value(
         value: &serde_json::Value,
     ) -> Result<Self, ProcessDefinitionIdentityError> {
@@ -54,6 +61,10 @@ impl ProcessDefinitionIdentity {
         })
     }
 
+    /// Encodes this identity as the marked Lashlang process definition value.
+    ///
+    /// The `$lash_process` marker distinguishes it from an ordinary record; see
+    /// [`Self::from_process_value`] for the codec contract.
     pub fn to_process_value(&self) -> serde_json::Value {
         serde_json::json!({
             LASH_PROCESS_VALUE_KEY: true,

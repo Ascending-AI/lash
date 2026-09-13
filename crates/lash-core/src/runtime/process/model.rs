@@ -1650,6 +1650,10 @@ impl ProcessStatusFilter {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProcessListFilter {
+    /// Engine-encoded process definition value, compared verbatim against
+    /// `ProcessIdentity.definition`. The core owns no encoding here: a caller
+    /// passes the same value the engine that started the run stores, so a
+    /// caller holding a definition can filter by it directly.
     pub definition: Option<serde_json::Value>,
     pub status: ProcessStatusFilter,
     pub originator_id: Option<String>,
@@ -1691,6 +1695,9 @@ impl ProcessListFilter {
                 _ => return Err(format!("processes.list unknown filter `{key}`")),
             }
         }
+        // Taken verbatim: the definition value is whichever encoding the engine
+        // that started the process stores, and `matches_record` compares the two
+        // by equality. Normalizing here would reintroduce a second encoding.
         let definition = args.get("definition").cloned();
         let status = ProcessStatusFilter::decode(args.get("status"))?;
         let originator_id = optional_string_filter(args, "originator_id")?;
