@@ -92,6 +92,43 @@ The deferred-link companion must show all of these named cases green:
 - `revoked_route_refuses_without_replacing_the_journaled_grant` proves a restored route
   cannot silently acquire replacement authority.
 
+Also capture the dedicated deferred-trigger-definition companion:
+`cargo test --workspace --all-targets --locked deferred_trigger -- --nocapture`. Save its
+complete output as `00-deferred-trigger-definition.txt`. This is a deterministic,
+operator-run link test: it reads definitions from in-memory test providers but does not
+activate a provider, create a subscription, execute a provider route, call a model, or
+change Tool Catalog membership.
+
+The companion must show these cases green:
+
+- `registry_applies_zero_one_two_provider_rule` proves an unannotated constructor has
+  exactly the specified outcomes: unavailable with zero providers, resolved with one,
+  and a deterministic ambiguity error with two;
+- `deferred_and_resident_definitions_build_equivalent_link_surfaces` proves one deferred
+  constructor and its named event schema fold to the same link surface as the resident
+  definition;
+- `deferred_trigger_constructor_and_event_schema_link_for_both_frontends` and
+  `deferred_trigger_references_inside_helpers_and_processes_are_gathered` prove Lashlang
+  and TypeScript gather direct, helper, and process-body receiver calls before target
+  mapping is typechecked;
+- `deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping` proves missing
+  and ambiguous source definitions are reported before a downstream mapping error; and
+- `recorded_grant_masks_changed_ambient_and_preserves_route_without_activation` proves
+  the trigger record is distinct from deferred-tool state and replays its captured
+  provider route without consulting or activating that provider again; and
+- `recorded_unavailable_masks_later_ambient_trigger_definition` proves a captured
+  negative outcome remains unavailable when the ambient trigger catalog changes; and
+- `deferred_trigger_record_and_provider_route_survive_snapshot_restore` proves that
+  separate record, provider identity, and opaque route survive RLM state restoration;
+  and
+- `mixed_deferred_trigger_and_tool_links_keep_provider_records_separate` proves a mixed
+  link resolves each family into its own record and never folds a trigger definition
+  into deferred-tool state.
+
+These are definition-linking claims only. Explicit authored registration remains the
+first operation allowed to create a subscription. Provider activation and route use
+belong to registration and delivery, not discovery.
+
 **Restate deployment cutover.** A resource-bearing RLM cell now emits exactly one
 batched `LanguageRuntimeValue` journal command after `ExecCode` admission and before
 its first dependent effect. Restate classifies that command as `JournaledRun`, so later
@@ -107,6 +144,20 @@ The native controller remains intentionally process-local: it exercises the same
 ordering and typed failures but does not claim cold-restart persistence. Durable replay
 claims in this companion come from the file-backed SQLite controller; Restate supplies
 the production engine-owned journal under the ordinal cutover above.
+
+**RLM snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger
+resolution record, including captured provider identity and route. Version 18 snapshots
+cannot preserve that authority boundary and are rejected. Drain in-flight RLM sessions
+on the old build before deploying, or recreate development/test stores; do not add a
+compatibility decoder or silently reset a store.
+
+Enabling a deferred trigger resolver also adds one batched
+`deferred_trigger_resolution:v1` `LanguageRuntimeValue` command before deferred-tool
+resolution and before any dependent effect. Its effect id is distinct from the tool
+resolver's record, so the two outcomes cannot alias. This is an intentional Restate
+ordinal cutover for deployments that enable the resolver: drain in-flight RLM
+`ExecCode` invocations before enabling it. A host with no resolver and no recorded
+trigger outcomes emits no trigger-definition command.
 
 Save every API response named below under the run's artifact directory.
 

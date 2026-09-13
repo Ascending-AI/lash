@@ -294,6 +294,12 @@ fn fold_grant(
 /// Whether the host environment already binds `call_path` (dotted
 /// `module.operation`), so it does not need deferral.
 fn already_provided(host_environment: &LashlangHostEnvironment, call_path: &str) -> bool {
+    if host_environment
+        .resources
+        .provides_value_constructor(call_path)
+    {
+        return true;
+    }
     let Some((module_path, operation)) = call_path.rsplit_once('.') else {
         return false;
     };
@@ -347,6 +353,27 @@ pub async fn resolve_and_build_deferred_environment(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<LashlangHostEnvironment, DeferredResolutionError> {
     let referenced = lashlang::referenced_module_call_paths(program);
+    resolve_and_build_deferred_environment_from_references(
+        &referenced,
+        surface,
+        catalog,
+        resolver,
+        record,
+        ctx,
+    )
+    .await
+}
+
+/// Variant used when another deferred-definition family shares the program's
+/// receiver-call gather pass. Provider state and outcomes remain separate.
+pub async fn resolve_and_build_deferred_environment_from_references(
+    referenced: &BTreeSet<String>,
+    surface: &LashlangSurface,
+    catalog: &lash_core::ToolCatalog,
+    resolver: Option<&SharedDeferredToolResolver>,
+    record: &mut DeferredResolutionRecord,
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+) -> Result<LashlangHostEnvironment, DeferredResolutionError> {
     if referenced.is_empty() {
         return surface
             .host_environment(catalog)
@@ -360,8 +387,11 @@ pub async fn resolve_and_build_deferred_environment(
         .cloned()
         .collect::<BTreeSet<_>>();
     let outcomes = journal_deferred_outcomes(
-        referenced,
+        referenced.clone(),
         move || {
+            // Retained outcomes own their exact paths. Classify live ambient
+            // availability only after masking them, so later incompatible
+            // schemas cannot preempt journal replay during environment build.
             let host_environment = surface.host_environment_masking(catalog, &recorded_paths)?;
             Ok(referenced_for_ambient
                 .iter()
@@ -548,6 +578,7 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    mod journal_replay;
     mod runtime_built_in;
 
     #[derive(Clone, Copy)]

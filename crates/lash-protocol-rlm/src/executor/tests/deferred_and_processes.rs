@@ -821,14 +821,15 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
                 enumerations: Default::default(),
             });
 
-        let controller =
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
             lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
                 .await
-                .expect("open SQLite effect controller");
+                .expect("open SQLite effect controller"),
+        );
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             collision.clone(),
-            lash_core::ScopedEffectController::shared(Arc::new(controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::clone(&controller), scope.clone())
                 .expect("admit SQLite controller scope"),
             invocation.clone(),
         );
@@ -854,6 +855,8 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
             other => panic!("live failure was not Ambient: {other:?}"),
         };
 
+        drop(ctx);
+        drop(controller);
         let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
             .await
             .expect("cold-reopen SQLite effect controller");
@@ -2028,27 +2031,30 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
     assert_eq!(turn_n.terminal_finish, Some(serde_json::json!("started")));
 
-    let (turn_n_plus_one, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        tokio::join!(
-            execute_code_with_dialect_and_bounds(
-                &mut state,
-                ctx,
-                ExecRequest {
-                    language: "typescript".to_string(),
-                    code: "finish(await handle);".to_string(),
-                },
-                artifact_store,
-                surface,
-                None,
-                RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
-                RlmLashlangExecutionTraceConfig::default(),
-                lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(SourceDialect::Typescript),
-            ),
-            worker.drive_pending_processes()
-        )
-    })
+    let (turn_n_plus_one, _) = Box::pin(tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        async {
+            tokio::join!(
+                execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    ctx,
+                    ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "finish(await handle);".to_string(),
+                    },
+                    artifact_store,
+                    surface,
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    RlmSourceContext::cell(SourceDialect::Typescript),
+                ),
+                worker.drive_pending_processes()
+            )
+        },
+    ))
     .await
     .expect("turn N+1 process-handle await must not hang");
     assert!(

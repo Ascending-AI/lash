@@ -632,8 +632,10 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
 
         let initial_budget = state::measure_snapshot(&initial);
         let changed_budget = state::measure_snapshot(&changed);
-        assert_eq!(initial_budget.checkpoint_bytes, 82_515);
-        assert_eq!(changed_budget.checkpoint_bytes, 14_033);
+        // Snapshot v19 adds the empty, separate deferred-trigger record to
+        // every root; it contributes the same 43-byte fixed cost to both.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_558);
+        assert_eq!(changed_budget.checkpoint_bytes, 14_076);
     });
 }
 
@@ -850,8 +852,8 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             measured.len()
         );
         assert_eq!(full_state_bytes, 136_711);
-        assert_eq!(minimum, 21_040);
-        assert_eq!(maximum, 21_094);
+        assert_eq!(minimum, 21_083);
+        assert_eq!(maximum, 21_137);
     });
 }
 
@@ -915,8 +917,8 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        assert_eq!(minimum, 94_287);
-        assert_eq!(maximum, 94_289);
+        assert_eq!(minimum, 94_330);
+        assert_eq!(maximum, 94_332);
     });
 }
 
