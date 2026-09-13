@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -217,20 +216,6 @@ def fail_open(reason: str) -> dict[str, str]:
     return outputs
 
 
-def github_runner_cache_identity(
-    runner_os: str,
-    runner_arch: str,
-    image_os: str,
-    image_version: str,
-) -> str:
-    """Build an action identity for the concrete GitHub-hosted runner image."""
-    fields = (runner_os, runner_arch, image_os, image_version)
-    if any(not field.strip() for field in fields):
-        raise PlanError("GitHub runner cache identity fields must be nonempty")
-    digest = hashlib.sha256("\0".join(fields).encode()).hexdigest()
-    return f"github-actions-{digest}"
-
-
 def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -416,12 +401,6 @@ def main() -> int:
     fail_parser = subparsers.add_parser("fail-open")
     fail_parser.add_argument("--reason", required=True)
 
-    runtime_parser = subparsers.add_parser("bazel-runtime")
-    runtime_parser.add_argument("--runner-os", required=True)
-    runtime_parser.add_argument("--runner-arch", required=True)
-    runtime_parser.add_argument("--image-os", required=True)
-    runtime_parser.add_argument("--image-version", required=True)
-
     matrix_parser = subparsers.add_parser("postgres-matrix")
     matrix_parser.add_argument("--event", required=True)
 
@@ -438,20 +417,6 @@ def main() -> int:
 
     if args.command == "fail-open":
         _write_outputs(fail_open(args.reason))
-        return 0
-
-    if args.command == "bazel-runtime":
-        try:
-            identity = github_runner_cache_identity(
-                args.runner_os,
-                args.runner_arch,
-                args.image_os,
-                args.image_version,
-            )
-        except PlanError as error:
-            print(f"Invalid Bazel runtime identity: {error}", file=sys.stderr)
-            return 1
-        _write_outputs({"bazel_runtime": identity})
         return 0
 
     if args.command == "postgres-matrix":
