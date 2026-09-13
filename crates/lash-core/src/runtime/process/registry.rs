@@ -167,14 +167,23 @@ pub enum WakeDeliveryState {
     Discarded,
 }
 
+super::model::lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {
+    Pending => "pending",
+    Enqueuing => "enqueuing",
+    Enqueued => "enqueued",
+    Discarded => "discarded",
+});
+
 impl WakeDeliveryState {
-    /// Exposes the stable snake-case wake-delivery state for process-store implementors.
-    pub fn as_str(self) -> &'static str {
+    /// Whether the delivery still owes the target a wake.
+    ///
+    /// The Rust twin of the `state IN (...)` predicate prune and preflight
+    /// queries carry. Exhaustive on purpose: a new state must declare whether
+    /// it is still owed before any query can compile.
+    pub fn is_undelivered(self) -> bool {
         match self {
-            Self::Pending => "pending",
-            Self::Enqueuing => "enqueuing",
-            Self::Enqueued => "enqueued",
-            Self::Discarded => "discarded",
+            Self::Pending | Self::Enqueuing => true,
+            Self::Enqueued | Self::Discarded => false,
         }
     }
 }

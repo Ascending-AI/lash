@@ -1,7 +1,12 @@
 use super::*;
+use crate::process_lifecycle_sql::{
+    live_process_status, retired_process_status, wake_delivery_state,
+};
 use lash_core::ProcessQuery as _;
+use lash_core::WakeDeliveryState;
 use lash_core::facade_support;
 use lash_sansio::ProcessId;
+use std::sync::LazyLock;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
 mod leases;
@@ -19,7 +24,7 @@ mod support;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
 mod wake_delivery;
-mod worklist;
+pub(crate) mod worklist;
 
 use support::process_scope_fence_key;
 use support::process_status_label;
@@ -44,10 +49,132 @@ const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
        AND (?9 IS NULL OR created_at_ms < ?9)
      ORDER BY process_id ASC";
 
-const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
-    "SELECT record_json FROM (
+pub(crate) static SETTLE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                     SET state = ?3, claim_token = NULL, discard_reason = ?4
+                     WHERE delivery_id = ?1 AND state = {enqueuing} AND claim_token = ?2",
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+    )
+});
+
+pub(crate) static DISCARD_RETARGETED_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                             SET state = {discarded}, discard_reason = 'retargeted'
+                             WHERE process_id = ?1 AND target_session_id = ?2 AND state = {pending}",
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static INSERT_WAKE_DELIVERY_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "INSERT OR IGNORE INTO process_wake_deliveries (
+                delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+                claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+                discard_reason, delivery_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, {pending}, NULL, 0, NULL, ?6, ?7, NULL, ?8)",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static RECLAIM_LAPSED_WAKE_CLAIMS_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                         SET state = {pending}, claim_token = NULL
+                         WHERE state = {enqueuing} AND next_attempt_at_ms <= ?1",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+    )
+});
+
+/// Split around the caller-built discard-reason placeholder list.
+pub(crate) static SELECT_CLAIMABLE_WAKE_SQL_PREFIX: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT candidate.delivery_id
+                             FROM process_wake_deliveries AS candidate
+                             WHERE candidate.state = {pending}
+                               AND candidate.next_attempt_at_ms <= ?
+                               AND NOT EXISTS (
+                                   SELECT 1
+                                   FROM process_wake_deliveries AS earlier
+                                   WHERE earlier.state <> {enqueued}
+                                     AND NOT (
+                                         earlier.state = {discarded}
+                                         AND (
+                                             earlier.discard_reason IS NULL
+                                             OR earlier.discard_reason IN (",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueued = wake_delivery_state(WakeDeliveryState::Enqueued),
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+    )
+});
+
+pub(crate) const SELECT_CLAIMABLE_WAKE_SQL_SUFFIX: &str = ")
+                                         )
+                                     )
+                                     AND earlier.target_session_id = candidate.target_session_id
+                                     AND earlier.process_id = candidate.process_id
+                                     AND earlier.sequence < candidate.sequence
+                               )
+                             ORDER BY candidate.next_attempt_at_ms ASC,
+                                      candidate.target_session_id ASC,
+                                      candidate.process_id ASC,
+                                      candidate.sequence ASC
+                             LIMIT ?";
+
+pub(crate) static START_WAKE_ENQUEUING_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                             SET state = {enqueuing},
+                                 claim_token = ?4,
+                                 attempts = attempts + 1,
+                                 first_attempt_ms = COALESCE(first_attempt_ms, ?2),
+                                 next_attempt_at_ms = ?3
+                             WHERE delivery_id = ?1 AND state = {pending}",
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static REDRIVE_DISCARDED_WAKE_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                             SET state = {pending}, attempts = 0, first_attempt_ms = NULL,
+                                 claim_token = NULL, next_attempt_at_ms = ?3, expires_at_ms = ?2,
+                                 discard_reason = NULL
+                             WHERE delivery_id = ?1 AND state = {discarded}",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+    )
+});
+
+pub(crate) static RELEASE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                             SET state = {pending}, claim_token = NULL, next_attempt_at_ms = ?3
+                             WHERE delivery_id = ?1 AND state = {enqueuing} AND claim_token = ?2",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
+    )
+});
+
+pub(crate) static DISCARD_TARGET_GONE_WAKES_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "UPDATE process_wake_deliveries
+                             SET state = {discarded}, discard_reason = 'target_gone'
+                             WHERE target_session_id = ?1 AND state = {pending}",
+        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
+pub(crate) static LIST_PROCESSES_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
-         WHERE status IN ('running', 'waiting')
+         WHERE {live}
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
            AND (?3 IS NULL OR identity_kind = ?3)
@@ -65,7 +192,7 @@ const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
            AND (?9 IS NULL OR created_at_ms < ?9)
          UNION ALL
          SELECT process_id, record_json FROM processes
-         WHERE status NOT IN ('running', 'waiting')
+         WHERE {retired}
            AND updated_at_ms >= ?10
            AND (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
            AND (?2 IS NULL OR originator_id = ?2)
@@ -82,23 +209,48 @@ const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
                 json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
            AND (?8 IS NULL OR created_at_ms >= ?8)
            AND (?9 IS NULL OR created_at_ms < ?9)
-     ) ORDER BY process_id ASC";
+     ) ORDER BY process_id ASC",
+        live = live_process_status("status"),
+        retired = retired_process_status("status"),
+    )
+});
 
-const LIST_OBSERVED_RECENT_RETIRED_SQL: &str = "SELECT record_json FROM (
+pub(crate) static LIST_OBSERVED_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT record_json FROM (
          SELECT p.process_id, p.record_json FROM processes p
-         WHERE p.status IN ('running', 'waiting')
+         WHERE {live}
            AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
            AND EXISTS (SELECT 1 FROM process_observers o
                        WHERE o.session_id = ?1 AND o.process_id = p.process_id
                          AND o.process_incarnation = p.incarnation)
          UNION ALL
          SELECT p.process_id, p.record_json FROM processes p
-         WHERE p.status NOT IN ('running', 'waiting') AND p.updated_at_ms >= ?3
+         WHERE {retired} AND p.updated_at_ms >= ?3
            AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
            AND EXISTS (SELECT 1 FROM process_observers o
                        WHERE o.session_id = ?1 AND o.process_id = p.process_id
                          AND o.process_incarnation = p.incarnation)
-     ) ORDER BY process_id";
+     ) ORDER BY process_id",
+        live = live_process_status("p.status"),
+        retired = retired_process_status("p.status"),
+    )
+});
+
+pub(crate) static LIST_OBSERVED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT p.record_json
+                     FROM process_observers o
+                     JOIN processes p ON p.process_id = o.process_id
+                                     AND p.incarnation = o.process_incarnation
+                     WHERE o.session_id = ?1
+                       AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
+                       AND (?3 IS NULL OR {live}
+                            OR p.updated_at_ms >= ?3)
+                     ORDER BY p.process_id",
+        live = live_process_status("p.status"),
+    )
+});
 
 #[async_trait::async_trait]
 impl lash_core::ProcessQuery for SqliteProcessRegistry {
@@ -180,7 +332,7 @@ impl lash_core::ProcessQuery for SqliteProcessRegistry {
             .call(move |conn| {
                 Ok((|| {
                     let sql = if filter.retired_since_ms.is_some() {
-                        LIST_PROCESSES_RECENT_RETIRED_SQL
+                        LIST_PROCESSES_RECENT_RETIRED_SQL.as_str()
                     } else {
                         LIST_PROCESSES_SQL
                     };
@@ -398,17 +550,9 @@ impl lash_core::ProcessObserverRegistry for SqliteProcessRegistry {
         self.conn
             .call(move |conn| {
                 let sql = if retired_since_ms.is_some() {
-                    LIST_OBSERVED_RECENT_RETIRED_SQL
+                    LIST_OBSERVED_RECENT_RETIRED_SQL.as_str()
                 } else {
-                    "SELECT p.record_json
-                     FROM process_observers o
-                     JOIN processes p ON p.process_id = o.process_id
-                                     AND p.incarnation = o.process_incarnation
-                     WHERE o.session_id = ?1
-                       AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
-                       AND (?3 IS NULL OR p.status IN ('running', 'waiting')
-                            OR p.updated_at_ms >= ?3)
-                     ORDER BY p.process_id"
+                    LIST_OBSERVED_SQL.as_str()
                 };
                 let mut stmt = conn.prepare(sql)?;
                 let rows = stmt.query_map(
@@ -521,12 +665,7 @@ impl lash_core::ProcessObserverRegistry for SqliteProcessRegistry {
                     Ok(tx_outcome((|| {
                         let session_id = session_id_owned;
                         let discarded_wake_delivery_count = tx
-                            .execute(
-                                "UPDATE process_wake_deliveries
-                             SET state = 'discarded', discard_reason = 'target_gone'
-                             WHERE target_session_id = ?1 AND state = 'pending'",
-                                params![session_id],
-                            )
+                            .execute(DISCARD_TARGET_GONE_WAKES_SQL.as_str(), params![session_id])
                             .map_err(process_sqlite_error)?;
                         let removed_observer_count = tx
                             .execute(
@@ -1203,13 +1342,8 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    tx.execute(
-                        "UPDATE process_wake_deliveries
-                         SET state = 'pending', claim_token = NULL
-                         WHERE state = 'enqueuing' AND next_attempt_at_ms <= ?1",
-                        params![now as i64],
-                    )
-                    .map_err(process_sqlite_error)?;
+                    tx.execute(RECLAIM_LAPSED_WAKE_CLAIMS_SQL.as_str(), params![now as i64])
+                        .map_err(process_sqlite_error)?;
                     let ids = {
                         let non_blocking_labels =
                             lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS;
@@ -1218,40 +1352,20 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
                                 .collect::<Vec<_>>()
                                 .join(", ");
                         let claim_sql = format!(
-                            "SELECT candidate.delivery_id
-                             FROM process_wake_deliveries AS candidate
-                             WHERE candidate.state = 'pending'
-                               AND candidate.next_attempt_at_ms <= ?
-                               AND NOT EXISTS (
-                                   SELECT 1
-                                   FROM process_wake_deliveries AS earlier
-                                   WHERE earlier.state <> 'enqueued'
-                                     AND NOT (
-                                         earlier.state = 'discarded'
-                                         AND (
-                                             earlier.discard_reason IS NULL
-                                             OR earlier.discard_reason IN ({non_blocking_placeholders})
-                                         )
-                                     )
-                                     AND earlier.target_session_id = candidate.target_session_id
-                                     AND earlier.process_id = candidate.process_id
-                                     AND earlier.sequence < candidate.sequence
-                               )
-                             ORDER BY candidate.next_attempt_at_ms ASC,
-                                      candidate.target_session_id ASC,
-                                      candidate.process_id ASC,
-                                      candidate.sequence ASC
-                             LIMIT ?"
+                            "{}{non_blocking_placeholders}{}",
+                            SELECT_CLAIMABLE_WAKE_SQL_PREFIX.as_str(),
+                            SELECT_CLAIMABLE_WAKE_SQL_SUFFIX
                         );
-                        let mut stmt = tx
-                            .prepare(&claim_sql)
-                            .map_err(process_sqlite_error)?;
-                        let values = std::iter::once(rusqlite::types::Value::Integer(now as i64))
-                            .chain(non_blocking_labels.iter().map(|label| {
-                                rusqlite::types::Value::Text((*label).to_string())
-                            }))
-                            .chain(std::iter::once(rusqlite::types::Value::Integer(limit as i64)))
-                            .collect::<Vec<_>>();
+                        let mut stmt = tx.prepare(&claim_sql).map_err(process_sqlite_error)?;
+                        let values =
+                            std::iter::once(rusqlite::types::Value::Integer(now as i64))
+                                .chain(non_blocking_labels.iter().map(|label| {
+                                    rusqlite::types::Value::Text((*label).to_string())
+                                }))
+                                .chain(std::iter::once(rusqlite::types::Value::Integer(
+                                    limit as i64,
+                                )))
+                                .collect::<Vec<_>>();
                         stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             row.get::<_, String>(0)
                         })
@@ -1262,13 +1376,7 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
                     for id in &ids {
                         let claim_token = uuid::Uuid::new_v4().to_string();
                         tx.execute(
-                            "UPDATE process_wake_deliveries
-                             SET state = 'enqueuing',
-                                 claim_token = ?4,
-                                 attempts = attempts + 1,
-                                 first_attempt_ms = COALESCE(first_attempt_ms, ?2),
-                                 next_attempt_at_ms = ?3
-                             WHERE delivery_id = ?1 AND state = 'pending'",
+                            START_WAKE_ENQUEUING_SQL.as_str(),
                             params![
                                 id,
                                 now as i64,
@@ -1358,11 +1466,7 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     let changed = tx
                         .execute(
-                            "UPDATE process_wake_deliveries
-                             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                                 claim_token = NULL, next_attempt_at_ms = ?3, expires_at_ms = ?2,
-                                 discard_reason = NULL
-                             WHERE delivery_id = ?1 AND state = 'discarded'",
+                            REDRIVE_DISCARDED_WAKE_SQL.as_str(),
                             params![delivery_id, expires_at_ms as i64, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
@@ -1391,9 +1495,7 @@ impl lash_core::ProcessWakeOutbox for SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     let changed = tx
                         .execute(
-                            "UPDATE process_wake_deliveries
-                             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = ?3
-                             WHERE delivery_id = ?1 AND state = 'enqueuing' AND claim_token = ?2",
+                            RELEASE_WAKE_CLAIM_SQL.as_str(),
                             params![delivery_id, claim_token, next_attempt_at_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;

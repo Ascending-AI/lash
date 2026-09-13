@@ -68,7 +68,10 @@ const UNDEFINED_TABLE: &str = "42P01";
 /// character sorting below the separator reverses the two. Comparing the columns
 /// themselves cannot disagree with the ordering of the same columns, under any
 /// collation.
-const PARKED_SEGMENT_SQL: &str = "SELECT
+pub(crate) static PARKED_SEGMENT_SQL: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| {
+        format!(
+            "SELECT
          handovers.process_id,
          handovers.segment_ordinal,
          handovers.handover_json,
@@ -78,13 +81,16 @@ const PARKED_SEGMENT_SQL: &str = "SELECT
      FROM lash_process_segment_handovers AS handovers
      JOIN lash_processes AS processes
          ON processes.process_id = handovers.process_id
-     WHERE processes.status IN ('running', 'waiting')
+     WHERE {live}
        AND (
            $1::text IS NULL
            OR (handovers.process_id, handovers.segment_ordinal) > ($1::text, $2::bigint)
        )
      ORDER BY handovers.process_id, handovers.segment_ordinal
-     LIMIT $3";
+     LIMIT $3",
+            live = crate::process_lifecycle_sql::live_process_status("processes.status"),
+        )
+    });
 
 /// Undelivered wakes only.
 ///
@@ -93,17 +99,22 @@ const PARKED_SEGMENT_SQL: &str = "SELECT
 /// claim lapses, so a row in either state is one no session has received.
 /// Anything else (`enqueued`, `discarded`) has already left the queue, and
 /// putting it on a drain list would be reporting work that is done.
-const PENDING_WAKE_SQL: &str = "SELECT
+pub(crate) static PENDING_WAKE_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "SELECT
          delivery_id,
          process_id,
          target_session_id,
          state,
          delivery_json
      FROM lash_process_wake_deliveries
-     WHERE state IN ('pending', 'enqueuing')
+     WHERE {undelivered}
        AND ($1::text IS NULL OR delivery_id > $1::text)
      ORDER BY delivery_id
-     LIMIT $2";
+     LIMIT $2",
+        undelivered = crate::process_lifecycle_sql::undelivered_wake_delivery_state("state"),
+    )
+});
 
 /// The session scan both deep surfaces share.
 ///
@@ -210,7 +221,7 @@ async fn scan_parked_segments(
         }
         None => (None, None),
     };
-    let rows = sqlx::query_as::<_, ParkedSegmentRow>(PARKED_SEGMENT_SQL)
+    let rows = sqlx::query_as::<_, ParkedSegmentRow>(PARKED_SEGMENT_SQL.as_str())
         .bind(after_process)
         .bind(after_ordinal)
         .bind(row_limit(scan))
@@ -254,7 +265,7 @@ async fn scan_pending_wakes(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, PendingWakeRow>(PENDING_WAKE_SQL)
+    let rows = sqlx::query_as::<_, PendingWakeRow>(PENDING_WAKE_SQL.as_str())
         .bind(scan.after.clone())
         .bind(row_limit(scan))
         .fetch_all(pool)
@@ -699,15 +710,17 @@ mod tests {
                 .await
                 .expect("set planner witness preference");
         }
-        let plan =
-            sqlx::query_scalar::<_, String>(&format!("EXPLAIN (COSTS OFF) {PARKED_SEGMENT_SQL}"))
-                .bind(None::<String>)
-                .bind(0_i64)
-                .bind(65_i64)
-                .fetch_all(&mut *tx)
-                .await
-                .expect("explain parked segment walk")
-                .join(" | ");
+        let plan = sqlx::query_scalar::<_, String>(&format!(
+            "EXPLAIN (COSTS OFF) {}",
+            PARKED_SEGMENT_SQL.as_str()
+        ))
+        .bind(None::<String>)
+        .bind(0_i64)
+        .bind(65_i64)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("explain parked segment walk")
+        .join(" | ");
         eprintln!("parked segment plan: {plan}");
         assert!(
             plan.contains("Merge Join")

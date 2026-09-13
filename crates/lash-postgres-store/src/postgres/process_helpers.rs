@@ -2,6 +2,22 @@ use crate::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
+use crate::process_lifecycle_sql::wake_delivery_state;
+use lash_core::WakeDeliveryState;
+use std::sync::LazyLock;
+
+pub(crate) static INSERT_WAKE_DELIVERY_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "INSERT INTO lash_process_wake_deliveries (
+            delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+            claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
+            discard_reason, delivery_json
+         ) VALUES ($1, $2, $3, $4, $5, {pending}, NULL, 0, NULL, $6, $7, NULL, $8)
+         ON CONFLICT (delivery_id) DO NOTHING",
+        pending = wake_delivery_state(WakeDeliveryState::Pending),
+    )
+});
+
 pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
@@ -469,25 +485,18 @@ pub(crate) async fn insert_wake_delivery_tx(
         return Ok(());
     };
     let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
-    sqlx::query(
-        "INSERT INTO lash_process_wake_deliveries (
-            delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
-            claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
-            discard_reason, delivery_json
-         ) VALUES ($1, $2, $3, $4, $5, 'pending', NULL, 0, NULL, $6, $7, NULL, $8)
-         ON CONFLICT (delivery_id) DO NOTHING",
-    )
-    .bind(&delivery.delivery_id)
-    .bind(delivery.wake.process_id.as_str())
-    .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
-    .bind(delivery.wake.target_session_id.as_str())
-    .bind(delivery.wake.sequence as i64)
-    .bind(delivery.next_attempt_at_ms as i64)
-    .bind(delivery.expires_at_ms as i64)
-    .bind(serde_json::to_string(&delivery.wake).map_err(process_decode_error)?)
-    .execute(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    sqlx::query(INSERT_WAKE_DELIVERY_SQL.as_str())
+        .bind(&delivery.delivery_id)
+        .bind(delivery.wake.process_id.as_str())
+        .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
+        .bind(delivery.wake.target_session_id.as_str())
+        .bind(delivery.wake.sequence as i64)
+        .bind(delivery.next_attempt_at_ms as i64)
+        .bind(delivery.expires_at_ms as i64)
+        .bind(serde_json::to_string(&delivery.wake).map_err(process_decode_error)?)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 

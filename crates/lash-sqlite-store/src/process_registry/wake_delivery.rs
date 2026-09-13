@@ -60,9 +60,7 @@ pub(super) async fn update_wake_delivery_state(
         Ok(tx_outcome((|| {
             let changed = tx
                 .execute(
-                    "UPDATE process_wake_deliveries
-                     SET state = ?3, claim_token = NULL, discard_reason = ?4
-                     WHERE delivery_id = ?1 AND state = 'enqueuing' AND claim_token = ?2",
+                    crate::process_registry::SETTLE_WAKE_CLAIM_SQL.as_str(),
                     params![
                         delivery_id,
                         claim_token,

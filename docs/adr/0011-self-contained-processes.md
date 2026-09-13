@@ -23,6 +23,13 @@ explicit Lifecycle Relation defined by
 Every process records a Lifecycle Policy and Parent Scope at registration;
 originator, observer, wake, and session relations still imply no cleanup.
 
+Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) makes the definition a first-class
+value and pins a `ProcessDefinitionRef` on every durable record, so capture
+at creation now includes the definition reference itself and a registry name
+is never resolved after registration. Capture-by-value of cell locals into a
+lifted process body is admitted only for immutable, durably representable
+locals, which enforces the prohibition above on capturing a mutable name.
+
 ## Considered Options
 
 - **Live session binding (status quo)**: the worker rebuilt the owner session's runtime
