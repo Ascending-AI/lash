@@ -40,10 +40,15 @@ fn workspace_root() -> PathBuf {
 
 /// Test sources may pin the spelling: that is how the key's byte identity is
 /// proved, and a pinned expectation is the opposite of a second minting site.
+///
+/// Only real test roots are exempt: a `tests/` or `benches/` directory, and the
+/// `tests.rs` / `*_tests.rs` files that hold `#[cfg(test)]` module bodies. A
+/// `testing/` directory is *not* exempt — `lash-core/src/testing` ships behind
+/// the `testing` feature and its registries mint live keys, so it is scanned
+/// like any other production path.
 fn is_test_path(relative: &str) -> bool {
     relative.split('/').any(|segment| {
         segment == "tests"
-            || segment == "testing"
             || segment == "benches"
             || segment.ends_with("_tests.rs")
             || segment == "tests.rs"
@@ -66,6 +71,14 @@ fn normalise(line: &str) -> String {
 /// re-spells the surrounding format. A fully fixed spelling such as
 /// `process:1:signal.ready:1` interpolates nothing and is a pinned expectation,
 /// not a minting site.
+///
+/// What it does not catch, stated so a reader does not over-trust it: the
+/// detector keys on `process:{` and `:signal.` appearing on one line, so a key
+/// assembled in two steps (a prefix bound to a variable, the `:signal.` tail
+/// appended later) or one whose event type is itself interpolated
+/// (`process:{id}:{event_type}:{n}`) slips past. It stops the format from being
+/// retyped, which is the drift the ticket found; it is not a proof that no other
+/// code can construct the same string.
 fn mints_signal_key(line: &str) -> bool {
     let normalised = normalise(line);
     normalised.contains("process:{") && normalised.contains(":signal.")
