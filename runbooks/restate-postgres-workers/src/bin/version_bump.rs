@@ -58,39 +58,87 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 88;
-/// Tables component 89 introduced. Dropping them leaves the published
-/// component-88 catalog; this is exactly the migration's
-/// `source_missing_tables`.
-const POST_FLOOR_TABLES: [&str; 3] = [
-    "lash_artifact_owners",
-    "lash_artifact_owner_retirements",
-    "lash_process_artifact_cleanup",
+const MIGRATION_FLOOR_VERSION: i32 = 50;
+/// Tables the component generations *above* the floor introduced, newest first
+/// (60 adds no table; 59: turn-cancel requests; 58 adds no table; 57: checkpoint edges; 56 and
+/// 55 add no table; 54: the effect-group journal;
+/// 52: attachment GC fence; 51: parent-end plans and tool-intent submissions).
+/// Dropping them leaves the published floor
+/// catalog: the set is exactly the floor migration's `source_missing_tables`.
+const POST_FLOOR_TABLES: [&str; 6] = [
+    "lash_turn_cancel_requests",
+    "lash_checkpoint_blob_refs",
+    "lash_runtime_effect_group",
+    "lash_attachment_condemnations",
+    "lash_tool_intent_submissions",
+    "lash_process_parent_end_plans",
 ];
-/// Indexes component 89 added to tables the floor catalog already had, so
-/// dropping the post-floor tables does not take them with it. This list is the
+/// Indexes those generations added to tables the floor catalog already had, so
+/// dropping the post-floor tables does not take them with it (60: the session
+/// state inventory index; 65: the process update-time index; 57: the two root
+/// indexes; 56: trigger reclaim eligibility; 55: the drain's
+/// unsettled-children index; 54: the settlement uniqueness guard, both on the
+/// effect-replay table; 53: the ingress-family ordering pair). This list is the
 /// post-floor `introduced_relations` that are not
 /// themselves post-floor tables and do not belong to one, which is what
 /// `scripts/check_version_bump_fixtures.py` proves.
-const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_artifact_owners_owner"];
-/// Columns component 89 added to tables the floor catalog already had, so
-/// dropping the post-floor tables does not take them with it either. Without this axis the
+const POST_FLOOR_INDEXES: [&str; 10] = [
+    "idx_lash_session_meta_state_version",
+    "idx_lash_session_meta_catalog",
+    "idx_lash_sessions_checkpoint_ref",
+    "idx_lash_node_anchors_checkpoint_ref",
+    "idx_lash_queued_work_session_command_order",
+    "idx_lash_pending_turn_input_order",
+    "uq_lash_runtime_effect_replay_group_seq",
+    "idx_lash_runtime_effect_replay_group_unsettled",
+    "idx_lash_trigger_occurrences_reclaimable",
+    "idx_lash_processes_updated",
+];
+/// Columns those generations added to tables the floor catalog already had, so
+/// dropping the post-floor tables does not take them with it either (54: the two
+/// effect-group columns on the effect-replay table; 56: the occurrence
+/// eligibility arm; 58: the session-enumeration metadata). Without this axis the
 /// "published floor catalog" the fixture reconstructs is a floor catalog with
 /// current-generation columns bolted on, and the refusal it proves is not the
 /// one a genuinely older store gets. The set is exactly the floor migration's
 /// `source_missing_columns`, which `scripts/check_version_bump_fixtures.py`
 /// proves.
-const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [(
-    "lash_effect_scope_retirements",
-    "artifact_cleanup_completed",
-)];
+const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
+    ("lash_session_meta", "session_state_version"),
+    ("lash_runtime_effect_replay", "group_key"),
+    ("lash_runtime_effect_replay", "settlement_seq"),
+    ("lash_trigger_occurrences", "reclaimable_at_ms"),
+    ("lash_session_meta", "created_at_ms"),
+    ("lash_session_meta", "last_commit_at_ms"),
+    ("lash_deleted_sessions", "created_at_ms"),
+    ("lash_deleted_sessions", "last_commit_at_ms"),
+    ("lash_deleted_sessions", "head_revision"),
+    ("lash_deleted_sessions", "relation_kind"),
+    ("lash_deleted_sessions", "parent_session_id"),
+];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 4] = [
-    "lash_artifact_owners",
-    "idx_lash_artifact_owners_owner",
-    "lash_artifact_owner_retirements",
-    "lash_process_artifact_cleanup",
+const POST_FLOOR_ARTIFACTS: [&str; 20] = [
+    "lash_turn_cancel_requests",
+    "idx_lash_session_meta_state_version",
+    "idx_lash_session_meta_catalog",
+    "lash_checkpoint_blob_refs",
+    "idx_lash_checkpoint_blob_refs_blob_ref",
+    "idx_lash_sessions_checkpoint_ref",
+    "idx_lash_node_anchors_checkpoint_ref",
+    "idx_lash_pending_turn_input_order",
+    "idx_lash_queued_work_session_command_order",
+    "idx_lash_runtime_effect_group_scope",
+    "idx_lash_runtime_effect_group_session",
+    "idx_lash_runtime_effect_replay_group_unsettled",
+    "idx_lash_tool_intent_submissions_scope",
+    "idx_lash_trigger_occurrences_reclaimable",
+    "lash_attachment_condemnations",
+    "lash_process_parent_end_plans",
+    "lash_runtime_effect_group",
+    "lash_tool_intent_submissions",
+    "uq_lash_runtime_effect_replay_group_seq",
+    "idx_lash_processes_updated",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture

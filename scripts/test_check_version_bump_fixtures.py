@@ -328,6 +328,54 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         self.assertTrue(valid, message)
         self.assertIn("component 53", message)
 
+    def test_current_refusal_row_can_layer_over_the_historical_catalog(self) -> None:
+        current_row = """\
+    SchemaMigration {
+        from: 53,
+        to: 54,
+        source_missing_tables: &["lash_current"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["lash_current"],
+        statements: &[],
+    },
+"""
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 54;\n",
+            migrations=MIGRATIONS_SOURCE.replace(
+                "const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[\n",
+                "const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[\n" + current_row,
+            ),
+            fixture=FIXTURE_SOURCE.replace(
+                'const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_fence"];',
+                'const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_current"];',
+            ),
+        )
+        self.assertTrue(valid, message)
+        self.assertIn("component 54, floor 50, 3 explicit migrations", message)
+
+    def test_layered_catalog_requires_the_retained_current_minus_two_target(self) -> None:
+        current_row = """\
+    SchemaMigration {
+        from: 54,
+        to: 55,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+"""
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 55;\n",
+            migrations=MIGRATIONS_SOURCE.replace(
+                "const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[\n",
+                "const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[\n" + current_row,
+            ),
+        )
+        self.assertFalse(valid)
+        self.assertIn("only over the retained pre-cutover generation 53", message)
+
     def test_destructive_bump_still_claiming_migration_divergence_fails(self) -> None:
         valid, message = self.check(version="const SCHEMA_VERSION: i32 = 53;\n")
         self.assertFalse(valid)
