@@ -112,7 +112,6 @@ impl StaticToolExecute for SessionProcessAdminTools {
                 lash_core::CancelProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from(process_id),
-                    reason: Some("cancelled by processes.cancel".to_string()),
                 },
             )]),
         )
@@ -349,10 +348,6 @@ mod tests {
         };
         assert_eq!(intent.session_id, "test-session");
         assert_eq!(intent.process_id, "literal-process");
-        assert_eq!(
-            intent.reason.as_deref(),
-            Some("cancelled by processes.cancel")
-        );
     }
 
     #[test]

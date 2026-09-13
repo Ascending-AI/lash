@@ -228,10 +228,28 @@ where
     Ok(())
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RestateProcessCancelRequest {
-    pub process_id: ProcessId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub process_ref: lash_core::ProcessRef,
+    pub request: lash_core::CancelRequest,
+}
+
+impl RestateProcessCancelRequest {
+    pub(crate) fn from_record(record: &lash_core::ProcessRecord) -> Result<Self, PluginError> {
+        let request = record.cancel_request.as_deref().cloned().ok_or_else(|| {
+            PluginError::Session(format!(
+                "process `{}` has no cancellation request",
+                record.id
+            ))
+        })?;
+        Ok(Self {
+            process_ref: lash_core::ProcessRef {
+                process_id: record.id.clone(),
+                incarnation: record.incarnation,
+            },
+            request,
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -319,7 +337,7 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         request: RestateProcessCancelRequest,
     ) -> Result<(), PluginError> {
         self.worker
-            .request_process_cancel(&request.process_id, request.reason)
+            .request_process_cancel(&request.process_ref, &request.request)
             .await
     }
 

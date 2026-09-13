@@ -867,9 +867,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
     assert_eq!(handle.definition.as_ref().unwrap()["revision"], 7);
     assert_eq!(handle.status, ProcessStatus::Completed);
-    let cancel_summary = lash::process::ProcessCancelReceipt::from_record(completed.clone());
-    assert_eq!(cancel_summary.process_id, process_id);
-    assert_eq!(cancel_summary.status, ProcessStatus::Completed);
+    assert!(
+        lash::process::ProcessCancelReceipt::from_record(completed.clone()).is_err(),
+        "a completed process without an accepted cancel request has no cancel receipt"
+    );
 
     let worklist_cursor = ProcessWorklistCursor::new("example", "invoice-a", "invoice-z");
     assert_eq!(worklist_cursor.backend(), "example");

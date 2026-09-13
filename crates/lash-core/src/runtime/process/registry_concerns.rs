@@ -577,6 +577,21 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessStartOutcome, PluginError>;
 
+    /// Request cancellation of this exact process lifetime.
+    ///
+    /// The registry stamps the first accepted request with its injected clock.
+    /// Same origin and requester is a no-op on a nonterminal row; a different
+    /// request is a typed conflict. Optional attribution never replaces the
+    /// cancellation's intrinsic replay key. The returned record contains the
+    /// first accepted fact, including its original timestamp.
+    async fn request_process_cancel(
+        &self,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<ProcessRecord, PluginError>;
+
     /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
     ///
     /// First-writer-wins: a repeat with the same requester and reason is an

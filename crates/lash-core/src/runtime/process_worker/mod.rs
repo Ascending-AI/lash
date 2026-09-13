@@ -1467,7 +1467,7 @@ impl DurableProcessWorker {
     ) -> Result<bool, RecoverFailure> {
         self.config
             .process_registry()
-            .count_events_through(process_id, "process.cancel_requested", i64::MAX as u64)
+            .get_process(process_id)
             .await
             .map_err(|error| {
                 RecoverFailure::BackendError(self.recovery_backend_error(
@@ -1476,19 +1476,27 @@ impl DurableProcessWorker {
                     error,
                 ))
             })
-            .map(|count| count > 0)
+            .and_then(|record| {
+                record
+                    .map(|record| record.cancel_request.is_some())
+                    .ok_or_else(|| {
+                        RecoverFailure::Run(crate::runtime::registry_transitions::unknown_process(
+                            process_id,
+                        ))
+                    })
+            })
     }
 
     pub async fn request_process_cancel(
         &self,
-        process_id: &ProcessId,
-        reason: Option<String>,
+        process_ref: &crate::ProcessRef,
+        request: &crate::CancelRequest,
     ) -> Result<(), PluginError> {
         self.config
             .process_registry()
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::cancel_requested(process_id, reason),
+            .append_event_ref(
+                process_ref,
+                crate::ProcessEventAppendRequest::cancel_requested(process_ref, request),
             )
             .await
             .map(|_| ())

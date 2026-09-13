@@ -1063,13 +1063,19 @@ impl<'run> RuntimeExecutionContext<'run> {
                         .event_context
                         .as_ref()
                         .ok_or_else(missing_process_execution_error)?;
-                    let events = match event_context
+                    let record = match event_context
                         .process_work
                         .registry()
-                        .events_after(&process.process_id, 0)
+                        .get_process(&process.process_id)
                         .await
-                    {
-                        Ok(events) => events,
+                        .and_then(|record| {
+                            record.ok_or_else(|| {
+                                crate::runtime::registry_transitions::unknown_process(
+                                    &process.process_id,
+                                )
+                            })
+                        }) {
+                        Ok(record) => record,
                         Err(error) => {
                             let error = match error {
                                 crate::PluginError::Runtime(error) => {
@@ -1081,9 +1087,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                             return Err(error);
                         }
                     };
-                    let cancel_requested = events
-                        .iter()
-                        .any(|event| event.event_type == "process.cancel_requested");
+                    let cancel_requested = record.cancel_request.is_some();
                     if cancel_requested {
                         cancellation.cancel();
                         return Err(crate::RuntimeEffectControllerError::new(

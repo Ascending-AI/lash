@@ -414,8 +414,9 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
                 runtime_invocation(RuntimeEffectKind::Process, "background-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_ref: lash_core::ProcessRef::from_record(&record),
-                    reason: Some("user requested".to_string()),
-                    replay: None,
+                    origin: lash_core::CancelOrigin::OperatorRequested,
+                    requester: "actor:cancel-test".to_string(),
+                    attribution: None,
                 }),
             ),
             registry_local_executor(registry),
@@ -430,13 +431,574 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
     };
 
     assert!(!record.is_terminal());
+    let request = record
+        .cancel_request
+        .as_deref()
+        .expect("folded cancellation");
+    assert_eq!(request.origin, lash_core::CancelOrigin::OperatorRequested);
+    assert_eq!(request.requester, "actor:cancel-test");
     assert_eq!(
         context.cancelled.lock_recover().as_slice(),
-        &[(
-            "task-cancel".to_string(),
-            Some("user requested".to_string())
-        )]
+        &[RestateProcessCancelRequest {
+            process_ref: lash_core::ProcessRef::from_record(&record),
+            request: request.clone(),
+        }]
     );
+}
+
+fn mutate_process_command_journal_payload(
+    context: &ReplayableRecordingContext,
+    invocation: &RuntimeEffectInvocation,
+    operation: &str,
+    mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) {
+    let effect_name = format!("{}.{operation}:v1", restate_effect_name(invocation));
+    let mut records = context.records.lock_recover();
+    let bytes = records
+        .get_mut(&effect_name)
+        .expect("recorded process-command journal payload");
+    let mut encoded: serde_json::Value =
+        serde_json::from_slice(bytes).expect("decode process-command journal result");
+    let payload = encoded
+        .get_mut("Ok")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("successful process-command journal payload");
+    mutate(payload);
+    *bytes = serde_json::to_vec(&encoded).expect("encode mutated process-command journal payload");
+}
+
+fn remove_outer_recorded_process_effect(
+    context: &ReplayableRecordingContext,
+    invocation: &RuntimeEffectInvocation,
+) {
+    context
+        .records
+        .lock_recover()
+        .remove(&restate_effect_name(invocation))
+        .expect("outer recorded process effect");
+}
+
+#[tokio::test]
+pub(super) async fn restate_cancel_redrive_after_completion_replays_journaled_admission() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("restate-cancel-redrive"))
+        .await
+        .expect("register cancellation target");
+    let invocation = runtime_invocation(RuntimeEffectKind::Process, "cancel-redrive");
+    let command = ProcessCommand::Cancel {
+        process_ref: lash_core::ProcessRef::from_record(&record),
+        origin: lash_core::CancelOrigin::OperatorRequested,
+        requester: "actor:cancel-redrive".to_string(),
+        attribution: None,
+    };
+
+    let first = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation.clone(),
+                RuntimeEffectCommand::process(command.clone()),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("first cancellation admission");
+    let admission_name = format!(
+        "{}.process-cancel-admission:v1",
+        restate_effect_name(&invocation)
+    );
+    let admission: serde_json::Value = serde_json::from_slice(
+        context
+            .records
+            .lock_recover()
+            .get(&admission_name)
+            .expect("current cancel admission payload"),
+    )
+    .expect("decode current cancel admission payload");
+    assert_eq!(admission["Ok"]["version"], 1);
+    assert_eq!(
+        admission["Ok"]["identity"]["process_ref"]["process_id"],
+        record.id.as_str()
+    );
+    let first_sequence = {
+        let mut commands = context.journal_commands.lock_recover();
+        std::mem::take(&mut *commands)
+    };
+
+    registry
+        .complete_process(
+            &record.id,
+            process_success(serde_json::json!({ "completed": true })),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete after cancellation admission");
+    context.start_replay();
+    let replay = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(invocation.clone(), RuntimeEffectCommand::process(command)),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("redrive cancellation after process completion");
+    let replay_sequence = context.journal_commands.lock_recover().clone();
+
+    assert_eq!(
+        serde_json::to_value(replay).expect("encode replay outcome"),
+        serde_json::to_value(first).expect("encode first outcome"),
+        "redrive must return the cancellation record accepted before completion"
+    );
+    assert_eq!(replay_sequence, first_sequence);
+    assert_eq!(
+        first_sequence,
+        vec![
+            format!(
+                "run:{}.process-cancel-admission:v1",
+                restate_effect_name(&invocation)
+            ),
+            format!("call:process-cancel:{}", record.id),
+        ],
+        "admission must be journaled before workflow delivery on every attempt"
+    );
+    assert_eq!(
+        registry
+            .events_after(&record.id, 0)
+            .await
+            .expect("read cancellation events")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        1,
+        "redrive must not repeat cancellation admission against live state"
+    );
+    assert_eq!(
+        context.events.cancelled.lock_recover().len(),
+        2,
+        "the workflow delivery command must be replayed after the journaled admission"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn restate_cancel_replay_refuses_journaled_command_identity_drift() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let registry = process_registry();
+    let first_record = registry
+        .register_process(external_registration("restate-cancel-identity-a"))
+        .await
+        .expect("register first cancellation target");
+    let second_record = registry
+        .register_process(external_registration("restate-cancel-identity-b"))
+        .await
+        .expect("register second cancellation target");
+    let invocation = runtime_invocation(RuntimeEffectKind::Process, "cancel-identity-drift");
+    let command = |record: &lash_core::ProcessRecord| ProcessCommand::Cancel {
+        process_ref: lash_core::ProcessRef::from_record(record),
+        origin: lash_core::CancelOrigin::OperatorRequested,
+        requester: "actor:cancel-identity-drift".to_string(),
+        attribution: None,
+    };
+
+    host.execute_effect(
+        RuntimeEffectEnvelope::new(
+            invocation.clone(),
+            RuntimeEffectCommand::process(command(&first_record)),
+        ),
+        registry_local_executor(Arc::clone(&registry)),
+    )
+    .await
+    .expect("record first cancellation admission");
+    assert_eq!(context.events.cancelled.lock_recover().len(), 1);
+
+    context.start_replay();
+    let error = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation,
+                RuntimeEffectCommand::process(command(&second_record)),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect_err("a different target must not reuse the recorded admission");
+
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateProcessJournalIdentityDrift
+    );
+    assert!(
+        registry
+            .get_process(&second_record.id)
+            .await
+            .expect("read second target")
+            .expect("second target remains retained")
+            .cancel_request
+            .is_none(),
+        "identity drift must be refused before registry cancellation"
+    );
+    assert_eq!(
+        context.events.cancelled.lock_recover().len(),
+        1,
+        "identity drift must be refused before workflow cancellation"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn restate_cancel_replay_refuses_incompatible_journal_payloads() {
+    for mutation in ["wrong-version", "unknown-field"] {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let registry = process_registry();
+        let process_id = format!("restate-cancel-payload-{mutation}");
+        let record = registry
+            .register_process(external_registration(&process_id))
+            .await
+            .expect("register cancellation target");
+        let effect_id = format!("cancel-payload-{mutation}");
+        let invocation = runtime_invocation(RuntimeEffectKind::Process, &effect_id);
+        let command = ProcessCommand::Cancel {
+            process_ref: lash_core::ProcessRef::from_record(&record),
+            origin: lash_core::CancelOrigin::OperatorRequested,
+            requester: format!("actor:cancel-payload-{mutation}"),
+            attribution: None,
+        };
+
+        host.execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation.clone(),
+                RuntimeEffectCommand::process(command.clone()),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("record current cancellation payload");
+        mutate_process_command_journal_payload(
+            &context,
+            &invocation,
+            "process-cancel-admission",
+            |payload| match mutation {
+                "wrong-version" => {
+                    payload.insert("version".to_string(), serde_json::json!(999));
+                }
+                "unknown-field" => {
+                    payload.insert("future_field".to_string(), serde_json::json!(true));
+                }
+                _ => unreachable!("bounded mutation table"),
+            },
+        );
+        context.start_replay();
+
+        let error = host
+            .execute_effect(
+                RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::process(command)),
+                registry_local_executor(Arc::clone(&registry)),
+            )
+            .await
+            .expect_err("incompatible journal payload must be refused");
+        assert_eq!(
+            error.code,
+            lash_core::RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+            "{mutation}"
+        );
+        assert_eq!(
+            registry
+                .events_after(&record.id, 0)
+                .await
+                .expect("read cancellation history")
+                .iter()
+                .filter(|event| event.event_type == "process.cancel_requested")
+                .count(),
+            1,
+            "{mutation} must not repeat registry cancellation"
+        );
+        assert_eq!(
+            context.events.cancelled.lock_recover().len(),
+            1,
+            "{mutation} must be refused before workflow cancellation"
+        );
+    }
+}
+
+#[tokio::test]
+pub(super) async fn restate_parent_end_redrive_preserves_decision_and_delivery_journal_sequence() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let registry = process_registry();
+    let record = registry
+        .register_process(external_registration("restate-parent-end-redrive"))
+        .await
+        .expect("register parent-end target");
+    let invocation = runtime_invocation(RuntimeEffectKind::Process, "parent-end-redrive");
+    let command = ProcessCommand::ParentEnd {
+        identity: lash_core::ToolIntentIdentity {
+            session_id: SessionId::from("session"),
+            execution_scope_id: "turn".to_string(),
+            tool_call_id: "parent-end-redrive-call".to_string(),
+            intent_index: 0,
+            replay_key: "parent-end-redrive-intent".to_string(),
+            minting_emission_replay_key: None,
+        },
+        process_id: record.id.clone(),
+        policy: lash_core::ProcessParentEndPolicy::Cancel,
+    };
+
+    let first = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation.clone(),
+                RuntimeEffectCommand::process(command.clone()),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("first parent-end cancellation");
+    let decision_name = format!(
+        "{}.parent-end-cancel-decision:v1",
+        restate_effect_name(&invocation)
+    );
+    let decision: serde_json::Value = serde_json::from_slice(
+        context
+            .records
+            .lock_recover()
+            .get(&decision_name)
+            .expect("current parent-end decision payload"),
+    )
+    .expect("decode current parent-end decision payload");
+    assert_eq!(decision["Ok"]["version"], 1);
+    assert_eq!(decision["Ok"]["identity"]["process_id"], record.id.as_str());
+    let first_sequence = {
+        let mut commands = context.journal_commands.lock_recover();
+        std::mem::take(&mut *commands)
+    };
+
+    context.start_replay();
+    let replay = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(invocation.clone(), RuntimeEffectCommand::process(command)),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("redrive parent-end cancellation");
+    let replay_sequence = context.journal_commands.lock_recover().clone();
+
+    assert_eq!(
+        serde_json::to_value(replay).expect("encode replay outcome"),
+        serde_json::to_value(first).expect("encode first outcome"),
+        "redrive must preserve the winning parent-end cancellation fact"
+    );
+    assert_eq!(
+        replay_sequence, first_sequence,
+        "parent-end redrive must emit the same Restate journal commands"
+    );
+    assert_eq!(
+        first_sequence,
+        vec![
+            format!(
+                "run:{}.parent-end-cancel-decision:v1",
+                restate_effect_name(&invocation)
+            ),
+            format!("call:process-cancel:{}", record.id),
+            format!("run:{}", restate_effect_name(&invocation)),
+        ]
+    );
+    assert_eq!(
+        registry
+            .events_after(&record.id, 0)
+            .await
+            .expect("read parent-end cancellation events")
+            .iter()
+            .filter(|event| event.event_type == "process.cancel_requested")
+            .count(),
+        1,
+        "the journaled decision must keep replay from issuing cancellation twice"
+    );
+    assert_eq!(
+        context.events.cancelled.lock_recover().len(),
+        2,
+        "the standing cancellation still replays workflow delivery"
+    );
+}
+
+fn parent_end_command(process_id: ProcessId, replay_key: &str) -> ProcessCommand {
+    ProcessCommand::ParentEnd {
+        identity: lash_core::ToolIntentIdentity {
+            session_id: SessionId::from("session"),
+            execution_scope_id: "turn".to_string(),
+            tool_call_id: format!("{replay_key}-call"),
+            intent_index: 0,
+            replay_key: replay_key.to_string(),
+            minting_emission_replay_key: None,
+        },
+        process_id,
+        policy: lash_core::ProcessParentEndPolicy::Cancel,
+    }
+}
+
+fn assert_parent_end_refusal_code(outcome: RuntimeEffectOutcome, expected: &str) {
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::ParentEnd { outcome },
+    } = outcome
+    else {
+        panic!("expected parent-end refusal, got {outcome:?}");
+    };
+    let lash_core::ToolIntentParentEndOutcome::Refused { code, .. } = outcome.as_ref() else {
+        panic!("expected parent-end refusal, got {outcome:?}")
+    };
+    assert_eq!(code, expected);
+}
+
+#[tokio::test]
+pub(super) async fn restate_parent_end_replay_refuses_journaled_command_identity_drift() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let registry = process_registry();
+    let first_record = registry
+        .register_process(external_registration("restate-parent-end-identity-a"))
+        .await
+        .expect("register first parent-end target");
+    let second_record = registry
+        .register_process(external_registration("restate-parent-end-identity-b"))
+        .await
+        .expect("register second parent-end target");
+    let invocation = runtime_invocation(RuntimeEffectKind::Process, "parent-end-identity-drift");
+
+    host.execute_effect(
+        RuntimeEffectEnvelope::new(
+            invocation.clone(),
+            RuntimeEffectCommand::process(parent_end_command(
+                first_record.id.clone(),
+                "parent-end-identity-drift",
+            )),
+        ),
+        registry_local_executor(Arc::clone(&registry)),
+    )
+    .await
+    .expect("record first parent-end decision");
+    assert_eq!(context.events.cancelled.lock_recover().len(), 1);
+
+    mutate_process_command_journal_payload(
+        &context,
+        &invocation,
+        "parent-end-cancel-decision",
+        |payload| {
+            payload
+                .get_mut("identity")
+                .and_then(serde_json::Value::as_object_mut)
+                .expect("parent-end command identity")
+                .insert(
+                    "process_id".to_string(),
+                    serde_json::json!(second_record.id.as_str()),
+                );
+        },
+    );
+    remove_outer_recorded_process_effect(&context, &invocation);
+    context.start_replay_allowing_journal_extension();
+    let outcome = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation,
+                RuntimeEffectCommand::process(parent_end_command(
+                    first_record.id.clone(),
+                    "parent-end-identity-drift",
+                )),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("identity drift becomes a typed parent-end refusal");
+
+    assert_parent_end_refusal_code(
+        outcome,
+        lash_core::RuntimeErrorCode::RestateProcessJournalIdentityDrift.as_str(),
+    );
+    assert!(
+        registry
+            .get_process(&second_record.id)
+            .await
+            .expect("read second target")
+            .expect("second target remains retained")
+            .cancel_request
+            .is_none(),
+        "identity drift must be refused before registry cancellation"
+    );
+    assert_eq!(
+        context.events.cancelled.lock_recover().len(),
+        1,
+        "identity drift must be refused before workflow cancellation"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn restate_parent_end_replay_refuses_incompatible_journal_payloads() {
+    for mutation in ["wrong-version", "unknown-field"] {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let registry = process_registry();
+        let process_id = format!("restate-parent-end-payload-{mutation}");
+        let record = registry
+            .register_process(external_registration(&process_id))
+            .await
+            .expect("register parent-end target");
+        let effect_id = format!("parent-end-payload-{mutation}");
+        let invocation = runtime_invocation(RuntimeEffectKind::Process, &effect_id);
+        let command = parent_end_command(record.id.clone(), &effect_id);
+
+        host.execute_effect(
+            RuntimeEffectEnvelope::new(
+                invocation.clone(),
+                RuntimeEffectCommand::process(command.clone()),
+            ),
+            registry_local_executor(Arc::clone(&registry)),
+        )
+        .await
+        .expect("record current parent-end payload");
+        mutate_process_command_journal_payload(
+            &context,
+            &invocation,
+            "parent-end-cancel-decision",
+            |payload| match mutation {
+                "wrong-version" => {
+                    payload.insert("version".to_string(), serde_json::json!(999));
+                }
+                "unknown-field" => {
+                    payload.insert("future_field".to_string(), serde_json::json!(true));
+                }
+                _ => unreachable!("bounded mutation table"),
+            },
+        );
+        remove_outer_recorded_process_effect(&context, &invocation);
+        context.start_replay_allowing_journal_extension();
+
+        let outcome = host
+            .execute_effect(
+                RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::process(command)),
+                registry_local_executor(Arc::clone(&registry)),
+            )
+            .await
+            .expect("incompatible payload becomes a typed parent-end refusal");
+        assert_parent_end_refusal_code(
+            outcome,
+            lash_core::RuntimeErrorCode::RestateProcessJournalPayloadIncompatible.as_str(),
+        );
+        assert_eq!(
+            registry
+                .events_after(&record.id, 0)
+                .await
+                .expect("read parent-end cancellation history")
+                .iter()
+                .filter(|event| event.event_type == "process.cancel_requested")
+                .count(),
+            1,
+            "{mutation} must not repeat registry cancellation"
+        );
+        assert_eq!(
+            context.events.cancelled.lock_recover().len(),
+            1,
+            "{mutation} must be refused before workflow cancellation"
+        );
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -856,8 +1418,15 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         .append_event(
             &ProcessId::from("prompt-cancel"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("prompt-cancel"),
-                Some("stop promptly".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("prompt-cancel"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:running_process_cancel_uses_native_signal_without_poll_delay",
+                    11,
+                ),
             ),
         )
         .await
@@ -926,8 +1495,15 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
         .append_event(
             &ProcessId::from("cancel-cleanup-failure"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("cancel-cleanup-failure"),
-                Some("exercise cleanup failure".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("cancel-cleanup-failure"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:cancellation_cleanup_failure_does_not_write_a_false_terminal",
+                    11,
+                ),
             ),
         )
         .await
@@ -1000,10 +1576,8 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
     registry
         .append_event(
             &ProcessId::from("non-session-cancel-failure"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("non-session-cancel-failure"),
-                Some("preserve prior non-session behavior".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("non-session-cancel-failure")).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:non_session_cancel_preserves_the_prior_cancelled_terminal_on_runner_failure", 11)),
         )
         .await
         .expect("append cancel request");
@@ -1279,10 +1853,8 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
     registry
         .append_event(
             &ProcessId::from("transient-cancel-read"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("transient-cancel-read"),
-                Some("retry the durable read".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("transient-cancel-read")).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:transient_cancel_registry_read_error_cannot_fall_through_to_success", 11)),
         )
         .await
         .expect("append cancel request");

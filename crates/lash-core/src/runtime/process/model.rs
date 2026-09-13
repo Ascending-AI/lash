@@ -1,4 +1,5 @@
 use lash_sansio::sync::MutexExt;
+use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
@@ -1087,6 +1088,9 @@ pub struct ProcessRecord {
     /// Pending Abandon Request the sweep reconciles once the lease lapses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandon_request: Option<Box<AbandonRequest>>,
+    /// The first accepted cancellation request, retained across retries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<Box<CancelRequest>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<WaitState>,
     #[serde(default)]
@@ -1176,6 +1180,7 @@ impl ProcessRecord {
             external_ref: None,
             first_started: None,
             abandon_request: None,
+            cancel_request: None,
             wait: None,
             status: ProcessStatus::Running,
             outcome: None,
@@ -1465,17 +1470,25 @@ pub struct ProcessCancelReceipt {
     pub process_id: ProcessId,
     pub incarnation: ProcessIncarnation,
     pub status: ProcessStatus,
+    pub origin: CancelOrigin,
 }
 
 impl ProcessCancelReceipt {
     /// Builds a `ProcessCancelReceipt` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn from_record(record: ProcessRecord) -> Self {
-        Self {
+    pub fn from_record(record: ProcessRecord) -> Result<Self, crate::PluginError> {
+        let request = record.cancel_request.ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "process `{}` has no cancellation request",
+                record.id
+            ))
+        })?;
+        Ok(Self {
             process_id: record.id,
             incarnation: record.incarnation,
             status: record.status,
-        }
+            origin: request.origin,
+        })
     }
 }
 

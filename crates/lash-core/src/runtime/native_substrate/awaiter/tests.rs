@@ -265,8 +265,15 @@ async fn await_event_returns_historical_event_immediately() {
         .append_event(
             &ProcessId::from("proc"),
             ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("proc"),
-                Some("stop".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("proc"))
+                    .await
+                    .expect("retained cancellation target"),
+                &crate::CancelRequest::new(
+                    crate::CancelOrigin::OperatorRequested,
+                    "actor:fixture:await_event_returns_historical_event_immediately",
+                    11,
+                ),
             ),
         )
         .await
@@ -391,7 +398,17 @@ async fn watched_registry_bumps_on_mutations() {
     registry
         .append_event(
             &ProcessId::from("proc"),
-            ProcessEventAppendRequest::cancel_requested(&ProcessId::from("proc"), None),
+            ProcessEventAppendRequest::cancel_requested(
+                &registry
+                    .resolve_process_ref(&ProcessId::from("proc"))
+                    .await
+                    .expect("retained cancellation target"),
+                &crate::CancelRequest::new(
+                    crate::CancelOrigin::OperatorRequested,
+                    "actor:fixture:watched_registry_bumps_on_mutations",
+                    11,
+                ),
+            ),
         )
         .await
         .expect("append");
@@ -585,6 +602,48 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
         .await
         .expect("request abandon");
 
+    let process_ref = registry
+        .resolve_process_ref(&ProcessId::from("proc"))
+        .await
+        .expect("retained lifecycle target");
+    let before_cancel = registry
+        .get_process_ref(&process_ref)
+        .await
+        .expect("read before cancel")
+        .expect("retained target");
+    assert!(!before_cancel.is_terminal());
+    assert!(before_cancel.cancel_request.is_none());
+    let cancelled = registry
+        .request_process_cancel(
+            &process_ref,
+            crate::CancelOrigin::OperatorRequested,
+            "actor:lifecycle-sink".to_string(),
+            None,
+        )
+        .await
+        .expect("request cancellation through watched registry");
+    assert_eq!(
+        cancelled
+            .cancel_request
+            .as_ref()
+            .expect("folded cancellation")
+            .origin,
+        crate::CancelOrigin::OperatorRequested
+    );
+    let repeated = registry
+        .request_process_cancel(
+            &process_ref,
+            crate::CancelOrigin::OperatorRequested,
+            "actor:lifecycle-sink".to_string(),
+            None,
+        )
+        .await
+        .expect("replay cancellation through watched registry");
+    assert_eq!(
+        repeated, cancelled,
+        "watch notification preserves the first durable request"
+    );
+
     let collected = sink.collected();
     assert_eq!(
         collected
@@ -597,6 +656,7 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
             "process.resumed",
             "process.external_ref_set",
             "process.abandon_requested",
+            "process.cancel_requested",
         ],
         "the sink must observe every runtime lifecycle append"
     );

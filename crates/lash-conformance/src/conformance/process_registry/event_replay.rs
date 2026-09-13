@@ -32,28 +32,35 @@ pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn Pro
     );
 }
 
-pub(super) async fn long_cancellation_reason_replay_is_backend_safe(
+pub(super) async fn long_cancellation_requester_replay_is_backend_safe(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("long-cancellation-reason-replay");
-    registry
+    let process_id = ProcessId::from("long-cancellation-requester-replay");
+    let record = registry
         .register_process(registration(&process_id))
         .await
         .expect("register long-cancellation process");
-    let reason = (0..800)
+    let requester = (0..800)
         .map(|index| format!("{index:08x}"))
         .collect::<String>();
-    let request = ProcessEventAppendRequest::cancel_requested(&process_id, Some(reason));
+    let request = ProcessEventAppendRequest::cancel_requested(
+        &ProcessRef::from_record(&record),
+        &lash_core::CancelRequest::new(
+            lash_core::CancelOrigin::OperatorRequested,
+            format!("actor:{requester}"),
+            11,
+        ),
+    );
     let first = registry
         .append_event(&process_id, request.clone())
         .await
-        .expect("append cancellation with long reason");
+        .expect("append cancellation with long requester");
     let replay = registry
         .append_event(&process_id, request)
         .await
-        .expect("replay cancellation with long reason");
+        .expect("replay cancellation with long requester");
     assert_eq!(
         replay.event.sequence, first.event.sequence,
-        "long cancellation reason retries must remain idempotent on every backend"
+        "long cancellation requester retries must remain idempotent on every backend"
     );
 }

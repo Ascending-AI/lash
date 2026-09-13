@@ -210,14 +210,12 @@ pub struct SignalProcessIntent {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Cancellation declaration consumed by protocol and process-engine implementors.
+#[serde(deny_unknown_fields)]
 pub struct CancelProcessIntent {
     /// Session whose authority owns the cancellation.
     pub session_id: SessionId,
     /// Target process id.
     pub process_id: ProcessId,
-    /// Optional durable cancellation reason.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

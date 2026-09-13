@@ -581,8 +581,9 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             LIVE_PROCESS,
             crate::ProcessIncarnation::from_registration_sequence(1),
         ),
-        reason: Some("outside any attempt".to_string()),
-        replay: None,
+        origin: crate::CancelOrigin::OperatorRequested,
+        requester: "test:outside-attempt".to_string(),
+        attribution: None,
     };
     let effect_id = command.effect_id();
     crate::RuntimeEffectController::execute_effect(
@@ -619,6 +620,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     );
 
     let registry = Arc::clone(&fixtures.registry);
+    let nested_target = registry
+        .resolve_process_ref(&ProcessId::from(EXTERNAL_PROCESS))
+        .await
+        .expect("resolve the nonterminal sentinel target");
     let nested_sentinel = &sentinel;
     crate::RuntimeEffectController::execute_effect(
         &sentinel,
@@ -633,12 +638,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
         ),
         crate::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
             let command = crate::ProcessCommand::Cancel {
-                process_ref: crate::ProcessRef::new(
-                    LIVE_PROCESS,
-                    crate::ProcessIncarnation::from_registration_sequence(1),
-                ),
-                reason: Some("test-only sentinel leak".to_string()),
-                replay: None,
+                process_ref: nested_target,
+                origin: crate::CancelOrigin::OperatorRequested,
+                requester: "test:sentinel-leak".to_string(),
+                attribution: None,
             };
             let effect_id = command.effect_id();
             crate::RuntimeEffectController::execute_effect(
@@ -680,7 +683,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     .expect("test-only nested leak executes");
     assert_eq!(
         ledger.crossings_inside_attempt(),
-        vec!["execute_effect:process:process:cancel:attempt-atomicity-live".to_string()],
+        vec!["execute_effect:process:process:cancel:attempt-atomicity-external".to_string()],
         "the literal test-only leak proves the sentinel fails red when a command escapes"
     );
 }
@@ -739,7 +742,6 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             process_id: ProcessId::from(LIVE_PROCESS.to_string()),
-            reason: Some("intent test complete".to_string()),
         }),
     ]);
     let outcomes =
