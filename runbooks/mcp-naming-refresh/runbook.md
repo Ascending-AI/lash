@@ -24,7 +24,7 @@ Do:
 
 ```bash
 kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
+  '. ./env.sh && cargo test --workspace --all-targets --locked \
   naming::tests -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-names.log"
 ```
@@ -49,7 +49,7 @@ Do:
 
 ```bash
 kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
+  '. ./env.sh && cargo test --workspace --all-targets --locked \
   deferred_call_ -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-refresh.log"
 ```
@@ -78,7 +78,7 @@ Do:
 
 ```bash
 kiln gate lash "$LASH_MCP_NAMING_FORK" -- bash -lc \
-  '. ./env.sh && heavy-slot cargo test --workspace --all-targets --locked \
+  '. ./env.sh && cargo test --workspace --all-targets --locked \
   refuses_a_forced_ -- --nocapture' \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/mcp-naming-runbook-collisions.log"
 ```
