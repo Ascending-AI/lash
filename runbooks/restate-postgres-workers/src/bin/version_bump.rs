@@ -144,12 +144,17 @@ const POST_FLOOR_ARTIFACTS: [&str; 20] = [
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 0] = [];
+const DIVERGENT_ARTIFACTS: [&str; 4] = [
+    "lash_artifact_owners",
+    "idx_lash_artifact_owners_owner",
+    "lash_artifact_owner_retirements",
+    "lash_process_artifact_cleanup",
+];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
 /// reject-and-recreate boundary.
-const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

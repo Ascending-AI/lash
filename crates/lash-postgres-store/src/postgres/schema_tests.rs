@@ -1,28 +1,47 @@
 use super::*;
 
-const RETAINED_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION - 1;
+const CURRENT_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION;
 
 #[test]
-fn current_destructive_cutover_has_no_migration_arm() {
+fn current_catalog_targets_the_running_component_and_refuses_its_predecessor() {
     assert!(
         SCHEMA_MIGRATIONS
             .iter()
-            .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 78 must reject every pre-cutover schema rather than migrate it"
+            .all(|migration| migration.to == SCHEMA_VERSION),
+        "every admission row must target the component selected by apply_schema_migration"
     );
 
     let predecessor = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 68 && migration.to == RETAINED_MIGRATION_ENDPOINT)
-        .expect("the historical component 68 refusal boundary must remain declared");
+        .find(|migration| migration.from == SCHEMA_VERSION - 1)
+        .expect("the immediate predecessor must remain declared");
     assert!(
         predecessor.is_recreate_boundary(),
+        "component 87 must be refused before FIG-677 ownership rows are read"
+    );
+    assert_eq!(
+        predecessor.introduced_relations,
+        &[
+            "lash_artifact_owners",
+            "idx_lash_artifact_owners_owner",
+            "lash_artifact_owner_retirements",
+            "lash_process_artifact_cleanup",
+        ],
+        "the component-87 divergence must name every FIG-677 relation witness"
+    );
+
+    let historical_refusal = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|migration| migration.from == 68 && migration.to == CURRENT_MIGRATION_ENDPOINT)
+        .expect("the historical component 68 refusal boundary must remain declared");
+    assert!(
+        historical_refusal.is_recreate_boundary(),
         "component 68 must not migrate into the retained predecessor"
     );
 
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == 64 && migration.to == RETAINED_MIGRATION_ENDPOINT)
+        .find(|migration| migration.from == 64 && migration.to == CURRENT_MIGRATION_ENDPOINT)
         .expect("the historical component 64 creation-only migration must remain declared");
 
     assert_eq!(
@@ -123,7 +142,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: RETAINED_MIGRATION_ENDPOINT,
+        expected_version: CURRENT_MIGRATION_ENDPOINT,
         found_version: Some(53),
         findings,
     }
@@ -134,7 +153,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: RETAINED_MIGRATION_ENDPOINT,
+            expected: CURRENT_MIGRATION_ENDPOINT,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {
