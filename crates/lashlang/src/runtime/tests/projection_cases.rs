@@ -205,7 +205,10 @@ fn projected_response_from_value(
         ProjectedReadRequest::Empty => value_len(value)
             .map(|len| ProjectedReadResponse::Bool(len == 0))
             .unwrap_or(ProjectedReadResponse::Missing),
-        ProjectedReadRequest::Truthy => ProjectedReadResponse::Bool(is_truthy(value)),
+        ProjectedReadRequest::Truthy => match is_truthy(value) {
+            Ok(truthy) => ProjectedReadResponse::Bool(truthy),
+            Err(_) => ProjectedReadResponse::Missing,
+        },
         ProjectedReadRequest::Field(field) => {
             let field = Name {
                 symbol: intern_symbol(field.as_ref()),
@@ -574,12 +577,19 @@ async fn canonical_snapshot_restore_makes_projected_value_unavailable() {
 
     assert_eq!(projected.name(), "matches[0].text");
     assert_eq!(projected.value_type_name(), "string");
-    let rendered = projected.render().await;
-    assert!(rendered.contains("unavailable after snapshot restore"));
-    assert!(rendered.contains("rerun the producing tool"));
-    let materialized = projected.materialize_async().await;
-    assert!(matches!(materialized, Value::String(_)));
-    assert_ne!(materialized, Value::String("materialized full text".into()));
+    // Before FIG-2865 both of these produced the diagnostic *as data*: `render`
+    // returned the sentence and `materialize` returned it as a `Value::String`,
+    // so a restored placeholder read back as an English message where the host's
+    // view used to be. Both now refuse, typed.
+    assert!(matches!(
+        projected.render().await,
+        Err(RuntimeError::ProjectedValueUnavailable { ref name, ref type_name })
+            if name == "matches[0].text" && type_name == "string"
+    ));
+    assert!(matches!(
+        projected.materialize_async().await,
+        Err(RuntimeError::ProjectedValueUnavailable { .. })
+    ));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -781,7 +791,10 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
                 }
                 ProjectedReadRequest::Truthy => {
                     self.push_call("truthy");
-                    ProjectedReadResponse::Bool(is_truthy(&self.value))
+                    match is_truthy(&self.value) {
+                        Ok(truthy) => ProjectedReadResponse::Bool(truthy),
+                        Err(_) => ProjectedReadResponse::Missing,
+                    }
                 }
                 ProjectedReadRequest::Index(index) => {
                     self.push_call("get_index");
@@ -1238,12 +1251,61 @@ async fn await_record_process_starts_and_joins_handles() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn truthiness_covers_scalar_and_container_values() {
-    assert!(!is_truthy(&Value::Null));
-    assert!(!is_truthy(&Value::Bool(false)));
-    assert!(!is_truthy(&Value::Number(0.0)));
-    assert!(!is_truthy(&Value::String(String::new().into())));
-    assert!(is_truthy(&Value::Bool(true)));
-    assert!(is_truthy(&Value::Number(1.0)));
-    assert!(is_truthy(&Value::List(Vec::new().into())));
-    assert!(is_truthy(&Value::Record(Record::default().into())));
+    assert!(!is_truthy(&Value::Null).expect("null truthiness"));
+    assert!(!is_truthy(&Value::Bool(false)).expect("bool truthiness"));
+    assert!(!is_truthy(&Value::Number(0.0)).expect("number truthiness"));
+    assert!(!is_truthy(&Value::String(String::new().into())).expect("string truthiness"));
+    assert!(is_truthy(&Value::Bool(true)).expect("bool truthiness"));
+    assert!(is_truthy(&Value::Number(1.0)).expect("number truthiness"));
+    assert!(is_truthy(&Value::List(Vec::new().into())).expect("list truthiness"));
+    assert!(is_truthy(&Value::Record(Record::default().into())).expect("record truthiness"));
+}
+
+/// FIG-2865: a projection nested inside a container survives the snapshot wire
+/// with its three canonical fields intact. Before, the wire only ever saw a
+/// top-level projection; a nested one was written and read back with no way to
+/// tell the placeholder from the live view.
+#[test]
+fn nested_projection_survives_the_snapshot_wire() {
+    let snapshot = nested_projection_snapshot();
+    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+    let snapshot = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+
+    let Some(Value::List(rows)) = snapshot.globals().get("rows") else {
+        panic!("expected the nested container to survive the snapshot wire");
+    };
+    let Some(Value::Projected(nested)) = rows.first() else {
+        panic!("expected a nested projected placeholder");
+    };
+    assert_eq!(nested.name(), "report");
+    assert_eq!(nested.value_type_name(), "string");
+    assert_eq!(
+        nested.projection_ref(),
+        Some(&serde_json::json!({ "kind": "report", "id": 7 })),
+        "`projection_ref` must cross the wire unchanged"
+    );
+    assert!(
+        nested.is_unavailable(),
+        "a decoded projection is a placeholder"
+    );
+}
+
+fn nested_projection_snapshot() -> Snapshot {
+    Snapshot::new(
+        [(
+            "rows".to_string(),
+            Value::List(
+                vec![Value::Projected(
+                    ProjectedValue::custom_with_projection_ref(
+                        "report",
+                        Arc::new(SnapshotGuardProjectedValue::default()),
+                        serde_json::json!({ "kind": "report", "id": 7 }),
+                    ),
+                )]
+                .into(),
+            ),
+        )]
+        .into_iter()
+        .collect(),
+    )
 }

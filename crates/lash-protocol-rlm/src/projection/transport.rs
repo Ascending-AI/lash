@@ -313,9 +313,14 @@ pub(crate) fn flow_to_json_value<'a>(value: &'a FlowValue) -> ProjectedFuture<'a
                     .map(serde_json::from_value::<ProjectionRef>)
                 {
                     Some(Ok(reference)) => RlmProjectedSeedEntry::Ref(reference),
-                    Some(Err(_)) | None => RlmProjectedSeedEntry::Materialized(
-                        flow_to_json_value(&value.materialize_async().await).await,
-                    ),
+                    Some(Err(_)) | None => {
+                        RlmProjectedSeedEntry::Materialized(match value.materialize_async().await {
+                            Ok(value) => flow_to_json_value(&value).await,
+                            // No descriptor and no usable `projection_ref`
+                            // leaves nothing to seed with (FIG-2865).
+                            Err(_) => Value::Null,
+                        })
+                    }
                 };
                 projected_wrapper(entry)
             }

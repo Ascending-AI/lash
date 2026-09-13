@@ -394,8 +394,12 @@ async fn continuation_multi_effect_determinism_sweep() {
     }
 }
 
+/// FIG-2865: the continuation wire used to refuse `Value::Projected` outright,
+/// so a slot holding a projected binding could not park at all — while the
+/// `State` snapshot accepted the identical value. Both writers now carry the
+/// projection by identity.
 #[test]
-fn continuation_declines_projected_host_state_with_typed_error() {
+fn continuation_carries_a_projected_binding_slot_by_identity() {
     let program = compile_source("finish input").expect("program should compile");
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
@@ -403,12 +407,20 @@ fn continuation_declines_projected_host_state_with_typed_error() {
     let host = Host;
     let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
 
+    let continuation = vm.suspend().expect("a projected slot must be capturable");
+    let wire = serde_json::to_value(&continuation).expect("continuation should serialize");
     assert_eq!(
-        vm.suspend(),
-        Err(ContinuationError::UnserializableValue {
-            location: "slot 0".to_string(),
-            variant: "Projected",
-        })
+        wire["slots"][0]["value"],
+        serde_json::json!({
+            "kind": "projected",
+            "value": {
+                "name": "input",
+                "type_name": "number",
+                "projection_ref": null,
+            },
+        }),
+        "the continuation wire must carry the same three canonical fields the \
+         snapshot wire writes"
     );
 }
 
@@ -513,13 +525,7 @@ async fn requested_boundary_at_non_capturable_point_is_safely_skipped() {
             .expect("effect should succeed"),
         VmRunOutcome::EffectCompleted
     );
-    assert!(matches!(
-        vm.suspend(),
-        Err(ContinuationError::UnserializableValue {
-            variant: "Projected",
-            ..
-        })
-    ));
+    vm.suspend().expect("a projected slot must be capturable");
     assert_eq!(
         vm.run_process_until_effect()
             .await

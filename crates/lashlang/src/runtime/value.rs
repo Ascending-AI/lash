@@ -227,8 +227,12 @@ impl PartialEq for Value {
             (Self::List(left), Self::List(right)) => left == right,
             (Self::Record(left), Self::Record(right)) => left == right,
             (Self::Projected(left), Self::Projected(right)) => left == right,
-            (Self::Projected(left), right) => left.materialize() == *right,
-            (left, Self::Projected(right)) => *left == right.materialize(),
+            (Self::Projected(left), right) => {
+                matches!(left.materialize(), Ok(left) if left == *right)
+            }
+            (left, Self::Projected(right)) => {
+                matches!(right.materialize(), Ok(right) if *left == right)
+            }
             _ => false,
         }
     }
@@ -381,6 +385,14 @@ pub enum ProjectedReadResponse {
 pub trait ProjectedHostDescriptor: Send + Sync {
     fn type_name(&self) -> &str;
 
+    /// Whether this descriptor is the placeholder a durable wire decodes to
+    /// before the live binding is re-supplied. Reads on such a projection refuse
+    /// with `RuntimeError::ProjectedValueUnavailable` instead of answering
+    /// (FIG-2865); host descriptors never override it.
+    fn unavailable_after_restore(&self) -> bool {
+        false
+    }
+
     fn read_one(
         &self,
         _request: ProjectedReadRequest,
@@ -430,9 +442,35 @@ impl ProjectedValue {
         let name = name.into();
         Self {
             name: name.clone(),
-            kind: ProjectedKind::Custom(Arc::new(UnavailableProjectedValue::new(name, type_name))),
+            kind: ProjectedKind::Custom(Arc::new(UnavailableProjection {
+                type_name: type_name.into(),
+            })),
             projection_ref,
         }
+    }
+
+    /// Whether this projection is a placeholder decoded from a durable wire
+    /// whose host descriptor has not been re-supplied (FIG-2865).
+    pub(crate) fn is_unavailable(&self) -> bool {
+        match &self.kind {
+            ProjectedKind::Scalar(_) => false,
+            ProjectedKind::Custom(value) => value.unavailable_after_restore(),
+        }
+    }
+
+    /// The one answer a placeholder can give any read.
+    fn refusal(&self) -> RuntimeError {
+        RuntimeError::ProjectedValueUnavailable {
+            name: self.name.to_string(),
+            type_name: self.value_type_name().to_string(),
+        }
+    }
+
+    fn refuse_if_unavailable(&self) -> Result<(), RuntimeError> {
+        if self.is_unavailable() {
+            return Err(self.refusal());
+        }
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -531,8 +569,9 @@ impl ProjectedValue {
         }
     }
 
-    pub(crate) async fn len(&self) -> usize {
-        match &self.kind {
+    pub(crate) async fn len(&self) -> Result<usize, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).unwrap_or(0),
             ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Len).await {
                 ProjectedReadResponse::Len(value) => value,
@@ -542,40 +581,43 @@ impl ProjectedValue {
                 | ProjectedReadResponse::Bool(_)
                 | ProjectedReadResponse::Keys(_) => 0,
             },
-        }
+        })
     }
 
-    pub(crate) async fn empty(&self) -> Option<bool> {
-        match &self.kind {
+    pub(crate) async fn empty(&self) -> Result<Option<bool>, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => value_len(value).map(|len| len == 0),
             ProjectedKind::Custom(value) => match value.read_one(ProjectedReadRequest::Empty).await
             {
                 ProjectedReadResponse::Bool(value) => Some(value),
                 ProjectedReadResponse::Value(Value::Bool(value)) => Some(value),
-                ProjectedReadResponse::Value(value) => Some(value_truthy(&value)),
+                ProjectedReadResponse::Value(value) => Some(value_truthy(&value)?),
                 ProjectedReadResponse::Missing
                 | ProjectedReadResponse::Text(_)
                 | ProjectedReadResponse::Len(_)
                 | ProjectedReadResponse::Keys(_) => None,
             },
-        }
+        })
     }
 
-    pub(crate) async fn truthy(&self) -> bool {
-        match &self.kind {
-            ProjectedKind::Scalar(value) => value_truthy(value),
+    pub(crate) async fn truthy(&self) -> Result<bool, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
+            ProjectedKind::Scalar(value) => value_truthy(value)?,
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Truthy).await {
                     ProjectedReadResponse::Bool(value) => value,
-                    ProjectedReadResponse::Value(value) => value_truthy(&value),
+                    ProjectedReadResponse::Value(value) => value_truthy(&value)?,
                     _ => false,
                 }
             }
-        }
+        })
     }
 
     pub(crate) async fn get_index(&self, index: &Value) -> Result<Value, RuntimeError> {
-        let index = materialize_projected_async(index.clone()).await;
+        self.refuse_if_unavailable()?;
+        let index = materialize_projected_async(index.clone()).await?;
         match &self.kind {
             ProjectedKind::Scalar(value) => read_index_ref_direct(value, &index),
             ProjectedKind::Custom(value) => {
@@ -588,6 +630,7 @@ impl ProjectedValue {
     }
 
     pub(crate) async fn get_field(&self, field: &Name) -> Result<Value, RuntimeError> {
+        self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => read_field_ref_direct(value, field),
             ProjectedKind::Custom(value) => match value
@@ -601,6 +644,7 @@ impl ProjectedValue {
     }
 
     pub(crate) async fn contains(&self, needle: &Value) -> Result<bool, RuntimeError> {
+        self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => execute_contains_direct(value, needle),
             ProjectedKind::Custom(value) => Ok(
@@ -609,25 +653,30 @@ impl ProjectedValue {
                     .await
                 {
                     ProjectedReadResponse::Bool(value) => value,
-                    ProjectedReadResponse::Value(value) => value_truthy(&value),
+                    ProjectedReadResponse::Value(value) => value_truthy(&value)?,
                     _ => false,
                 },
             ),
         }
     }
 
-    pub(crate) async fn find(&self, needle: Value, start: usize) -> Option<Value> {
+    pub(crate) async fn find(
+        &self,
+        needle: Value,
+        start: usize,
+    ) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Find { needle, start })
             .await
     }
 
-    pub(crate) async fn grep_text(&self, needle: Value) -> Option<Value> {
+    pub(crate) async fn grep_text(&self, needle: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::GrepText(needle))
             .await
     }
 
-    pub(crate) async fn keys(&self) -> Vec<String> {
-        match &self.kind {
+    pub(crate) async fn keys(&self) -> Result<Vec<String>, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => match value.as_ref() {
                 Value::Record(record) => record.keys().map(ToString::to_string).collect(),
                 _ => Vec::new(),
@@ -645,11 +694,12 @@ impl ProjectedValue {
                     _ => Vec::new(),
                 }
             }
-        }
+        })
     }
 
-    pub(crate) async fn values(&self) -> Option<Value> {
-        match &self.kind {
+    pub(crate) async fn values(&self) -> Result<Option<Value>, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => match value.as_ref() {
                 Value::Record(record) => Some(Value::List(
                     record.values().cloned().collect::<Vec<_>>().into(),
@@ -659,68 +709,76 @@ impl ProjectedValue {
             },
             ProjectedKind::Custom(_) => {
                 self.custom_read_or_missing(ProjectedReadRequest::Values)
-                    .await
+                    .await?
             }
-        }
+        })
     }
 
-    pub(crate) async fn starts_with(&self, prefix: Value) -> Option<Value> {
+    pub(crate) async fn starts_with(&self, prefix: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::StartsWith(prefix))
             .await
     }
 
-    pub(crate) async fn ends_with(&self, suffix: Value) -> Option<Value> {
+    pub(crate) async fn ends_with(&self, suffix: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::EndsWith(suffix))
             .await
     }
 
-    pub(crate) async fn split(&self, needle: Value) -> Option<Value> {
+    pub(crate) async fn split(&self, needle: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Split(needle))
             .await
     }
 
-    pub(crate) async fn join(&self, sep: Value) -> Option<Value> {
+    pub(crate) async fn join(&self, sep: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Join(sep))
             .await
     }
 
-    pub(crate) async fn trim(&self) -> Option<Value> {
+    pub(crate) async fn trim(&self) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Trim)
             .await
     }
 
-    pub(crate) async fn slice(&self, start: Option<isize>, end: Option<isize>) -> Option<Value> {
+    pub(crate) async fn slice(
+        &self,
+        start: Option<isize>,
+        end: Option<isize>,
+    ) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Slice { start, end })
             .await
     }
 
-    pub(crate) async fn push(&self, item: Value) -> Option<Value> {
+    pub(crate) async fn push(&self, item: Value) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::Push(item))
             .await
     }
 
-    pub(crate) async fn to_number(&self) -> Option<Value> {
+    pub(crate) async fn to_number(&self) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::ToNumber)
             .await
     }
 
-    pub(crate) async fn json_parse(&self) -> Option<Value> {
+    pub(crate) async fn json_parse(&self) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::JsonParse)
             .await
     }
 
-    pub(crate) async fn slice_bound(&self) -> Option<Value> {
+    pub(crate) async fn slice_bound(&self) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::SliceBound)
             .await
     }
 
-    pub(crate) async fn range_bound(&self) -> Option<Value> {
+    pub(crate) async fn range_bound(&self) -> Result<Option<Value>, RuntimeError> {
         self.custom_read_or_missing(ProjectedReadRequest::RangeBound)
             .await
     }
 
-    async fn custom_read_or_missing(&self, request: ProjectedReadRequest) -> Option<Value> {
-        match &self.kind {
+    async fn custom_read_or_missing(
+        &self,
+        request: ProjectedReadRequest,
+    ) -> Result<Option<Value>, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(_) => None,
             ProjectedKind::Custom(value) => match value.read_one(request).await {
                 ProjectedReadResponse::Value(value) => Some(value),
@@ -736,11 +794,12 @@ impl ProjectedValue {
                 )),
                 ProjectedReadResponse::Missing => None,
             },
-        }
+        })
     }
 
-    pub async fn render(&self) -> String {
-        match &self.kind {
+    pub async fn render(&self) -> Result<String, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => stringify_value_async(value).await.unwrap_or_default(),
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Render).await {
@@ -751,11 +810,12 @@ impl ProjectedValue {
                     _ => String::new(),
                 }
             }
-        }
+        })
     }
 
-    pub async fn materialize_async(&self) -> Value {
-        match &self.kind {
+    pub async fn materialize_async(&self) -> Result<Value, RuntimeError> {
+        self.refuse_if_unavailable()?;
+        Ok(match &self.kind {
             ProjectedKind::Scalar(value) => (**value).clone(),
             ProjectedKind::Custom(value) => {
                 match value.read_one(ProjectedReadRequest::Materialize).await {
@@ -773,53 +833,40 @@ impl ProjectedValue {
                     ProjectedReadResponse::Missing => Value::Null,
                 }
             }
-        }
+        })
     }
 
-    pub fn materialize(&self) -> Value {
+    pub fn materialize(&self) -> Result<Value, RuntimeError> {
         futures_executor::block_on(self.materialize_async())
     }
 }
 
-struct UnavailableProjectedValue {
-    name: Arc<str>,
+/// A projection that survived a durable wire but lost its host descriptor.
+///
+/// It carries only the identity both durable writers encode — the binding name
+/// and the declared type name — which is what lets a re-supplied binding refresh
+/// it in place. Until that happens it answers nothing: reads refuse with
+/// [`RuntimeError::ProjectedValueUnavailable`] so the host's missing view can
+/// never be substituted by a diagnostic string standing in as data (FIG-2865).
+struct UnavailableProjection {
     type_name: Arc<str>,
 }
 
-impl UnavailableProjectedValue {
-    fn new(name: Arc<str>, type_name: impl Into<Arc<str>>) -> Self {
-        Self {
-            name,
-            type_name: type_name.into(),
-        }
-    }
-
-    fn message(&self) -> String {
-        format!(
-            "projected host descriptor `{}` ({}) is unavailable after snapshot restore; rerun the producing tool to recreate it",
-            self.name, self.type_name
-        )
-    }
-}
-
-impl ProjectedHostDescriptor for UnavailableProjectedValue {
+impl ProjectedHostDescriptor for UnavailableProjection {
     fn type_name(&self) -> &str {
         &self.type_name
     }
 
+    fn unavailable_after_restore(&self) -> bool {
+        true
+    }
+
     fn read_one(
         &self,
-        request: ProjectedReadRequest,
+        _request: ProjectedReadRequest,
     ) -> ProjectedFuture<'_, ProjectedReadResponse> {
-        Box::pin(async move {
-            match request {
-                ProjectedReadRequest::Render => ProjectedReadResponse::Text(self.message()),
-                ProjectedReadRequest::Materialize => {
-                    ProjectedReadResponse::Value(Value::String(self.message().into()))
-                }
-                _ => ProjectedReadResponse::Missing,
-            }
-        })
+        // Unreachable: `ProjectedValue` refuses before asking a placeholder.
+        Box::pin(async { ProjectedReadResponse::Missing })
     }
 }
 
@@ -834,7 +881,20 @@ impl fmt::Debug for ProjectedValue {
 
 impl PartialEq for ProjectedValue {
     fn eq(&self, other: &Self) -> bool {
-        self.materialize() == other.materialize()
+        // An unavailable placeholder has no value to compare, so it is equal
+        // only to the same placeholder. Materializing it would be an error, and
+        // silently treating that error as a value is exactly what FIG-2865
+        // removes.
+        match (self.is_unavailable(), other.is_unavailable()) {
+            (true, true) => {
+                self.name == other.name && self.value_type_name() == other.value_type_name()
+            }
+            (true, false) | (false, true) => false,
+            (false, false) => match (self.materialize(), other.materialize()) {
+                (Ok(left), Ok(right)) => left == right,
+                _ => false,
+            },
+        }
     }
 }
 

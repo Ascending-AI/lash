@@ -272,7 +272,12 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
     let reference_semantics = program.dialect == super::CompilationDialect::Typescript;
     state.reference_semantics = reference_semantics;
     if let Some(scratch) = scratch {
-        let (globals, heap) = state.take_runtime();
+        let (mut globals, mut heap) = state.take_runtime();
+        // A snapshot restore leaves placeholders wherever a projection was
+        // nested inside a container or a heap object; slot-name rebinding alone
+        // never revisits those (FIG-2865).
+        crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
+        crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
         let slots = SlotState::from_globals_with_scratch(
             globals,
             &program.chunk.slot_names,
@@ -293,7 +298,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         state.install_runtime(runtime_globals, heap)?;
         result
     } else {
-        let (globals, heap) = state.take_runtime();
+        let (mut globals, mut heap) = state.take_runtime();
+        crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
+        crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
         let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
         vm.reference_semantics = reference_semantics;

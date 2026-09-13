@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use super::value_contains_projected;
-use super::{ImageValue, ProjectedFuture, ResourceHandle, Value, debug_assert_exported_value};
+use super::{
+    ImageValue, ProjectedFuture, ProjectedValue, ResourceHandle, Value, debug_assert_exported_value,
+};
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq};
 use std::fmt::Write as _;
@@ -73,7 +75,12 @@ pub(crate) fn to_json_async<'a>(value: &'a Value) -> ProjectedFuture<'a, serde_j
                 }
                 serde_json::Value::Object(object)
             }
-            Value::Projected(value) => to_json_async(&value.materialize_async().await).await,
+            // Mirrors the unexported-reference arm below: this async converter
+            // has no error channel, and a restored placeholder has no value.
+            Value::Projected(value) => match value.materialize_async().await {
+                Ok(value) => to_json_async(&value).await,
+                Err(_) => serde_json::Value::Null,
+            },
             Value::Ref(_) => {
                 debug_assert_exported_value("JSON conversion");
                 serde_json::Value::Null
@@ -132,7 +139,7 @@ impl Serialize for RuntimeJson<'_> {
     {
         match self.0 {
             Value::Projected(projected) => {
-                RuntimeJson(&projected.materialize()).serialize(serializer)
+                RuntimeJson(&materialize_for_json(projected)?).serialize(serializer)
             }
             value => serialize_value(value, serializer, ProjectedMode::Runtime),
         }
@@ -155,11 +162,18 @@ impl Serialize for TransportJson<'_> {
     {
         match self.0 {
             Value::Projected(projected) => {
-                TransportJson(&projected.materialize()).serialize(serializer)
+                TransportJson(&materialize_for_json(projected)?).serialize(serializer)
             }
             value => serialize_value(value, serializer, ProjectedMode::Transport),
         }
     }
+}
+
+/// A projection restored without its host descriptor has no value to encode, so
+/// JSON conversion fails instead of substituting a stand-in for the host's view
+/// (FIG-2865).
+fn materialize_for_json<E: serde::ser::Error>(projected: &ProjectedValue) -> Result<Value, E> {
+    projected.materialize().map_err(E::custom)
 }
 
 #[derive(Clone, Copy)]
@@ -219,12 +233,14 @@ where
             map.end()
         }
         Value::Projected(projected) => match projected_mode {
-            ProjectedMode::Runtime => RuntimeJson(&projected.materialize()).serialize(serializer),
+            ProjectedMode::Runtime => {
+                RuntimeJson(&materialize_for_json(projected)?).serialize(serializer)
+            }
             ProjectedMode::Direct => {
                 unreachable!("projected values require runtime json conversion")
             }
             ProjectedMode::Transport => {
-                TransportJson(&projected.materialize()).serialize(serializer)
+                TransportJson(&materialize_for_json(projected)?).serialize(serializer)
             }
         },
         Value::Ref(_) => Err(serde::ser::Error::custom(
@@ -301,9 +317,12 @@ pub(crate) fn append_runtime_json_async<'a>(
                 }
                 output.push('}');
             }
-            Value::Projected(projected) => {
-                append_runtime_json_async(output, &projected.materialize_async().await).await;
-            }
+            Value::Projected(projected) => match projected.materialize_async().await {
+                Ok(value) => append_runtime_json_async(output, &value).await,
+                // Mirrors the unexported-reference arm below: this async writer
+                // has no error channel, and a placeholder has no value to write.
+                Err(_) => output.push_str("null"),
+            },
             Value::Ref(_) => {
                 debug_assert_exported_value("JSON conversion");
                 output.push_str("null");

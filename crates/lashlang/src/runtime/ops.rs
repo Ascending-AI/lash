@@ -48,7 +48,7 @@ pub(crate) async fn execute_intrinsic(
                 Value::Record(record) => Ok(Value::Bool(record.is_empty())),
                 Value::Projected(value) => value
                     .empty()
-                    .await
+                    .await?
                     .map(Value::Bool)
                     .ok_or(RuntimeError::EmptyUnsupported),
                 Value::Null => Ok(Value::Bool(true)),
@@ -68,7 +68,7 @@ pub(crate) async fn execute_intrinsic(
                 Value::Projected(value) => Ok(Value::List(
                     value
                         .keys()
-                        .await
+                        .await?
                         .into_iter()
                         .map(|key| Value::String(key.into()))
                         .collect::<Vec<_>>()
@@ -81,11 +81,11 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::Values => {
             expect_arg_count("values", values, 1)?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.values().await
+                && let Some(value) = value.values().await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             match &value {
                 Value::Record(record) => Ok(Value::List(
                     record.values().cloned().collect::<Vec<_>>().into(),
@@ -102,39 +102,39 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::GrepText => execute_grep_text_builtin(values).await,
         IntrinsicOp::StartsWith => {
             expect_arg_count("starts_with", values, 2)?;
-            let prefix = materialize_projected_async(values[1].clone()).await;
+            let prefix = materialize_projected_async(values[1].clone()).await?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.starts_with(prefix.clone()).await
+                && let Some(value) = value.starts_with(prefix.clone()).await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let prefix = coerce_string(&prefix)?;
             Ok(Value::Bool(value.starts_with(prefix.as_ref())))
         }
         IntrinsicOp::EndsWith => {
             expect_arg_count("ends_with", values, 2)?;
-            let suffix = materialize_projected_async(values[1].clone()).await;
+            let suffix = materialize_projected_async(values[1].clone()).await?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.ends_with(suffix.clone()).await
+                && let Some(value) = value.ends_with(suffix.clone()).await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let suffix = coerce_string(&suffix)?;
             Ok(Value::Bool(value.ends_with(suffix.as_ref())))
         }
         IntrinsicOp::Split => {
             expect_arg_count("split", values, 2)?;
-            let needle = materialize_projected_async(values[1].clone()).await;
+            let needle = materialize_projected_async(values[1].clone()).await?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.split(needle.clone()).await
+                && let Some(value) = value.split(needle.clone()).await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             let value = coerce_string(&value)?;
             let needle = coerce_string(&needle)?;
             Ok(Value::List(
@@ -167,11 +167,11 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::Trim => {
             expect_arg_count("trim", values, 1)?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.trim().await
+                && let Some(value) = value.trim().await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             Ok(Value::String(coerce_string(&value)?.trim().into()))
         }
         IntrinsicOp::Slice => {
@@ -179,11 +179,11 @@ pub(crate) async fn execute_intrinsic(
             let start = as_slice_bound_async(&values[1]).await?;
             let end = as_slice_bound_async(&values[2]).await?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.slice(start, end).await
+                && let Some(value) = value.slice(start, end).await?
             {
                 return Ok(value);
             }
-            let target = materialize_projected_async(values[0].clone()).await;
+            let target = materialize_projected_async(values[0].clone()).await?;
             match &target {
                 Value::String(value) => Ok(Value::String(slice_string(value, start, end).into())),
                 Value::Tuple(items) => {
@@ -213,31 +213,31 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::ToInt => {
             expect_arg_count("to_int", values, 1)?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.to_number().await
+                && let Some(value) = value.to_number().await?
             {
                 return Ok(Value::Number(as_number(&value)?.trunc()));
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             Ok(Value::Number(as_number(&value)?.trunc()))
         }
         IntrinsicOp::ToFloat => {
             expect_arg_count("to_float", values, 1)?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.to_number().await
+                && let Some(value) = value.to_number().await?
             {
                 return Ok(Value::Number(as_number(&value)?));
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             Ok(Value::Number(as_number(&value)?))
         }
         IntrinsicOp::JsonParse => {
             expect_arg_count("json_parse", values, 1)?;
             if let Value::Projected(value) = &values[0]
-                && let Some(value) = value.json_parse().await
+                && let Some(value) = value.json_parse().await?
             {
                 return Ok(value);
             }
-            let value = materialize_projected_async(values[0].clone()).await;
+            let value = materialize_projected_async(values[0].clone()).await?;
             let parsed: serde_json::Value =
                 serde_json::from_str(&coerce_string(&value)?).map_err(|err| {
                     RuntimeError::InvalidJson {
@@ -265,8 +265,8 @@ pub(crate) async fn execute_intrinsic(
         IntrinsicOp::Validate => {
             expect_arg_count("validate", values, 2)?;
             execute_validate_builtin(
-                materialize_projected_async(values[0].clone()).await,
-                &materialize_projected_async(values[1].clone()).await,
+                materialize_projected_async(values[0].clone()).await?,
+                &materialize_projected_async(values[1].clone()).await?,
             )
         }
         IntrinsicOp::Range(_) => execute_range_builtin_async(values).await,
@@ -330,7 +330,7 @@ async fn shaping_list(
     value: &Value,
     instructions_executed: &mut u64,
 ) -> Result<Vec<Value>, RuntimeError> {
-    let value = materialize_projected_async(value.clone()).await;
+    let value = materialize_projected_async(value.clone()).await?;
     match value {
         Value::Tuple(items) | Value::List(items) => {
             charge_collection_work(instructions_executed, items.len());
@@ -407,7 +407,7 @@ async fn execute_sort_by_builtin(
 ) -> Result<Value, RuntimeError> {
     expect_arg_count("sort_by", values, 2)?;
     let items = shaping_list("sort_by", &values[0], instructions_executed).await?;
-    let path_value = materialize_projected_async(values[1].clone()).await;
+    let path_value = materialize_projected_async(values[1].clone()).await?;
     let Value::String(path) = path_value else {
         return Err(RuntimeError::ShapingTextRequired {
             builtin: "sort_by".into(),
@@ -497,7 +497,7 @@ async fn shaping_text(
     value: &Value,
     instructions_executed: &mut u64,
 ) -> Result<String, RuntimeError> {
-    let value = materialize_projected_async(value.clone()).await;
+    let value = materialize_projected_async(value.clone()).await?;
     match value {
         Value::String(value) => {
             charge_collection_work(instructions_executed, value.chars().count());
@@ -621,7 +621,7 @@ fn invalid_arity_error(name: &str, argc: usize) -> RuntimeError {
 
 pub(crate) async fn execute_len_builtin(value: &Value) -> Result<Value, RuntimeError> {
     if let Value::Projected(value) = value {
-        return Ok(Value::Number(value.len().await as f64));
+        return Ok(Value::Number(value.len().await? as f64));
     }
     execute_len_direct(value)
 }
@@ -636,7 +636,7 @@ pub(crate) async fn execute_contains_builtin(
     haystack: &Value,
     needle: &Value,
 ) -> Result<Value, RuntimeError> {
-    let needle = materialize_projected_async(needle.clone()).await;
+    let needle = materialize_projected_async(needle.clone()).await?;
     if !matches!(haystack, Value::Projected(_)) {
         return execute_contains_direct(haystack, &needle).map(Value::Bool);
     }
@@ -686,33 +686,33 @@ pub(crate) async fn execute_find_builtin(values: &[Value]) -> Result<Value, Runt
         });
     }
 
-    let needle = materialize_projected_async(values[1].clone()).await;
+    let needle = materialize_projected_async(values[1].clone()).await?;
     let start = match values.get(2) {
         Some(value) => {
-            let value = materialize_projected_async(value.clone()).await;
+            let value = materialize_projected_async(value.clone()).await?;
             as_non_negative_char_index("find", "start", &value)?
         }
         None => 0,
     };
 
     if let Value::Projected(value) = &values[0]
-        && let Some(value) = value.find(needle.clone(), start).await
+        && let Some(value) = value.find(needle.clone(), start).await?
     {
         return Ok(value);
     }
-    let haystack = materialize_projected_async(values[0].clone()).await;
+    let haystack = materialize_projected_async(values[0].clone()).await?;
     execute_find_direct(&haystack, &needle, start)
 }
 
 pub(crate) async fn execute_grep_text_builtin(values: &[Value]) -> Result<Value, RuntimeError> {
     expect_arg_count("grep_text", values, 2)?;
-    let needle = materialize_projected_async(values[1].clone()).await;
+    let needle = materialize_projected_async(values[1].clone()).await?;
     if let Value::Projected(value) = &values[0]
-        && let Some(value) = value.grep_text(needle.clone()).await
+        && let Some(value) = value.grep_text(needle.clone()).await?
     {
         return Ok(value);
     }
-    let text = materialize_projected_async(values[0].clone()).await;
+    let text = materialize_projected_async(values[0].clone()).await?;
     execute_grep_text_direct(&text, &needle)
 }
 
@@ -806,7 +806,7 @@ pub(crate) async fn iterable_values(value: Value) -> Result<ListValue, RuntimeEr
     match value {
         Value::List(values) => Ok(values),
         Value::Tuple(values) => Ok(values),
-        Value::Projected(value) => match value.materialize_async().await {
+        Value::Projected(value) => match value.materialize_async().await? {
             Value::List(values) => Ok(values),
             Value::Tuple(values) => Ok(values),
             _ => Err(RuntimeError::NonListIteration),
@@ -819,13 +819,13 @@ pub(crate) async fn execute_join_builtin_async(
     items: &Value,
     sep: &Value,
 ) -> Result<Value, RuntimeError> {
-    let sep = materialize_projected_async(sep.clone()).await;
+    let sep = materialize_projected_async(sep.clone()).await?;
     if let Value::Projected(value) = items
-        && let Some(value) = value.join(sep.clone()).await
+        && let Some(value) = value.join(sep.clone()).await?
     {
         return Ok(value);
     }
-    let items = materialize_projected_async(items.clone()).await;
+    let items = materialize_projected_async(items.clone()).await?;
     let items = match &items {
         Value::List(items) | Value::Tuple(items) => items,
         _ => {
@@ -838,7 +838,7 @@ pub(crate) async fn execute_join_builtin_async(
         if index > 0 {
             joined.push_str(sep.as_ref());
         }
-        let item = materialize_projected_async(item.clone()).await;
+        let item = materialize_projected_async(item.clone()).await?;
         joined.push_str(coerce_string(&item)?.as_ref());
     }
     Ok(Value::String(joined.into()))
@@ -863,9 +863,9 @@ pub(crate) async fn range_bounds_async(values: &[Value]) -> Result<(i64, i64, i6
     let mut materialized = Vec::with_capacity(values.len());
     for value in values {
         let value = match value {
-            Value::Projected(projected) => match projected.range_bound().await {
+            Value::Projected(projected) => match projected.range_bound().await? {
                 Some(value) => value,
-                None => projected.materialize_async().await,
+                None => projected.materialize_async().await?,
             },
             other => other.clone(),
         };
@@ -902,13 +902,13 @@ pub(crate) async fn execute_push_builtin_async(
     list: Value,
     item: Value,
 ) -> Result<Value, RuntimeError> {
-    let item = materialize_projected_async(item).await;
+    let item = materialize_projected_async(item).await?;
     if let Value::Projected(value) = &list
-        && let Some(value) = value.push(item.clone()).await
+        && let Some(value) = value.push(item.clone()).await?
     {
         return Ok(value);
     }
-    let list = materialize_projected_async(list).await;
+    let list = materialize_projected_async(list).await?;
     let Value::List(items) = list else {
         return Err(RuntimeError::PushUnsupported);
     };
@@ -1009,8 +1009,8 @@ async fn execute_integer_div_builtin_async(
     round: impl FnOnce(f64) -> f64,
 ) -> Result<Value, RuntimeError> {
     expect_arg_count(name, values, 2)?;
-    let dividend = materialize_projected_async(values[0].clone()).await;
-    let divisor = materialize_projected_async(values[1].clone()).await;
+    let dividend = materialize_projected_async(values[0].clone()).await?;
+    let divisor = materialize_projected_async(values[1].clone()).await?;
     execute_integer_div_builtin(name, &[dividend, divisor], round)
 }
 
@@ -1159,10 +1159,10 @@ pub(crate) fn expect_bool_value(value: Value) -> bool {
     }
 }
 
-pub(crate) async fn materialize_projected_async(value: Value) -> Value {
+pub(crate) async fn materialize_projected_async(value: Value) -> Result<Value, RuntimeError> {
     match value {
         Value::Projected(projected) => projected.materialize_async().await,
-        other => other,
+        other => Ok(other),
     }
 }
 
@@ -1248,9 +1248,9 @@ fn as_non_negative_char_index(
 
 pub(crate) async fn as_slice_bound_async(value: &Value) -> Result<Option<isize>, RuntimeError> {
     let value = match value {
-        Value::Projected(projected) => match projected.slice_bound().await {
+        Value::Projected(projected) => match projected.slice_bound().await? {
             Some(value) => value,
-            None => projected.materialize_async().await,
+            None => projected.materialize_async().await?,
         },
         other => other.clone(),
     };
@@ -1312,23 +1312,23 @@ pub(crate) fn add_values(left: Value, right: Value) -> Result<Value, RuntimeErro
     }
 }
 
-pub(crate) fn is_truthy(value: &Value) -> bool {
-    match value {
+pub(crate) fn is_truthy(value: &Value) -> Result<bool, RuntimeError> {
+    Ok(match value {
         Value::Null | Value::Undefined => false,
         Value::Bool(value) => *value,
         Value::Number(value) => *value != 0.0 && !value.is_nan(),
         Value::String(value) => !value.is_empty(),
         Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => true,
         Value::Tuple(values) => !values.is_empty(),
-        Value::Projected(value) => futures_executor::block_on(value.truthy()),
+        Value::Projected(value) => futures_executor::block_on(value.truthy())?,
         Value::Ref(_) => {
             debug_assert_exported_value("truthiness");
             true
         }
-    }
+    })
 }
 
-pub(crate) async fn is_truthy_async(value: &Value) -> bool {
+pub(crate) async fn is_truthy_async(value: &Value) -> Result<bool, RuntimeError> {
     match value {
         Value::Projected(value) => value.truthy().await,
         other => is_truthy(other),
@@ -1492,9 +1492,9 @@ pub(crate) fn value_contains_projected(value: &Value) -> bool {
     }
 }
 
-pub(crate) fn materialize_value(value: Value) -> Value {
+pub(crate) fn materialize_value(value: Value) -> Result<Value, RuntimeError> {
     match value {
         Value::Projected(projected) => projected.materialize(),
-        other => other,
+        other => Ok(other),
     }
 }

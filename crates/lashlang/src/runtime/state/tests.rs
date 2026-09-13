@@ -1,6 +1,7 @@
 use super::*;
 use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
+use crate::runtime::ProjectedValue;
 use crate::runtime::entry_points::compile_program_internal;
 
 #[test]

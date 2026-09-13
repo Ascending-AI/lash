@@ -78,7 +78,7 @@ pub(crate) fn append_stringified_value_async<'a>(
             Value::Number(value) => {
                 write_number(output, *value).expect("string writes should not fail")
             }
-            Value::Projected(value) => output.push_str(&value.render().await),
+            Value::Projected(value) => output.push_str(&value.render().await?),
             Value::Tuple(values) => append_tuple_literal_async(output, values).await?,
             Value::Ref(id) => {
                 return Err(RuntimeError::UnexportedHeapReference {

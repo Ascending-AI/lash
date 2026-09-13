@@ -132,6 +132,7 @@ pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {
         Scenario::ProjectedValues
             | Scenario::ProjectedOperations
             | Scenario::ContinueAsSeedHostEnvironment
+            | Scenario::SnapshotProjectedState
     ) {
         return bindings;
     }
@@ -150,6 +151,29 @@ pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {
             bindings.insert(
                 "proj",
                 ProjectedValue::scalar("proj", projected_operations_record()),
+            );
+        }
+        // The snapshot scenario seeds its projections inside a plain global
+        // record, so a snapshot round-trip decodes them as placeholders. Naming
+        // them here is what lets the restore re-bind them to the live host view
+        // (FIG-2865) instead of refusing the read.
+        Scenario::SnapshotProjectedState => {
+            bindings.insert(
+                "snap.projected.body",
+                ProjectedValue::custom(
+                    "snap.projected.body",
+                    Arc::new(ProjectedText::new(
+                        "snapshot_body",
+                        "projected body stays lazy across snapshot markers",
+                    )),
+                ),
+            );
+            bindings.insert(
+                "snap.mixed.nested.projected_title",
+                ProjectedValue::custom(
+                    "snap.mixed.nested.projected_title",
+                    Arc::new(ProjectedText::new("nested_title", "Nested Projection")),
+                ),
             );
         }
         _ => {}

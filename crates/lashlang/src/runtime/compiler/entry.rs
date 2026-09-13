@@ -1084,7 +1084,7 @@ impl Compiler {
                 let value = self.fold_compile_time_expr(expr)?;
                 match op {
                     UnaryOp::Negate => Some(Value::Number(-as_number(&value).ok()?)),
-                    UnaryOp::Not => Some(Value::Bool(!is_truthy(&value))),
+                    UnaryOp::Not => Some(Value::Bool(!is_truthy(&value).ok()?)),
                 }
             }
             Expr::If {
@@ -1092,7 +1092,7 @@ impl Compiler {
                 then_block,
                 else_block,
             } => {
-                if is_truthy(&self.fold_compile_time_expr(condition)?) {
+                if is_truthy(&self.fold_compile_time_expr(condition)?).ok()? {
                     self.fold_compile_time_expr(then_block)
                 } else {
                     self.fold_compile_time_expr(else_block)
@@ -1101,18 +1101,22 @@ impl Compiler {
             Expr::Binary { left, op, right } => match op {
                 BinaryOp::And => {
                     let left = self.fold_compile_time_expr(left)?;
-                    if !is_truthy(&left) {
+                    if !is_truthy(&left).ok()? {
                         Some(Value::Bool(false))
                     } else {
-                        Some(Value::Bool(is_truthy(&self.fold_compile_time_expr(right)?)))
+                        Some(Value::Bool(
+                            is_truthy(&self.fold_compile_time_expr(right)?).ok()?,
+                        ))
                     }
                 }
                 BinaryOp::Or => {
                     let left = self.fold_compile_time_expr(left)?;
-                    if is_truthy(&left) {
+                    if is_truthy(&left).ok()? {
                         Some(Value::Bool(true))
                     } else {
-                        Some(Value::Bool(is_truthy(&self.fold_compile_time_expr(right)?)))
+                        Some(Value::Bool(
+                            is_truthy(&self.fold_compile_time_expr(right)?).ok()?,
+                        ))
                     }
                 }
                 _ => {
@@ -1121,10 +1125,9 @@ impl Compiler {
                     eval_binary_values(left, *op, right).ok()
                 }
             },
-            Expr::JavaScriptUnary { op, expr } => Some(eval_javascript_unary(
-                self.fold_compile_time_expr(expr)?,
-                *op,
-            )),
+            Expr::JavaScriptUnary { op, expr } => {
+                eval_javascript_unary(self.fold_compile_time_expr(expr)?, *op).ok()
+            }
             Expr::JavaScriptBinary { left, op, right } => Some(eval_javascript_binary(
                 self.fold_compile_time_expr(left)?,
                 *op,
@@ -1133,8 +1136,8 @@ impl Compiler {
             Expr::JavaScriptLogical { left, op, right } => {
                 let left = self.fold_compile_time_expr(left)?;
                 let use_right = match op {
-                    JavaScriptLogicalOp::And => is_truthy(&left),
-                    JavaScriptLogicalOp::Or => !is_truthy(&left),
+                    JavaScriptLogicalOp::And => is_truthy(&left).ok()?,
+                    JavaScriptLogicalOp::Or => !is_truthy(&left).ok()?,
                     JavaScriptLogicalOp::NullishCoalesce => {
                         matches!(left, Value::Null | Value::Undefined)
                     }
