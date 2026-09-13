@@ -728,11 +728,6 @@ impl TriggerSubscriptionFilter {
         }
     }
 
-    /// Returns the canonical registrant scope for trigger-store implementors.
-    pub fn effective_registrant_scope_id(&self) -> Option<String> {
-        self.registrant_scope_id.clone()
-    }
-
     /// Applies every populated subscription filter conjunctively for trigger-store and conformance
     /// implementors and always excludes tombstoned records.
     pub fn matches(&self, record: &TriggerSubscriptionRecord) -> bool {
@@ -1217,6 +1212,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             } = filter;
             for value in [
                 registrant_scope_id.as_deref(),
+                None,
                 subscription_key.as_deref(),
                 name.as_deref(),
                 source_type.as_deref(),
