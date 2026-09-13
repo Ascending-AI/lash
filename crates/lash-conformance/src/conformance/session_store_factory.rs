@@ -21,6 +21,14 @@ mod config_commands;
 mod state_version;
 mod turn_cancel;
 
+/// Prove that an exact commit replay cannot consume a different pending
+/// cancellation-closure authorization on the same turn address.
+pub async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_exact_replay_preserves_different_pending_authorization(factory).await;
+}
+
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.

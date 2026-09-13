@@ -33,7 +33,8 @@ const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/turn_input.rs");
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/session_commit.rs");
-const PROCESS_REGISTRY_SOURCE: &str = include_str!("../src/postgres/process_registry.rs");
+const PROCESS_REGISTRY_LIFECYCLE_SOURCE: &str =
+    include_str!("../src/postgres/process_registry/lifecycle.rs");
 const PROCESS_REGISTRY_LEASES_SOURCE: &str =
     include_str!("../src/postgres/process_registry/leases.rs");
 const PROCESS_HELPERS_SOURCE: &str = include_str!("../src/postgres/process_helpers.rs");
@@ -195,7 +196,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
             "pub(crate) async fn read_session_execution_lease_unlocked(",
         ),
         (
-            PROCESS_REGISTRY_SOURCE,
+            PROCESS_REGISTRY_LIFECYCLE_SOURCE,
             "async fn complete_process_with_lease(",
             "async fn record_first_started_with_authority(",
         ),

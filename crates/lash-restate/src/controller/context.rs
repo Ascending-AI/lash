@@ -1012,7 +1012,7 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let workflow_key = request.process_id.clone();
+                    let workflow_key = request.process_ref.process_id.clone();
                     let request = self
                         .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
                         .cancel(Json(request));

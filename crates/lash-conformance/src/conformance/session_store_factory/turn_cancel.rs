@@ -122,6 +122,116 @@ fn settled_closure(
     crate::TurnCancelClosureSettlement::settled_for_test(authorization.clone(), base, effective)
 }
 
+/// Replaying an already committed receipt must not consume a newer pending
+/// authorization that happens to reuse the same turn address.
+pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-exact-replay-preserves-new-authorization"),
+        "turn-cancel-exact-replay-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let address = crate::TurnAddress::new(
+        &request.session_id,
+        TurnId::from("turn-cancel-exact-replay:turn"),
+    );
+    let first = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque("exact-replay-first", "exact-replay-first:1"),
+            "exact-replay-first:executor",
+            60_000,
+        )
+        .await
+        .expect("claim first exact-replay lane")
+        .acquired()
+        .expect("first exact-replay lane is free");
+    let first_authorization = authorize_closure(
+        &store,
+        &first.fence(),
+        &address,
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+    )
+    .await;
+    let mut state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    state.ensure_agent_frame_initialized();
+    let (mut commit, _) = crate::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .with_operation(crate::OperationId::turn(
+            &request.session_id,
+            &address.turn_id,
+            "final",
+        ))
+        .expect("stamp exact replay operation");
+    commit.interrupted_turn_input_turn_id = Some(address.turn_id.clone());
+    commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
+    commit.turn_cancel_closure_settlement = Some(settled_closure(&first_authorization, None));
+    commit.release_session_execution_lease = Some(first.completion());
+    store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect("commit first authorization");
+
+    let successor = store
+        .try_claim_session_execution_lease(
+            &request.session_id,
+            &crate::LeaseOwnerIdentity::opaque(
+                "exact-replay-successor",
+                "exact-replay-successor:1",
+            ),
+            "exact-replay-successor:executor",
+            60_000,
+        )
+        .await
+        .expect("claim successor exact-replay lane")
+        .acquired()
+        .expect("successor exact-replay lane is free");
+    let successor_authorization = authorize_closure(
+        &store,
+        &successor.fence(),
+        &address,
+        crate::TurnCancelIntentSnapshot::Absent,
+        crate::TurnCancelClosureProposal::CompletionSealed,
+    )
+    .await;
+    assert_ne!(successor_authorization, first_authorization);
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read successor authorization before replay"),
+        vec![successor_authorization.clone()]
+    );
+
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("adopt exact committed receipt");
+    assert_eq!(
+        store
+            .pending_turn_cancel_closure_pins()
+            .await
+            .expect("read successor authorization after replay"),
+        vec![successor_authorization],
+        "exact receipt replay must retain a different pending closure authorization"
+    );
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .expect("read head after exact replay")
+            .expect("committed head exists")
+            .head_revision,
+        1,
+        "exact replay must not publish another head"
+    );
+}
+
 /// The durable closure slot is non-overwritable, survives lease-generation
 /// changes, preserves its admitted physical scope, and can be consumed only by
 /// a current owner presenting the exact authorization.

@@ -116,6 +116,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         lease_holder: None,
         lease_expires_at_ms: None,
         abandon_request: None,
+        cancel_request: None,
         input: lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),
         },

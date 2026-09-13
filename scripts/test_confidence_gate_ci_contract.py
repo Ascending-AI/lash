@@ -1703,22 +1703,19 @@ derive_mutation_jobs() {{
         self.assertIn(
             "run: cargo test -p lash-internal-s3-store --locked", s3_store_job
         )
-        self.assertIn(
-            "LASH_MINIO_ENDPOINT: http://127.0.0.1:9000", s3_store_job
-        )
+        self.assertNotIn("LASH_MINIO_ENDPOINT:", s3_store_job)
         self.assertIn('LASH_REQUIRE_MINIO: "1"', s3_store_job)
         self.assertIn("attachment_blob_store_differential_agrees", s3_store_job)
 
-        # Same per-step rule as the Postgres lane: both MinIO steps skip green
-        # on an absent endpoint, so each needs the require flag in its own env
-        # block rather than relying on its sibling's.
+        # Both fixed-configuration MinIO suites still need the require flag in
+        # their own env block so an unavailable service fails instead of skips.
         for step_name in (
             "Test S3 store conformance",
             "Test attachment blob-store differential",
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(s3_store_job, step_name)
-                self.assertIn("LASH_MINIO_ENDPOINT:", step)
+                self.assertNotIn("LASH_MINIO_ENDPOINT:", step)
                 self.assertIn('LASH_REQUIRE_MINIO: "1"', step)
 
     def test_generated_postgres_dynamic_rerun_is_bounded_and_artifacted(self) -> None:

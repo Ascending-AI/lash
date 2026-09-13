@@ -58,7 +58,6 @@ fn test_tool_intent() -> (crate::ToolIntentIdentity, crate::ToolIntent) {
     let intent = crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
         session_id: SessionId::from("tool-intent-gate-session"),
         process_id: ProcessId::from("tool-intent-gate-process"),
-        reason: None,
     });
     (identity, intent)
 }

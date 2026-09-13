@@ -42,16 +42,32 @@ fn historical_remote_protocol_generation_60_is_refused() {
 
 /// Captured by main's Envelope writer at 11f6b0eb40f6; no hand-edited wire bytes.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_61_is_refused() {
+fn historical_remote_protocol_generation_61_is_refused() {
     let bytes = include_bytes!("../tests/fixtures/remote-envelope-v61.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], 61);
-    assert_eq!(61 + 1, REMOTE_PROTOCOL_VERSION);
+    assert_eq!(61 + 1, 62, "historical generation adjacency pin");
     assert!(matches!(
         Envelope::<EmptyEnvelopeBody>::decode_json(bytes),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 61,
-            expected: 62
+            expected: REMOTE_PROTOCOL_VERSION
+        })
+    ));
+}
+
+/// Captured by main's Envelope writer at 847ba3b0b342; no hand-edited wire bytes.
+#[test]
+fn immediate_predecessor_remote_protocol_generation_62_is_refused() {
+    let bytes = include_bytes!("../tests/fixtures/remote-envelope-v62.json");
+    let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(predecessor["protocol_version"], 62);
+    assert_eq!(62 + 1, REMOTE_PROTOCOL_VERSION);
+    assert!(matches!(
+        Envelope::<EmptyEnvelopeBody>::decode_json(bytes),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 62,
+            expected: 63
         })
     ));
 }
@@ -1229,7 +1245,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 62,
+            expected: 63,
         }
     ));
 
@@ -1419,7 +1435,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 62,
+            "protocol_version": 63,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1434,7 +1450,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 62,
+            actual: 63,
             expected: 41,
         }
     ));
@@ -1480,7 +1496,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 62,
+            expected: 63,
         }
     ));
 
@@ -1497,7 +1513,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 62, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 63, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1609,6 +1625,7 @@ fn remote_process_dtos_json_round_trip() {
                 lease_holder: None,
                 lease_expires_at_ms: None,
                 abandon_request: None,
+                cancel_request: None,
                 input: RemoteProcessInput::External {
                     metadata: serde_json::json!({ "label": "Import" }),
                 },
@@ -1658,10 +1675,11 @@ fn remote_process_dtos_json_round_trip() {
     let cancel = RemoteProcessCancelRequest {
         process_id: ProcessId::from("process:1"),
         incarnation: 1,
-        reason: Some("requested by host".to_string()),
+        requester: "actor:remote-host".to_string(),
     };
     cancel.validate().expect("valid cancel request");
     let cancel_result = RemoteProcessCancelReceipt {
+        origin: lash_sansio::CancelOrigin::OperatorRequested,
         process_id: ProcessId::from("process:1"),
         incarnation: 1,
         status: RemoteProcessStatus::Cancelled,
@@ -1840,7 +1858,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 62,
+            expected: 63,
         })
     ));
 }
@@ -1879,7 +1897,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1915,7 +1933,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1970,7 +1988,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -2002,7 +2020,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2372,6 +2390,7 @@ fn remote_process_record() -> RemoteProcessRecord {
         }),
         first_started: None,
         abandon_request: None,
+        cancel_request: None,
         wait: Some(RemoteProcessWaitState {
             kind: RemoteProcessWaitKind::Signal {
                 name: "ready".to_string(),

@@ -564,7 +564,7 @@ pub(super) struct RecordingContext {
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
-    pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
+    pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
@@ -821,10 +821,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         let endpoint = self.endpoint.clone();
-        let process_id = request.process_id.clone();
-        self.cancelled
-            .lock_recover()
-            .push((request.process_id.to_string(), request.reason.clone()));
+        let process_id = request.process_ref.process_id.clone();
+        self.cancelled.lock_recover().push(request.clone());
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
                 invoke_process_workflow_endpoint(&endpoint, "cancel", &process_id, &request, false)
@@ -1088,6 +1086,7 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) crash_after_run_commit: AtomicBool,
     pub(super) run_committed: ZeroPermitSemaphore,
     pub(super) runs: Mutex<Vec<String>>,
+    pub(super) journal_commands: Mutex<Vec<String>>,
     pub(super) records: Mutex<HashMap<String, Vec<u8>>>,
     pub(super) replaying: AtomicBool,
     pub(super) append_missing_on_replay: AtomicBool,
@@ -1866,6 +1865,7 @@ impl ReplayableRecordingContext {
             .records
             .lock_recover()
             .iter()
+            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
                 let recorded: RecordedRuntimeEffect =
                     serde_json::from_slice(bytes).expect("recorded runtime effect");
@@ -1890,6 +1890,7 @@ impl ReplayableRecordingContext {
         self.records
             .lock_recover()
             .iter()
+            .filter(|(effect_name, _)| !is_process_command_journal_fact(effect_name))
             .map(|(effect_name, bytes)| {
                 let recorded =
                     serde_json::from_slice(bytes).expect("decode recorded runtime effect");
@@ -1934,6 +1935,11 @@ impl ReplayableRecordingContext {
         self.replay_process_workflow_starts_from_journal
             .store(true, Ordering::SeqCst);
     }
+}
+
+fn is_process_command_journal_fact(effect_name: &str) -> bool {
+    effect_name.ends_with(".process-cancel-admission:v1")
+        || effect_name.ends_with(".parent-end-cancel-decision:v1")
 }
 
 #[derive(Default)]
@@ -2209,6 +2215,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         Fut: Future<Output = T> + Send + 'run,
     {
         self.runs.lock_recover().push(effect_name.clone());
+        self.journal_commands
+            .lock_recover()
+            .push(format!("run:{effect_name}"));
         let replaying = self.replaying.load(Ordering::SeqCst);
         if replaying {
             let recorded = self.records.lock_recover().get(&effect_name).cloned();
@@ -2324,11 +2333,16 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn request_process_workflow_cancel<'run>(
         &'run self,
-        _request: RestateProcessCancelRequest,
+        request: RestateProcessCancelRequest,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
+        self.journal_commands.lock_recover().push(format!(
+            "call:process-cancel:{}",
+            request.process_ref.process_id
+        ));
+        self.events.cancelled.lock_recover().push(request);
         Box::pin(async { Ok(()) })
     }
 

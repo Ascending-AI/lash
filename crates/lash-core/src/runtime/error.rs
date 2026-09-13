@@ -143,6 +143,8 @@ pub enum RuntimeErrorCode {
     /// Effect-host implementor diagnostic for a child registration refused
     /// because its declared parent scope has already ended.
     ProcessParentEnded,
+    /// Effect-host implementor diagnostic for a conflicting cancellation request.
+    ProcessCancelConflict,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -176,6 +178,12 @@ pub enum RuntimeErrorCode {
     RestateJournaledEffectPoisoned,
     RestateProcessAwait,
     RestateProcessCancel,
+    /// A Restate DirectProcess redrive addressed an existing journal entry
+    /// with a different canonical process-command identity.
+    RestateProcessJournalIdentityDrift,
+    /// A Restate DirectProcess journal entry has an unsupported version or a
+    /// shape this build cannot decode exactly.
+    RestateProcessJournalPayloadIncompatible,
     RestateProcessIngressSubmit,
     /// The ingress target names a service no deployment has bound. A
     /// deployment fact, not a busy engine: retrying cannot make an unbound
@@ -611,6 +619,7 @@ impl RuntimeErrorCode {
             Self::ProcessNotVisible => "process_not_visible",
             Self::ProcessAlreadyTerminal => "process_already_terminal",
             Self::ProcessParentEnded => "process_parent_ended",
+            Self::ProcessCancelConflict => "process_cancel_conflict",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessIncarnationSuperseded => "process_incarnation_superseded",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
@@ -632,6 +641,10 @@ impl RuntimeErrorCode {
             }
             Self::RestateProcessAwait => "restate_process_await",
             Self::RestateProcessCancel => "restate_process_cancel",
+            Self::RestateProcessJournalIdentityDrift => "restate_process_journal_identity_drift",
+            Self::RestateProcessJournalPayloadIncompatible => {
+                "restate_process_journal_payload_incompatible"
+            }
             Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
             Self::RestateServiceUnregistered => "restate_service_unregistered",
             Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
@@ -742,6 +755,7 @@ impl RuntimeErrorCode {
             self,
             Self::SqliteEffectReplayHashConflict
                 | Self::PostgresEffectReplayHashConflict
+                | Self::RestateProcessJournalIdentityDrift
                 | Self::WorkerReplacementAbort
                 | Self::ToolIntentReplayKeyFormatCutover
         )
@@ -842,6 +856,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessNotVisible
                 | Self::ProcessAlreadyTerminal
                 | Self::ProcessParentEnded
+                | Self::ProcessCancelConflict
                 | Self::ProcessNoLongerRetained
                 | Self::ProcessIncarnationSuperseded
                 | Self::ProcessRegistryUnavailable
@@ -851,6 +866,8 @@ impl RuntimeErrorCode {
                 | Self::RestateEffectHostRequiresHandlerScope
                 | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
+                | Self::RestateProcessJournalIdentityDrift
+                | Self::RestateProcessJournalPayloadIncompatible
                 | Self::RestateServiceUnregistered
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
@@ -996,6 +1013,7 @@ impl RuntimeErrorCode {
             "process_not_visible" => Self::ProcessNotVisible,
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
             "process_parent_ended" => Self::ProcessParentEnded,
+            "process_cancel_conflict" => Self::ProcessCancelConflict,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_incarnation_superseded" => Self::ProcessIncarnationSuperseded,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
@@ -1019,6 +1037,10 @@ impl RuntimeErrorCode {
             "restate_journaled_effect_poisoned" => Self::RestateJournaledEffectPoisoned,
             "restate_process_await" => Self::RestateProcessAwait,
             "restate_process_cancel" => Self::RestateProcessCancel,
+            "restate_process_journal_identity_drift" => Self::RestateProcessJournalIdentityDrift,
+            "restate_process_journal_payload_incompatible" => {
+                Self::RestateProcessJournalPayloadIncompatible
+            }
             "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
             "restate_service_unregistered" => Self::RestateServiceUnregistered,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,

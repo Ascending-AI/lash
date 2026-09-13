@@ -637,7 +637,6 @@ impl ToolProvider for AttemptIntentTools {
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                     session_id: SessionId::from("session"),
                     process_id: ProcessId::from("attempt-intents-target"),
-                    reason: Some("literal final intent".to_string()),
                 }),
             ]),
         )

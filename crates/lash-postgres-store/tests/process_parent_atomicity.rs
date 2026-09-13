@@ -12,8 +12,6 @@ use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, Postg
 
 use crate::support::{SharedDatabaseLock, database_url};
 
-const PARENT_END_REASON: &str = "recorded start intent parent ended with cancel policy";
-
 #[derive(Default)]
 struct ParentEndFaultState {
     crash_before_record_remaining: AtomicUsize,
@@ -601,10 +599,19 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
         .map(|event| event.payload)
         .collect::<Vec<_>>();
     assert_eq!(
-        cancellations,
-        vec![serde_json::json!({"reason": PARENT_END_REASON})],
+        cancellations.len(),
+        1,
         "two synchronized scanners must append exactly one literal cancellation"
     );
+    let cancellation: lash_core::CancelRequest = serde_json::from_value(
+        cancellations
+            .into_iter()
+            .next()
+            .expect("one retained cancellation"),
+    )
+    .expect("decode typed parent-end cancellation");
+    assert_eq!(cancellation.origin, lash_core::CancelOrigin::ParentEnded);
+    assert_eq!(cancellation.requester, r#"{"kind":"host"}"#);
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         0,

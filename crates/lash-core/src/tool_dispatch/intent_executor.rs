@@ -92,7 +92,6 @@ pub(crate) async fn execute_parent_end_actions(
             identity,
             parent_end,
         } = action;
-        let reason = "recorded start intent parent ended with cancel policy";
         let replay_key = format!("{}:parent-end", identity.replay_key);
         let parent = crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
@@ -119,7 +118,6 @@ pub(crate) async fn execute_parent_end_actions(
                 identity,
                 parent_end.process_id,
                 parent_end.policy,
-                reason.to_string(),
                 scope,
             )
             .await?;
@@ -403,12 +401,12 @@ async fn execute_one(
                 .cancel_recorded_intent(
                     &intent.session_id,
                     &intent.process_id,
-                    intent.reason.clone(),
+                    identity.clone(),
                     scope,
                 )
                 .await?;
             Ok((
-                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record))
+                serde_json::to_value(crate::ProcessCancelReceipt::from_record(record)?)
                     .unwrap_or(serde_json::Value::Null),
                 None,
             ))
@@ -465,6 +463,7 @@ fn error_code(error: &crate::PluginError) -> String {
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
         crate::PluginError::ParentEnded { .. } => "process_parent_ended".to_string(),
+        crate::PluginError::ProcessCancelConflict { .. } => "process_cancel_conflict".to_string(),
         crate::PluginError::ProcessNoLongerRetained { .. } => {
             "process_no_longer_retained".to_string()
         }

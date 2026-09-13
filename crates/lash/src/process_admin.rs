@@ -468,8 +468,10 @@ impl Processes {
             .await?;
         let command = lash_core::ProcessCommand::Cancel {
             process_ref,
-            reason: Some("requested by host".to_string()),
-            replay: None,
+            origin: lash_core::CancelOrigin::OperatorRequested,
+            requester: serde_json::to_string(scoped_effect_controller.execution_scope())
+                .expect("execution scopes contain only serializable identities"),
+            attribution: None,
         };
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())
@@ -479,7 +481,7 @@ impl Processes {
                 "process cancel returned the wrong outcome".to_string(),
             )));
         };
-        Ok(lash_core::ProcessCancelReceipt::from_record(*record))
+        Ok(lash_core::ProcessCancelReceipt::from_record(*record)?)
     }
 
     /// Delivers a signal to the identified process.

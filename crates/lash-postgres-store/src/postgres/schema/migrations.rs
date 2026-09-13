@@ -3,12 +3,12 @@
 
 use super::*;
 
-/// Component 87 has no durable cancellation authority and must be recreated.
+/// Component 88 has no durable cancellation authority and must be recreated.
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // The immediate predecessor is explicitly refusal-only.
     SchemaMigration {
-        from: 87,
-        to: 88,
+        from: 88,
+        to: 89,
         source_missing_tables: &[
             "lash_turn_cancellation_bindings",
             "lash_turn_cancel_closure_authorizations",

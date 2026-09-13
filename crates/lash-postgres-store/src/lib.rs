@@ -330,8 +330,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // all-or-none pending-input claim identity and token fencing. Both incompatible
 // component-85 parent shapes are rejected and recreated.
 // Required lifecycle policy changes record_json: older components require recreation.
-// Version 88 adds durable cancellation intent revisions and closure authority.
-const SCHEMA_VERSION: i32 = 88;
+// Version 88 folds typed cancellation into process records. Prior stores must be
+// recreated rather than silently forgetting pending prose cancellation events.
+// Version 89 adds durable cancellation intent revisions and closure authority.
+const SCHEMA_VERSION: i32 = 89;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

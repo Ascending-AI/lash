@@ -61,7 +61,6 @@ dependencies = [
  "futures-util",
  "http",
  "http-body-util",
- "lash-internal-core",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",

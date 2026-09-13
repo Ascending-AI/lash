@@ -69,8 +69,6 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
-        self.process_events_read_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
@@ -92,8 +90,6 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         process_ref: &crate::ProcessRef,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
-        self.process_events_read_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
@@ -122,8 +118,6 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, PluginError> {
-        self.process_events_read_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);

@@ -633,8 +633,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                         "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                     },
                     "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
-                    "policy": "cancel",
-                    "reason": "recorded start intent parent ended with cancel policy"
+                    "policy": "cancel"
                 }
             }
         })]
@@ -786,8 +785,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                             "replay_key": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9"
                         },
                         "process_id": "tool-intent:v2:blake3:7c74c379f68bf3c63191e0a04e564bb08f62f20226c21029bd2b276cd7771cb9",
-                        "policy": "cancel",
-                        "reason": "recorded start intent parent ended with cancel policy"
+                        "policy": "cancel"
                     }
                 }
             }),
@@ -806,8 +804,7 @@ pub(super) async fn restate_public_parent_end_cancel_survives_crash_after_tool_b
                             "replay_key": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244"
                         },
                         "process_id": "tool-intent:v2:blake3:a651abf6867eb51ffbdf30909c5b19e4b11c8ebd6e224fda98e6fe562cb73244",
-                        "policy": "cancel",
-                        "reason": "recorded start intent parent ended with cancel policy"
+                        "policy": "cancel"
                     }
                 }
             }),

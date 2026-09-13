@@ -162,6 +162,7 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::ProcessNotVisible
         | RuntimeErrorCode::ProcessAlreadyTerminal
         | RuntimeErrorCode::ProcessParentEnded
+        | RuntimeErrorCode::ProcessCancelConflict
         | RuntimeErrorCode::ProcessNoLongerRetained
         | RuntimeErrorCode::ProcessIncarnationSuperseded
         | RuntimeErrorCode::ProcessRegistryUnavailable
@@ -172,6 +173,8 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
         | RuntimeErrorCode::RestateJournaledEffectPoisoned
         | RuntimeErrorCode::RestateProcessAwait
+        | RuntimeErrorCode::RestateProcessJournalIdentityDrift
+        | RuntimeErrorCode::RestateProcessJournalPayloadIncompatible
         | RuntimeErrorCode::RestateServiceUnregistered
         | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
         | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
@@ -331,6 +334,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         RuntimeErrorCode::ProcessNotVisible,
         RuntimeErrorCode::ProcessAlreadyTerminal,
         RuntimeErrorCode::ProcessParentEnded,
+        RuntimeErrorCode::ProcessCancelConflict,
         RuntimeErrorCode::ProcessNoLongerRetained,
         RuntimeErrorCode::ProcessIncarnationSuperseded,
         RuntimeErrorCode::ProcessRegistryUnavailable,
@@ -350,6 +354,8 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         RuntimeErrorCode::RestateJournaledEffectPoisoned,
         RuntimeErrorCode::RestateProcessAwait,
         RuntimeErrorCode::RestateProcessCancel,
+        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
         RuntimeErrorCode::RestateProcessIngressSubmit,
         RuntimeErrorCode::RestateServiceUnregistered,
         RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,

@@ -28,6 +28,12 @@ pub(super) async fn complete_process(
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 let mut record = SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
+                let await_output = await_output.with_cancel_origin(
+                    record
+                        .cancel_request
+                        .as_deref()
+                        .map(|request| request.origin),
+                );
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,
@@ -83,6 +89,12 @@ pub(super) async fn complete_process_with_lease(
                 let process_id = lease.process_id.as_str();
                 let mut record =
                     SqliteProcessRegistry::require_process_conn(tx, &ProcessId::from(process_id))?;
+                let await_output = await_output.with_cancel_origin(
+                    record
+                        .cancel_request
+                        .as_deref()
+                        .map(|request| request.origin),
+                );
                 if record.is_terminal() {
                     return Ok(lash_core::ProcessCompletionOutcome::from_stored(
                         record,

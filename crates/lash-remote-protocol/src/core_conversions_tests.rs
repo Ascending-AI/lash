@@ -10,6 +10,9 @@ use super::*;
 mod process_fixtures;
 use process_fixtures::*;
 
+#[path = "core_conversions_tests/cancellation.rs"]
+mod cancellation;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]
@@ -779,12 +782,14 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.id, "process:start-result");
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
+        origin: lash_sansio::CancelOrigin::ModelRequested,
         process_id: ProcessId::from("process:cancel"),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         status: lash_core::ProcessStatus::Cancelled,
     });
     let core = lash_core::ProcessCancelReceipt::try_from(cancel).expect("core cancel summary");
     assert_eq!(core.status, lash_core::ProcessStatus::Cancelled);
+    assert_eq!(core.origin, lash_sansio::CancelOrigin::ModelRequested);
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
         lash_core::ProcessRef::new(
@@ -890,7 +895,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let cancel = RemoteProcessCancelRequest {
         process_id: ProcessId::from("process:cancel"),
         incarnation: 1,
-        reason: Some("host requested".to_string()),
+        requester: "actor:remote-host".to_string(),
     };
     cancel.validate().expect("valid cancel");
     let command = lash_core::ProcessCommand::from(cancel);
@@ -2340,5 +2345,3 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
-#[path = "core_conversions_tests/cancellation.rs"]
-mod cancellation;
