@@ -159,6 +159,38 @@ and its `generated_sim_search_mode_keeps_summary_lean_and_labels_shards` case
 reported simulator nondeterminism under Bazel's scheduling. Their reasons in
 `tools/bazel/target-inventory.json` now name those cases.
 
+The remaining `Test Cargo workspace partition` compile was re-measured against
+the pool on 2026-09-13 and stays on Cargo. Four binaries are selected there by
+`tools/bazel/cargo_owned_nextest_filter.txt`, and moving a subset buys nothing:
+the job's cost is `cargo nextest run --workspace`, which compiles every
+workspace test binary to run those four, so the Cargo compile disappears only
+if all four move. They do not:
+
+- `//crates/lash-core:lash-core__unit_test` fails in a Bazel test action on the
+  fake-Cargo confidence-gate case above, and independently on
+  `turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work`,
+  which passes alone and fails with `StoreCommitContended` when the binary runs
+  as one libtest process. nextest's process-per-test isolation is load-bearing
+  here, so a `bazel test` or a bare libtest run of this binary is a weaker gate,
+  not the same one.
+- `//crates/lash-core:integration_boundary__test` shells out to `cargo
+  metadata` at the workspace root. A Bazel test action has neither `cargo` on
+  `PATH` nor the workspace manifests in its runfiles.
+- `//crates/lash-sim:lash-sim__unit_test` fails the two cases named above and
+  took 152 s as a single libtest process.
+- `//crates/lash-typescript:integration__test` is the one that does pass —
+  `PASSED in 37.8s` with `--strategy=TestRunner=local`, because its Test262 and
+  WPT trees ride in runfiles. Moving it alone would add its 38 s to the
+  near-critical-path `Test Bazel partition` job while leaving the Cargo compile
+  in place, so it stays where it is.
+
+Bazel bakes `CARGO_MANIFEST_DIR` as a path relative to the execution root,
+where Cargo bakes an absolute one. A Bazel-built test binary is therefore only
+path-correct when it runs with the repository root as its working directory,
+which is neither a Bazel test action's runfiles root nor nextest's per-crate
+working directory. That rules out feeding pool-built binaries to nextest
+through `--binaries-metadata`.
+
 The 20 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
 binary, the two `lash-sim` cross-backend binaries, the `lash-sim` unit binary,
 the `lash-runtime` trybuild binary, the `lash-core` unit and nested-metadata
@@ -170,7 +202,18 @@ contracts:
 - `scripts/check_feature_coverage.py` and the explicit no-default-feature
   commands own feature-combination coverage. Cargo-required targets omitted
   from the resolved default graph are recorded with `cargo-feature-gate` in
-  `tools/bazel/target-inventory.json`.
+  `tools/bazel/target-inventory.json`. Neither moves to the pool. `crate.from_cargo`
+  in `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
+  resolution, so a second generated universe could set `crate_features` on
+  first-party targets but not re-resolve third-party feature flags; the
+  `Runtime feature boundary` lanes would compile a graph Cargo never builds and
+  the `>= 130` test-count assertion would be measured against it. The
+  `Package feature check` lanes are worse still: their proof is the
+  `compiler-artifact` feature set parsed out of `cargo --message-format=json`
+  plus `cargo tree` resolver witnesses, which has no Bazel equivalent that is
+  not a rewrite of the coverage semantics. `dependency-boundary` (21 s of
+  `cargo tree`) is the cheap lane and already the one that enforces the
+  RLM/Lashlang boundary.
 - The `lash-runtime` `ui` target owns trybuild compile-fail fixtures and their
   nested Cargo target cache.
 - nextest profiles own workspace filtering, retries, and scheduling; the
@@ -306,6 +349,14 @@ Three jobs stay entirely Cargo-owned, and not for want of trying:
   real `cargo test` invocations of their own, and the generated simulation and
   minimizer fixtures scheduled by `profile.ci-heavy`. Bazel cannot own a suite
   whose work is a Cargo build.
+- `Seal-test the API surface` runs the `lash-runtime` trybuild binary. Bazel can
+  build that binary from the shared cache, but the 742 s is not the harness
+  compile: trybuild spawns its own `cargo` against `CARGO_TARGET_DIR` to build
+  each compile-fail fixture, so the runner still needs the full workspace
+  dependency graph materialised in a Cargo target directory. Moving the harness
+  compile to the pool would leave that untouched, and narrowing the command off
+  `--workspace` would change the feature unification the fixtures are sealed
+  against.
 - `Build worker release artifacts` compiles `--release` binaries. The generated
   graph is the development compilation graph; the release profile (`thin` LTO
   and stripping) stays a Cargo-owned artifact contract.

@@ -115,7 +115,10 @@ def cargo_test_policy(
         tags.extend(["manual", "cargo-nested-suite"])
         reasons.append(
             "shares a unit-test binary with the fault-matrix tests, which execute"
-            " scripts/confidence-gate.sh against a fake Cargo on PATH"
+            " scripts/confidence-gate.sh against a fake Cargo on PATH, and with"
+            " turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work,"
+            " which needs nextest's process-per-test isolation: it passes alone and"
+            " fails with StoreCommitContended inside a single libtest process"
         )
     if package_name == "lash-sim" and kind == "unit-test":
         tags.extend(["manual", "cargo-heavy-suite"])
