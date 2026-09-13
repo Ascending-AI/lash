@@ -230,9 +230,35 @@ pub(super) struct RawDurableState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StepObservation {
     pub(super) store_error: Option<String>,
+    /// Coarse, backend-stable summary of what an inventory read or write
+    /// answered (counts, presence, outcome discriminant). Backend-generated
+    /// ids and clock stamps are deliberately absent: they are not comparable,
+    /// and the durable contract is carried by `durable_state`.
+    pub(super) surface_answer: Option<String>,
+    /// The mutated-or-not verdict for a *refused* step: whether the refusal
+    /// moved any durable row this harness can observe. Part of the compared
+    /// observation, so backends must agree about it and not only about the
+    /// error class (FIG-2841 law 2). The *contents* of a mutation stay in
+    /// `durable_state`, which is normalized for cross-backend comparison.
+    ///
+    /// `None` on a successful step. The law FIG-2841 states is about refused
+    /// and corrupt-input operations; a *successful* write legitimately moves
+    /// backend-authoritative columns that are not cross-backend comparable —
+    /// PostgreSQL stamps `lease_expires_at_ms` from database wall time on a
+    /// successful lease renewal, where SQLite and the in-memory store read the
+    /// harness's injected `DifferentialClock` and may write the identical
+    /// value back. What a successful step wrote is still compared, in full, by
+    /// the normalized `durable_state` digest.
+    pub(super) refusal_mutated: Option<bool>,
     pub(super) runtime_commit_result: Option<ComparableRuntimeCommitResult>,
     pub(super) freshness_head: FreshnessHeadObservation,
-    pub(super) durable_state: RawDurableState,
+    /// Present for cases compared through the decoded digest; absent for the
+    /// corrupt-input cases, whose rows cannot be decoded by construction.
+    pub(super) durable_state: Option<RawDurableState>,
+    /// Present only for the corrupt-input cases: the logical tables this step
+    /// moved, read without decoding. Both SQL backends name the same logical
+    /// tables, so this crosses the backend boundary where raw row text cannot.
+    pub(super) raw_changed_tables: Option<Vec<&'static str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

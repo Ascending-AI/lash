@@ -77,6 +77,7 @@ lash_rust_integration_test(
     crate_root = "tests/cross_backend_active_turn_divergence.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -99,6 +100,7 @@ lash_rust_integration_test(
     crate_root = "tests/cross_backend_store_differential.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -121,6 +123,7 @@ lash_rust_integration_test(
     crate_root = "tests/logical_turn.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -140,6 +143,7 @@ lash_rust_integration_test(
     crate_root = "tests/process_lifecycle_vocabulary.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -159,6 +163,7 @@ lash_rust_integration_test(
     crate_root = "tests/retention_classification.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -178,6 +183,7 @@ lash_rust_integration_test(
     crate_root = "tests/schema_congruence.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
     ],
@@ -197,6 +203,7 @@ lash_rust_integration_test(
     crate_root = "tests/stack_policy.rs",
     declared_features = [],
     extra_compile_data = [
+        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
         ":lash-sim__bin",
