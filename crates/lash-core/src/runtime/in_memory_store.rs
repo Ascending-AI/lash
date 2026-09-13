@@ -40,7 +40,7 @@ mod claim_hold;
 mod turn_cancel_closure;
 mod turn_input;
 mod warnings;
-use claim_hold::ClaimHold;
+use claim_hold::{ClaimHold, InMemoryClaimMint, InMemoryClaimRow, mint_in_memory_claim};
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
@@ -54,6 +54,26 @@ struct InMemoryQueuedBatch {
 struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
     claim: ClaimHold,
+}
+
+impl InMemoryClaimRow for InMemoryQueuedBatch {
+    fn claim(&self) -> &ClaimHold {
+        &self.claim
+    }
+
+    fn claim_mut(&mut self) -> &mut ClaimHold {
+        &mut self.claim
+    }
+}
+
+impl InMemoryClaimRow for InMemoryPendingTurnInput {
+    fn claim(&self) -> &ClaimHold {
+        &self.claim
+    }
+
+    fn claim_mut(&mut self) -> &mut ClaimHold {
+        &mut self.claim
+    }
 }
 
 #[derive(Clone)]
@@ -626,51 +646,37 @@ impl InMemorySessionStore {
                 }
             }
         };
-        let next_fencing_tokens = selected_indices
-            .iter()
-            .map(|index| {
-                crate::StoreError::checked_monotonic_increment(
-                    "queued_work_claim_fencing_token",
-                    queued[*index].claim.fencing_token,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let first_index = selected_indices[0];
-        let first = queued[first_index].batch.clone();
-        let abandon_restore_claim_id = queued[first_index].claim.id();
-        let abandon_restore_claim_token = queued[first_index].claim.token();
-        let fencing_token = next_fencing_tokens[0];
-        let claim_id = crate::store::queued_work::derive_claim_id(
-            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-            first.enqueue_seq,
-            fencing_token,
-        );
-        let lease_token =
-            crate::store::queued_work::derive_claim_lease_token(session_id, owner, &claim_id, now);
-        let mut batches = Vec::new();
-        for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
-            let entry = &mut queued[index];
-            entry.claim.acquire(
-                claim_id.clone(),
-                lease_token.clone(),
-                owner.clone(),
+        let enqueue_seq = queued[selected_indices[0]].batch.enqueue_seq;
+        let minted = mint_in_memory_claim(
+            queued,
+            InMemoryClaimMint {
+                selected_indices: &selected_indices,
+                enqueue_seq,
+                dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+                fencing_label: "queued_work_claim_fencing_token",
+                session_id,
+                owner,
                 generation,
-                next_fencing_token,
-            );
-            batches.push(entry.batch.clone());
-        }
+                now,
+            },
+        )?;
+        let batches = selected_indices
+            .iter()
+            .map(|&index| queued[index].batch.clone())
+            .collect();
         Ok(crate::QueuedWorkClaimOutcome::Claimed(
             crate::QueuedWorkClaim {
                 session_id: SessionId::from(session_id.to_string()),
-                claim_id,
+                claim_id: minted.claim_id,
                 owner: owner.clone(),
-                lease_token,
-                fencing_token,
+                lease_token: minted.lease_token,
+                fencing_token: minted.fencing_token,
                 session_lease_generation: generation,
                 data: crate::QueuedWorkClaimData {
                     batches,
-                    abandon_restore_claim_id,
-                    abandon_restore_claim_token: abandon_restore_claim_token
+                    abandon_restore_claim_id: minted.abandon_restore_claim_id,
+                    abandon_restore_claim_token: minted
+                        .abandon_restore_claim_token
                         .map(String::into_boxed_str),
                 },
             },
@@ -774,33 +780,23 @@ impl InMemorySessionStore {
         let Some(first_index) = selected_indices.first().copied() else {
             return Ok(None);
         };
-        let next_fencing_tokens = selected_indices
-            .iter()
-            .map(|index| {
-                crate::StoreError::checked_monotonic_increment(
-                    "turn_input_claim_fencing_token",
-                    pending[*index].claim.fencing_token,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let fencing_token = next_fencing_tokens[0];
-        let claim_id = crate::store::queued_work::derive_claim_id(
-            crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
-            pending[first_index].input.enqueue_seq,
-            fencing_token,
-        );
-        let lease_token =
-            crate::store::queued_work::derive_claim_lease_token(session_id, owner, &claim_id, now);
-        let mut inputs = Vec::new();
-        for (index, next_fencing_token) in selected_indices.into_iter().zip(next_fencing_tokens) {
-            let entry = &mut pending[index];
-            entry.claim.acquire(
-                claim_id.clone(),
-                lease_token.clone(),
-                owner.clone(),
+        let enqueue_seq = pending[first_index].input.enqueue_seq;
+        let minted = mint_in_memory_claim(
+            pending,
+            InMemoryClaimMint {
+                selected_indices: &selected_indices,
+                enqueue_seq,
+                dialect: crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+                fencing_label: "turn_input_claim_fencing_token",
+                session_id,
+                owner,
                 generation,
-                next_fencing_token,
-            );
+                now,
+            },
+        )?;
+        let mut inputs = Vec::new();
+        for index in selected_indices {
+            let entry = &mut pending[index];
             if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. }) {
                 entry.input.state = crate::TurnInputState::Accepted;
             }
@@ -808,10 +804,10 @@ impl InMemorySessionStore {
         }
         Ok(Some(crate::TurnInputClaim {
             session_id: SessionId::from(session_id.to_string()),
-            claim_id,
+            claim_id: minted.claim_id,
             owner: owner.clone(),
-            lease_token,
-            fencing_token,
+            lease_token: minted.lease_token,
+            fencing_token: minted.fencing_token,
             session_lease_generation: generation,
             data: crate::TurnInputClaimData {
                 mode,
