@@ -6,7 +6,7 @@
 //! the unstamped shape must read back identically on every backend.
 
 use lash_core::store::StoreError;
-use lash_core::{AttachmentIntent, AttachmentOwnerKind, AttachmentWriteFence, SessionId};
+use lash_core::{AttachmentIntent, AttachmentOwner, AttachmentWriteFence, SessionId};
 
 use super::ConformancePersistence;
 
@@ -31,9 +31,7 @@ pub(crate) fn seed_differential_attachment_rows(
         session_id: session_id.clone(),
         canonical_uri: "lash-attachment://blake3/differential-attachment".to_string(),
         intent_at_epoch_ms: 1_000,
-        owner_kind: Some(AttachmentOwnerKind::Turn),
-        owner_id: Some(operation),
-        owner_incarnation: None,
+        owner: Some(AttachmentOwner::Turn { id: operation }),
     };
     let AttachmentWriteFence::Granted(turn_permit) =
         store.begin_attachment_write(turn_owned.clone())?
@@ -47,11 +45,12 @@ pub(crate) fn seed_differential_attachment_rows(
         session_id: session_id.clone(),
         canonical_uri: "lash-attachment://blake3/differential-process-attachment".to_string(),
         intent_at_epoch_ms: 1_000,
-        owner_kind: Some(AttachmentOwnerKind::Process),
-        owner_id: Some(super::DIFFERENTIAL_PROCESS_OWNER_ID.to_string()),
-        owner_incarnation: Some(lash_core::ProcessIncarnation::from_registration_sequence(
-            super::DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
-        )),
+        owner: Some(AttachmentOwner::Process {
+            id: super::DIFFERENTIAL_PROCESS_OWNER_ID.to_string(),
+            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(
+                super::DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
+            ),
+        }),
     };
     let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(process_owned)? else {
         panic!("the process-owned digest must grant its writer");

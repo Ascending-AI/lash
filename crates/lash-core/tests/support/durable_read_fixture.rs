@@ -412,9 +412,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         session_id: SessionId::from(SESSION_ID.to_string()),
         canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment".to_string(),
         intent_at_epoch_ms: 100,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
         .runtime

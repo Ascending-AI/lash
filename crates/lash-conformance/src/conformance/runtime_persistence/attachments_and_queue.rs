@@ -69,9 +69,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
                 session_id: SessionId::from(session_id.to_string()),
                 canonical_uri: format!("session:{session_id}:sha256:{attachment}"),
                 intent_at_epoch_ms: 100,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             },
         );
     }
@@ -102,9 +100,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
             session_id: SessionId::from("committed-owner"),
             canonical_uri: format!("session:committed-owner:sha256:{attachment}"),
             intent_at_epoch_ms: 150,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         },
     );
     assert!(

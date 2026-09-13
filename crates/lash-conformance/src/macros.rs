@@ -755,6 +755,7 @@ macro_rules! attachment_adoption_tests {
         $crate::attachment_adoption_tests!(@catalogue $fixture; [
             (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
             (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),
+            (attachment_owner_identity_round_trips_conformance, "attachment-owner-identity-round-trip"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

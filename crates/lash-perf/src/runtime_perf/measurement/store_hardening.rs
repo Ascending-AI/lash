@@ -463,9 +463,9 @@ async fn measure_store_hardening_backend_turn(
         session_id: SessionId::from(session_id.to_string()),
         canonical_uri: format!("sha256:{attachment_id}"),
         intent_at_epoch_ms: turn_index as u64 + 1,
-        owner_kind: Some(AttachmentOwnerKind::Turn),
-        owner_id: Some(format!("hardening-turn-{turn_index}")),
-        owner_incarnation: None,
+        owner: Some(lash_core::AttachmentOwner::Turn {
+            id: format!("hardening-turn-{turn_index}"),
+        }),
     };
     let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
         let lash_core::AttachmentWriteFence::Granted(permit) =

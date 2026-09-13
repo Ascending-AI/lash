@@ -61,9 +61,7 @@ impl InMemorySessionStore {
                     intent_at_epoch_ms: committed_at_epoch_ms,
                     written_at_epoch_ms: None,
                     committed_at_epoch_ms: None,
-                    owner_kind: None,
-                    owner_id: None,
-                    owner_incarnation: None,
+                    owner: None,
                 });
             // Copy the evidence onto the adopter's row so it outlives the
             // uploader's intent being forgotten.
@@ -86,8 +84,11 @@ impl InMemorySessionStore {
         for entry in self.attachment_manifest.lock_recover().values_mut() {
             let turn_id = completed.operation.turn_id();
             if entry.session_id == session_id
-                && entry.owner_kind == Some(crate::AttachmentOwnerKind::Turn)
-                && entry.owner_id.as_deref() == turn_id.map(crate::TurnId::as_str)
+                && matches!(
+                    &entry.owner,
+                    Some(crate::AttachmentOwner::Turn { id })
+                        if Some(id.as_str()) == turn_id.map(crate::TurnId::as_str)
+                )
                 && entry.committed_at_epoch_ms.is_none()
             {
                 entry.committed_at_epoch_ms = Some(committed_at_epoch_ms);
@@ -116,9 +117,7 @@ impl InMemorySessionStore {
                 // age with owner death.
                 existing.canonical_uri = intent.canonical_uri;
                 existing.intent_at_epoch_ms = intent.intent_at_epoch_ms;
-                existing.owner_kind = intent.owner_kind;
-                existing.owner_id = intent.owner_id;
-                existing.owner_incarnation = intent.owner_incarnation;
+                existing.owner = intent.owner;
                 self.attachment_write_ids
                     .lock_recover()
                     .insert(key, write_id);
@@ -133,9 +132,7 @@ impl InMemorySessionStore {
                         intent_at_epoch_ms: intent.intent_at_epoch_ms,
                         written_at_epoch_ms: None,
                         committed_at_epoch_ms: None,
-                        owner_kind: intent.owner_kind,
-                        owner_id: intent.owner_id,
-                        owner_incarnation: intent.owner_incarnation,
+                        owner: intent.owner,
                     },
                 );
                 self.attachment_write_ids
@@ -337,17 +334,16 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         // durable factories evaluate process-row existence in their database.
         self.attachment_manifest.lock_recover().retain(|_, entry| {
             let owner_is_dead = deleted.contains(&entry.session_id)
-                || match (entry.owner_kind, entry.owner_id.as_deref()) {
-                    (None, None) => true,
-                    (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => committed_turns
+                || match &entry.owner {
+                    None => true,
+                    Some(crate::AttachmentOwner::Turn { id: owner_id }) => committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
                             session_id == entry.session_id
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),
-                    (Some(crate::AttachmentOwnerKind::Process), Some(_)) => false,
-                    _ => false,
+                    Some(crate::AttachmentOwner::Process { .. }) => false,
                 };
             !(entry.committed_at_epoch_ms.is_none()
                 && entry.intent_at_epoch_ms <= intent_grace_cutoff_epoch_ms
@@ -405,9 +401,9 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                 if deleted.contains(&entry.session_id) {
                     return false;
                 }
-                match (entry.owner_kind, entry.owner_id.as_deref()) {
-                    (None, None) => false,
-                    (Some(crate::AttachmentOwnerKind::Turn), Some(owner_id)) => !committed_turns
+                match &entry.owner {
+                    None => false,
+                    Some(crate::AttachmentOwner::Turn { id: owner_id }) => !committed_turns
                         .iter()
                         .any(|(session_id, turn_id, committed_at_ms)| {
                             session_id == entry.session_id
@@ -416,9 +412,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                         }),
                     // The in-memory store has no durable process registry, so it
                     // cannot prove process death and must retain the root.
-                    (Some(crate::AttachmentOwnerKind::Process), Some(_)) => true,
-                    // Invalid owner pairs are conservatively retained.
-                    _ => true,
+                    Some(crate::AttachmentOwner::Process { .. }) => true,
                 }
             }))
     }
@@ -448,9 +442,7 @@ mod attachment_reconciliation_tests {
             session_id: SessionId::from(session.to_string()),
             canonical_uri: format!("lash-attachment://blake3/{id}"),
             intent_at_epoch_ms: at_ms,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         }
     }
 

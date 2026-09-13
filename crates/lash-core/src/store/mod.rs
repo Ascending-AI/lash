@@ -40,8 +40,8 @@ pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence, AttachmentWritePermit,
-    AttachmentWriteToken, DecodedAttachmentOwner, decode_attachment_condemnation_record,
+    AttachmentManifestEntry, AttachmentOwner, AttachmentOwnerKind, AttachmentWriteFence,
+    AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
     decode_attachment_owner,
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};

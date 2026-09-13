@@ -869,10 +869,12 @@ fn attachment_manifest_observation(
         intent_at_epoch_ms: entry.intent_at_epoch_ms,
         written: entry.written_at_epoch_ms.is_some(),
         committed: entry.committed_at_epoch_ms.is_some(),
-        owner_kind: entry.owner_kind,
-        owner_id: entry.owner_id,
+        owner_kind: entry.owner.as_ref().map(lash_core::AttachmentOwner::kind),
+        owner_id: entry.owner.as_ref().map(|owner| owner.id().to_string()),
         owner_incarnation: entry
-            .owner_incarnation
+            .owner
+            .as_ref()
+            .and_then(lash_core::AttachmentOwner::incarnation)
             .map(|incarnation| incarnation.registration_sequence()),
     }
 }

@@ -522,9 +522,9 @@ async fn attachment_prefix_retention(
             session_id: request.session_id.clone(),
             canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
             intent_at_epoch_ms: 0,
-            owner_kind: Some(crate::AttachmentOwnerKind::Turn),
-            owner_id: Some("orphan-turn".into()),
-            owner_incarnation: None,
+            owner: Some(crate::AttachmentOwner::Turn {
+                id: "orphan-turn".into(),
+            }),
         },
     );
     let mut state = crate::RuntimeSessionState {

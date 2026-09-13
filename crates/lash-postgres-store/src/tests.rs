@@ -1190,9 +1190,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             session_id: session_id.clone(),
             canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
             intent_at_epoch_ms: 1,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         }
     };
 
@@ -1331,9 +1329,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         session_id: request.session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
         intent_at_epoch_ms: 1,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     let lash_core::AttachmentWriteFence::Granted(live_permit) =
         lash_core::AttachmentManifest::begin_attachment_write(&*live_store, live_intent.clone())
