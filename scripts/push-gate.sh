@@ -27,29 +27,11 @@ step() {
   printf '\n==> %s\n' "$*"
 }
 
-# Build-heavy legs run through `heavy-slot` when the developer box provides it.
-#
-# The gate lock this script already holds serialises push gates *within* one
-# worktree. It says nothing about the rest of the machine, and a box running
-# several agent lanes at once has several of these gates compiling the whole
-# workspace simultaneously — each sized from `nproc`, each evicting the others'
-# pages. `heavy-slot` is a box-wide semaphore (a small number of `flock`ed
-# slots) that caps how many compile-shaped gates are resident at once; it waits
-# for a slot rather than failing, and it is re-entrant, so wrapping a leg that
-# already runs inside a slot is a no-op rather than a deadlock.
-#
-# It is feature-detected on purpose. CI runners have one job per runner and no
-# such tool, and a gate that only works on one developer's machine is a broken
-# gate: with `heavy-slot` absent, `heavy` expands to nothing and every leg below
-# runs exactly as it did before.
-heavy_slot_cmd=()
-if command -v heavy-slot >/dev/null 2>&1; then
-  heavy_slot_cmd=(heavy-slot)
-fi
-
-heavy() {
-  "${heavy_slot_cmd[@]}" "$@"
-}
+# Build-heavy legs used to run through a box-wide `heavy-slot` semaphore. That
+# semaphore was retired on 2026-09-13: the Kiln `cargo` wrapper now runs every
+# compile-shaped command in its own fixed cgroup sub-budget inside
+# `kiln-heavy.slice`, so concurrent lanes are capped by the slice instead of
+# queueing behind each other, and nothing here needs to wrap a leg.
 
 configure_bindgen_headers() {
   if [ -n "${BINDGEN_EXTRA_CLANG_ARGS:-}" ]; then
@@ -174,7 +156,7 @@ run_formatting_gates() {
 run_clippy_gate() {
   step "Clippy"
   # shellcheck disable=SC2086
-  heavy cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
+  cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
 }
 
 # Guards whose inputs are Rust sources, the crate-adjacent schema artefacts
@@ -217,13 +199,13 @@ run_workflow_gates() {
 run_workspace_check() {
   step "Workspace check"
   # shellcheck disable=SC2086
-  heavy cargo check --workspace --all-targets --locked ${ci_features}
+  cargo check --workspace --all-targets --locked ${ci_features}
 }
 
 run_workspace_doctests() {
   step "Workspace doctests"
   # shellcheck disable=SC2086
-  heavy cargo test --doc --workspace --locked ${ci_features}
+  cargo test --doc --workspace --locked ${ci_features}
 }
 
 run_workflow_graph_integration() {
@@ -303,12 +285,12 @@ run_workspace_tests() {
   step "Workspace tests"
   if cargo nextest --version >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    heavy env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
       cargo nextest run --workspace --locked ${ci_features}
   else
     echo "cargo-nextest is not installed; falling back to cargo test for local push gate." >&2
     # shellcheck disable=SC2086
-    heavy env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
+    env -u LASH_POSTGRES_DATABASE_URL -u LASH_REQUIRE_POSTGRES \
       cargo test --workspace --locked ${ci_features}
   fi
 }

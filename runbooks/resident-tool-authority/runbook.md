@@ -25,7 +25,7 @@ Do:
 ```bash
 kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   . ./env.sh
-  heavy-slot cargo nextest run --workspace --locked -E "
+  cargo nextest run --workspace --locked -E "
     test(~effective_member_without_contract_is_refused_before_prepare) |
     test(~restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare) |
     test(~plugin_session_refuses_missing_resident_route_before_advertisement) |
