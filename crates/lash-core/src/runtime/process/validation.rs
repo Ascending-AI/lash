@@ -1186,7 +1186,7 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
 ///
 /// Remote ingress must refuse every shape core refuses (FIG-2985), so this
 /// registry is the shared vocabulary of the two validators: each variant has a
-/// fixture in [`crate::testing::refused_process_registration`], and both the
+/// fixture in [`crate::testing::refused_process_registrations`], and both the
 /// core parity test and the `lash-remote-protocol` decoder parity test iterate
 /// [`ProcessRegistrationRefusal::ALL`]. Adding a core rule means adding a
 /// variant, which stops the exhaustive fixture match from compiling until the

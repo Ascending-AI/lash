@@ -269,7 +269,7 @@ pub use process::{
 pub use process::{
     ConformanceProcessRegistry, PROCESS_REFUSAL_FIXTURE_PROCESS_ID, ProcessRegistryTestSupport,
     TestLocalProcessRegistry, TestProcessRegistryWriteExt, accepted_process_registration,
-    refused_process_registration,
+    refused_process_registrations,
 };
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,

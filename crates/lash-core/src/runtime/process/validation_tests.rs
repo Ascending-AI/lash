@@ -691,20 +691,28 @@ fn lifecycle_and_resolved_attempts_are_registration_identity() {
 #[test]
 fn every_registration_refusal_rule_has_a_fixture_that_trips_exactly_it() {
     use crate::runtime::{
-        ProcessRegistrationRefusal, accepted_process_registration, refused_process_registration,
+        ProcessRegistrationRefusal, accepted_process_registration, refused_process_registrations,
     };
 
     validate_process_registration(&accepted_process_registration())
         .expect("the base fixture must be accepted, or every refusal below proves nothing");
 
     for rule in ProcessRegistrationRefusal::ALL {
-        let registration = refused_process_registration(*rule);
-        match super::classify_process_registration(&registration) {
-            Err((refused_rule, error)) => assert_eq!(
-                refused_rule, *rule,
-                "fixture for {rule:?} tripped {refused_rule:?} instead: {error}"
-            ),
-            Ok(()) => panic!("fixture for {rule:?} is accepted by core validation"),
+        let fixtures = refused_process_registrations(*rule);
+        assert!(
+            !fixtures.is_empty(),
+            "rule {rule:?} contributes no fixture, so neither validator is proved against it"
+        );
+        for (index, registration) in fixtures.iter().enumerate() {
+            match super::classify_process_registration(registration) {
+                Err((refused_rule, error)) => assert_eq!(
+                    refused_rule, *rule,
+                    "fixture {index} for {rule:?} tripped {refused_rule:?} instead: {error}"
+                ),
+                Ok(()) => {
+                    panic!("fixture {index} for {rule:?} is accepted by core validation")
+                }
+            }
         }
     }
 }

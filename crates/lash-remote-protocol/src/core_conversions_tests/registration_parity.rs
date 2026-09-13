@@ -3,7 +3,7 @@
 //! `ProcessRecord::from_registration` `.expect()`s on any validation error, so
 //! a peer record core would refuse used to abort the host instead of yielding a
 //! typed error (FIG-2985). The corpus driving these tests lives in
-//! `lash_core::runtime::refused_process_registration`, whose match over
+//! `lash_core::runtime::refused_process_registrations`, whose match over
 //! `ProcessRegistrationRefusal::ALL` is exhaustive: a new core rule without a
 //! fixture fails to compile, and a fixture the remote decoder still accepts
 //! fails here.
@@ -11,7 +11,7 @@
 use super::*;
 
 use lash_core::runtime::{
-    ProcessRegistrationRefusal, accepted_process_registration, refused_process_registration,
+    ProcessRegistrationRefusal, accepted_process_registration, refused_process_registrations,
 };
 
 /// Projects a core registration onto the peer-facing record DTO.
@@ -73,23 +73,60 @@ fn the_accepted_fixture_decodes_so_refusals_are_the_mutation_talking() {
 
 #[test]
 fn every_core_refusal_is_a_typed_remote_refusal_not_a_decoder_panic() {
+    let mut refused_at_projection = 0usize;
+    let mut refused_at_decode = 0usize;
     for rule in ProcessRegistrationRefusal::ALL {
-        let registration = refused_process_registration(*rule);
-        lash_core::runtime::prepare_process_registration(registration.clone())
-            .expect_err("the fixture must be refused by core, or it proves nothing here");
+        let fixtures = refused_process_registrations(*rule);
+        assert!(
+            !fixtures.is_empty(),
+            "rule {rule:?} contributes no fixture, so the decoder is not proved against it"
+        );
+        for (index, registration) in fixtures.into_iter().enumerate() {
+            lash_core::runtime::prepare_process_registration(registration.clone())
+                .expect_err("the fixture must be refused by core, or it proves nothing here");
 
-        // A projection failure is itself a typed refusal at the DTO boundary;
-        // otherwise the record must be refused by the decoder.
-        let Ok(record) = peer_record(registration) else {
-            continue;
-        };
-        match lash_core::ProcessRecord::try_from(record) {
-            Err(RemoteProtocolError::InvalidEnvelope { .. })
-            | Err(RemoteProtocolError::MissingRequiredField { .. }) => {}
-            Err(other) => panic!("{rule:?}: expected an envelope refusal, got {other:?}"),
-            Ok(_) => panic!("{rule:?}: the remote decoder accepted a record core refuses"),
+            // A projection failure is itself a typed refusal at the DTO
+            // boundary; otherwise the record must be refused by the decoder.
+            // Both outcomes are counted, so a fixture that silently stops
+            // reaching the decoder shows up as a moved tally rather than as a
+            // quietly skipped rule.
+            match peer_record(registration) {
+                Err(RemoteProtocolError::InvalidEnvelope { .. })
+                | Err(RemoteProtocolError::MissingRequiredField { .. }) => {
+                    refused_at_projection += 1;
+                }
+                Err(other) => {
+                    panic!("{rule:?}/{index}: expected a typed projection refusal, got {other:?}")
+                }
+                Ok(record) => match lash_core::ProcessRecord::try_from(record) {
+                    Err(RemoteProtocolError::InvalidEnvelope { .. })
+                    | Err(RemoteProtocolError::MissingRequiredField { .. }) => {
+                        refused_at_decode += 1;
+                    }
+                    Err(other) => {
+                        panic!("{rule:?}/{index}: expected an envelope refusal, got {other:?}")
+                    }
+                    Ok(_) => {
+                        panic!("{rule:?}/{index}: the decoder accepted a record core refuses")
+                    }
+                },
+            }
         }
     }
+    let total = refused_at_projection + refused_at_decode;
+    assert_eq!(
+        total,
+        ProcessRegistrationRefusal::ALL
+            .iter()
+            .map(|rule| refused_process_registrations(*rule).len())
+            .sum::<usize>(),
+        "every fixture must be accounted for by exactly one refusal point"
+    );
+    assert!(
+        refused_at_decode > 0,
+        "at least one fixture must reach the decoder guard, or this test only \
+         proves the DTO layer"
+    );
 }
 
 #[test]
@@ -114,4 +151,45 @@ fn tool_call_input_refuses_a_blank_call_id_or_tool_name() {
             other => panic!("expected `{field}` to be required, got {other:?}"),
         }
     }
+}
+
+/// `prepare_process_registration` normalizes event types — it fills in the core
+/// set and then strips the runtime lifecycle names the runtime re-supplies — so
+/// the decoder guard sits between the peer's declared list and the decoded
+/// record. This pins that the guard hands back exactly what core's own
+/// normalization produces, and in particular that the peer's own declaration
+/// survives rather than being dropped with the runtime names.
+#[test]
+fn the_decoder_guard_preserves_the_peer_declared_event_types() {
+    let mut registration = accepted_process_registration();
+    registration.event_types.push(lash_core::ProcessEventType {
+        name: "app.declared".to_string(),
+        payload_schema: lash_core::LashSchema::any(),
+        semantics: lash_core::ProcessEventSemanticsSpec::default(),
+    });
+    let normalized = lash_core::runtime::prepare_process_registration(registration.clone())
+        .expect("the fixture is accepted by core");
+    let expected = normalized
+        .event_types
+        .iter()
+        .map(|event_type| event_type.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        expected.contains("app.declared"),
+        "core normalization must keep the peer's own declaration, or this proves nothing"
+    );
+
+    let record = peer_record(registration).expect("the fixture projects onto the record DTO");
+    let decoded =
+        lash_core::ProcessRecord::try_from(record).expect("the fixture decodes through the guard");
+
+    let decoded_names = decoded
+        .event_types
+        .iter()
+        .map(|event_type| event_type.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        decoded_names, expected,
+        "the decoder guard must round-trip the peer's event-type declarations"
+    );
 }

@@ -7,9 +7,11 @@
 //! pushes the same fixtures through the peer-facing decoder and asserts a typed
 //! refusal rather than a panic.
 //!
-//! [`refused_process_registration`] matches [`ProcessRegistrationRefusal`]
+//! [`refused_process_registrations`] matches [`ProcessRegistrationRefusal`]
 //! exhaustively, so a new core rule cannot be added without a fixture, and the
-//! fixture is automatically fed to the remote decoder.
+//! fixtures are automatically fed to the remote decoder. A rule reached from
+//! more than one input arm carries one fixture per arm, because an arm nobody
+//! spells is an arm neither validator is proved to refuse.
 
 use super::super::events::{ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSpec};
 use super::super::model::{
@@ -75,18 +77,35 @@ fn custom_event_type(name: &str, semantics: ProcessEventSemanticsSpec) -> Proces
     }
 }
 
-/// Builds the registration that violates exactly `rule` and nothing checked before it.
+/// A session-turn input with an otherwise valid definition key.
+fn session_turn_input(definition_key: &str) -> ProcessInput {
+    ProcessInput::SessionTurn {
+        definition_key: definition_key.to_string(),
+        create_request: Box::new(
+            crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("refusal-fixture-child"),
+        ),
+        turn_input: Box::new(crate::TurnInput::empty()),
+        output_contract: crate::ToolOutputContract::Static,
+    }
+}
+
+/// Builds every registration that violates exactly `rule` and nothing checked
+/// before it — one per input arm the rule can be reached from.
 ///
 /// The match is exhaustive on purpose: adding a rule to
 /// [`ProcessRegistrationRefusal`] stops this function compiling until the shape
 /// is spelled here, and both validators then see it.
-pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> ProcessRegistration {
+pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<ProcessRegistration> {
     match rule {
         ProcessRegistrationRefusal::HostParentCancels => {
             let mut registration = accepted_process_registration();
             registration.lifecycle =
                 ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Cancel);
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::TurnParentSessionMismatch => {
             let mut registration = accepted_process_registration();
@@ -100,57 +119,51 @@ pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> Process
             registration.provenance = ProcessProvenance::session(crate::SessionScope::new(
                 "a-different-session".to_string(),
             ));
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::InvalidProcessKey => {
             let mut registration = accepted_process_registration();
             registration.id = "refusal#fixture".into();
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::ZeroMaxAttempts => {
             let mut registration = accepted_process_registration();
             registration.max_attempts = Some(0);
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::ToolCallWithoutCallId => {
             let mut registration = host_registration(tool_call_input("   ", "fixture-tool"));
             registration.env_ref = env_ref();
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::ToolCallWithoutToolName => {
             let mut registration = host_registration(tool_call_input("fixture-call", "\t"));
             registration.env_ref = env_ref();
-            registration
+            vec![registration]
         }
-        ProcessRegistrationRefusal::ExecutionEnvMissing => {
+        // Both arms that must carry an env: engine and tool-call.
+        ProcessRegistrationRefusal::ExecutionEnvMissing => vec![
             host_registration(ProcessInput::Engine {
                 kind: "fixture-engine".to_string(),
                 payload: serde_json::Value::Null,
-            })
-        }
+            }),
+            host_registration(tool_call_input("fixture-call", "fixture-tool")),
+        ],
+        // Both arms that must not: external and session-turn.
         ProcessRegistrationRefusal::ExecutionEnvNotAllowed => {
-            let mut registration = accepted_process_registration();
-            registration.env_ref = env_ref();
-            registration
+            let mut external = accepted_process_registration();
+            external.env_ref = env_ref();
+            let mut session_turn = host_registration(session_turn_input("fixture-definition"));
+            session_turn.env_ref = env_ref();
+            vec![external, session_turn]
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {
-            host_registration(ProcessInput::SessionTurn {
-                definition_key: "  ".to_string(),
-                create_request: Box::new(
-                    crate::SessionCreateRequest::root(
-                        crate::SessionStartPoint::Empty,
-                        crate::PluginOptions::default(),
-                    )
-                    .with_session_id("refusal-fixture-child"),
-                ),
-                turn_input: Box::new(crate::TurnInput::empty()),
-                output_contract: crate::ToolOutputContract::Static,
-            })
+            vec![host_registration(session_turn_input("  "))]
         }
-        ProcessRegistrationRefusal::EmptyEventTypeName => with_event_type(custom_event_type(
+        ProcessRegistrationRefusal::EmptyEventTypeName => vec![with_event_type(custom_event_type(
             "  ",
             ProcessEventSemanticsSpec::default(),
-        )),
+        ))],
         ProcessRegistrationRefusal::DuplicateEventType => {
             let mut registration = with_event_type(custom_event_type(
                 "app.duplicated",
@@ -160,7 +173,7 @@ pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> Process
                 "app.duplicated",
                 ProcessEventSemanticsSpec::default(),
             ));
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::ReservedRuntimeEventType => {
             // Redeclares a reserved name the defaults already carry, with a
@@ -173,10 +186,10 @@ pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> Process
                 .find(|event_type| event_type.name == "process.waiting")
                 .expect("the default event types declare `process.waiting`");
             declared.payload_schema = crate::LashSchema::new(serde_json::json!({"type": "object"}));
-            registration
+            vec![registration]
         }
         ProcessRegistrationRefusal::NonTerminalTerminalStatus => {
-            with_event_type(custom_event_type(
+            vec![with_event_type(custom_event_type(
                 "app.terminal",
                 ProcessEventSemanticsSpec {
                     terminal: Some(ProcessTerminalSpec {
@@ -187,10 +200,10 @@ pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> Process
                     }),
                     ..ProcessEventSemanticsSpec::default()
                 },
-            ))
+            ))]
         }
         ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput => {
-            with_event_type(custom_event_type(
+            vec![with_event_type(custom_event_type(
                 "app.terminal",
                 ProcessEventSemanticsSpec {
                     terminal: Some(ProcessTerminalSpec {
@@ -199,7 +212,7 @@ pub fn refused_process_registration(rule: ProcessRegistrationRefusal) -> Process
                     }),
                     ..ProcessEventSemanticsSpec::default()
                 },
-            ))
+            ))]
         }
     }
 }
