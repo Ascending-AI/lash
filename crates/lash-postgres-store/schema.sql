@@ -286,14 +286,15 @@ CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     committed_at_ms BIGINT,
     owner_kind TEXT CHECK (owner_kind IN ('turn', 'process')),
     owner_id TEXT,
-    CHECK ((owner_kind IS NULL) = (owner_id IS NULL)),
+    owner_incarnation BIGINT,
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
     PRIMARY KEY (session_id, attachment_id)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_uncommitted
     ON lash_attachment_manifest(committed_at_ms)
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
-    ON lash_attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
+    ON lash_attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 
 -- Attachment GC fence state, one row per condemned digest. Deliberately
 -- timestampless: the protocol is CAS transitions only, never an expiry.
@@ -637,7 +638,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 89)
+VALUES ('lash-postgres-store', 90)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

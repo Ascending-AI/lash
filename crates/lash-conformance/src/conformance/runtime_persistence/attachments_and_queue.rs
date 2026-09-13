@@ -69,6 +69,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
                 intent_at_epoch_ms: 100,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             })
             .expect("record independent owner intent");
     }
@@ -100,6 +101,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
             intent_at_epoch_ms: 150,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         })
         .expect("repeat committed owner intent");
     assert!(

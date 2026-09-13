@@ -21,6 +21,7 @@ fn process_owner_death_sql(process_registry_shared: bool) -> String {
                 AND NOT EXISTS (
                     SELECT 1 FROM lash_processes AS process
                     WHERE process.process_id = manifest.owner_id
+                      AND process.incarnation = manifest.owner_incarnation
                 )
             )",
             AttachmentOwnerKind::Process.as_str()
@@ -302,14 +303,15 @@ impl AttachmentManifest for PostgresSessionStore {
             sqlx::query(
                 "INSERT INTO lash_attachment_manifest (
                     attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                    owner_kind, owner_id
+                    owner_kind, owner_id, owner_incarnation
                  )
-                 VALUES ($1, $2, $3, $4, NULL, $5, $6)
+                 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
                  ON CONFLICT (session_id, attachment_id) DO UPDATE SET
                     canonical_uri = EXCLUDED.canonical_uri,
                     intent_at_ms = EXCLUDED.intent_at_ms,
                     owner_kind = EXCLUDED.owner_kind,
-                    owner_id = EXCLUDED.owner_id",
+                    owner_id = EXCLUDED.owner_id,
+                    owner_incarnation = EXCLUDED.owner_incarnation",
             )
             .bind(intent.attachment_id.as_str())
             .bind(intent.session_id.as_str())
@@ -317,6 +319,15 @@ impl AttachmentManifest for PostgresSessionStore {
             .bind(intent.intent_at_epoch_ms as i64)
             .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
             .bind(intent.owner_id)
+            .bind(
+                intent
+                    .owner_incarnation
+                    .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
+                    .transpose()
+                    .map_err(|_| {
+                        StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
+                    })?,
+            )
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -398,14 +409,15 @@ impl AttachmentManifest for PostgresSessionStore {
             sqlx::query(
                 "INSERT INTO lash_attachment_manifest (
                     attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                    owner_kind, owner_id
+                    owner_kind, owner_id, owner_incarnation
                  )
-                 VALUES ($1, $2, $3, $4, NULL, $5, $6)
+                 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
                  ON CONFLICT (session_id, attachment_id) DO UPDATE SET
                     canonical_uri = EXCLUDED.canonical_uri,
                     intent_at_ms = EXCLUDED.intent_at_ms,
                     owner_kind = EXCLUDED.owner_kind,
-                    owner_id = EXCLUDED.owner_id",
+                    owner_id = EXCLUDED.owner_id,
+                    owner_incarnation = EXCLUDED.owner_incarnation",
             )
             .bind(intent.attachment_id.as_str())
             .bind(intent.session_id.as_str())
@@ -413,6 +425,15 @@ impl AttachmentManifest for PostgresSessionStore {
             .bind(intent.intent_at_epoch_ms as i64)
             .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
             .bind(intent.owner_id)
+            .bind(
+                intent
+                    .owner_incarnation
+                    .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
+                    .transpose()
+                    .map_err(|_| {
+                        StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
+                    })?,
+            )
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -544,7 +565,7 @@ impl AttachmentManifest for PostgresSessionStore {
         block_on_detached(async move {
             let rows = sqlx::query(
                 "SELECT attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                        owner_kind, owner_id
+                        owner_kind, owner_id, owner_incarnation
                  FROM lash_attachment_manifest
                  WHERE committed_at_ms IS NULL AND intent_at_ms <= $1
                  ORDER BY attachment_id ASC",
@@ -555,6 +576,18 @@ impl AttachmentManifest for PostgresSessionStore {
             .map_err(store_sqlx_error)?;
             rows.into_iter()
                 .map(|row| {
+                    let owner_kind = row.get::<Option<String>, _>(5);
+                    let owner_id = row.get::<Option<String>, _>(6);
+                    let owner_incarnation = row
+                        .get::<Option<i64>, _>(7)
+                        .map(|value| u64_from_sql("AttachmentManifest", "owner_incarnation", value))
+                        .transpose()?;
+                    let (owner_kind, owner_id, owner_incarnation) =
+                        lash_core::store::decode_attachment_owner(
+                            owner_kind.as_deref(),
+                            owner_id,
+                            owner_incarnation,
+                        )?;
                     Ok(AttachmentManifestEntry {
                         attachment_id: attachment_id_from_sql(
                             "AttachmentManifest",
@@ -574,19 +607,9 @@ impl AttachmentManifest for PostgresSessionStore {
                                 u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                             })
                             .transpose()?,
-                        owner_kind: row
-                            .get::<Option<String>, _>(5)
-                            .as_deref()
-                            .map(|value| {
-                                AttachmentOwnerKind::from_wire_str(value).ok_or_else(|| {
-                                    StoreError::StoredDataCorrupt {
-                                        record_kind: "AttachmentManifest owner kind",
-                                        message: format!("unknown attachment owner kind `{value}`"),
-                                    }
-                                })
-                            })
-                            .transpose()?,
-                        owner_id: row.get(6),
+                        owner_kind,
+                        owner_id,
+                        owner_incarnation,
                     })
                 })
                 .collect()

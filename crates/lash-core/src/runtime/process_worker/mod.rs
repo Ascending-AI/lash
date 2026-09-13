@@ -565,6 +565,7 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
+        let attachment_owner = crate::ProcessRef::from_record(&current);
         let (owner, fencing_token) = match &execution_write_authority {
             crate::ProcessExecutionWriteAuthority::Lease(lease) => {
                 (self.config.lease_owner.clone(), lease.fencing_token)
@@ -613,7 +614,7 @@ impl DurableProcessWorker {
                 .core
                 .durability
                 .attachment_store
-                .bind_process_scoped(registration.id.clone())
+                .bind_process_scoped(attachment_owner)
         });
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator

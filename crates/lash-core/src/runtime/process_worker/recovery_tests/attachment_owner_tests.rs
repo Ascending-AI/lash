@@ -227,7 +227,10 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .core
         .durability
         .attachment_store
-        .bind_process_scoped(PROCESS_ID);
+        .bind_process_scoped(crate::ProcessRef::new(
+            PROCESS_ID,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ));
     runtime
         .host
         .core

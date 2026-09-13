@@ -53,6 +53,7 @@ impl InMemorySessionStore {
                     committed_at_epoch_ms: None,
                     owner_kind: None,
                     owner_id: None,
+                    owner_incarnation: None,
                 })
                 .committed_at_epoch_ms
                 .get_or_insert(committed_at_epoch_ms);
@@ -95,6 +96,7 @@ impl InMemorySessionStore {
                 existing.intent_at_epoch_ms = intent.intent_at_epoch_ms;
                 existing.owner_kind = intent.owner_kind;
                 existing.owner_id = intent.owner_id;
+                existing.owner_incarnation = intent.owner_incarnation;
             }
             None => {
                 manifest.insert(
@@ -107,6 +109,7 @@ impl InMemorySessionStore {
                         committed_at_epoch_ms: None,
                         owner_kind: intent.owner_kind,
                         owner_id: intent.owner_id,
+                        owner_incarnation: intent.owner_incarnation,
                     },
                 );
             }
@@ -470,6 +473,7 @@ mod attachment_reconciliation_tests {
             intent_at_epoch_ms: at_ms,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         }
     }
 

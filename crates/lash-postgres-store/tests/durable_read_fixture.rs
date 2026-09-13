@@ -18,6 +18,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-68-9680a9bd/postgres-expected.json",
+];
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-67-02339d79/postgres-expected.json",
 ];
@@ -117,7 +120,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 89);
+    assert_eq!(PostgresStorage::schema_version(), 90);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -283,6 +286,21 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
+         ALTER TABLE lash_attachment_manifest
+             ADD COLUMN IF NOT EXISTS owner_incarnation BIGINT,
+             DROP CONSTRAINT IF EXISTS lash_attachment_manifest_check,
+             DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity,
+             ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+                 CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
+                     OR (owner_kind = 'turn' AND owner_id IS NOT NULL
+                         AND owner_incarnation IS NULL)
+                     OR (owner_kind = 'process' AND owner_id IS NOT NULL
+                         AND owner_incarnation IS NOT NULL));
+         DROP INDEX IF EXISTS idx_lash_attachment_manifest_owner;
+         CREATE INDEX idx_lash_attachment_manifest_owner
+             ON lash_attachment_manifest(
+                 session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms
+             );
          ALTER TABLE lash_turn_cancel_requests
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';",
     )
