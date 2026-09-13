@@ -575,9 +575,12 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
         )
         .await;
 
+        let error = response.error.expect("journal failure must abort linking");
         assert!(
-            response.error.is_some(),
-            "journal failure must abort linking"
+            error
+                .message
+                .contains("injected deferred journal commit failure"),
+            "the journal commit failure must not be shadowed: {error:?}"
         );
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
         assert_eq!(executions.load(Ordering::SeqCst), 0);
@@ -786,6 +789,105 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
         assert_eq!(installs.load(Ordering::SeqCst), 2);
         assert_eq!(executions.load(Ordering::SeqCst), 1);
+    });
+}
+
+#[test]
+pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
+    block_on(async {
+        let dir = tempfile::tempdir().expect("temporary effect journal");
+        let path = dir.path().join("ambient-failure.sqlite");
+        let session_id = "sqlite-ambient-failure";
+        let turn_id = "turn-1";
+        let replay_key = "exec-code:ambient-failure";
+        let scope = lash_core::ExecutionScope::turn(session_id, turn_id);
+        let invocation = lash_core::testing::exec_code_invocation(
+            session_id,
+            turn_id,
+            0,
+            0,
+            "ambient failure",
+            replay_key,
+        );
+        let program = lashlang::parse(r#"await web.fetch({})?"#).expect("parse");
+        let collision = lash_core::ToolCatalog::from_tool_definitions(vec![
+            ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
+            ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
+        ]);
+        let provider: Arc<dyn lash_core::ToolProvider> =
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: Default::default(),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            });
+
+        let controller =
+            lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+                .await
+                .expect("open SQLite effect controller");
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            Arc::clone(&provider),
+            collision.clone(),
+            lash_core::ScopedEffectController::shared(Arc::new(controller), scope.clone())
+                .expect("admit SQLite controller scope"),
+            invocation.clone(),
+        );
+        let mut record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+        record.select_link(
+            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
+                &invocation,
+            )
+            .expect("effect invocation has a link identity"),
+        );
+        let live = lash_lashlang_runtime::resolve_and_build_deferred_environment(
+            &program,
+            &LashlangSurface::default(),
+            &collision,
+            None,
+            &mut record,
+            &ctx,
+        )
+        .await
+        .expect_err("duplicate live bindings must fail ambient classification");
+        let live_message = match live {
+            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
+            other => panic!("live failure was not Ambient: {other:?}"),
+        };
+
+        let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
+            .await
+            .expect("cold-reopen SQLite effect controller");
+        reopened.start_replay();
+        let replay_ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+            provider,
+            lash_core::ToolCatalog::default(),
+            lash_core::ScopedEffectController::shared(Arc::new(reopened), scope)
+                .expect("admit reopened SQLite controller scope"),
+            invocation,
+        );
+        let mut replay_record = lash_lashlang_runtime::DeferredResolutionRecord::default();
+        replay_record.select_link(
+            lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(
+                replay_ctx.parent_invocation().expect("parent invocation"),
+            )
+            .expect("effect invocation has a link identity"),
+        );
+        let replay = lash_lashlang_runtime::resolve_and_build_deferred_environment(
+            &program,
+            &LashlangSurface::default(),
+            &lash_core::ToolCatalog::default(),
+            None,
+            &mut replay_record,
+            &replay_ctx,
+        )
+        .await
+        .expect_err("cold replay must preserve the ambient failure");
+        let replay_message = match replay {
+            lash_lashlang_runtime::DeferredResolutionError::Ambient(error) => error.to_string(),
+            other => panic!("replayed failure was not Ambient: {other:?}"),
+        };
+
+        assert_eq!(replay_message, live_message);
     });
 }
 

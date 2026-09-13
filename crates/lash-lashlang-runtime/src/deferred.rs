@@ -409,15 +409,12 @@ where
     let phase_context = ctx.clone();
     let resolver_for_resolution = resolver.cloned();
     let referenced_for_resolution = referenced.clone();
-    let ambient_error = Arc::new(tokio::sync::Mutex::new(None));
-    let ambient_error_for_resolution = Arc::clone(&ambient_error);
     let journaled = ctx
         .journaled_deferred_resolution_with(effect_id, operation, move || async move {
             let ambient_paths = match ambient_paths() {
                 Ok(paths) => paths,
                 Err(error) => {
                     let message = error.to_string();
-                    *ambient_error_for_resolution.lock().await = Some(error);
                     return Err(lash_core::RuntimeEffectControllerError::new(
                         lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed,
                         message,
@@ -454,10 +451,21 @@ where
             })
         })
         .await;
-    if let Some(error) = ambient_error.lock().await.take() {
-        return Err(DeferredResolutionError::Ambient(error));
-    }
-    let journaled = journaled.map_err(DeferredResolutionError::Journal)?;
+    let journaled = match journaled {
+        Ok(journaled) => journaled,
+        Err(error)
+            if error.code == lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed
+                && error.summary.is_none()
+                && error.cause.is_none() =>
+        {
+            return Err(DeferredResolutionError::Ambient(
+                ToolBindingError::JournaledAmbient {
+                    message: error.message,
+                },
+            ));
+        }
+        Err(error) => return Err(DeferredResolutionError::Journal(error)),
+    };
     {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve.after_durable_record");
     }
