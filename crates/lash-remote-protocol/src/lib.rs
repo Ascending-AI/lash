@@ -182,6 +182,88 @@ impl<T> Envelope<T> {
     }
 }
 
+struct EnvelopeBody<T>(T);
+
+impl<'de, T> serde::Deserialize<'de> for EnvelopeBody<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor<T>(std::marker::PhantomData<fn() -> T>);
+
+        impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+        where
+            T: serde::Deserialize<'de>,
+        {
+            type Value = EnvelopeBody<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a remote protocol envelope object")
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(
+                    ProtocolVersionSkippingMapAccess {
+                        inner: map,
+                        seen: std::collections::BTreeSet::new(),
+                    },
+                ))
+                .map(EnvelopeBody)
+            }
+        }
+
+        deserializer.deserialize_map(Visitor(std::marker::PhantomData))
+    }
+}
+
+struct ProtocolVersionSkippingMapAccess<A> {
+    inner: A,
+    seen: std::collections::BTreeSet<String>,
+}
+
+impl<'de, A> serde::de::MapAccess<'de> for ProtocolVersionSkippingMapAccess<A>
+where
+    A: serde::de::MapAccess<'de>,
+{
+    type Error = A::Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        loop {
+            let Some(name) = self.inner.next_key::<String>()? else {
+                return Ok(None);
+            };
+            if !self.seen.insert(name.clone()) {
+                return Err(<A::Error as serde::de::Error>::custom(format_args!(
+                    "duplicate field `{name}`"
+                )));
+            }
+            if name == "protocol_version" {
+                self.inner.next_value::<serde::de::IgnoredAny>()?;
+                continue;
+            }
+            return seed
+                .deserialize(serde::de::value::StringDeserializer::<A::Error>::new(name))
+                .map(Some);
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        self.inner.next_value_seed(seed)
+    }
+}
+
 impl<T> Envelope<T>
 where
     T: serde::de::DeserializeOwned,
@@ -210,55 +292,8 @@ where
             });
         }
 
-        struct EnvelopeFields(Vec<(String, serde_json::Value)>);
-
-        impl<'de> serde::Deserialize<'de> for EnvelopeFields {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                struct Visitor;
-
-                impl<'de> serde::de::Visitor<'de> for Visitor {
-                    type Value = EnvelopeFields;
-
-                    fn expecting(
-                        &self,
-                        formatter: &mut std::fmt::Formatter<'_>,
-                    ) -> std::fmt::Result {
-                        formatter.write_str("a remote protocol envelope object")
-                    }
-
-                    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-                    where
-                        A: serde::de::MapAccess<'de>,
-                    {
-                        let mut fields = Vec::new();
-                        let mut names = std::collections::BTreeSet::new();
-                        while let Some(name) = map.next_key::<String>()? {
-                            if !names.insert(name.clone()) {
-                                return Err(serde::de::Error::custom(format_args!(
-                                    "duplicate field `{name}`"
-                                )));
-                            }
-                            fields.push((name, map.next_value()?));
-                        }
-                        Ok(EnvelopeFields(fields))
-                    }
-                }
-
-                deserializer.deserialize_map(Visitor)
-            }
-        }
-
-        let EnvelopeFields(fields) =
+        let EnvelopeBody(body) =
             serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
-        let body = fields
-            .into_iter()
-            .filter(|(name, _)| name != "protocol_version")
-            .collect::<serde_json::Map<_, _>>();
-        let body = serde_json::from_value(serde_json::Value::Object(body))
-            .map_err(RemoteProtocolError::MessageDecode)?;
         Ok(Self {
             protocol_version: probe.protocol_version,
             body,

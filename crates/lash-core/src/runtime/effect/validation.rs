@@ -48,7 +48,13 @@ impl CanonicalRuntimeEffectEnvelope {
                 format!("failed to decode canonical runtime effect envelope: {err}"),
             )
         })?;
-        let value: Value = serde_json::from_str(&canonical.json).map_err(|err| {
+        canonical.refuse_unsupported_recorded_shape()?;
+        Ok(canonical)
+    }
+
+    /// Refuses recorded shapes this binary cannot replay before any hash work.
+    fn refuse_unsupported_recorded_shape(&self) -> Result<(), RuntimeEffectControllerError> {
+        let value: Value = serde_json::from_str(&self.json).map_err(|err| {
             RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
                 format!("failed to decode canonical runtime effect payload: {err}"),
@@ -57,10 +63,10 @@ impl CanonicalRuntimeEffectEnvelope {
         if is_pre_cutover_trigger_list_envelope(&value) {
             return Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
-                "pre-effect-20 trigger-list envelope uses the retired filter.session_id encoding; recreate the effect journal instead of replaying it across the cutover",
+                "pre-effect-19 trigger-list envelope uses the retired filter.session_id encoding; recreate the effect journal instead of replaying it across the cutover",
             ));
         }
-        Ok(canonical)
+        Ok(())
     }
 
     pub fn hash(&self) -> &str {
@@ -165,8 +171,9 @@ impl RuntimeEffectReplayTrace {
 /// canonical envelope.
 ///
 /// This is the shared replay-validation seam. Substrates supply only their
-/// public mismatch code; canonical comparison, summary construction, and
-/// divergence diagnostics remain identical for every consumer.
+/// public mismatch code; recorded-shape compatibility runs before integrity or
+/// equality checks, and comparison, summary construction, and divergence
+/// diagnostics remain identical for every consumer.
 pub fn validate_replayed_effect_envelope(
     recorded: &CanonicalRuntimeEffectEnvelope,
     reconstructed: &CanonicalRuntimeEffectEnvelope,
@@ -177,6 +184,7 @@ pub fn validate_replayed_effect_envelope(
         mismatch_code.is_replay_mismatch(),
         "replay-validation seam requires a classified replay-mismatch code: {mismatch_code}"
     );
+    recorded.refuse_unsupported_recorded_shape()?;
     recorded.verify("recorded")?;
     reconstructed.verify("reconstructed")?;
 
