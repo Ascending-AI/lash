@@ -40,6 +40,10 @@ impl crate::AwaitEventResolver for DefaultBindingHost {
 
 #[async_trait::async_trait]
 impl crate::EffectHost for DefaultBindingHost {
+    fn turn_control_binding_id(&self) -> String {
+        "fig2471-default-binding-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }

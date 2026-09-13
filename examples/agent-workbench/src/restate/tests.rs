@@ -10,6 +10,18 @@ use lash::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+impl super::WorkbenchCronJobImpl {
+    pub(crate) fn new_for_test(
+        state: crate::AppState,
+        authority_id: lash_restate::RestateAuthorityId,
+    ) -> Self {
+        Self {
+            state,
+            authority_id: Some(authority_id),
+        }
+    }
+}
+
 #[derive(Default)]
 struct CountingProcessEffectController {
     process_starts: AtomicUsize,
@@ -607,9 +619,10 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     let native_host: Arc<dyn lash::durability::EffectHost> =
         Arc::new(lash::durability::NativeEffectHost::default());
     let durable_host: Arc<dyn lash::durability::EffectHost> =
-        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::new(
-            "http://127.0.0.1:8080",
-        ))
+        lash_restate::RestateTurnDeployment::new(
+            lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
+            lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+        )
         .effect_host();
     let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
     let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");
@@ -618,10 +631,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             .turn_control_binding(&native_scoped)
             .await
             .expect("inline binding"),
-        lash::runtime::TurnControlBinding::HostOwned {
-            resolver: _,
-            peek: _,
-        }
+        lash::runtime::TurnControlBinding::HostOwned { .. }
     ));
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
     assert!(matches!(
@@ -632,6 +642,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         lash::runtime::TurnControlBinding::RunScoped {
             resolver: _,
             durable_cancel_after_llm: true,
+            ..
         }
     ));
 

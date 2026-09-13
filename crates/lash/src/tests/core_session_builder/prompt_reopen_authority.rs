@@ -571,24 +571,28 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
-    core.session("sqlite-reseed-twice")
-        .store(Arc::clone(&store))
-        .instructions("FIRST RECONCILED PROMPT")
-        .open()
-        .await?
-        .close()
-        .await?;
+    Box::pin(
+        core.session("sqlite-reseed-twice")
+            .store(Arc::clone(&store))
+            .instructions("FIRST RECONCILED PROMPT")
+            .open()
+            .await?
+            .close(),
+    )
+    .await?;
 
     // A second reopen carrying a different reconciled seed is a new logical
     // operation: the content-addressed identity admits it as a fresh commit
     // instead of tripping the journaled-determinism guard (FIG-1875).
-    core.session("sqlite-reseed-twice")
-        .store(Arc::clone(&store))
-        .instructions("SECOND RECONCILED PROMPT")
-        .open()
-        .await?
-        .close()
-        .await?;
+    Box::pin(
+        core.session("sqlite-reseed-twice")
+            .store(Arc::clone(&store))
+            .instructions("SECOND RECONCILED PROMPT")
+            .open()
+            .await?
+            .close(),
+    )
+    .await?;
 
     let head = store.load_session().await?.expect("reseeded SQLite head");
     assert!(
@@ -599,13 +603,15 @@ async fn successive_reopens_with_distinct_host_prompts_each_recommit_sqlite() ->
 
     // Reopening with the seed the head already carries settles nothing.
     let before = head.head_revision;
-    core.session("sqlite-reseed-twice")
-        .store(Arc::clone(&store))
-        .instructions("SECOND RECONCILED PROMPT")
-        .open()
-        .await?
-        .close()
-        .await?;
+    Box::pin(
+        core.session("sqlite-reseed-twice")
+            .store(Arc::clone(&store))
+            .instructions("SECOND RECONCILED PROMPT")
+            .open()
+            .await?
+            .close(),
+    )
+    .await?;
     let after = store
         .load_session()
         .await?

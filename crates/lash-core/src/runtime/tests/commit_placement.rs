@@ -7,6 +7,10 @@ struct JournaledCommitController<const ENGINE: bool> {
 
 #[async_trait::async_trait]
 impl<const ENGINE: bool> crate::AwaitEventResolver for JournaledCommitController<ENGINE> {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("commit-controller:{:p}", &self.native))
+    }
+
     async fn await_event_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -72,8 +76,18 @@ async fn assert_commit_placement(
             ..LlmResponse::default()
         }),
     }]);
+    let host = match controller.turn_control_participation().await.unwrap() {
+        crate::TurnControlParticipation::Local => {
+            let mut config = test_runtime_host_config();
+            config.control.effect_host = Arc::new(crate::NativeEffectHost::new(controller.clone()));
+            EmbeddedRuntimeHost::new(config)
+        }
+        crate::TurnControlParticipation::DurableJournaled => {
+            journal_replay_host(controller.clone())
+        }
+    };
     let mut runtime = TestRuntime::new(transport)
-        .host(journal_replay_host(controller.clone()))
+        .host(host)
         .store(store.clone())
         .with_session_id(session_id)
         .build()

@@ -253,7 +253,25 @@ CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
     record_json TEXT NOT NULL,
+    intent_revision INTEGER NOT NULL CHECK (intent_revision >= 1),
     PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
+    session_id TEXT PRIMARY KEY,
+    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
+    admitted_scope_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_authorizations (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    authorization_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS turn_cancel_retired_scopes (
+    scope_id TEXT PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS session_execution_leases (
@@ -407,6 +425,33 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
+
+-- Cancellation-only durable promises for Native sessions. These tables live
+-- in durable core so reopening the session recovers the same authority without
+-- migrating unrelated Native effects into the effect journal.
+CREATE TABLE IF NOT EXISTS await_event_meta (
+    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+    signing_secret  BLOB NOT NULL
+);
+INSERT INTO await_event_meta (singleton, signing_secret)
+VALUES (1, randomblob(32))
+ON CONFLICT(singleton) DO NOTHING;
+CREATE TABLE IF NOT EXISTS await_event_waits (
+    key_id          TEXT PRIMARY KEY,
+    scope_json      TEXT NOT NULL,
+    wait_json       TEXT NOT NULL,
+    session_id      TEXT,
+    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
+    terminal_json   TEXT,
+    created_at_ms   INTEGER NOT NULL,
+    resolved_at_ms  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
+    ON await_event_waits(session_id);
+CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
+    session_id      TEXT PRIMARY KEY,
+    revoked_at_ms   INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
     ON artifact_owners(owner_kind, owner_id);
 ";
@@ -582,7 +627,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// Version 59 qualifies process-owned attachment intents with the registry-minted
 /// incarnation. Version-58 catalogs are rejected so a bare process id is never
 /// reinterpreted as the current incarnation with the same reusable name.
-pub(crate) const SCHEMA_VERSION: i32 = 59;
+/// Version 60 adds intent revisions, Native cancellation authority, exact
+/// closure authorizations, and retired-scope fencing. Component-59 catalogs
+/// cannot recover these facts and must be recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 60;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1048,6 +1096,17 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     retired_at_ms   INTEGER NOT NULL,
     artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
+
+-- Durable catalogs that may hold an authorized cancellation closure under a
+-- physical scope. Owner retirement and participant registration serialize on
+-- this database; a participant is released only after its catalog fences new
+-- authorizations and proves that none remain.
+CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
+    scope_id       TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    scope_json     TEXT NOT NULL,
+    PRIMARY KEY (scope_id, participant_id)
+);
 ";
 
 // Version 6 keys session-owned effects by the permanent session id and removes
@@ -1107,7 +1166,10 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // are recreated rather than replayed across this encoding cutover.
 // Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
 // Pre-20 effect databases are rejected rather than migrated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
+// Version 21 adds owner-side cancellation-closure participants. This makes
+// scope retirement serialize with authorization held in separate session
+// catalogs; pre-21 effect databases are rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 21;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

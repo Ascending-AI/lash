@@ -142,10 +142,12 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
         &self,
         request: crate::SessionTurnRequest<'_>,
     ) -> Result<AssembledTurn, crate::PluginError> {
-        self.services
-            .managed
-            .start_turn(&self.services.current, &self.services.usage, request)
-            .await
+        Box::pin(self.services.managed.start_turn(
+            &self.services.current,
+            &self.services.usage,
+            request,
+        ))
+        .await
     }
 }
 
@@ -156,16 +158,14 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::AppendSessionNodesOutcome, crate::PluginError> {
-        self.services
-            .current
-            .append_session_nodes(
-                &self.services.managed,
-                &self.services.usage,
-                &self.services.processes,
-                session_id,
-                request,
-            )
-            .await
+        Box::pin(self.services.current.append_session_nodes(
+            &self.services.managed,
+            &self.services.usage,
+            &self.services.processes,
+            session_id,
+            request,
+        ))
+        .await
     }
     async fn emit_trace_event(
         &self,

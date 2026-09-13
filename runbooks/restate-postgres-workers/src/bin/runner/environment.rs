@@ -48,7 +48,7 @@ pub(super) async fn run_cold_process_await_event_vectors(
             "identity": identity,
             "nonce": nonce,
         }));
-        let resolver = RestateEffectHost::new(ingress_url.to_string());
+        let resolver = RestateEffectHost::new(ingress_url.to_string(), restate_authority_id()?);
         anyhow::ensure!(
             matches!(
                 resolver
@@ -59,7 +59,7 @@ pub(super) async fn run_cold_process_await_event_vectors(
             ),
             "killed-helper {identity} resolution did not win"
         );
-        let observer = RestateEffectHost::new(ingress_url.to_string());
+        let observer = RestateEffectHost::new(ingress_url.to_string(), restate_authority_id()?);
         anyhow::ensure!(
             observer
                 .peek_await_event(&key)
@@ -356,7 +356,11 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         Err(err) => eprintln!("workers-e2e TIMEOUT Restate state query failed: {err:#}"),
     }
 
-    let wait_host = RestateEffectHost::new(ingress_url);
+    let Ok(authority_id) = restate_authority_id() else {
+        eprintln!("timeout diagnostics skipped durable-wait probe: RESTATE_AUTHORITY_ID missing");
+        return;
+    };
+    let wait_host = RestateEffectHost::new(ingress_url, authority_id);
     let mut completed_promise_keys = BTreeSet::new();
     for key in &recorded_wait_keys {
         let workflow_key = lash_restate::RestateDurableWaitAddress::for_key(key).workflow_key;

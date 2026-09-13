@@ -10,9 +10,10 @@ use super::*;
 use crate::SessionId;
 
 // Version 2 (FIG-2880) carries explicit ambient/restricted resident-tool
-// authority in the shared persisted-config projection.
-const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
-const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
+// authority in the shared persisted-config projection. Version 3 accounts for
+// the cancellation-dependent commit fields admitted after that cutover.
+const RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
+const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 3;
 // Version 2 (FIG-2765): staged usage rows carry their usage disposition through
 // the usage-payload identity, so a retried usage-ledger commit whose rows gained
 // a hole or a correction no longer matches a v1 receipt. Version 3 (FIG-2765 fix
@@ -20,7 +21,8 @@ const CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 2;
 // count, moving every unreported row's payload hash again. The projection and
 // domain are unchanged; the version is the fence. Version 4 (FIG-2880) carries
 // the same explicit resident-tool authority as the other boundary operations.
-const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
+// Version 5 accounts for the cancellation-dependent commit fields.
+const USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 5;
 
 /// Refuse settlement or evidence content on a semantic-boundary commit.
 ///
@@ -106,6 +108,9 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         completed_turn_input_claims: _, // refused non-empty by validation
         enqueued_queue_batches: _,      // refused non-empty by validation
         interrupted_turn_input_turn_id: _, // refused present by validation
+        interrupted_turn_input_cancellation: _, // refused present by validation
+        interrupted_turn_cancel_intent: _, // transient CAS predicate
+        turn_cancel_closure_settlement: _, // transient fenced obligation
         adopted_intent_rows: _,         // refused non-zero by validation
         committed_attachment_ids: _,    // refused non-empty by validation
     } = commit;
@@ -197,9 +202,9 @@ mod semantic_boundary_request_identity_tests {
         // cargo test -p lash-internal-core \
         //   semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
-            ("record-config", "protocol-materialization", 2),
-            ("create-session", "child-1", 2),
-            ("usage-ledger", "child-turn", 4),
+            ("record-config", "protocol-materialization", 3),
+            ("create-session", "child-1", 3),
+            ("usage-ledger", "child-turn", 5),
         ]
         .into_iter()
         .map(|(key, boundary, expected_version)| {

@@ -202,7 +202,7 @@ impl LashRuntime {
         &mut self,
         patch: SessionConfigPatch,
     ) -> Result<(), SessionError> {
-        self.apply_session_config(patch, |_| {}).await
+        Box::pin(self.apply_session_config(patch, |_| {})).await
     }
 
     async fn apply_session_config(
@@ -368,11 +368,10 @@ impl LashRuntime {
         &mut self,
         options: crate::ProtocolTurnOptions,
     ) -> Result<(), SessionError> {
-        match self
-            .update_protocol_turn_options(|_| {
-                Ok::<crate::ProtocolTurnOptions, std::convert::Infallible>(options)
-            })
-            .await?
+        match Box::pin(self.update_protocol_turn_options(|_| {
+            Ok::<crate::ProtocolTurnOptions, std::convert::Infallible>(options)
+        }))
+        .await?
         {
             Ok(_) => Ok(()),
             Err(never) => match never {},
@@ -388,7 +387,7 @@ impl LashRuntime {
         &mut self,
         options: crate::ProtocolTurnOptions,
     ) -> Result<(), SessionError> {
-        self.set_protocol_turn_options(options).await
+        Box::pin(self.set_protocol_turn_options(options)).await
     }
 
     /// Reload the durable session state, derive protocol options from that
@@ -441,16 +440,20 @@ impl LashRuntime {
         &mut self,
         template: crate::PromptTemplate,
     ) -> Result<(), SessionError> {
-        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
-            prompt.template = Some(template);
-        })
+        Box::pin(
+            self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+                prompt.template = Some(template);
+            }),
+        )
         .await
     }
 
     pub async fn clear_prompt_template(&mut self) -> Result<(), SessionError> {
-        self.apply_session_config(SessionConfigPatch::default(), |prompt| {
-            prompt.template = None;
-        })
+        Box::pin(
+            self.apply_session_config(SessionConfigPatch::default(), |prompt| {
+                prompt.template = None;
+            }),
+        )
         .await
     }
 
@@ -458,9 +461,11 @@ impl LashRuntime {
         &mut self,
         contribution: crate::PromptContribution,
     ) -> Result<(), SessionError> {
-        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
-            prompt.add_contribution(contribution);
-        })
+        Box::pin(
+            self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+                prompt.add_contribution(contribution);
+            }),
+        )
         .await
     }
 
@@ -476,9 +481,11 @@ impl LashRuntime {
     }
 
     pub async fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) -> Result<(), SessionError> {
-        self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
-            prompt.clear_slot(slot);
-        })
+        Box::pin(
+            self.apply_session_config(SessionConfigPatch::default(), move |prompt| {
+                prompt.clear_slot(slot);
+            }),
+        )
         .await
     }
 

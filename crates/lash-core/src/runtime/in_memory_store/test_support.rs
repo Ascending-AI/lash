@@ -177,6 +177,12 @@ impl InMemorySessionStore {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
     }
 
+    pub fn inject_turn_cancel_before_next_runtime_commit(&self, request: crate::TurnCancelRequest) {
+        *self
+            .inject_turn_cancel_before_next_runtime_commit
+            .lock_recover() = Some(request);
+    }
+
     pub fn fail_next_runtime_commit_after_first_mutation(&self, error: crate::StoreError) {
         *self
             .fail_next_runtime_commit_after_first_mutation

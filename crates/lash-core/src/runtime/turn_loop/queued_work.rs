@@ -315,6 +315,19 @@ impl LashRuntime {
                 EmptyQueuedDrainReason::NoDurableQueue,
             ));
         };
+        let activation_controller = opts.scoped_effect_controller();
+        if let Err(error) = self
+            .defer_orphaned_turn_inputs_before_drain(
+                &store,
+                &session_execution_fence,
+                &TurnId::from(opts.execution_scope_id()),
+                &activation_controller,
+            )
+            .await
+        {
+            let _ = session_execution_lease.release_if_live().await;
+            return Err(error.into());
+        }
         let drain_commands_before_turn_input = if selected_batch_ids.is_some() {
             true
         } else {
@@ -342,7 +355,7 @@ impl LashRuntime {
             }
         }
         if selected_batch_ids.is_none() {
-            let mut input_claim = store
+            let input_claim = store
                 .claim_next_turn_inputs(
                     &self.state.session_id,
                     &session_execution_fence,
@@ -351,30 +364,6 @@ impl LashRuntime {
                 )
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
-            // FIG-1573 backstop: a drain that holds the lane and finds nothing
-            // claimable is the wedge's exact signature. Repair the rows no turn
-            // can deliver, then claim once more so the repair lands in this same
-            // drain rather than waiting for another wake.
-            if input_claim.is_none()
-                && self
-                    .defer_orphaned_turn_inputs_before_drain(
-                        &store,
-                        &session_execution_fence,
-                        &TurnId::from(opts.execution_scope_id()),
-                    )
-                    .await
-                    > 0
-            {
-                input_claim = store
-                    .claim_next_turn_inputs(
-                        &self.state.session_id,
-                        &session_execution_fence,
-                        &self.runtime_lease_owner,
-                        MAX_CLAIMED_TURN_INPUTS,
-                    )
-                    .await
-                    .map_err(super::runtime_error_from_store_commit)?;
-            }
             if let Some(input_claim) = input_claim {
                 let mut input = input_claim.materialize_turn_input();
                 if let Some(hint) = opts.local_cancel_origin_hint() {

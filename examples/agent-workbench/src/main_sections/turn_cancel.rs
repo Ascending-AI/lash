@@ -75,12 +75,43 @@ pub(crate) enum TurnCancelReceipt {
     UnknownOrRevoked {
         address: lash::TurnAddress,
     },
+    PolicyConflict {
+        address: lash::TurnAddress,
+        requested: lash::TurnCancelDisposition,
+        accepted: lash::TurnCancellationEvidence,
+    },
 }
 
 impl TurnCancelReceipt {
     pub(crate) fn terminal_is_pending(&self) -> bool {
         matches!(self, Self::CancellationRecordedTerminalPending { .. })
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn await_durable_turn_cancel_request(
+    state: &AppState,
+    address: &lash::TurnAddress,
+) -> lash::TurnCancelRequestRecord {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(store) = state
+                .session_store_factory
+                .open_existing_store_by_id(&address.session_id)
+                .await
+                .expect("open durable cancellation store")
+                && let Some(record) = store
+                    .turn_cancel_request(address)
+                    .await
+                    .expect("read durable cancellation request")
+            {
+                return record;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("timed out waiting for durable cancellation request")
 }
 
 pub(crate) async fn cancel_turn(

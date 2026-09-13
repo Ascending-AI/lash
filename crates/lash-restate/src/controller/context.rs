@@ -36,7 +36,7 @@ use crate::durable_wait::{
     RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
     RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
-    register_turn_cancel_gate, restate_await_event_key, restate_durable_wait_request,
+    register_turn_cancel_gate, restate_await_event_key_for_authority, restate_durable_wait_request,
     retire_turn_cancel_gate,
 };
 use crate::effect_group::{
@@ -441,6 +441,10 @@ where
     C: ContextClient<'ctx>,
 {
     let scope = turn_cancel.key.scope.clone();
+    let authority_id = crate::durable_wait::restate_authority_id_for_key(&turn_cancel.key)
+        .ok_or_else(|| {
+            TerminalError::from_error(crate::durable_wait::restate_unknown_or_revoked())
+        })?;
     let (awakeable_id, awakeable_wait) = awakeable();
     let gate = match register_turn_cancel_gate(context, session_id, turn_cancel.key, awakeable_id)
         .await?
@@ -483,9 +487,12 @@ where
         session_id = session_id.as_str(),
         "after-step stop observed by a parked durable wait; composing to the step boundary"
     );
-    let escalation_key =
-        restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelEscalation)
-            .map_err(TerminalError::from_error)?;
+    let escalation_key = restate_await_event_key_for_authority(
+        &authority_id,
+        &scope,
+        AwaitEventWaitIdentity::TurnCancelEscalation,
+    )
+    .map_err(TerminalError::from_error)?;
     let (escalation_id, escalation) = awakeable();
     let escalation_gate = match register_turn_cancel_gate(
         context,

@@ -104,6 +104,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .context("invalid AGENT_WORKBENCH_RESTATE_ADDR")?;
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    let restate_authority_id =
+        lash_restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").context(
+            "RESTATE_AUTHORITY_ID is required and must remain stable for one Restate state",
+        )?)?;
     let restate_admin_url =
         std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19070".to_string());
     let data_dir = std::env::var("AGENT_WORKBENCH_DATA_DIR")
@@ -260,6 +264,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 attach_ceiling_ms: 6 * 60 * 60 * 1_000,
             },
         ),
+        restate_authority_id.clone(),
         process_registry,
         process_continuations,
         Some(Arc::clone(&process_event_sink)),
@@ -277,11 +282,13 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
 
-    let turn_deployment =
-        lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::with_client(
+    let turn_deployment = lash_restate::RestateTurnDeployment::new(
+        lash_restate::RestateConnection::with_client(
             restate_ingress_url.clone(),
             restate_http.clone(),
-        ));
+        ),
+        restate_authority_id.clone(),
+    );
 
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),

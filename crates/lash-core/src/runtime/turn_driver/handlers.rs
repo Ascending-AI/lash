@@ -326,7 +326,7 @@ impl RuntimeTurnDriver<'_> {
             .await?;
         let (resolver, peek_controller): (&dyn AwaitEventResolver, &ScopedEffectController<'_>) =
             match &binding {
-                crate::TurnControlBinding::HostOwned { resolver, peek } => (*resolver, peek),
+                crate::TurnControlBinding::HostOwned { resolver, peek, .. } => (*resolver, peek),
                 crate::TurnControlBinding::RunScoped { resolver, .. } => {
                     (*resolver, &self.scoped_effect_controller)
                 }

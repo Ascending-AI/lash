@@ -9,6 +9,46 @@ use super::{InMemoryPendingTurnInput, InMemorySessionStore};
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
+pub(super) fn settlement_mismatch<'a, R>(
+    rows: &'a [R],
+    row_ids: &'a [String],
+    session_id: &SessionId,
+    identity: impl Fn(&R) -> (&str, &str),
+    matches: impl Fn(&R) -> bool,
+) -> Option<(Option<&'a String>, Option<&'a R>)> {
+    if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
+        return None;
+    }
+    let row_id = row_ids.iter().find(|id| {
+        !rows
+            .iter()
+            .any(|row| identity(row).1 == id.as_str() && matches(row))
+    });
+    let current = row_id.and_then(|id| {
+        rows.iter()
+            .find(|row| identity(row) == (session_id, id.as_str()))
+    });
+    Some((row_id, current))
+}
+
+/// The in-memory store's turn-input settlement predicate.
+///
+/// One predicate, two regimes: the claim fields only strengthen it. A claimed
+/// settlement requires the row to still carry that claim; an unclaimed
+/// settlement requires it to still be unclaimed and unsettled
+/// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §5).
+pub(super) fn settlement_matches(
+    entry: &InMemoryPendingTurnInput,
+    completed: &crate::TurnInputCompletion,
+) -> bool {
+    entry.input.session_id == completed.session_id
+        && completed.input_ids.contains(&entry.input.input_id)
+        && match completed.claim.as_ref() {
+            Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
+            None => entry.claim.id().is_none() && !entry.input.state.is_terminal(),
+        }
+}
+
 impl InMemoryPendingTurnInput {
     fn claim_diagnostics(&self) -> Option<crate::PendingTurnInputClaimDiagnostics> {
         self.claim
@@ -73,25 +113,216 @@ fn find_pending_turn_input_index(
 
 #[async_trait::async_trait]
 impl crate::store::TurnInputStore for InMemorySessionStore {
+    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
+        self.turn_cancellation_authority.clone()
+    }
+
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<(), crate::store::StoreError> {
+        admitted_scope
+            .validate()
+            .map_err(|error| crate::StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancellationBinding",
+                message: error.to_string(),
+            })?;
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(session_id)?;
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let admitted_physical_scope = admitted_scope
+            .session_id()
+            .is_none()
+            .then(|| admitted_scope.clone());
+        let mut selected = self.turn_cancellation_binding.lock_recover();
+        match selected.as_ref() {
+            None => *selected = Some((binding_id.to_string(), admitted_physical_scope.clone())),
+            Some((expected, expected_scope))
+                if expected == binding_id && expected_scope == &admitted_physical_scope => {}
+            Some((expected, _)) => {
+                return Err(crate::StoreError::TurnCancelBindingMismatch {
+                    session_id: session_id.clone(),
+                    expected: expected.to_string(),
+                    presented: binding_id.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, crate::store::StoreError> {
+        authorization
+            .validate()
+            .map_err(|error| crate::StoreError::StoredDataCorrupt {
+                record_kind: "TurnCancelClosureAuthorization",
+                message: error.to_string(),
+            })?;
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(authorization.session_id())?;
+        if authorization.session_id() != session_execution_lease.session_id
+            || authorization.authorizing_fencing_token() != session_execution_lease.fencing_token
+        {
+            return Err(crate::StoreError::SessionExecutionLeaseExpired {
+                session_id: authorization.session_id().clone(),
+            });
+        }
+        if authorization.admitted_scope().session_id().is_none() {
+            let scope_id = authorization
+                .admitted_scope()
+                .journal_identity()
+                .map_err(|error| crate::StoreError::Backend(error.to_string()))?
+                .key()
+                .to_string();
+            if self
+                .retired_turn_cancel_scopes
+                .lock_recover()
+                .contains(&scope_id)
+            {
+                return Err(crate::StoreError::TurnCancelClosureScopeRetired { scope_id });
+            }
+        }
+        let selected = self.turn_cancellation_binding.lock_recover();
+        let admitted_physical_scope = authorization
+            .admitted_scope()
+            .session_id()
+            .is_none()
+            .then(|| authorization.admitted_scope().clone());
+        if selected
+            .as_ref()
+            .map(|(binding, scope)| (binding.as_str(), scope))
+            != Some((authorization.binding_id(), &admitted_physical_scope))
+        {
+            return Err(crate::StoreError::TurnCancelBindingMismatch {
+                session_id: authorization.session_id().clone(),
+                expected: selected
+                    .as_ref()
+                    .map(|(binding, scope)| format!("{binding} at {scope:?}"))
+                    .unwrap_or_default(),
+                presented: authorization.binding_id().to_string(),
+            });
+        }
+        let mut pending = self.turn_cancel_closure_authorizations.lock_recover();
+        match pending.get(authorization.turn_id()) {
+            Some(existing) if existing == authorization => {
+                Ok(crate::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
+            }
+            Some(_) => Err(crate::StoreError::TurnCancelClosureConflict {
+                session_id: authorization.session_id().clone(),
+                turn_id: authorization.turn_id().clone(),
+            }),
+            None => {
+                let requests = self.turn_cancel_requests.lock_recover();
+                if snapshot(&requests, authorization.turn_id()) != *authorization.observed_intent()
+                {
+                    return Err(crate::StoreError::TurnCancelIntentChanged {
+                        session_id: authorization.session_id().clone(),
+                        turn_id: authorization.turn_id().clone(),
+                    });
+                }
+                drop(requests);
+                pending.insert(authorization.turn_id().clone(), authorization.clone());
+                Ok(crate::TurnCancelClosureAuthorizationOutcome::Authorized)
+            }
+        }
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::store::StoreError> {
+        self.validate_turn_cancellation_binding(
+            session_id,
+            session_execution_lease,
+            binding_id,
+            admitted_scope,
+        )
+        .await?;
+        Ok(self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .values()
+            .filter(|authorization| authorization.session_id() == session_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::store::StoreError> {
+        Ok(self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn turn_is_committed(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<bool, crate::store::StoreError> {
+        let operation_key =
+            crate::OperationId::turn(&address.session_id, &address.turn_id, "final")
+                .storage_key()?;
+        Ok(self
+            .runtime_turn_commits
+            .lock_recover()
+            .contains_key(&(address.session_id.clone(), operation_key)))
+    }
+
     async fn record_turn_cancel_request(
         &self,
         request: crate::TurnCancelRequest,
     ) -> Result<crate::TurnCancelRequestRecord, crate::store::StoreError> {
-        self.ensure_session_not_deleted(&request.address.session_id)?;
         let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&request.address.session_id)?;
         let mut requests = self.turn_cancel_requests.lock_recover();
-        let record = requests
-            .entry(request.address.turn_id.clone())
-            .or_insert_with(|| crate::TurnCancelRequestRecord {
-                request: request.clone(),
+        let operation_key = crate::OperationId::turn(
+            &request.address.session_id,
+            &request.address.turn_id,
+            "final",
+        )
+        .storage_key()?;
+        if self
+            .runtime_turn_commits
+            .lock_recover()
+            .contains_key(&(request.address.session_id.clone(), operation_key))
+        {
+            return Ok(crate::TurnCancelRequestRecord {
+                request,
                 outcome: None,
             });
-        // First writer wins, except that a stronger mode escalates the durable
-        // request; the repair outcome accumulated so far stays attached.
-        if request.mode.is_stronger_than(record.request.mode) {
-            record.request = request;
         }
-        Ok(record.clone())
+        let stored = requests
+            .entry(request.address.turn_id.clone())
+            .or_insert_with(|| super::InMemoryTurnCancelRequest {
+                record: crate::TurnCancelRequestRecord {
+                    request: request.clone(),
+                    outcome: None,
+                },
+                intent_revision: 1,
+            });
+        // The first policy acceptor is immutable. A stronger same-policy
+        // request advances the closure-CAS revision; its effective timing is
+        // recorded by the settled gate.
+        if request.mode.is_stronger_than(stored.record.request.mode) {
+            stored.intent_revision = crate::store::StoreError::checked_monotonic_increment(
+                "turn_cancel_intent_revision",
+                stored.intent_revision,
+            )?;
+        }
+        Ok(stored.record.clone())
     }
 
     async fn turn_cancel_request(
@@ -103,7 +334,58 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .turn_cancel_requests
             .lock_recover()
             .get(&address.turn_id)
-            .cloned())
+            .map(|stored| stored.record.clone()))
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<crate::TurnCancelIntentSnapshot, crate::store::StoreError> {
+        self.ensure_session_not_deleted(&address.session_id)?;
+        Ok(self
+            .turn_cancel_requests
+            .lock_recover()
+            .get(&address.turn_id)
+            .map_or(crate::TurnCancelIntentSnapshot::Absent, |stored| {
+                crate::TurnCancelIntentSnapshot::Present {
+                    request: stored.record.request.clone(),
+                    revision: stored.intent_revision,
+                }
+            }))
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
+        evidence: &crate::TurnCancellationEvidence,
+    ) -> Result<bool, crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&address.session_id)?;
+        let mut requests = self.turn_cancel_requests.lock_recover();
+        if snapshot(&requests, &address.turn_id) != *observed {
+            return Ok(false);
+        }
+        let outcome = requests
+            .get(&address.turn_id)
+            .and_then(|stored| stored.record.outcome.clone());
+        let request = request_from_evidence(address, evidence);
+        let revision = match requests.get(&address.turn_id) {
+            Some(stored) if stored.record.request == request => stored.intent_revision,
+            Some(stored) => crate::store::StoreError::checked_monotonic_increment(
+                "turn_cancel_intent_revision",
+                stored.intent_revision,
+            )?,
+            None => 1,
+        };
+        requests.insert(
+            address.turn_id.clone(),
+            super::InMemoryTurnCancelRequest {
+                record: crate::TurnCancelRequestRecord { request, outcome },
+                intent_revision: revision,
+            },
+        );
+        Ok(true)
     }
 
     async fn enqueue_pending_turn_input(
@@ -338,24 +620,96 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         Ok(())
     }
 
-    async fn defer_orphaned_active_turn_inputs(
+    async fn orphaned_active_turn_ids(
         &self,
         session_id: &SessionId,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
-    ) -> Result<crate::TurnCancelInputOutcome, crate::store::StoreError> {
+    ) -> Result<Vec<crate::TurnId>, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
-        // Inside the write transaction, exactly like the claim path: a fence
-        // validated outside it could be displaced before the repair writes.
+        self.ensure_session_not_deleted(session_id)?;
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let pending = self.pending_turn_inputs.lock_recover();
+        let mut turn_ids = std::collections::BTreeSet::new();
+        for entry in pending.iter() {
+            if entry.input.session_id == session_id
+                && crate::store_backend_support::orphaned_active_turn_input_is_repairable(
+                    scope,
+                    session_execution_lease.fencing_token,
+                    entry.input.state,
+                    &entry.input.ingress,
+                    entry.claim.token().is_some(),
+                    entry.claim.generation().unwrap_or(0),
+                )
+                && let Some(turn_id) = entry.input.ingress.active_turn_id()
+            {
+                turn_ids.insert(turn_id.clone());
+            }
+        }
+        Ok(turn_ids.into_iter().collect())
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
+    ) -> Result<crate::store::TurnCancelRepairResult, crate::store::StoreError> {
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(session_id)?;
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let closure = settlement.map(crate::TurnCancelClosureSettlement::authorization);
+        let pending_closure = self
+            .turn_cancel_closure_authorizations
+            .lock_recover()
+            .get(turn_id)
+            .cloned();
+        let closure_required = pending_closure.is_some()
+            || !matches!(observed, crate::TurnCancelIntentSnapshot::Absent);
+        if closure_required != settlement.is_some()
+            || closure.is_some_and(|authorization| {
+                authorization.session_id() != session_id || authorization.turn_id() != turn_id
+            })
+        {
+            return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
+        }
+        if let Some(closure) = closure
+            && pending_closure.as_ref() != Some(closure)
+        {
+            return Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+            });
+        }
         let mut pending = self.pending_turn_inputs.lock_recover();
         let mut requests = self.turn_cancel_requests.lock_recover();
+        if snapshot(&requests, turn_id) != *observed {
+            return Ok(crate::store::TurnCancelRepairResult::IntentChanged);
+        }
+        let effective =
+            settlement.and_then(crate::TurnCancelClosureSettlement::effective_cancellation);
+        let disposition = effective.map_or(crate::TurnCancelDisposition::Defer, |e| e.undelivered);
+        if let Some(evidence) =
+            settlement.and_then(crate::TurnCancelClosureSettlement::base_cancellation)
+        {
+            reconcile_authenticated_turn_cancel_winner(
+                &mut requests,
+                &crate::TurnAddress::new(session_id, turn_id),
+                evidence,
+            )?;
+        }
         let mut outcome = crate::TurnCancelInputOutcome::default();
         for entry in pending.iter_mut() {
             if entry.input.session_id != session_id
                 || !crate::store_backend_support::orphaned_active_turn_input_is_repairable(
-                    scope,
+                    crate::OrphanedTurnInputScope::Turn(turn_id),
                     session_execution_lease.fencing_token,
                     entry.input.state,
                     &entry.input.ingress,
@@ -365,17 +719,6 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             {
                 continue;
             }
-            let turn_id = entry
-                .input
-                .ingress
-                .active_turn_id()
-                .expect("repairable input is active-turn scoped")
-                .clone();
-            let disposition = requests
-                .get(&turn_id)
-                .map_or(crate::TurnCancelDisposition::Defer, |record| {
-                    record.request.undelivered
-                });
             let affected = crate::TurnCancelAffectedInput {
                 input_id: entry.input.input_id.clone(),
                 payload: entry.input.input.clone(),
@@ -391,8 +734,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 }
             }
             entry.clear_claim();
-            if let Some(record) = requests.get_mut(&turn_id) {
+            if effective.is_some()
+                && let Some(record) = requests.get_mut(turn_id)
+            {
                 record
+                    .record
                     .outcome
                     .get_or_insert_with(crate::TurnCancelInputOutcome::default)
                     .affected_inputs
@@ -400,6 +746,66 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             }
             outcome.affected_inputs.push(affected);
         }
-        Ok(outcome)
+        if settlement.is_some() {
+            self.turn_cancel_closure_authorizations
+                .lock_recover()
+                .remove(turn_id);
+        }
+        Ok(crate::store::TurnCancelRepairResult::Applied(outcome))
+    }
+}
+
+pub(super) fn snapshot(
+    requests: &std::collections::HashMap<crate::TurnId, super::InMemoryTurnCancelRequest>,
+    turn_id: &crate::TurnId,
+) -> crate::TurnCancelIntentSnapshot {
+    requests
+        .get(turn_id)
+        .map_or(crate::TurnCancelIntentSnapshot::Absent, |stored| {
+            crate::TurnCancelIntentSnapshot::Present {
+                request: stored.record.request.clone(),
+                revision: stored.intent_revision,
+            }
+        })
+}
+
+pub(super) fn reconcile_authenticated_turn_cancel_winner(
+    requests: &mut std::collections::HashMap<crate::TurnId, super::InMemoryTurnCancelRequest>,
+    address: &crate::TurnAddress,
+    evidence: &crate::TurnCancellationEvidence,
+) -> Result<(), crate::StoreError> {
+    let outcome = requests
+        .get(&address.turn_id)
+        .and_then(|stored| stored.record.outcome.clone());
+    let request = request_from_evidence(address, evidence);
+    let intent_revision = match requests.get(&address.turn_id) {
+        Some(stored) if stored.record.request == request => stored.intent_revision,
+        Some(stored) => crate::StoreError::checked_monotonic_increment(
+            "turn_cancel_intent_revision",
+            stored.intent_revision,
+        )?,
+        None => 1,
+    };
+    requests.insert(
+        address.turn_id.clone(),
+        super::InMemoryTurnCancelRequest {
+            record: crate::TurnCancelRequestRecord { request, outcome },
+            intent_revision,
+        },
+    );
+    Ok(())
+}
+
+pub(super) fn request_from_evidence(
+    address: &crate::TurnAddress,
+    evidence: &crate::TurnCancellationEvidence,
+) -> crate::TurnCancelRequest {
+    crate::TurnCancelRequest {
+        address: address.clone(),
+        request_id: evidence.request_id.clone(),
+        origin: evidence.origin.clone(),
+        reason: evidence.reason.clone(),
+        undelivered: evidence.undelivered,
+        mode: evidence.mode,
     }
 }

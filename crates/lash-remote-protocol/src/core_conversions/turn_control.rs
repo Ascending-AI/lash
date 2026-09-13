@@ -1,5 +1,23 @@
 use super::*;
 
+impl From<lash_core::facade_support::TurnCancelDisposition> for RemoteTurnCancelDisposition {
+    fn from(value: lash_core::facade_support::TurnCancelDisposition) -> Self {
+        match value {
+            lash_core::facade_support::TurnCancelDisposition::Defer => Self::Defer,
+            lash_core::facade_support::TurnCancelDisposition::Drop => Self::Drop,
+        }
+    }
+}
+
+impl From<RemoteTurnCancelDisposition> for lash_core::facade_support::TurnCancelDisposition {
+    fn from(value: RemoteTurnCancelDisposition) -> Self {
+        match value {
+            RemoteTurnCancelDisposition::Defer => Self::Defer,
+            RemoteTurnCancelDisposition::Drop => Self::Drop,
+        }
+    }
+}
+
 // The remote wire shape predates `TurnCancelMode` and is a versioned
 // surface: a remote request always compiles to an immediate stop and remote
 // evidence drops the mode and the honoured step. Carrying the mode over the
@@ -137,6 +155,13 @@ impl From<lash_core::facade_support::TurnCancelOutcome> for RemoteTurnCancelOutc
                     cancellation: cancellation.into(),
                 }
             }
+            lash_core::facade_support::TurnCancelOutcome::PolicyConflict {
+                requested,
+                accepted,
+            } => Self::PolicyConflict {
+                requested: requested.into(),
+                accepted: accepted.into(),
+            },
             lash_core::facade_support::TurnCancelOutcome::CompletionWonRace => {
                 Self::CompletionWonRace
             }
@@ -156,6 +181,13 @@ impl From<RemoteTurnCancelOutcome> for lash_core::facade_support::TurnCancelOutc
             RemoteTurnCancelOutcome::AlreadyRequested { cancellation } => {
                 Self::AlreadyRequested(cancellation.into())
             }
+            RemoteTurnCancelOutcome::PolicyConflict {
+                requested,
+                accepted,
+            } => Self::PolicyConflict {
+                requested: requested.into(),
+                accepted: accepted.into(),
+            },
             RemoteTurnCancelOutcome::CompletionWonRace => Self::CompletionWonRace,
             RemoteTurnCancelOutcome::UnknownOrRevoked => Self::UnknownOrRevoked,
         }

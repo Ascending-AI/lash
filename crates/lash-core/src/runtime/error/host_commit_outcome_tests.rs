@@ -2,6 +2,16 @@ use super::{RuntimeErrorCode, runtime_error_from_store_commit};
 use crate::store::StoreError;
 
 #[test]
+fn cancellation_intent_change_maps_to_superseded_commit_if_it_escapes() {
+    let mapped = runtime_error_from_store_commit(StoreError::TurnCancelIntentChanged {
+        session_id: crate::SessionId::from("session-cas"),
+        turn_id: crate::TurnId::from("turn-cas"),
+    });
+    assert_eq!(mapped.code, RuntimeErrorCode::StoreCommitSuperseded);
+    assert!(mapped.message.contains("turn-cas"));
+}
+
+#[test]
 fn head_cas_supersession_requires_reload_before_retry() {
     let superseded = runtime_error_from_store_commit(StoreError::HeadRevisionConflict {
         expected: 7,

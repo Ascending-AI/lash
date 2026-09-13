@@ -28,6 +28,10 @@ impl lash_core::AwaitEventResolver for FailOnceRetirementHost {
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for FailOnceRetirementHost {
+    fn turn_control_binding_id(&self) -> String {
+        "fail-once-retirement-host".to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }
@@ -163,12 +167,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
             .effect_host(receiving_host)
             .build(owner)?;
 
-    let parked = source
-        .session("owner-preserved")
-        .open()
-        .await?
-        .park()
-        .await?;
+    let parked = Box::pin(source.session("owner-preserved").open().await?.park()).await?;
     let resumed = receiving.resume(parked).await?;
     let result = resumed
         .turn(TurnInput::text("use receiving core live configuration"))

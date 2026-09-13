@@ -597,6 +597,242 @@ async fn process_prune_retries_each_artifact_release_after_registry_reopen() -> 
 }
 
 #[tokio::test]
+async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<()> {
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(TestLocalProcessRegistry::default());
+    let core = process_test_core(
+        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        Arc::clone(&registry),
+        in_memory_process_env_store(),
+    )?;
+    let process_id = ProcessId::from("process-prune-turn-cancel-closure-pin");
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                process_id.clone(),
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_identity(lash_core::ProcessIdentity::new("test")),
+        )
+        .await?;
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+
+    let session_id = lash_core::SessionId::from("process-prune-closure-session");
+    let factory = core
+        .store_factory
+        .as_ref()
+        .expect("process test core has a session-store factory");
+    let store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await?;
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(
+                "process-prune-closure-owner",
+                "process-prune-closure-owner:incarnation",
+            ),
+            "process-prune-closure-executor",
+            60_000,
+        )
+        .await?
+        .acquired()
+        .expect("fresh session lane is available");
+    let authority = store
+        .turn_cancellation_authority()
+        .expect("factory-created in-memory store exposes its cancellation authority");
+    let physical_scope = lash_core::ExecutionScope::process(process_id.clone());
+    let binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
+        authority.binding_id(),
+        &physical_scope,
+    )?;
+    store
+        .validate_turn_cancellation_binding(
+            &session_id,
+            &lease.fence(),
+            &binding_id,
+            &physical_scope,
+        )
+        .await?;
+    let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
+    let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
+    let resolver = authority.resolver();
+    let cancel_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+        )
+        .await?;
+    let escalation_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+        )
+        .await?;
+    let terminal_key = resolver
+        .await_event_key(
+            &address.execution_scope(),
+            lash_core::AwaitEventWaitIdentity::TurnTerminal,
+        )
+        .await?;
+    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+        address,
+        binding_id,
+        physical_scope,
+        cancel_key,
+        escalation_key,
+        terminal_key,
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &lease.fence(),
+    )?;
+    store
+        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .await?;
+
+    let refusal = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect_err("a Process-scoped closure pins its process journal");
+    assert!(matches!(
+        refusal,
+        crate::EmbedError::Store(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
+            ref session_id,
+            pending_count: 1,
+        }) if session_id == "process-prune-closure-session"
+    ));
+    assert!(
+        registry.get_process(&process_id).await?.is_some(),
+        "the refused prune retains the terminal process and its journal"
+    );
+
+    let settlement = authority.settle_authorized_closure(&authorization).await?;
+    store
+        .repair_orphaned_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &turn_id,
+            &lash_core::TurnCancelIntentSnapshot::Absent,
+            Some(&settlement),
+        )
+        .await?
+        .into_applied()
+        .expect("the exact current owner consumes the closure authorization");
+    let report = core
+        .processes()
+        .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    assert_eq!(report.pruned_processes, 1);
+
+    let late_session_id = lash_core::SessionId::from("process-prune-closure-late-session");
+    let late_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: late_session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await?;
+    let late_lease = late_store
+        .try_claim_session_execution_lease(
+            &late_session_id,
+            &lash_core::LeaseOwnerIdentity::opaque(
+                "process-prune-closure-late-owner",
+                "process-prune-closure-late-owner:incarnation",
+            ),
+            "process-prune-closure-late-executor",
+            60_000,
+        )
+        .await?
+        .acquired()
+        .expect("fresh late session lane is available");
+    let late_authority = late_store
+        .turn_cancellation_authority()
+        .expect("late store exposes cancellation authority");
+    let late_scope = lash_core::ExecutionScope::process(process_id.clone());
+    let late_binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
+        late_authority.binding_id(),
+        &late_scope,
+    )?;
+    late_store
+        .validate_turn_cancellation_binding(
+            &late_session_id,
+            &late_lease.fence(),
+            &late_binding_id,
+            &late_scope,
+        )
+        .await?;
+    let late_address = lash_core::facade_support::TurnAddress::new(
+        &late_session_id,
+        lash_core::TurnId::from("process-prune-closure-late-turn"),
+    );
+    let late_resolver = late_authority.resolver();
+    let late_authorization = lash_core::TurnCancelClosureAuthorization::new(
+        late_address.clone(),
+        late_binding_id,
+        lash_core::ExecutionScope::process(process_id),
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+            )
+            .await?,
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+            )
+            .await?,
+        late_resolver
+            .await_event_key(
+                &late_address.execution_scope(),
+                lash_core::AwaitEventWaitIdentity::TurnTerminal,
+            )
+            .await?,
+        lash_core::TurnCancelClosureProposal::CompletionSealed,
+        lash_core::TurnCancelIntentSnapshot::Absent,
+        &late_lease.fence(),
+    )?;
+    assert!(matches!(
+        late_store
+            .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+            .await,
+        Err(lash_core::StoreError::TurnCancelClosureScopeRetired { .. })
+    ));
+    assert!(
+        late_store
+            .pending_turn_cancel_closure_pins()
+            .await?
+            .is_empty()
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()> {
     let dir = tempfile::tempdir().expect("sqlite facade prune tempdir");
     let trigger_store: Arc<dyn lash_core::TriggerStore> = Arc::new(
@@ -2215,163 +2451,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     Ok(())
 }
 
-/// native-substrate end to end across the process wait, observation, and retention
-/// interfaces: a host starts a process, holds `ProcessWorkSubstrate::await_process_terminal`
-/// (through `core.processes().await_output`), signals it to completion, and
-/// observes its intermediate events through a wired `ProcessEventSink` — then
-/// prunes the terminal registry rows while the host's projected copies survive.
-#[tokio::test]
-async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(TestLocalProcessRegistry::default());
-    let process_env_store = in_memory_process_env_store();
-    let sink = CollectingProcessEventSink::default();
-    let core = process_test_core_with_sink(
-        Arc::clone(&artifact_store),
-        Arc::clone(&trigger_store),
-        Arc::clone(&registry),
-        Arc::clone(&process_env_store),
-        Arc::new(sink.clone()),
-    )?;
-    let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          value = wait_signal("ready")
-          finish value
-        }
-        "#,
-        "main",
-    )
-    .await;
-
-    let process_id = "e2e-await-sink-prune";
-    core.processes()
-        .start(
-            process.start_request(&ProcessId::from(process_id)),
-            runtime_operation_scope(&core, "e2e-start"),
-        )
-        .await?;
-    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
-
-    // Hold the terminal await while the process is still running; it must resolve
-    // only once the signal drives the process to finish.
-    let await_core = core.clone();
-    let await_id = process_id.to_string();
-    let started = std::time::Instant::now();
-    let waiter = tokio::spawn(async move {
-        await_core
-            .processes()
-            .await_output(&ProcessId::from(await_id))
-            .await
-    });
-
-    let payload = serde_json::json!({ "ok": true, "answer": 42 });
-    core.processes()
-        .signal(
-            &ProcessId::from(process_id),
-            "ready",
-            "e2e-signal-1",
-            signal_request(
-                &ProcessId::from(process_id),
-                "ready",
-                "e2e-signal-1",
-                payload.clone(),
-            ),
-            runtime_operation_scope(&core, "e2e-signal"),
-        )
-        .await?;
-
-    let output = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
-        .await
-        .expect("held await_terminal resolves within bound")
-        .expect("join await task")?;
-    let elapsed = started.elapsed();
-    let output = output.into_tool_output();
-    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
-        panic!("process did not succeed: {output:#?}");
-    };
-    let value = value.to_json_value();
-    assert_eq!(
-        value, payload,
-        "the held await_terminal yields exactly the process's finish value"
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "the held await resolves promptly once the process completes (waited {elapsed:?})"
-    );
-
-    // The wired sink observed lifecycle, signal, and terminal events in append
-    // order. The await seam remains authoritative for terminal observation.
-    let collected = sink.collected();
-    let sequences: Vec<u64> = collected.iter().map(|(_, sequence)| *sequence).collect();
-    let mut sorted = sequences.clone();
-    sorted.sort_unstable();
-    assert_eq!(
-        sequences, sorted,
-        "the sink observes appended events in per-process append order; got {collected:?}"
-    );
-    assert!(
-        collected
-            .iter()
-            .any(|(event_type, _)| event_type == "signal.ready"),
-        "the sink observed the intermediate signal event; got {collected:?}"
-    );
-    assert!(
-        collected
-            .iter()
-            .any(|(event_type, _)| event_type == "process.completed"),
-        "the sink observed the terminal append; got {collected:?}"
-    );
-
-    wait_for_terminal(
-        &core,
-        &ProcessId::from(process_id),
-        lash_core::ProcessStatus::Completed,
-    )
-    .await;
-
-    // Retention: prune the terminal registry rows. The registry forgets the
-    // process, but the host's projected copies (the sink log) remain intact.
-    let projected_before_prune = sink.collected();
-    let report = core
-        .processes()
-        .prune(
-            i64::MAX as u64,
-            None,
-            lash_core::ProjectionWatermark::NoProjector,
-        )
-        .await
-        .expect("prune terminal process");
-    assert_eq!(
-        report.pruned_processes, 1,
-        "the single terminal process is pruned"
-    );
-    assert!(
-        matches!(
-            registry.get_process(&ProcessId::from(process_id)).await,
-            Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
-        ),
-        "the pruned process returns the typed retained-history miss"
-    );
-    assert_eq!(
-        sink.collected(),
-        projected_before_prune,
-        "the host's projected copies survive the registry prune untouched"
-    );
-    assert!(
-        sink.collected()
-            .iter()
-            .any(|(event_type, _)| event_type == "signal.ready"),
-        "the projected intermediate events remain available to the host after prune"
-    );
-
-    Ok(())
-}
-
 mod artifact_cleanup_round4;
+mod native_process_await;
+mod owner_lifecycle;
 mod recovery_dispositions;

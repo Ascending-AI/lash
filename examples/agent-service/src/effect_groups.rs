@@ -100,7 +100,12 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
         let group = effect_group(&request.run_id)
             .map_err(restate_sdk::errors::TerminalError::from_error)?;
         let group_key = group.group_key().to_string();
-        let controller = RestateRuntimeEffectController::new(ctx);
+        let authority_id =
+            lash_restate::RestateAuthorityId::new(std::env::var("RESTATE_AUTHORITY_ID").map_err(
+                |_| restate_sdk::errors::TerminalError::new("RESTATE_AUTHORITY_ID is required"),
+            )?)
+            .map_err(restate_sdk::errors::TerminalError::from_error)?;
+        let controller = RestateRuntimeEffectController::new(ctx, authority_id);
         let mut handle = controller
             .open_effect_group(group)
             .await

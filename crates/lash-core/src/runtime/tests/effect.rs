@@ -12,8 +12,14 @@ mod fig1127;
 mod fig1416;
 
 mod fig2471;
+mod recording_authority;
 mod response_settlement;
+mod source_lint_support;
 mod turn_cancel_modes;
+pub(super) use recording_authority::{
+    controller_effect_host, host_with_effect_recorder, runtime_host_config_with_native_controller,
+};
+use source_lint_support::{effect_module_sources, turn_loop_module_sources, unique_trace_path};
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -247,14 +253,6 @@ impl RecordingEffectController {
     }
 }
 
-pub(super) fn runtime_host_config_with_native_controller(
-    controller: Arc<dyn RuntimeEffectController>,
-) -> RuntimeHostConfig {
-    let mut config = test_runtime_host_config();
-    config.control.effect_host = Arc::new(NativeEffectHost::new(controller));
-    config
-}
-
 pub(super) fn scoped_test_turn<'a>(
     controller: &'a dyn RuntimeEffectController,
     turn_id: &TurnId,
@@ -265,6 +263,13 @@ pub(super) fn scoped_test_turn<'a>(
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RecordingEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!(
+            "recording-controller:{:p}",
+            Arc::as_ptr(&self.records)
+        ))
+    }
+
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn crate::QueuedLaneProbe>,
@@ -613,20 +618,31 @@ impl RuntimeEffectController for RecordingEffectController {
                     }
                     _ => None,
                 };
-                Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution })
+                if let Some(resolution) = resolution {
+                    self.native.resolve_await_event(&key, resolution).await?;
+                }
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
+                    resolution: self.native.peek_await_event(&key).await?,
+                })
             }
-            RuntimeEffectCommand::PeekAwaitEvent { .. }
+            RuntimeEffectCommand::PeekAwaitEvent { key }
                 if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
             {
+                self.native
+                    .resolve_await_event(
+                        &key,
+                        Resolution::Ok(serde_json::json!({
+                            "state": "cancel_requested",
+                            "cancellation": {
+                                "request_id": "cancel-after-llm",
+                                "origin": "effect-controller-test",
+                                "reason": "cancel landed during the journaled LLM run"
+                            }
+                        })),
+                    )
+                    .await?;
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: Some(Resolution::Ok(serde_json::json!({
-                        "state": "cancel_requested",
-                        "cancellation": {
-                            "request_id": "cancel-after-llm",
-                            "origin": "effect-controller-test",
-                            "reason": "cancel landed during the journaled LLM run"
-                        }
-                    }))),
+                    resolution: self.native.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { key }
@@ -708,16 +724,6 @@ impl RuntimeEffectController for RecordingEffectController {
         self.strict_replay.record(strict_replay, &outcome);
         outcome
     }
-}
-
-pub(super) fn host_with_effect_recorder(
-    recorder: RecordingEffectController,
-) -> EmbeddedRuntimeHost {
-    let mut config = runtime_host_config_with_native_controller(Arc::new(recorder));
-    config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
-        mock_provider(Vec::new()).into_handle(),
-    ));
-    EmbeddedRuntimeHost::new(config)
 }
 
 #[tokio::test]
@@ -1101,6 +1107,13 @@ impl CapturingRuntimeReplayController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!(
+            "capturing-runtime-replay-controller:{:p}",
+            Arc::as_ptr(&self.tool_outcomes)
+        ))
+    }
+
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -2402,45 +2415,6 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
     assert!(envelope.contains(&expected_attachment_id));
 }
 
-fn effect_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
-    rust_sources_in(manifest_dir.join("src/runtime/effect"))
-}
-
-/// The turn loop's phase modules, so the cutover lint keeps inspecting the
-/// implementation after FIG-1028 moved it out of the single `turn_loop.rs`.
-fn turn_loop_module_sources(manifest_dir: &std::path::Path) -> Vec<PathBuf> {
-    rust_sources_in(manifest_dir.join("src/runtime/turn_loop"))
-}
-
-fn rust_sources_in(dir: PathBuf) -> Vec<PathBuf> {
-    let mut pending = vec![dir];
-    let mut paths = Vec::new();
-
-    while let Some(dir) = pending.pop() {
-        for entry in std::fs::read_dir(&dir).expect("read module directory") {
-            let entry = entry.expect("read module directory entry");
-            let file_type = entry.file_type().expect("read module entry type");
-            let path = entry.path();
-
-            assert!(
-                !file_type.is_symlink(),
-                "module source traversal does not follow symlink {}",
-                path.display()
-            );
-            if file_type.is_dir() {
-                pending.push(path);
-            } else if file_type.is_file()
-                && path.extension().and_then(|ext| ext.to_str()) == Some("rs")
-            {
-                paths.push(path);
-            }
-        }
-    }
-
-    paths.sort();
-    paths
-}
-
 #[test]
 fn lint_runtime_effect_executor_has_no_legacy_future_api() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2507,17 +2481,6 @@ fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback
             );
         }
     }
-}
-
-fn unique_trace_path(prefix: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "lash-{prefix}-{}-{}.jsonl",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ))
 }
 
 #[cfg(test)]

@@ -1,0 +1,16 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 63,
+  "source_commit": "037d9999fb2e9df5276e70a8216dae1119cea309",
+  "relationship": "main candidate immediately before integration with fe2964c7badf1d95dc76fe87a913f5d7736cf8b2",
+  "artifacts": {
+    "postgres-expected.json": "4e8fa03f4c0839f93cb0b0fd47cfb27abf09859c0304de071ff33ff81b24e84f",
+    "sqlite-expected.json": "f6c4ffee2336ebed3be30b148b3ae739ca846ebc1e1ccd318fa055d8e4ff7e2a"
+  },
+  "other_parent": {
+    "commit": "fe2964c7badf1d95dc76fe87a913f5d7736cf8b2",
+    "note": "The cancellation parent also carried schema 63 with distinct closure-owner lifecycle bytes.",
+    "postgres_expected_sha256": "10bd84fa0b7e5c49cd045d437efe07b0f65b3c4c8f61e2a0526e1a296388112e",
+    "sqlite_expected_sha256": "a8d49a0e5bed77328b9572ac22c83f5fbd0688cdd1e5950644ffe9a1c7dbc785"
+  }
+}

@@ -36,8 +36,9 @@ use serde::Serialize;
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
-    RestateTurnCancelRaceOutcome, restate_await_event_key, restate_await_event_key_is_valid,
-    restate_durable_wait_request, restate_unknown_or_revoked,
+    RestateTurnCancelRaceOutcome, restate_await_event_key_for_authority,
+    restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
+    restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -47,6 +48,7 @@ use crate::effect_group::{
     EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
     rank_wait_request, ready_wait_request, settlement_from_payload,
 };
+use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
 use context::journaled_restate_durable_wait_request;
 
@@ -192,6 +194,7 @@ where
         })
 }
 fn restate_turn_cancel_wait_request(
+    authority_id: &RestateAuthorityId,
     invocation: &RuntimeEffectInvocation,
     turn_cancel_scope: Option<&ExecutionScope>,
 ) -> Result<Option<RestateDurableWaitAwaitRequest>, RuntimeEffectControllerError> {
@@ -224,7 +227,11 @@ fn restate_turn_cancel_wait_request(
             "turn-cancel scope must match the runtime effect invocation",
         ));
     }
-    let key = restate_await_event_key(scope, AwaitEventWaitIdentity::TurnCancelGate)?;
+    let key = restate_await_event_key_for_authority(
+        authority_id,
+        scope,
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )?;
     Ok(Some(restate_durable_wait_request(
         &key,
         None,
@@ -233,6 +240,7 @@ fn restate_turn_cancel_wait_request(
 }
 
 pub(crate) fn restate_timer_turn_cancel_wait_request(
+    authority_id: &RestateAuthorityId,
     invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
@@ -240,10 +248,11 @@ pub(crate) fn restate_timer_turn_cancel_wait_request(
     if !observe_turn_cancel {
         return Ok(None);
     }
-    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
+    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
 }
 
 fn restate_process_turn_cancel_wait_request(
+    authority_id: &RestateAuthorityId,
     invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
@@ -251,10 +260,11 @@ fn restate_process_turn_cancel_wait_request(
     if !observe_turn_cancel {
         return Ok(None);
     }
-    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
+    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
 }
 
 pub(crate) fn restate_await_event_turn_cancel_wait_request(
+    authority_id: &RestateAuthorityId,
     invocation: &RuntimeEffectInvocation,
     observe_turn_cancel: bool,
     turn_cancel_scope: Option<&ExecutionScope>,
@@ -262,7 +272,7 @@ pub(crate) fn restate_await_event_turn_cancel_wait_request(
     if !observe_turn_cancel {
         return Ok(None);
     }
-    restate_turn_cancel_wait_request(invocation, turn_cancel_scope)
+    restate_turn_cancel_wait_request(authority_id, invocation, turn_cancel_scope)
 }
 /// Lash [`RuntimeEffectController`] and [`EffectHost`] backed by a Restate handler context.
 ///
@@ -272,23 +282,53 @@ pub(crate) fn restate_await_event_turn_cancel_wait_request(
 /// scoped API with a stable [`ExecutionScope`].
 pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
+    authority_id: RestateAuthorityId,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
     _ctx: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
-    pub fn new(context: C) -> Self {
-        Self::with_options(context, RestateEffectControllerOptions::default())
+    pub fn new(context: C, authority_id: RestateAuthorityId) -> Self {
+        Self::with_options(
+            context,
+            authority_id,
+            RestateEffectControllerOptions::default(),
+        )
     }
 
-    pub fn with_options(context: C, options: RestateEffectControllerOptions) -> Self {
+    pub fn with_options(
+        context: C,
+        authority_id: RestateAuthorityId,
+        options: RestateEffectControllerOptions,
+    ) -> Self {
         Self {
             context,
+            authority_id,
             options,
             trace: None,
             _ctx: PhantomData,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test(context: C) -> Self {
+        Self::new(
+            context,
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_options_for_test(
+        context: C,
+        options: RestateEffectControllerOptions,
+    ) -> Self {
+        Self::with_options(
+            context,
+            RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            options,
+        )
     }
 
     /// Observe durable steps through a non-owning sink handle.
@@ -447,6 +487,10 @@ impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(self.authority_id.binding_id().to_string())
+    }
+
     /// Restate re-drives this handler invocation, so its retry policy - not a
     /// sleep inside one invocation - is the right place to pace a queued drain
     /// that found the session execution lane held by a live foreign executor.
@@ -481,7 +525,7 @@ where
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
         scope.validate()?;
-        restate_await_event_key(scope, wait)
+        restate_await_event_key_for_authority(&self.authority_id, scope, wait)
     }
 
     async fn resolve_await_event(
@@ -489,7 +533,7 @@ where
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Ok(ResolveOutcome::UnknownOrRevoked);
         }
         resolve_restate_await_event(&self.context, key, resolution).await
@@ -499,7 +543,7 @@ where
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;
@@ -520,7 +564,7 @@ where
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        if !restate_await_event_key_is_valid(key) {
+        if !restate_await_event_key_is_valid_for_authority(&self.authority_id, key) {
             return Err(restate_unknown_or_revoked());
         }
         self.require_active_session(key.scope.session_id()).await?;
@@ -580,6 +624,10 @@ impl<'ctx, C> EffectHost for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx> + Sync,
 {
+    fn turn_control_binding_id(&self) -> String {
+        self.authority_id.binding_id().to_string()
+    }
+
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
         self
     }
@@ -926,6 +974,7 @@ where
                 command,
             } => execute_restate_process_command(
                 &self.context,
+                &self.authority_id,
                 &invocation,
                 *command,
                 local_executor,
@@ -962,6 +1011,7 @@ where
                     Box::pin(async move {
                         execute_restate_process_command(
                             &self.context,
+                            &self.authority_id,
                             &invocation,
                             *command,
                             local_executor,
@@ -1003,6 +1053,7 @@ where
                 });
                 let duration = Duration::from_millis(duration_ms);
                 let turn_cancel = restate_timer_turn_cancel_wait_request(
+                    &self.authority_id,
                     &invocation,
                     observe_turn_cancel,
                     turn_cancel_scope.as_ref(),
@@ -1061,7 +1112,7 @@ where
                 Ok(RuntimeEffectOutcome::Sleep)
             }
             RestateEffectExecution::AwaitEvent { invocation, key } => {
-                if !restate_await_event_key_is_valid(&key) {
+                if !restate_await_event_key_is_valid_for_authority(&self.authority_id, &key) {
                     return Err(RuntimeEffectControllerError::from(
                         restate_unknown_or_revoked(),
                     ));
@@ -1081,6 +1132,7 @@ where
                     turn_cancel_scope,
                 } = local_executor.into_await_event_options()?;
                 let turn_cancel = restate_await_event_turn_cancel_wait_request(
+                    &self.authority_id,
                     &invocation,
                     observe_turn_cancel,
                     turn_cancel_scope.as_ref(),

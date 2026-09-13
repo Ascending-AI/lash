@@ -36,6 +36,7 @@
 use lash_sansio::SessionId;
 mod namespace;
 mod process_key;
+mod turn_cancel_closure;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -318,8 +319,8 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // generation.
 // Version 83 adds the terminal attachment-condemnation `reclaimed` phase
 // (FIG-2512); component-82 stores must be recreated so successful physical
-// deletion remains durable byte-absence evidence. There is no migration into this
-// generation.
+// deletion remains durable byte-absence evidence. There is no migration into
+// this generation.
 // Version 84 adds the attachment-condemnation write token and its manifest
 // session association. The prior phase now remains durable until a restoring
 // backend put settles, and explicit recovery can remove exactly that attempt's
@@ -338,7 +339,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 90 qualifies process-owned attachment intents with the registry-minted
 // incarnation. Component-89 stores are rejected so a bare process id is never
 // reinterpreted as the current incarnation with the same reusable name.
-const SCHEMA_VERSION: i32 = 90;
+// Version 91 adds durable cancellation intent revisions and closure authority.
+// Component-90 stores are rejected and recreated.
+const SCHEMA_VERSION: i32 = 91;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -357,8 +360,10 @@ pub struct PostgresSessionStoreFactory {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
+    await_event_signing_secret: Arc<[u8]>,
     process_registry_shared: bool,
     clock: Arc<dyn lash_core::Clock>,
+    turn_cancel_closure_owner: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
 }
@@ -368,8 +373,10 @@ pub struct PostgresSessionStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
     pool: PgPool,
+    await_event_signing_secret: Arc<[u8]>,
     clock: Arc<dyn lash_core::Clock>,
     session_id: SessionId,
+    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -792,10 +799,12 @@ impl PostgresStorage {
         warn_postgres_process_registry_not_wired(path);
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             process_registry_shared: false,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
@@ -808,10 +817,12 @@ impl PostgresStorage {
     ) -> PostgresSessionStoreFactory {
         PostgresSessionStoreFactory {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             process_registry_shared: true,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             clock: Arc::new(lash_core::facade_support::SystemClock),
+            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
         }
@@ -829,8 +840,10 @@ impl PostgresStorage {
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
+            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::new(lash_core::facade_support::SystemClock),
             session_id: session_id.into(),
+            turn_cancel_closure_owner: None,
             #[cfg(any(test, feature = "testing"))]
             lease_clock_for_testing: None,
             #[cfg(test)]

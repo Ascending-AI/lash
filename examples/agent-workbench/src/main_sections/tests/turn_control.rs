@@ -937,25 +937,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     // request; the route forwards the same strength and attaches to the
     // stopped terminal.
     state.track_turn(&session_id, &TurnId::from("stop-mode-turn"));
-    let seeded = state
-        .core
-        .turn_work_driver()
-        .expect("workbench core has a session catalog")
-        .request_cancel(
-            lash::TurnCancelRequest::new(
-                session.turn_address("stop-mode-turn"),
-                "host-stop-first",
-                Some("user".to_string()),
-            )
-            .mode(lash::TurnCancelMode::AfterStep),
-        )
-        .await
-        .expect("seed the after-step request");
-    assert!(matches!(
-        seeded.outcome,
-        lash::TurnCancelOutcome::Requested(ref evidence)
-            if evidence.mode == lash::TurnCancelMode::AfterStep
-    ));
+    let address = session.turn_address("stop-mode-turn");
     let (stopped, turn) = tokio::join!(
         cancel_turn(
             State(state.clone()),
@@ -966,10 +948,20 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
                 mode: WorkbenchTurnCancelMode::Stop,
             }),
         ),
-        session
-            .turn(lash::TurnInput::text("stop after the step"))
-            .turn_id("stop-mode-turn")
-            .run(),
+        async {
+            let recorded = await_durable_turn_cancel_request(&state, &address).await;
+            assert_eq!(recorded.request.origin.as_deref(), Some("user"));
+            assert_eq!(
+                recorded.request.reason.as_deref(),
+                Some("workbench Stop control")
+            );
+            assert_eq!(recorded.request.mode, lash::TurnCancelMode::AfterStep);
+            session
+                .turn(lash::TurnInput::text("stop after the step"))
+                .turn_id("stop-mode-turn")
+                .run()
+                .await
+        },
     );
     let (status, Json(stopped)) = stopped.expect("stop route");
     let turn = turn.expect("stopped turn commits");
@@ -978,7 +970,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     match stopped.cancellations.as_slice() {
         [
             TurnCancelReceipt::TerminalAttached {
-                cancellation: RecordedTurnCancellation::AlreadyRequested(evidence),
+                cancellation: RecordedTurnCancellation::Requested(evidence),
                 terminal:
                     lash::TurnTerminal::Committed {
                         outcome:
@@ -990,7 +982,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
                 ..
             },
         ] => {
-            assert_eq!(evidence.request_id, "host-stop-first");
+            assert_eq!(evidence.origin.as_deref(), Some("user"));
+            assert_eq!(evidence.reason.as_deref(), Some("workbench Stop control"));
             assert_eq!(evidence.mode, lash::TurnCancelMode::AfterStep);
             assert_eq!(committed.mode, lash::TurnCancelMode::AfterStep);
             assert_eq!(committed.honoured_after_step, None);
@@ -1062,10 +1055,9 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         .await
         .expect("read durable request")
         .expect("durable request recorded");
-    assert_eq!(durable.request.mode, lash::TurnCancelMode::Immediate);
-    assert_eq!(
-        durable.request.reason.as_deref(),
-        Some("workbench Abort control")
-    );
+    assert_eq!(durable.request.mode, lash::TurnCancelMode::AfterStep);
+    assert_eq!(durable.request.request_id, "host-stop");
+    assert_eq!(durable.request.origin.as_deref(), Some("user"));
+    assert_eq!(durable.request.reason, None);
     let _ = std::fs::remove_dir_all(data_dir);
 }

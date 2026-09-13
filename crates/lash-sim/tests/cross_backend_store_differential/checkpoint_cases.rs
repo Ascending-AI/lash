@@ -67,3 +67,23 @@ pub(super) fn bodies_then_cleared() -> GeneratedCase {
         ],
     }
 }
+
+/// A checkpoint that references execution state no backend ever stored. The
+/// case is declared here beside the other checkpoint shapes so the parent file
+/// stays inside the test file-size budget.
+pub(super) fn missing_component_ref() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::MissingCheckpointComponentRef,
+        operations: vec![StoreOperation::Commit {
+            label: "commit_ref_for_never_stored_execution_state",
+            expected_head_revision: 0,
+            graph: append(Vec::new(), None),
+            turn_commit: Some(TurnCommitSpec {
+                turn_id: "missing-component",
+            }),
+            checkpoint: CheckpointSpec::MissingExecutionStateRef,
+            usage: false,
+            adopt_attachment: false,
+        }],
+    }
+}

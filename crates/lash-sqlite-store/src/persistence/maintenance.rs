@@ -25,10 +25,9 @@ impl StoreMaintenance for Store {
                     ),
                     params![session_id.as_str()],
                 )?;
-                tx.execute(
-                    "DELETE FROM turn_cancel_requests WHERE session_id = ?1",
-                    params![session_id.as_str()],
-                )?;
+                // Cancellation rows include unresolved recovery intent. They
+                // remain until session deletion, which is the only safe
+                // reclamation boundary without terminal correlation.
                 Ok((
                     removed_node_count,
                     removed_pending_turn_input_tombstone_count,
