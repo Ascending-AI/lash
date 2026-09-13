@@ -170,13 +170,7 @@ filegroup(
     name = "cold_process_drivers",
     srcs = [
         "tests/support/cold_process_effect_driver.rs",
-        "tests/support/cold_process_turn_driver.rs",
     ],
-)
-
-filegroup(
-    name = "cold_process_turn_parent",
-    srcs = ["tests/support/cold_process_turn_parent.rs"],
 )
 
 filegroup(

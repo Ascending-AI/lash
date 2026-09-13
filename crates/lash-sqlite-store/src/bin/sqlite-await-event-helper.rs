@@ -13,8 +13,6 @@ use lash_sqlite_store::{
 
 #[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]
 mod cold_process_effect_driver;
-#[path = "../../../lash-core/tests/support/cold_process_turn_driver.rs"]
-mod cold_process_turn_driver;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -119,7 +117,8 @@ async fn run_turn_action(
         )
         .await?,
     );
-    cold_process_turn_driver::run_real_turn_action(store, controller, action, nonce, marker).await
+    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
+    Ok(())
 }
 
 async fn run_effect_action(

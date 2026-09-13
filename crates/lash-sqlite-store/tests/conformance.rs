@@ -170,8 +170,7 @@ fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
     ConformanceInvocation::end(successor);
 }
 
-#[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
-mod cold_process_turn_parent;
+use lash_conformance::cold_process_turn_parent;
 
 fn fresh_db_path(dirs: &Arc<Mutex<Vec<TempDir>>>, file_name: &str) -> PathBuf {
     let dir = tempfile::tempdir().expect("tempdir");

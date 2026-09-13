@@ -143,7 +143,6 @@ lash_rust_integration_test(
         "testing",
     ],
     extra_compile_data = [
-        "//crates/lash-core:cold_process_turn_parent",
         "//crates/lash-core:queued_claim_atomicity",
     ],
     extra_data = [

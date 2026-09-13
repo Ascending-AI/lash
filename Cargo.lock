@@ -2085,7 +2085,6 @@ dependencies = [
  "futures-util",
  "hmac",
  "insta",
- "lash-internal-conformance",
  "lash-internal-http-transport",
  "lash-internal-sansio",
  "lash-internal-trace",
