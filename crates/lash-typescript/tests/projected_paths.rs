@@ -155,7 +155,7 @@ async fn finished(source: &str) -> Value {
         panic!("`{source}` should finish: {outcome:?}")
     };
     match value {
-        Value::Projected(projected) => projected.materialize(),
+        Value::Projected(projected) => projected.materialize().expect("projection materializes"),
         other => other,
     }
 }
@@ -253,7 +253,10 @@ async fn projected_path_reads_stay_projected() {
         panic!("a projected field read should finish with a projected value: {outcome:?}")
     };
     assert_eq!(projected.name(), "row.kind");
-    assert_eq!(projected.materialize(), Value::String("tool".into()));
+    assert_eq!(
+        projected.materialize().expect("projection materializes"),
+        Value::String("tool".into())
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -265,7 +268,10 @@ async fn custom_projection_field_reads_stay_lazy() {
     let value = finished_projection(r#"finish(view.kind);"#, &view).await;
     // Asserted before materializing the handle below, which is itself a read.
     assert_eq!(asked(&view), vec!["field:kind".to_string()]);
-    assert_eq!(value.materialize(), Value::String("tool".into()));
+    assert_eq!(
+        value.materialize().expect("projection materializes"),
+        Value::String("tool".into())
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -372,7 +378,7 @@ async fn finished_with_view(source: &str, view: &Arc<RecordingView>) -> Value {
         panic!("`{source}` should finish: {outcome:?}")
     };
     match value {
-        Value::Projected(projected) => projected.materialize(),
+        Value::Projected(projected) => projected.materialize().expect("projection materializes"),
         other => other,
     }
 }

@@ -16,7 +16,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             return Ok(true);
         }
-        Ok(is_truthy(value))
+        is_truthy(value)
     }
 
     pub(super) fn read_dialect_field(
@@ -325,7 +325,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // nothing. A projected handle is a host-side view of a value:
                 // assign the record behind it. Nullish sources are still
                 // skipped, projected or not.
-                let source = materialize_value(source.clone());
+                let source = materialize_value(source.clone())?;
                 let entries = match &source {
                     Value::Ref(id) => match self.heap.get(*id)? {
                         HeapObject::Record(record) => Some(ecma_record_entries(record)),
@@ -405,7 +405,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         for value in &mut values {
             match value {
                 Value::Ref(_) => *value = self.heap.export_for_instruction(value)?,
-                Value::Projected(_) => *value = materialize_value(value.clone()),
+                Value::Projected(_) => *value = materialize_value(value.clone())?,
                 _ => {}
             }
         }

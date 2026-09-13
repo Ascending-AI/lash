@@ -716,7 +716,7 @@ impl Heap {
             super::ensure_value_depth(depth)?;
             match value {
                 Value::Projected(projected) => {
-                    let materialized = projected.materialize_async().await;
+                    let materialized = projected.materialize_async().await?;
                     self.javascript_to_primitive_inner_async(&materialized, active, depth)
                         .await
                 }
@@ -861,7 +861,7 @@ impl Heap {
                 // object of its own: coerce what is behind it.
                 Value::Projected(projected) => {
                     return self.javascript_to_primitive_inner(
-                        &projected.materialize(),
+                        &projected.materialize()?,
                         active,
                         depth,
                     );

@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use super::{
     CANONICAL_NAN_BITS, CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject,
-    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots,
-    ProjectedValue, Record, RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject,
-    UrlSearchParamsObject, Value, record_with_capacity,
+    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, Record,
+    RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject, UrlSearchParamsObject, Value,
+    record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod wire;
-use wire::child_location;
+pub(crate) use wire::child_location;
 
 mod canonical_messagepack;
 pub use canonical_messagepack::{
@@ -505,29 +505,9 @@ enum CanonicalValue {
     Projected { value: CanonicalProjectedValue },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct CanonicalProjectedValue {
-    name: String,
-    type_name: String,
-    projection_ref: Option<CanonicalJsonValue>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum CanonicalJsonValue {
-    Null {},
-    Bool { value: bool },
-    Number { value: serde_json::Number },
-    String { value: String },
-    Array { items: Vec<CanonicalJsonValue> },
-    Object { fields: Vec<CanonicalJsonField> },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct CanonicalJsonField {
-    name: String,
-    value: CanonicalJsonValue,
-}
+use super::projected_wire::CanonicalProjectedValue;
+#[cfg(test)]
+use super::projected_wire::{CanonicalJsonField, CanonicalJsonValue};
 
 impl TryFrom<&Snapshot> for CanonicalSnapshot {
     type Error = ContinuationError;

@@ -55,7 +55,23 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
         let source = self.load_slot(binding)?.clone();
         self.slots
-            .assign_loop_binding(binding, self.heap.isolate_value(&source)?);
+            .assign_loop_binding(binding, self.heap.isolate_value(&source)?)?;
         Ok(())
+    }
+}
+
+/// Re-binds restored projections held by live iterators (FIG-2865).
+pub(super) fn refresh_iterators(
+    iterators: &mut [IterState],
+    bindings: &crate::runtime::ProjectedBindings,
+) {
+    use crate::runtime::projected_refresh;
+    for iterator in iterators {
+        if let IterCursor::List { values, .. } = &mut iterator.cursor {
+            projected_refresh::refresh_values(values.make_mut(), bindings);
+        }
+        if let Some(value) = iterator.restore.previous.as_mut() {
+            projected_refresh::refresh_value(value, bindings);
+        }
     }
 }

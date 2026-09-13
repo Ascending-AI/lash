@@ -724,7 +724,7 @@ fn write_console_value(
         Value::Projected(projected) => {
             write_console_value(
                 heap,
-                &projected.materialize(),
+                &projected.materialize()?,
                 active,
                 depth,
                 top_level,

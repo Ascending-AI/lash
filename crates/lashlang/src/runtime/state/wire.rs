@@ -355,20 +355,7 @@ impl CanonicalValue {
                 }
             }
             Value::Projected(projected) => Self::Projected {
-                value: CanonicalProjectedValue {
-                    name: projected.name().to_string(),
-                    type_name: projected.value_type_name().to_string(),
-                    projection_ref: projected
-                        .projection_ref()
-                        .map(|value| {
-                            CanonicalJsonValue::from_json(
-                                value,
-                                &format!("{location}.projection_ref"),
-                                depth + 1,
-                            )
-                        })
-                        .transpose()?,
-                },
+                value: CanonicalProjectedValue::from_projected(projected, location, depth)?,
             },
         })
     }
@@ -409,16 +396,7 @@ impl CanonicalValue {
                     })
                     .collect::<Result<_, _>>()?,
             )),
-            Self::Projected { value } => Value::Projected(
-                ProjectedValue::unavailable_after_restore_with_projection_ref(
-                    value.name,
-                    value.type_name,
-                    value
-                        .projection_ref
-                        .map(CanonicalJsonValue::into_json)
-                        .transpose()?,
-                ),
-            ),
+            Self::Projected { value } => Value::Projected(value.into_projected()?),
         })
     }
 }
@@ -451,77 +429,6 @@ fn canonical_items_with_references(
         .collect()
 }
 
-impl CanonicalJsonValue {
-    fn from_json(
-        value: &serde_json::Value,
-        location: &str,
-        depth: usize,
-    ) -> Result<Self, ContinuationError> {
-        if depth > MAX_SNAPSHOT_VALUE_DEPTH {
-            return Err(ContinuationError::UnserializableValue {
-                location: location.to_string(),
-                variant: "value beyond the snapshot depth limit",
-            });
-        }
-        Ok(match value {
-            serde_json::Value::Null => Self::Null {},
-            serde_json::Value::Bool(value) => Self::Bool { value: *value },
-            serde_json::Value::Number(value) => Self::Number {
-                value: value.clone(),
-            },
-            serde_json::Value::String(value) => Self::String {
-                value: value.clone(),
-            },
-            serde_json::Value::Array(items) => Self::Array {
-                items: items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| {
-                        Self::from_json(value, &format!("{location}[{index}]"), depth + 1)
-                    })
-                    .collect::<Result<_, _>>()?,
-            },
-            serde_json::Value::Object(fields) => {
-                let mut fields = fields.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by_key(|(name, _)| *name);
-                Self::Object {
-                    fields: fields
-                        .into_iter()
-                        .map(|(name, value)| {
-                            let location = child_location(location, name);
-                            Ok(CanonicalJsonField {
-                                name: name.clone(),
-                                value: Self::from_json(value, &location, depth + 1)?,
-                            })
-                        })
-                        .collect::<Result<_, ContinuationError>>()?,
-                }
-            }
-        })
-    }
-
-    fn into_json(self) -> Result<serde_json::Value, SnapshotDecodeError> {
-        Ok(match self {
-            Self::Null {} => serde_json::Value::Null,
-            Self::Bool { value } => serde_json::Value::Bool(value),
-            Self::Number { value } => serde_json::Value::Number(value),
-            Self::String { value } => serde_json::Value::String(value),
-            Self::Array { items } => serde_json::Value::Array(
-                items
-                    .into_iter()
-                    .map(Self::into_json)
-                    .collect::<Result<_, _>>()?,
-            ),
-            Self::Object { fields } => serde_json::Value::Object(
-                fields
-                    .into_iter()
-                    .map(|field| field.value.into_json().map(|value| (field.name, value)))
-                    .collect::<Result<_, _>>()?,
-            ),
-        })
-    }
-}
-
 fn normalize_number(value: f64) -> f64 {
     if value.is_nan() {
         f64::from_bits(CANONICAL_NAN_BITS)
@@ -530,7 +437,7 @@ fn normalize_number(value: f64) -> f64 {
     }
 }
 
-pub(super) fn child_location(parent: &str, name: &str) -> String {
+pub(crate) fn child_location(parent: &str, name: &str) -> String {
     if is_path_identifier(name) {
         format!("{parent}.{name}")
     } else {

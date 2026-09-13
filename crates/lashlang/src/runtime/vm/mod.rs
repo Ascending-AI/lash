@@ -150,12 +150,13 @@ impl SlotState {
         slot_names: &[Name],
     ) -> Result<(), RuntimeError> {
         self.ensure_assignable(slot, slot_names)?;
-        self.values[slot] = Some(materialize_value(value));
+        self.values[slot] = Some(materialize_value(value)?);
         Ok(())
     }
 
-    fn assign_loop_binding(&mut self, slot: usize, value: Value) {
-        self.values[slot] = Some(materialize_value(value));
+    fn assign_loop_binding(&mut self, slot: usize, value: Value) -> Result<(), RuntimeError> {
+        self.values[slot] = Some(materialize_value(value)?);
+        Ok(())
     }
 
     fn ensure_assignable(&self, slot: usize, slot_names: &[Name]) -> Result<(), RuntimeError> {
@@ -177,7 +178,7 @@ impl SlotState {
         self.values[slot] = restore.previous;
     }
 
-    pub(crate) fn into_globals(self, slot_names: &[Name]) -> Record {
+    pub(crate) fn into_globals(self, slot_names: &[Name]) -> Result<Record, RuntimeError> {
         let mut extras = self.extras;
         for ((name, value), projected) in slot_names.iter().zip(self.values).zip(self.projected) {
             if projected {
@@ -189,7 +190,7 @@ impl SlotState {
                     extras.insert_symbolized(
                         name.symbol,
                         name.text.clone(),
-                        materialize_value(value),
+                        materialize_value(value)?,
                     );
                 }
                 None => {
@@ -197,14 +198,14 @@ impl SlotState {
                 }
             }
         }
-        extras
+        Ok(extras)
     }
 
     fn recycle_into_globals(
         self,
         slot_names: &[Name],
         slot_values: &mut Vec<Option<Value>>,
-    ) -> Record {
+    ) -> Result<Record, RuntimeError> {
         let mut extras = self.extras;
         let mut values = self.values;
         for ((name, value), projected) in
@@ -219,7 +220,7 @@ impl SlotState {
                     extras.insert_symbolized(
                         name.symbol,
                         name.text.clone(),
-                        materialize_value(value),
+                        materialize_value(value)?,
                     );
                 }
                 None => {
@@ -229,7 +230,7 @@ impl SlotState {
         }
         values.clear();
         *slot_values = values;
-        extras
+        Ok(extras)
     }
 }
 
@@ -927,7 +928,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.ip = jump_to;
                     return Ok(Some(VmStep::Continue));
                 };
-                self.slots.assign_loop_binding(iter_state.binding, value);
+                self.slots.assign_loop_binding(iter_state.binding, value)?;
             }
             Instruction::DeepCopyLoopBinding(binding) => self.deep_copy_loop_binding(binding)?,
             Instruction::EndIter => {
@@ -955,8 +956,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         &mut self,
         instruction: Instruction,
     ) -> Result<VmStep, RuntimeError> {
-        let right = materialize_projected_async(self.pop_stack()?).await;
-        let left = materialize_projected_async(self.pop_stack()?).await;
+        let right = materialize_projected_async(self.pop_stack()?).await?;
+        let left = materialize_projected_async(self.pop_stack()?).await?;
         let (left, right) = if let Instruction::JavaScriptBinary(op) = &instruction {
             self.prepare_javascript_binary_operands(*op, left, right)
                 .await?
@@ -985,7 +986,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         instruction: Instruction,
     ) -> Result<VmStep, RuntimeError> {
         let original = self.load_slot(slot)?.clone();
-        let materialized = materialize_projected_async(original.clone()).await;
+        let materialized = materialize_projected_async(original.clone()).await?;
         self.slots.values[slot] = Some(materialized);
         let result = self.redispatch_fast(instruction);
         self.slots.values[slot] = Some(original);
@@ -1055,7 +1056,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.stack.push(value);
             }
             Instruction::Index => {
-                let index = materialize_projected_async(self.pop_stack()?).await;
+                let index = materialize_projected_async(self.pop_stack()?).await?;
                 let target = self.pop_stack()?;
                 let value = match target {
                     Value::Projected(projected) => {
@@ -1089,7 +1090,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 self.execute_reference_path_assignment(slot, path)?;
             }
             Instruction::ListAppend => {
-                let item = materialize_projected_async(self.pop_stack()?).await;
+                let item = materialize_projected_async(self.pop_stack()?).await?;
                 let list = self.pop_stack()?;
                 let value = match &list {
                     Value::Ref(id) if matches!(self.heap.get(*id), Ok(HeapObject::List(_))) => {
@@ -1103,11 +1104,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let value = self.pop_stack()?;
                 let value = match op {
                     UnaryOp::Negate => {
-                        let value = materialize_projected_async(value).await;
+                        let value = materialize_projected_async(value).await?;
                         Value::Number(-as_number(&value)?)
                     }
                     UnaryOp::Not => Value::Bool(match &value {
-                        Value::Projected(_) => !is_truthy_async(&value).await,
+                        Value::Projected(_) => !is_truthy_async(&value).await?,
                         _ => !self.is_truthy_for_dialect(&value)?,
                     }),
                 };
@@ -1136,7 +1137,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ToBool => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await,
+                    Value::Projected(_) => is_truthy_async(&value).await?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 self.stack.push(Value::Bool(truthy));
@@ -1144,7 +1145,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::JumpIfFalse(target) => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await,
+                    Value::Projected(_) => is_truthy_async(&value).await?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if !truthy {
@@ -1174,7 +1175,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::JumpIfTrue(target) => {
                 let value = self.pop_stack()?;
                 let truthy = match &value {
-                    Value::Projected(_) => is_truthy_async(&value).await,
+                    Value::Projected(_) => is_truthy_async(&value).await?,
                     _ => self.is_truthy_for_dialect(&value)?,
                 };
                 if truthy {
@@ -1380,21 +1381,21 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::Validate => {
                 let schema = self.pop_stack()?;
                 let value = self.pop_stack()?;
-                let schema = materialize_projected_async(schema).await;
+                let schema = materialize_projected_async(schema).await?;
                 let value = self
-                    .execute_dynamic_validate(materialize_projected_async(value).await, &schema)?;
+                    .execute_dynamic_validate(materialize_projected_async(value).await?, &schema)?;
                 self.stack.push(value);
             }
             IntrinsicOp::ValidateCompiled(schema) => {
                 let value = self.pop_stack()?;
                 let value = execute_validation_plan(
-                    materialize_projected_async(value).await,
+                    materialize_projected_async(value).await?,
                     &self.chunk.compiled_schemas[schema],
                 )?;
                 self.stack.push(value);
             }
             IntrinsicOp::PushAssign(slot) => {
-                let mut item = Some(materialize_projected_async(self.pop_stack()?).await);
+                let mut item = Some(materialize_projected_async(self.pop_stack()?).await?);
                 let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
                 self.slots
                     .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
@@ -1491,7 +1492,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         )?)
                     }
                     left => {
-                        let left = materialize_projected_async(left.clone()).await;
+                        let left = materialize_projected_async(left.clone()).await?;
                         let value = eval_binary_values(left, op, Value::Number(right))?;
                         let value = if matches!(value, Value::Projected(_)) {
                             execute_compiled_format(template, &[value]).await?
@@ -1606,12 +1607,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Materializes host-visible globals, omitting any entire binding that
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
-        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names);
+        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names)?;
         super::state::materialize_runtime_globals(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
-        let globals = self.slots.into_globals(&self.chunk.slot_names);
+        let globals = self.slots.into_globals(&self.chunk.slot_names)?;
         Ok((globals, self.heap))
     }
 
@@ -1626,7 +1627,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
         let globals = self
             .slots
-            .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values);
+            .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values)?;
         Ok((globals, self.heap))
     }
 }
@@ -1634,6 +1635,7 @@ mod functions;
 use functions::*;
 mod assignment;
 mod iteration;
+mod projected_restore;
 pub(crate) use iteration::*;
 mod observations;
 mod roots;

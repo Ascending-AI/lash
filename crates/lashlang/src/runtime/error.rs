@@ -323,6 +323,12 @@ pub enum RuntimeError {
     /// Assignment targeted a projected binding that is read-only.
     #[error("`{name}` is a read-only projected binding")]
     ReadOnlyProjectedBinding { name: String },
+    /// A projection decoded from a durable wire was read without its host
+    /// descriptor having been re-supplied (FIG-2865).
+    #[error(
+        "projected host descriptor `{name}` ({type_name}) is unavailable after restore; re-supply the binding or rerun the producing tool"
+    )]
+    ProjectedValueUnavailable { name: String, type_name: String },
     /// `validate` received a second argument that is not a type literal.
     #[error("`validate` requires a Type literal as the second argument")]
     ValidateTypeLiteralRequired,
@@ -562,6 +568,7 @@ impl RuntimeError {
             Self::InvalidCharacterIndex { .. } => ErrorTaxonomy::Catchable,
             Self::IncompatibleSequenceConcatenation => ErrorTaxonomy::Catchable,
             Self::ReadOnlyProjectedBinding { .. } => ErrorTaxonomy::Catchable,
+            Self::ProjectedValueUnavailable { .. } => ErrorTaxonomy::Catchable,
             Self::ValidateTypeLiteralRequired => ErrorTaxonomy::Catchable,
             Self::NotTypeValue { .. } => ErrorTaxonomy::Catchable,
             Self::UnwrappedToolResultFailed { .. } => ErrorTaxonomy::EffectFailure,
@@ -694,6 +701,7 @@ impl RuntimeError {
             Self::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
             Self::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
             Self::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+            Self::ProjectedValueUnavailable { .. } => "ProjectedValueUnavailable",
             Self::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
             Self::NotTypeValue { .. } => "NotTypeValue",
             Self::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
@@ -963,6 +971,10 @@ mod tests {
             RuntimeError::IncompatibleSequenceConcatenation,
             RuntimeError::ReadOnlyProjectedBinding {
                 name: "binding".into(),
+            },
+            RuntimeError::ProjectedValueUnavailable {
+                name: "report".into(),
+                type_name: "Report".into(),
             },
             RuntimeError::ValidateTypeLiteralRequired,
             RuntimeError::NotTypeValue {
@@ -1288,6 +1300,9 @@ mod tests {
                 RuntimeError::ReadOnlyProjectedBinding { .. } => {
                     "`binding` is a read-only projected binding"
                 }
+                RuntimeError::ProjectedValueUnavailable { .. } => {
+                    "projected host descriptor `report` (Report) is unavailable after restore; re-supply the binding or rerun the producing tool"
+                }
                 RuntimeError::ValidateTypeLiteralRequired => {
                     "`validate` requires a Type literal as the second argument"
                 }
@@ -1503,6 +1518,7 @@ mod tests {
     RuntimeError::InvalidCharacterIndex { .. } => "InvalidCharacterIndex",
     RuntimeError::IncompatibleSequenceConcatenation => "IncompatibleSequenceConcatenation",
     RuntimeError::ReadOnlyProjectedBinding { .. } => "ReadOnlyProjectedBinding",
+    RuntimeError::ProjectedValueUnavailable { .. } => "ProjectedValueUnavailable",
     RuntimeError::ValidateTypeLiteralRequired => "ValidateTypeLiteralRequired",
     RuntimeError::NotTypeValue { .. } => "NotTypeValue",
     RuntimeError::UnwrappedToolResultFailed { .. } => "UnwrappedToolResultFailed",
