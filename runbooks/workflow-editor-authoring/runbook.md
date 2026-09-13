@@ -78,7 +78,10 @@ After readiness, gate these API facts before opening the editor:
 - `GET /operations` identifies Show message's `text` as `string`, Set progress's `pct`
   as `number`, and Finish's `expression` as `expression`;
 - projecting `process probe() { finish 0 }` through `POST /project` returns 200, canonical
-  source, one process, and one terminal without changing `GET /workflow`'s version.
+  source, one process, and one terminal without changing `GET /workflow`'s version. Every
+  such source string in this runbook is the workflow-graph lens's canonical printer output,
+  not a language a model was asked to write, and it changes when the TypeScript canonical
+  printer lands, not with this arc.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical
 source pane, and Display panel. Screenshot `00-ready.png`.
