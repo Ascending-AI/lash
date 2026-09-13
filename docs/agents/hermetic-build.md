@@ -58,11 +58,14 @@ kiln test \
   //crates/lash-sqlite-store:integration__test
 ```
 
-These build and test commands select the host shared executor by default.
+These build and test commands select the shared Kiln execution pool by default.
 `scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses REAPI
-instance `kiln` at `grpc://127.0.0.1:45191`, requires the declared NativeLink
-runtime identity, and fails when the executor is unavailable. NativeLink
-executes trusted builds directly on the host. Hermeticity here describes pinned
+instance `kiln` at `grpcs://178.105.21.6:8443` with the mutual-TLS client
+certificate under `~/.config/dev-setup/kiln-build-infra/tls`, requires the
+declared NativeLink runtime identity, and fails when the pool or the
+certificate is unavailable. One scheduler dispatches each action to whichever
+pool worker is free: this host or a Hetzner worker. NativeLink executes trusted
+builds directly on the chosen worker. Hermeticity here describes pinned
 tools and declared inputs, not an OS security boundary. `--local` executes
 actions in the checkout for CI, bootstrap, and reproducing an executor-specific
 failure:
