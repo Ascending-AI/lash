@@ -80,10 +80,18 @@ class HygieneTests(unittest.TestCase):
             # Execute the workflow's actual fetch/checkout code against a local remote.
             checkout = "\n".join(line[10:] for line in checkout.splitlines())
             checkout = checkout[checkout.index("git fetch"):]
-            for event, branch, base, expected in (
-                ("pull_request", "pr", self.base, commits),
-                ("merge_group", "merge-group", main_head, [*commits, merge_head]),
-                ("push", "pr", "", commits),
+            # `github_sha` is what the event puts in GITHUB_SHA; on pull_request
+            # that is the ephemeral refs/pull/N/merge commit, which also carries
+            # main's tip as a parent. `scan_head` is the commit the gate must
+            # actually scan. `base` is `pull_request.base.sha`, i.e. main's tip
+            # now, which is deliberately NOT an ancestor of the head here: the
+            # gate has to fall back on the merge base or it drags main's own
+            # commits into the range.
+            for event, branch, base, github_sha, scan_head, expected in (
+                ("pull_request", "merge-group", main_head, merge_head, pr_head, commits),
+                ("merge_group", "merge-group", main_head, merge_head, merge_head,
+                 [*commits, merge_head]),
+                ("push", "pr", "", pr_head, pr_head, commits),
             ):
                 with self.subTest(job=job, event=event), tempfile.TemporaryDirectory() as temp:
                     clone = Path(temp) / "checkout"
@@ -94,17 +102,17 @@ class HygieneTests(unittest.TestCase):
                     def git(*args):
                         return subprocess.run(["git", *args], cwd=clone, text=True,
                                               capture_output=True, check=True).stdout.strip()
-                    head = merge_head if event == "merge_group" else pr_head
                     self.assertEqual("true", git("rev-parse", "--is-shallow-repository"))
-                    self.assertEqual(head, git("rev-list", "HEAD"))
+                    self.assertEqual(github_sha, git("rev-list", "HEAD"))
                     result = subprocess.run(
                         ["bash", "-euo", "pipefail", "-c", checkout], cwd=clone,
-                        env={**os.environ, "BASE_SHA": base, "GITHUB_SHA": head},
+                        env={**os.environ, "BASE_SHA": base, "GITHUB_SHA": github_sha,
+                             "SCAN_HEAD_SHA": scan_head},
                         text=True, capture_output=True,
                     )
                     self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                    resolved_base = base or git("merge-base", "origin/main", "HEAD")
-                    self.assertEqual(head, git("rev-parse", "HEAD"))
+                    resolved_base = git("merge-base", base or "origin/main", "HEAD")
+                    self.assertEqual(scan_head, git("rev-parse", "HEAD"))
                     self.assertEqual(
                         ["first.txt", "second.txt"],
                         git("diff", "--diff-filter=A", "--name-only",
