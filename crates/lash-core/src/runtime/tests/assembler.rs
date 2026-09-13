@@ -365,6 +365,30 @@ fn assembler_derives_tool_failure_from_assembled_records() {
 }
 
 #[test]
+fn assembler_records_code_execution_from_the_code_block_stream() {
+    let mut assembler = TurnAssembler::default();
+    assembler.push(&SessionStreamEvent::Done);
+    let without = assembler.finish(
+        default_state().to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+    assert!(!without.execution.had_code_execution);
+
+    let mut assembler = TurnAssembler::default();
+    assembler.note_code_execution();
+    assembler.push(&SessionStreamEvent::Done);
+    let with = assembler.finish(
+        default_state().to_snapshot(),
+        None,
+        None,
+        &TerminationPolicy::default(),
+    );
+    assert!(with.execution.had_code_execution);
+}
+
+#[test]
 fn assembler_treats_any_non_success_record_as_tool_failure() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::ToolCall {

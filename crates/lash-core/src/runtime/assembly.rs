@@ -659,6 +659,7 @@ fn reconcile_text_snapshot(existing: &mut String, snapshot: &str) {
 
 pub(super) struct TurnAssembler {
     pub(super) tool_calls: Vec<ToolCallRecord>,
+    pub(super) had_code_execution: bool,
     pub(super) omitted: Option<crate::OmittedToolCalls>,
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
@@ -685,6 +686,7 @@ impl TurnAssembler {
     pub(super) fn new() -> Self {
         Self {
             tool_calls: Vec::new(),
+            had_code_execution: false,
             omitted: None,
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
@@ -695,6 +697,10 @@ impl TurnAssembler {
             saw_done: false,
             outcome: None,
         }
+    }
+
+    pub(super) fn note_code_execution(&mut self) {
+        self.had_code_execution = true;
     }
 
     pub(super) fn push(&mut self, event: &SessionStreamEvent) {
@@ -896,7 +902,7 @@ impl TurnAssembler {
         AssembledTurn {
             execution: TurnExecutionMetrics {
                 had_tool_calls: !self.tool_calls.is_empty(),
-                had_code_execution: false,
+                had_code_execution: self.had_code_execution,
                 // Timing is stamped by the turn loop, which owns the
                 // claim → final-commit measurement window.
                 started_at_ms: 0,

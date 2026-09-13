@@ -553,6 +553,9 @@ async fn emit_runtime_stream_event_to_sinks(
             emit_session_event_to_sink(events, event).await;
         }
         RuntimeStreamEvent::Turn(activity) => {
+            if matches!(activity.event, TurnEvent::CodeBlockCompleted { .. }) {
+                assembler.note_code_execution();
+            }
             emit_turn_activity_to_sink(turn_events, activity).await;
         }
     }
