@@ -559,19 +559,6 @@ fn standard_config() -> TurnMachineConfig {
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
-        turn_limit_final_message: Arc::new(test_turn_limit_final_message),
-    }
-}
-
-fn test_turn_limit_final_message(message_id: String, max_turns: usize) -> Message {
-    Message {
-        id: message_id.clone(),
-        role: MessageRole::System,
-        parts: lash_core::facade_support::shared_parts(vec![Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 

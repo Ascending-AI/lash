@@ -383,9 +383,6 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
         on_empty: CheckpointResumeAction,
     },
     AdvanceProtocolIteration,
-    ScheduleTurnLimitFinal {
-        message: Message,
-    },
     /// Finish for a cancellation whose host evidence was already observed.
     FinishCancelled {
         evidence: crate::TurnCancellationEvidence,
@@ -404,7 +401,6 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) turn_causes: &'a [TurnCause],
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
-    pub(super) termination: &'a TurnTerminationPolicyState,
     pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
 }
 
@@ -456,18 +452,6 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     pub fn autonomous(&self) -> bool {
         self.config.autonomous
-    }
-
-    pub fn should_force_exit_after_grace_turn(&self) -> bool {
-        self.termination.should_force_exit_after_grace_turn()
-    }
-
-    pub fn turn_limit_final_to_schedule(&self) -> Option<usize> {
-        self.termination.turn_limit_final_to_schedule(
-            self.protocol_iteration,
-            self.protocol_run_offset,
-            self.config.turn_budget,
-        )
     }
 
     pub fn messages(&self) -> &MessageSequence {
@@ -632,7 +616,6 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub turn_id: TurnId,
     pub emit_llm_trace: bool,
     pub termination: M::Termination,
-    pub turn_limit_final_message: crate::TurnLimitFinalMessage,
 }
 
 #[cfg(test)]

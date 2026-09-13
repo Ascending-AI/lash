@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -87,6 +88,8 @@ WORKERS_E2E_JOBS = {
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
+
+BAZEL_TEST_JOB = "bazel-tests"
 
 
 # Confidence is a separate scheduled/manual workflow. Pin its producer and
@@ -195,6 +198,20 @@ def fail_open(reason: str) -> dict[str, str]:
     return outputs
 
 
+def github_runner_cache_identity(
+    runner_os: str,
+    runner_arch: str,
+    image_os: str,
+    image_version: str,
+) -> str:
+    """Build an action identity for the concrete GitHub-hosted runner image."""
+    fields = (runner_os, runner_arch, image_os, image_version)
+    if any(not field.strip() for field in fields):
+        raise PlanError("GitHub runner cache identity fields must be nonempty")
+    digest = hashlib.sha256("\0".join(fields).encode()).hexdigest()
+    return f"github-actions-{digest}"
+
+
 def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -243,13 +260,14 @@ def evaluate_conclusion(
     event_name: str = "",
     ref: str = "",
     workers_e2e_enabled: bool | None = None,
+    bazel_is_trusted: bool = True,
 ) -> list[str]:
     if workers_e2e_enabled is None:
         workers_e2e_enabled = not (
             event_name == "push" and ref != "refs/heads/main"
         )
 
-    expected_jobs = UNGATED_JOBS | set(GATED_JOBS)
+    expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | {BAZEL_TEST_JOB}
     problems: list[str] = []
 
     missing = sorted(expected_jobs - set(needs))
@@ -284,6 +302,15 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if job == BAZEL_TEST_JOB:
+            wanted = "success" if bazel_is_trusted else "skipped"
+            if result != wanted:
+                problems.append(
+                    f"{job} ended with {result!r} for a"
+                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" expected {wanted}"
+                )
+            continue
         if job in WORKERS_E2E_JOBS and not workers_e2e_enabled:
             if result != "skipped":
                 problems.append(
@@ -370,6 +397,12 @@ def main() -> int:
     fail_parser = subparsers.add_parser("fail-open")
     fail_parser.add_argument("--reason", required=True)
 
+    runtime_parser = subparsers.add_parser("bazel-runtime")
+    runtime_parser.add_argument("--runner-os", required=True)
+    runtime_parser.add_argument("--runner-arch", required=True)
+    runtime_parser.add_argument("--image-os", required=True)
+    runtime_parser.add_argument("--image-version", required=True)
+
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
 
@@ -383,6 +416,20 @@ def main() -> int:
 
     if args.command == "fail-open":
         _write_outputs(fail_open(args.reason))
+        return 0
+
+    if args.command == "bazel-runtime":
+        try:
+            identity = github_runner_cache_identity(
+                args.runner_os,
+                args.runner_arch,
+                args.image_os,
+                args.image_version,
+            )
+        except PlanError as error:
+            print(f"Invalid Bazel runtime identity: {error}", file=sys.stderr)
+            return 1
+        _write_outputs({"bazel_runtime": identity})
         return 0
 
     try:
@@ -409,11 +456,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    bazel_is_trusted = os.environ.get("BAZEL_TRUSTED")
+    if bazel_is_trusted not in {"true", "false"}:
+        print(
+            f"Invalid BAZEL_TRUSTED: {bazel_is_trusted!r}, expected 'true' or 'false'",
+            file=sys.stderr,
+        )
+        return 1
     problems = evaluate_conclusion(
         needs,
         os.environ.get("GITHUB_EVENT_NAME", ""),
         os.environ.get("GITHUB_REF", ""),
         workers_e2e_enabled == "true",
+        bazel_is_trusted == "true",
     )
     print(json.dumps(needs, indent=2, sort_keys=True))
     if problems:

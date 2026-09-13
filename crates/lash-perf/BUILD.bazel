@@ -47,6 +47,7 @@ lash_rust_unit_test(
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    test_env = {"RUST_TEST_THREADS": "1"},
     tags = [],
     version = "0.0.0-dev",
 )

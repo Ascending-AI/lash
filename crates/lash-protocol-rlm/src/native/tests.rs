@@ -3,6 +3,7 @@ use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConf
 use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
@@ -55,12 +56,6 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             final_answer_format: None,
         })
         .unwrap(),
-        turn_limit_final_message: Arc::new(|id, _| lash_core::Message {
-            id,
-            role: lash_core::MessageRole::System,
-            parts: Vec::new().into(),
-            origin: None,
-        }),
     }
 }
 
@@ -329,6 +324,223 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         terminal_finish: finish,
     }
 }
+
+fn scripted_response_contains(parts: &[LlmOutputPart], needle: &str) -> bool {
+    parts.iter().any(|part| match part {
+        LlmOutputPart::Text { text, .. } | LlmOutputPart::Reasoning { text, .. } => {
+            text.contains(needle)
+        }
+        LlmOutputPart::ToolCall { input_json, .. } => input_json.contains(needle),
+    })
+}
+
+fn assert_driver_stops_before_queued_provider_response(
+    native: bool,
+    allowed_response: Vec<LlmOutputPart>,
+    queued_response: Vec<LlmOutputPart>,
+    allowed_code: &str,
+    forbidden_code: &str,
+) {
+    assert!(
+        scripted_response_contains(&queued_response, forbidden_code),
+        "the queued response must prove it would schedule the forbidden effect"
+    );
+    let mut provider_script = VecDeque::from([allowed_response, queued_response]);
+    let mut turn_config = config(native, RlmTermination::Natural);
+    turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
+    let mut machine = TurnMachine::new(turn_config, Vec::new(), Arc::new(Vec::new()), 0);
+    let mut pending = drain(&mut machine);
+    let mut observed = Vec::new();
+    loop {
+        observed.extend(pending.iter().cloned());
+        if pending
+            .iter()
+            .any(|effect| matches!(effect, Effect::Done { .. }))
+        {
+            break;
+        }
+
+        if let Some(id) = pending.iter().find_map(|effect| match effect {
+            Effect::LlmCall { id, .. } => Some(*id),
+            _ => None,
+        }) {
+            let parts = provider_script
+                .pop_front()
+                .expect("the driver exceeded the scripted provider responses");
+            machine.handle_response(Response::LlmComplete {
+                id,
+                text_streamed: false,
+                result: Ok(LlmResponse {
+                    parts,
+                    ..Default::default()
+                }),
+            });
+        } else if let Some(id) = pending.iter().find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        }) {
+            machine.handle_response(Response::ExecResult {
+                id,
+                result: Ok(response(None)),
+            });
+        } else if let Some(id) = pending.iter().find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        }) {
+            machine.handle_response(Response::Checkpoint {
+                id,
+                delivery: lash_sansio::CheckpointDelivery::default(),
+            });
+        } else {
+            panic!("driver emitted no blocking effect before completion: {pending:#?}");
+        }
+        pending = drain(&mut machine);
+    }
+
+    assert_eq!(
+        observed
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::ExecCode { code, .. } => Some(code.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![allowed_code],
+        "the queued iteration-N effect must never execute"
+    );
+    assert_eq!(
+        observed
+            .iter()
+            .filter(|effect| matches!(effect, Effect::LlmCall { .. }))
+            .count(),
+        1,
+        "N=1 permits exactly one model call"
+    );
+    assert_eq!(
+        provider_script.len(),
+        1,
+        "iteration-N response stays unused"
+    );
+    assert!(scripted_response_contains(
+        provider_script.front().expect("unused response"),
+        forbidden_code
+    ));
+    assert!(
+        observed.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+                outcome: lash_core::facade_support::TurnOutcome::Stopped(
+                    lash_core::facade_support::TurnStop::MaxTurns
+                )
+            })
+        )),
+        "budget exhaustion emits the typed stop"
+    );
+    let done_messages = observed
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Done { messages, .. } => Some(messages),
+            _ => None,
+        })
+        .expect("budget exhaustion finishes the turn");
+    assert!(
+        done_messages
+            .iter()
+            .all(|message| message.role != lash_core::MessageRole::System),
+        "the transcript contains no synthetic system message"
+    );
+    assert!(!observed.iter().any(|effect| {
+        matches!(effect, Effect::ExecCode { code, .. } if code.contains(forbidden_code))
+    }));
+}
+
+#[test]
+fn native_driver_stops_at_budget_before_queued_provider_response() {
+    assert_driver_stops_before_queued_provider_response(
+        true,
+        vec![call(
+            "allowed-call",
+            "execute_code",
+            r#"{"code":"print \"native-allowed\""}"#,
+        )],
+        vec![call(
+            "forbidden-call",
+            "execute_code",
+            r#"{"code":"print \"native-forbidden-iteration-one\""}"#,
+        )],
+        r#"print "native-allowed""#,
+        "native-forbidden-iteration-one",
+    );
+}
+
+#[test]
+fn cell_driver_stops_at_budget_before_queued_provider_response() {
+    assert_driver_stops_before_queued_provider_response(
+        false,
+        vec![text("<lashlang>\nprint \"cell-allowed\"\n</lashlang>")],
+        vec![text(
+            "<lashlang>\nprint \"cell-forbidden-iteration-one\"\n</lashlang>",
+        )],
+        r#"print "cell-allowed""#,
+        "cell-forbidden-iteration-one",
+    );
+}
+
+fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(native: bool) {
+    let mut turn_config = config(native, RlmTermination::FinishRequired { schema: None });
+    turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
+    turn_config.no_progress_budget = lash_core::NoProgressBudget::bounded(1);
+    let mut machine = TurnMachine::new(turn_config, Vec::new(), Arc::new(Vec::new()), 0);
+
+    let initial = drain(&mut machine);
+    let effects = reply(
+        &mut machine,
+        &initial,
+        vec![text("prose without a finishing cell")],
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+            outcome: lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::MaxTurns
+            )
+        })
+    )));
+    assert_eq!(
+        machine
+            .events()
+            .iter()
+            .filter(|event| matches!(event, lash_core::SessionHistoryRecord::Conversation(_)))
+            .count(),
+        0,
+        "turn-budget exhaustion must not append no-progress conversation feedback"
+    );
+    let done_messages = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Done { messages, .. } => Some(messages),
+            _ => None,
+        })
+        .expect("simultaneous exhaustion finishes the turn");
+    assert!(
+        done_messages
+            .iter()
+            .all(|message| message.role != lash_core::MessageRole::System),
+        "turn-budget exhaustion must not append a synthetic system message"
+    );
+}
+
+#[test]
+fn native_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
+    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(true);
+}
+
+#[test]
+fn cell_protocol_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
+    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(false);
+}
+
 #[test]
 fn termination_and_trajectory_parity() {
     for termination in [

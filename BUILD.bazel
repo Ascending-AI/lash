@@ -1,6 +1,7 @@
 load(
     "//tools/bazel:workspace_targets.bzl",
     "WORKSPACE_COMPILE_TARGETS",
+    "WORKSPACE_BAZEL_TEST_TARGETS",
     "WORKSPACE_DOCTEST_TARGETS",
     "WORKSPACE_RUST_SOURCE_TARGETS",
     "WORKSPACE_TEST_TARGETS",
@@ -18,6 +19,14 @@ filegroup(
         "Cargo.toml",
     ],
     visibility = ["//visibility:public"],
+)
+
+# The generated suite is the complete deterministic/default-feature test
+# partition. Cargo-owned labels carry `manual`, so `bazel test //...` and this
+# focused aggregate execute the same safe set.
+test_suite(
+    name = "workspace_tests",
+    tests = WORKSPACE_BAZEL_TEST_TARGETS,
 )
 
 # Runtime inputs for the few tests whose asserted contract spans package
@@ -63,9 +72,9 @@ filegroup(
     testonly = True,
 )
 
-# This target makes the complete test label set queryable without defining a
-# second workspace scheduler. Use explicit labels with `bazel test`; Cargo
-# nextest retains workspace scheduling and service constraints.
+# This target keeps the complete Bazel and Cargo-owned test label set queryable.
+# The executable default is `workspace_tests`; Cargo nextest retains special
+# scheduling and service constraints for the excluded labels.
 filegroup(
     name = "workspace_test_inventory",
     srcs = WORKSPACE_TEST_TARGETS,

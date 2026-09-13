@@ -188,6 +188,7 @@ lash_rust_integration_test(
         "//crates/lash-sqlite-store:package_files",
         ":lash-sim__bin",
     ],
+    test_env = {"CARGO_BIN_EXE_lash-sim": "$(rootpath :lash-sim__bin)"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",

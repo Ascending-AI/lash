@@ -575,22 +575,6 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         turn_id: TurnId::from("standard-max-turn"),
         emit_llm_trace: false,
         termination: lash_core::ProtocolTurnOptions::empty(),
-        turn_limit_final_message: Arc::new(contract_turn_limit_final_message),
-    }
-}
-
-pub(super) fn contract_turn_limit_final_message(
-    message_id: String,
-    max_turns: usize,
-) -> lash_core::Message {
-    lash_core::Message {
-        id: message_id.clone(),
-        role: lash_core::MessageRole::System,
-        parts: lash_core::facade_support::shared_parts(vec![lash_core::Part::error(
-            format!("{message_id}.p0"),
-            format!("Turn limit reached ({max_turns}) before a final test response."),
-        )]),
-        origin: None,
     }
 }
 

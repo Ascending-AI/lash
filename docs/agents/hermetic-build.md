@@ -16,9 +16,9 @@ Cargo commands; the entry script does this automatically.
 
 `analyze` validates generated files and performs Bazel loading and analysis with
 `--nobuild`; it does not run rustc and is not a substitute for `cargo check`.
-`build` compiles and links the requested Bazel labels. `test` first builds and
-then executes the explicit test labels. For an edit loop, request the narrowest
-library, binary, or test label affected by the change.
+`build` compiles and links the requested Bazel labels. `test` without labels
+builds and executes the generated deterministic/default-feature workspace
+suite; explicit labels remain available for a focused edit loop.
 
 ```sh
 # Analyze the generated graph and reject metadata or module-lock drift.
@@ -27,7 +27,10 @@ scripts/hermetic-build.sh analyze
 # Compile the complete Cargo --workspace --all-targets shape.
 scripts/hermetic-build.sh build
 
-# Compile or run focused targets.
+# Run the generated cacheable test suite (87 test binaries).
+scripts/hermetic-build.sh test
+
+# Compile or run focused targets instead.
 scripts/hermetic-build.sh build //crates/lash-core:lash-core
 scripts/hermetic-build.sh test \
   //crates/lash-sansio:lash-sansio__unit_test \
@@ -62,13 +65,16 @@ archive integrity; `rust-toolchain.toml`, rules_rs, and CI all select Rust
 floor.
 
 The shared caches live under `/home/sam/.cache/lash-bazel`; Bazel action keys use
-declared repository-relative inputs, so two Orb paths can reuse the same
-results. The executor has eight action slots. Each action declares one CPU and
-2 GiB by default, Bazel queues at most eight jobs, repository loading uses four
-threads, and each checkout's Bazel server has a 4 GiB heap ceiling. The Bazel
-server remains in the caller's cgroup; remote compilation runs inside the
-executor's `orb-heavy.slice` budget. Keeping a Bazel server alive preserves its
-analysis cache.
+declared repository-relative source, patch, data, runfiles, build environment,
+and rule inputs, so two Orb paths can reuse the same results. Successful test
+results are cacheable (`--cache_test_results=yes`) and an input change produces
+a different test action key. Failed tests are never reused as successes. The
+executor has eight action slots. Each action declares one CPU and 2 GiB by
+default, Bazel queues at most eight jobs, repository loading uses four threads,
+and each checkout's Bazel server has a 4 GiB heap ceiling. The Bazel server
+remains in the caller's cgroup; remote compilation runs inside the executor's
+`orb-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
+cache.
 
 For a golden refresh, prewarm the shared action cache once with:
 
@@ -102,9 +108,20 @@ calling checkout's output base. It preserves the shared
 entry point before deleting the checkout.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
-Cargo-owned test labels carry `manual` plus a reason tag, which keeps a broad
-`bazel test //...` from treating an unconfigured service or path fixture as
-proof. Use the existing Cargo recipes for these correctness contracts:
+Of its 109 executable test binaries, `//:workspace_tests` owns 87 deterministic
+binaries. The remaining 22 labels carry `manual`, a reason tag, and a durable
+`cargo_only` explanation in `tools/bazel/target-inventory.json`; this keeps both
+the aggregate and `bazel test //...` from treating an unconfigured service,
+special scheduler, or path fixture as proof. The partition is generated from
+Cargo metadata and checked by `scripts/test_bazel_test_contract.py` so new or
+reclassified targets cannot disappear into a hand-maintained list.
+
+The 22 Cargo-owned executable labels are eight PostgreSQL targets, the S3 and
+Restate unit binaries, the `lash-runtime` unit and trybuild binaries, the
+`lash-core` unit and nested-metadata binaries, three `lash-sim` heavy/backend
+binaries, the TypeScript integration binary, the agent-workbench unit binary
+that includes a Node.js browser projection gate, and three workflow-graph
+frontend binaries. Use the existing Cargo recipes for these correctness contracts:
 
 - `scripts/check_feature_coverage.py` and the explicit no-default-feature
   commands own feature-combination coverage. Cargo-required targets omitted
@@ -123,6 +140,35 @@ proof. Use the existing Cargo recipes for these correctness contracts:
 - `cargo package`, the layered publisher, exact-SHA release validation, the
   release profile (`thin` LTO and stripping), and the `judged` profile remain
   Cargo-owned publication and artifact contracts.
+
+Ignored live, regeneration, soak, and measurement tests remain ignored in the
+ordinary Bazel binaries exactly as they are in Cargo's ordinary workspace run;
+their named `--ignored` or live recipes remain authoritative. The 35 doctest
+labels stay manual because Cargo owns rustdoc execution, and the one target
+whose required feature is outside the default graph remains recorded as a
+Cargo feature-gate target without a Bazel label.
+
+The main CI workflow makes this a single authoritative partition. Trusted
+same-repository pull requests, merge-queue groups, `main` pushes, and manual CI
+dispatches run `//:workspace_tests` with the authenticated shared cache. On the
+same events the ordinary nextest job reads the generated
+`tools/bazel/cargo_owned_nextest_filter.txt`, so its `profile.ci` run executes
+only ordinary cases from the 22 Cargo-owned binaries. The existing doctest,
+trybuild, heavy, service, feature, fuzz, packaging, and release jobs keep their
+own Cargo commands and schedules. `CI conclusion` requires the Bazel job to
+succeed on every trusted event.
+
+Fork and Dependabot pull requests never receive cache credentials: their Bazel
+job is intentionally skipped and their ordinary nextest job omits the generated
+filter, preserving the full workspace fallback. `CI conclusion` accepts that
+skip only when the shared trust decision classifies the event as untrusted.
+
+GitHub-hosted actions execute locally, not in Orb's pinned executor image. Their
+remote-cache platform property is therefore derived from GitHub's `runner.os`,
+`runner.arch`, `ImageOS`, and `ImageVersion` values. This gives each concrete
+GitHub runner image a deterministic action identity distinct from
+`orb_executor_runtime`; the cache service and instance remain shared, but
+actions cannot cross the runtime boundary under the same key.
 
 The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent

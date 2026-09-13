@@ -522,8 +522,6 @@ pub(crate) trait RlmDialect: Send + Sync {
 
     fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String;
 
-    fn turn_limit_final_copy(&self, max_turns: usize) -> String;
-
     fn finish_required_copy(&self, requires_schema: bool) -> String;
 
     fn finish_schema_mismatch_copy(&self) -> String;

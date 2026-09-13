@@ -99,6 +99,11 @@ test-group = "docker-services"
 # suite on every push, so a workspace-side run would be a second report of the
 # same defect. Keep this expression and the `ci-heavy` default-filter exact
 # complements over the heavy set.
+#
+# Trusted main CI additionally intersects this profile with the generated
+# `tools/bazel/cargo_owned_nextest_filter.txt` binary partition. Fork and
+# Dependabot pull requests omit that expression and therefore retain this
+# profile's full-workspace behavior.
 default-filter = '''
   not (
       (

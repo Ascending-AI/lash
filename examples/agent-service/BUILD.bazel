@@ -63,6 +63,7 @@ lash_rust_integration_test(
         "//examples:shared_rust_sources",
         ":agent-service",
     ],
+    test_env = {"CARGO_BIN_EXE_agent-service": "$(rootpath :agent-service)"},
     library = None,
     library_crate_name = None,
     manifest_dir = "examples/agent-service",
