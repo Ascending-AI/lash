@@ -161,11 +161,10 @@ impl RemoteTriggerEmitReport {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteTriggerSubscriptionFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrant_scope_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -182,10 +181,7 @@ pub struct RemoteTriggerSubscriptionFilter {
 
 impl RemoteTriggerSubscriptionFilter {
     pub fn for_session(session_id: impl Into<SessionId>) -> Self {
-        Self {
-            session_id: Some(session_id.into()),
-            ..Self::default()
-        }
+        Self::for_registrant_scope(lash_sansio::session_owner_namespace(session_id.into()))
     }
 
     pub fn for_registrant_scope(scope_id: impl Into<String>) -> Self {

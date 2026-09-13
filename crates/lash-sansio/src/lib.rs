@@ -34,7 +34,9 @@ pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
 pub use frame_key::{FrameKey, FrameKeyError};
-pub use identity::{BatchId, InputId, NodeId, ProcessId, SessionId, TurnId};
+pub use identity::{
+    BatchId, InputId, NodeId, ProcessId, SessionId, TurnId, session_owner_namespace,
+};
 pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection,

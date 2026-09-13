@@ -1166,6 +1166,10 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
 
 #[tokio::test]
 async fn sqlite_trigger_store_satisfies_conformance() {
+    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
+        "SQLite",
+        lash_sqlite_store::testing::trigger_subscription_list_sql,
+    );
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_conformance::trigger_store_reopenable(|| {
         let path = fresh_db_path(&dirs, "triggers.db");
@@ -1204,7 +1208,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("supports schema version 20"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1232,7 +1236,7 @@ async fn sqlite_effect_controller_rejects_retained_generation_17_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("supports schema version 20"));
     assert!(message.contains("database reports version 17"));
 }
 

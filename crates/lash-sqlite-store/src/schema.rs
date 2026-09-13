@@ -1099,9 +1099,11 @@ CREATE TABLE IF NOT EXISTS effect_scope_retirements (
 // Version 18 persists the admitted execution scope with every replay key.
 // Pre-18 journals are rejected because their keys cannot identify the scope
 // whose authority admitted the effect.
-// Version 19 makes that lifecycle evidence own execution-artifact cleanup
-// completion. Pre-19 effect databases are rejected rather than migrated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 19;
+// Version 19 rejects the retired trigger-list envelope shape. Older journals
+// are recreated rather than replayed across this encoding cutover.
+// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
+// Pre-20 effect databases are rejected rather than migrated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

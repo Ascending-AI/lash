@@ -9,6 +9,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
+/// Returns the production trigger-subscription listing SQL for conformance assertions.
+pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> String {
+    crate::triggers::list_subscriptions_query(filter).0
+}
+
 /// Transaction boundary at which one armed fault is injected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

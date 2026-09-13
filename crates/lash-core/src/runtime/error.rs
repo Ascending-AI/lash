@@ -160,21 +160,15 @@ pub enum RuntimeErrorCode {
     RestateAwaitEventRevoke,
     RestateAwaitEventSessionUpdate,
     RestateEffectController,
-    /// Continuation replay encountered a journal row addressed by the retired
-    /// tool-intent v1 key family while this build derives emission-scoped v2
-    /// keys. Re-executing would duplicate or diverge from the committed
-    /// command, so the in-flight continuation is deliberately refused.
+    /// Replay found a retired tool-intent v1 key; re-execution under v2 could
+    /// duplicate or diverge from the committed command, so it is refused.
     ToolIntentReplayKeyFormatCutover,
-    /// A Restate redrive reconstructed an effect envelope that differs from its
-    /// durable journal. This commonly follows worker replacement across a
-    /// deployment, but the discriminator proves divergence rather than the
-    /// deployment event itself. The current invocation cannot replay that
-    /// journal safely; a fresh turn on the same session is safe.
+    /// A Restate redrive diverged from its durable journal and cannot replay it
+    /// safely; a fresh turn on the same session is safe.
     WorkerReplacementAbort,
     RestateEffectHostRequiresHandlerScope,
-    /// A journaled Restate effect produced an outcome the durable journal can
-    /// never accept, so the effect gave up with a terminal failure instead of
-    /// failing every redrive of the enclosing turn.
+    /// A journaled Restate effect produced an unacceptable outcome and became
+    /// terminal rather than failing every enclosing-turn redrive.
     RestateJournaledEffectPoisoned,
     RestateProcessAwait,
     RestateProcessCancel,
@@ -185,48 +179,33 @@ pub enum RuntimeErrorCode {
     /// shape this build cannot decode exactly.
     RestateProcessJournalPayloadIncompatible,
     RestateProcessIngressSubmit,
-    /// The ingress target names a service no deployment has bound. A
-    /// deployment fact, not a busy engine: retrying cannot make an unbound
-    /// service appear, so this code is terminal by construction.
+    /// The ingress target names an unbound service; retry cannot change that
+    /// deployment fact, so this code is terminal.
     RestateServiceUnregistered,
     RestateProcessAwaitAfterTurnCancel,
     RestateProcessTurnCancelContextMissing,
     RestateProcessTerminalEncode,
     RestateTurnTerminalAttach,
-    /// A bounded Restate terminal attachment elapsed while the durable wait
-    /// remained live. Re-attaching the same address is explicitly safe.
+    /// A Restate terminal attachment elapsed; re-attaching is safe.
     RestateTurnTerminalAttachCeilingElapsed,
     RestateTurnTerminalDecode,
     RestateTurnTerminalInvalidResolution,
     RestateTurnCancelScopeMismatch,
     RestateTurnCancelScopeMissing,
-    /// A host assistant-response hook failed while deriving the transformed
-    /// response from an already-journaled raw provider completion (FIG-1276).
-    ///
-    /// Deliberately **not** terminal: the paid completion is durable in phase
-    /// 1, so the correct recovery is to redrive phase 2 and derive again rather
-    /// than to seal an incomplete derivation into the journal.
+    /// A journaled response hook retries derivation without paying again (FIG-1276).
     RuntimeEffectAssistantResponseHook,
     RuntimeEffectAttachmentStore,
     RuntimeEffectEnvelopeCanonicalDecode,
     RuntimeEffectEnvelopeCanonicalHashInvariant,
     RuntimeEffectEnvelopeHash,
-    /// A grouped settlement await was cancelled by its cancellation token. The
-    /// group's durable rank is untouched, so a later await resumes at the same
-    /// rank.
+    RuntimeEffectEnvelopeVersion,
+    /// A cancelled group await leaves its durable rank untouched for retry.
     RuntimeEffectGroupAwaitCancelled,
-    /// A durable effect group's child was cancelled because the group's loser
-    /// disposition resolved to `Cancel`. The cancellation is that child's
-    /// terminal, not a transient failure to retry.
+    /// A group's `Cancel` loser disposition made this child terminal.
     RuntimeEffectGroupChildCancelled,
-    /// A drain pass was not attempted because the process asked to run it is
-    /// still working the group itself — a caller here has it open, or children
-    /// this host dispatched have not settled yet.
-    ///
-    /// Retryable, and the distinction matters: nothing about the group is wrong
-    /// and nothing needs changing, so the same call succeeds once this host is
-    /// done with it. A refusal that meant "never" would carry
-    /// `RuntimeEffectGroupShape` instead.
+    /// Drain deferred while this host still works the group or its children.
+    /// Retry succeeds once it finishes; permanent refusal uses
+    /// `RuntimeEffectGroupShape`.
     RuntimeEffectGroupDrainDeferred,
     /// A durable effect group was assembled with children that disagree with the
     /// group they claim to belong to, or an effect carrying group membership
@@ -347,9 +326,8 @@ pub(crate) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
         err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
             RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
         }
-        // ADR 0069 §5(d): a driver that settled the row it accepted without a
-        // claim, and found that row held or already settled, ceded at the head
-        // CAS. Nothing durable was written: a stand-down, not a commit fault.
+        // A no-claim driver that finds the row held/settled cedes at head CAS;
+        // nothing was written, so this is stand-down (ADR 0069 §5(d)).
         err @ crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. } => {
             RuntimeError::new(
                 RuntimeErrorCode::TurnInputSettlementSuperseded,
@@ -364,8 +342,6 @@ pub(crate) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
             RuntimeErrorCode::ExecutionStateCaptureFailed,
             format!("failed to snapshot dirty execution state: {message}"),
         ),
-        // The refusal was typed when the commit aborted; hand it back unchanged
-        // so the caller classifies the turn by that code, not by the wrapper.
         crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
@@ -538,6 +514,7 @@ impl RuntimeErrorCode {
                 "runtime_effect_envelope_canonical_hash_invariant"
             }
             Self::RuntimeEffectEnvelopeHash => "runtime_effect_envelope_hash",
+            Self::RuntimeEffectEnvelopeVersion => "runtime_effect_envelope_version_unsupported",
             Self::RuntimeEffectGroupAwaitCancelled => "runtime_effect_group_await_cancelled",
             Self::RuntimeEffectGroupChildCancelled => "runtime_effect_group_child_cancelled",
             Self::RuntimeEffectGroupDrainDeferred => "runtime_effect_group_drain_deferred",
@@ -747,6 +724,7 @@ impl RuntimeErrorCode {
                 | Self::RuntimeEffectEnvelopeCanonicalDecode
                 | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
                 | Self::RuntimeEffectEnvelopeHash
+                | Self::RuntimeEffectEnvelopeVersion
                 | Self::RuntimeEffectGroupAwaitCancelled
                 | Self::RuntimeEffectGroupChildCancelled
                 | Self::RuntimeEffectGroupShape
@@ -933,6 +911,7 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectEnvelopeCanonicalHashInvariant
             }
             "runtime_effect_envelope_hash" => Self::RuntimeEffectEnvelopeHash,
+            "runtime_effect_envelope_version_unsupported" => Self::RuntimeEffectEnvelopeVersion,
             "runtime_effect_group_await_cancelled" => Self::RuntimeEffectGroupAwaitCancelled,
             "runtime_effect_group_child_cancelled" => Self::RuntimeEffectGroupChildCancelled,
             "runtime_effect_group_drain_deferred" => Self::RuntimeEffectGroupDrainDeferred,
@@ -1219,9 +1198,6 @@ mod tests {
 
     fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         match code {
-            // A hook failure is an incomplete derivation over an already
-            // durable completion, so redriving phase 2 is the correct recovery
-            // (FIG-1276).
             RuntimeErrorCode::RuntimeEffectAssistantResponseHook
             | RuntimeErrorCode::RuntimeEffectGroupDrainDeferred
             | RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded
@@ -1323,6 +1299,7 @@ mod tests {
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode
             | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
             | RuntimeErrorCode::RuntimeEffectEnvelopeHash
+            | RuntimeErrorCode::RuntimeEffectEnvelopeVersion
             | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
             | RuntimeErrorCode::RuntimeEffectGroupChildCancelled
             | RuntimeErrorCode::RuntimeEffectGroupShape
@@ -1507,6 +1484,7 @@ mod tests {
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
             RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
             RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+            RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
             RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
             RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
             RuntimeErrorCode::RuntimeEffectGroupDrainDeferred,

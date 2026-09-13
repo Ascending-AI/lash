@@ -263,8 +263,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         child: &UnsettledGroupChild,
     ) -> Result<RuntimeEffectEnvelope, RuntimeEffectControllerError> {
         let vocabulary = self.vocabulary();
-        let canonical: CanonicalRuntimeEffectEnvelope = serde_json::from_str(&child.envelope_json)
-            .map_err(|err| vocabulary.decode_error(err))?;
+        let canonical = CanonicalRuntimeEffectEnvelope::decode(&child.envelope_json)?;
         serde_json::from_str(canonical.json()).map_err(|err| {
             vocabulary.error(
                 EffectReplayFailure::CorruptRow,

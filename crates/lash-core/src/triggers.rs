@@ -582,7 +582,7 @@ impl TriggerOwnerScope {
     /// `session:<id>`, `host:<binding>`, or the reserved platform `host` namespace.
     pub fn namespace(&self) -> String {
         match self {
-            Self::Session { session_id } => format!("session:{session_id}"),
+            Self::Session { session_id } => lash_sansio::session_owner_namespace(session_id),
             Self::Host { binding_id } => format!("host:{binding_id}"),
             Self::Platform => "host".to_string(),
         }
@@ -690,8 +690,6 @@ pub struct TriggerSubscriptionFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrant_scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<SessionId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -709,10 +707,7 @@ impl TriggerSubscriptionFilter {
     /// Constructs a `TriggerSubscriptionFilter` using for session semantics for store and
     /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_session(session_id: impl Into<SessionId>) -> Self {
-        Self {
-            session_id: Some(session_id.into()),
-            ..Self::default()
-        }
+        Self::for_registrant_scope(lash_sansio::session_owner_namespace(session_id.into()))
     }
 
     /// Constructs a `TriggerSubscriptionFilter` using for registrant scope semantics for store and
@@ -733,21 +728,12 @@ impl TriggerSubscriptionFilter {
         }
     }
 
-    /// Returns only the explicit canonical registrant scope for trigger-store implementors; legacy
-    /// session filtering remains a separate predicate.
-    pub fn effective_registrant_scope_id(&self) -> Option<String> {
-        self.registrant_scope_id.clone()
-    }
-
     /// Applies every populated subscription filter conjunctively for trigger-store and conformance
     /// implementors and always excludes tombstoned records.
     pub fn matches(&self, record: &TriggerSubscriptionRecord) -> bool {
-        self.effective_registrant_scope_id()
+        self.registrant_scope_id
+            .as_deref()
             .is_none_or(|scope_id| record.registrant_scope_id() == scope_id)
-            && self
-                .session_id
-                .as_ref()
-                .is_none_or(|session_id| record.registrant_session_id() == Some(session_id))
             && self
                 .subscription_key
                 .as_deref()
@@ -1159,9 +1145,12 @@ pub fn evaluate_trigger_prune(
 }
 
 const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
-// Bumped to 4 (FIG-1383): the command preimage's process-status tag registry
-// gained `caller_departed`; see the process-registration family note.
-const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 4;
+// Definition-bearing commands remain at v4 (FIG-1383): their preimage's
+// process-status tag registry gained `caller_departed`.
+const TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION: u8 = 4;
+// Bumped to 5 (FIG-2886): list filters carry the canonical owner scope and
+// retain an absent slot for the retired raw session-id spelling.
+const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 5;
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied
@@ -1172,6 +1161,9 @@ const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 /// actor, draft, and JSON tags are registered beside the trigger-definition
 /// projection they share; nested projections carry no version of their own.
 fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
+    if matches!(command, TriggerCommand::List { .. }) {
+        return TRIGGER_COMMAND_FAMILY_VERSION;
+    }
     let draft = match command {
         TriggerCommand::Register { draft, .. }
         | TriggerCommand::Update { draft, .. }
@@ -1179,9 +1171,10 @@ fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
         _ => None,
     };
     if draft.is_some_and(|draft| {
-        router::trigger_definition_family_version(draft) == TRIGGER_COMMAND_FAMILY_VERSION
+        router::trigger_definition_family_version(draft)
+            == TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION
     }) {
-        TRIGGER_COMMAND_FAMILY_VERSION
+        TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION
     } else {
         LEGACY_TRIGGER_COMMAND_FAMILY_VERSION
     }
@@ -1210,7 +1203,6 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             project_trigger_owner(&mut fingerprint, owner_scope);
             let TriggerSubscriptionFilter {
                 registrant_scope_id,
-                session_id,
                 subscription_key,
                 name,
                 source_type,
@@ -1220,7 +1212,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             } = filter;
             for value in [
                 registrant_scope_id.as_deref(),
-                session_id.as_deref(),
+                None,
                 subscription_key.as_deref(),
                 name.as_deref(),
                 source_type.as_deref(),
