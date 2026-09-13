@@ -2310,26 +2310,19 @@ enum BlobOperation {
 }
 
 #[tokio::test]
-#[ignore = "compares file and S3 blob stores; requires MinIO (`just push-gate`, or LASH_MINIO_ENDPOINT with --include-ignored)"]
+#[ignore = "compares file and S3 blob stores; requires MinIO (`just push-gate`, or LASH_REQUIRE_MINIO=1 with --include-ignored)"]
 async fn attachment_blob_store_differential_agrees() {
-    let endpoint = match std::env::var("LASH_MINIO_ENDPOINT") {
-        Ok(value) if !value.is_empty() => value,
-        _ if std::env::var("LASH_REQUIRE_MINIO").as_deref() == Ok("1") => {
-            panic!("LASH_MINIO_ENDPOINT must be set when LASH_REQUIRE_MINIO=1")
-        }
-        _ => {
-            eprintln!("SKIPPED attachment blob-store differential: MinIO is not configured");
-            return;
-        }
-    };
+    if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
+        eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_MINIO is not set");
+        return;
+    }
     let memory = InMemoryAttachmentStore::new();
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());
     let s3 = S3AttachmentStore::from_config(S3AttachmentStoreConfig {
-        endpoint_url: Some(endpoint),
+        endpoint_url: Some("http://127.0.0.1:9000".to_string()),
         region: "us-east-1".to_string(),
-        bucket: std::env::var("LASH_MINIO_BUCKET")
-            .unwrap_or_else(|_| "lash-attachments".to_string()),
+        bucket: "lash-attachments".to_string(),
         prefix: Some(format!("cross-backend/{}", run_nonce())),
         access_key_id: Some("minioadmin".to_string()),
         secret_access_key: Some("minioadmin".into()),

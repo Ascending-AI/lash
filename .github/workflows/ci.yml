@@ -1588,7 +1588,6 @@ jobs:
       - name: Test S3 store conformance
         run: cargo test -p lash-internal-s3-store --locked
         env:
-          LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
           LASH_REQUIRE_MINIO: "1"
 
       - name: Test attachment blob-store differential
@@ -1597,7 +1596,6 @@ jobs:
           --test cross_backend_store_differential
           --locked attachment_blob_store_differential_agrees -- --nocapture --include-ignored
         env:
-          LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
           LASH_REQUIRE_MINIO: "1"
 
       - name: Stop MinIO

@@ -114,25 +114,7 @@ impl S3AttachmentStore {
 
     pub fn from_config(config: S3AttachmentStoreConfig) -> Result<Self, AttachmentStoreError> {
         let prefix = normalize_prefix(config.prefix.as_deref());
-        let mut builder = AmazonS3Builder::from_env()
-            .with_region(config.region)
-            .with_bucket_name(config.bucket)
-            .with_virtual_hosted_style_request(!config.path_style);
-
-        if let Some(endpoint) = config.endpoint_url {
-            if endpoint_uses_http(&endpoint) {
-                builder = builder.with_allow_http(true);
-            }
-            builder = builder.with_endpoint(endpoint);
-        }
-        if let Some(access_key_id) = config.access_key_id {
-            builder = builder.with_access_key_id(access_key_id);
-        }
-        if let Some(secret_access_key) = config.secret_access_key {
-            builder = builder.with_secret_access_key(secret_access_key.into_inner());
-        }
-
-        let store = builder
+        let store = amazon_s3_builder(&config)
             .build()
             .map_err(|err| terminal_backend_error("build", err))?;
 
@@ -218,6 +200,30 @@ impl S3AttachmentStore {
         rows.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(rows)
     }
+}
+
+fn amazon_s3_builder(config: &S3AttachmentStoreConfig) -> AmazonS3Builder {
+    let mut builder = AmazonS3Builder::new()
+        .with_region(config.region.as_str())
+        .with_bucket_name(config.bucket.as_str())
+        .with_virtual_hosted_style_request(!config.path_style);
+
+    if let Some(endpoint) = config.endpoint_url.as_deref() {
+        if endpoint_uses_http(endpoint) {
+            builder = builder.with_allow_http(true);
+        }
+        builder = builder.with_endpoint(endpoint);
+    }
+    if let Some(access_key_id) = config.access_key_id.as_deref() {
+        builder = builder.with_access_key_id(access_key_id);
+    }
+    if let Some(secret_access_key) = config.secret_access_key.as_ref() {
+        builder = builder.with_secret_access_key(secret_access_key.expose_secret());
+    }
+    if config.access_key_id.is_none() && config.secret_access_key.is_none() {
+        builder = builder.with_skip_signature(true);
+    }
+    builder
 }
 
 #[async_trait::async_trait]
@@ -413,6 +419,7 @@ mod tests {
     use super::*;
     use lash_conformance::ReopenableAttachmentStore;
     use lash_core::{AttachmentTypeMetadata, MediaType};
+    use object_store::aws::AmazonS3ConfigKey;
 
     /// `content_path` derives the object key from the id, so it depends on
     /// `AttachmentId` refusing every shape that is not a single key segment.
@@ -621,8 +628,8 @@ mod tests {
 
     #[tokio::test]
     async fn minio_attachment_store_satisfies_conformance_when_configured() {
-        let Some(config) = minio_config_from_env() else {
-            eprintln!("skipping MinIO conformance: LASH_MINIO_ENDPOINT is not set");
+        let Some(config) = minio_config_for_ci() else {
+            eprintln!("skipping MinIO conformance: LASH_REQUIRE_MINIO is not set");
             return;
         };
         lash_conformance::attachment_store_reopenable(
@@ -655,8 +662,8 @@ mod tests {
     // boundaries, and GC collects the blob only after its final root disappears.
     #[tokio::test]
     async fn shared_bytes_isolation_and_gc_when_minio_configured() {
-        let Some(mut config) = minio_config_from_env() else {
-            eprintln!("skipping MinIO shared-bytes isolation: LASH_MINIO_ENDPOINT is not set");
+        let Some(mut config) = minio_config_for_ci() else {
+            eprintln!("skipping MinIO shared-bytes isolation: LASH_REQUIRE_MINIO is not set");
             return;
         };
         // The GC narrative asserts exact scanned/reclaimed counts, so this
@@ -678,8 +685,8 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_puts_are_content_addressed_when_minio_configured() {
-        let Some(config) = minio_config_from_env() else {
-            eprintln!("skipping MinIO duplicate-put test: LASH_MINIO_ENDPOINT is not set");
+        let Some(config) = minio_config_for_ci() else {
+            eprintln!("skipping MinIO duplicate-put test: LASH_REQUIRE_MINIO is not set");
             return;
         };
         let store = S3AttachmentStore::from_config(config).expect("store");
@@ -698,8 +705,8 @@ mod tests {
 
     #[tokio::test]
     async fn delete_removes_content_and_is_idempotent_when_minio_configured() {
-        let Some(config) = minio_config_from_env() else {
-            eprintln!("skipping MinIO delete test: LASH_MINIO_ENDPOINT is not set");
+        let Some(config) = minio_config_for_ci() else {
+            eprintln!("skipping MinIO delete test: LASH_REQUIRE_MINIO is not set");
             return;
         };
         let store = S3AttachmentStore::from_config(config).expect("store");
@@ -731,45 +738,61 @@ mod tests {
             .expect("delete of absent content is a no-op");
     }
 
-    fn minio_config_from_env() -> Option<S3AttachmentStoreConfig> {
-        let endpoint_url = match std::env::var("LASH_MINIO_ENDPOINT") {
-            Ok(endpoint) if !endpoint.is_empty() => endpoint,
-            Ok(_) => {
-                assert_ne!(
-                    std::env::var("LASH_REQUIRE_MINIO").as_deref(),
-                    Ok("1"),
-                    "LASH_MINIO_ENDPOINT must be non-empty when LASH_REQUIRE_MINIO=1"
-                );
-                return None;
-            }
-            Err(error) => {
-                assert_ne!(
-                    std::env::var("LASH_REQUIRE_MINIO").as_deref(),
-                    Ok("1"),
-                    "LASH_MINIO_ENDPOINT must be set when LASH_REQUIRE_MINIO=1: {error}"
-                );
-                return None;
-            }
-        };
-        let bucket =
-            std::env::var("LASH_MINIO_BUCKET").unwrap_or_else(|_| "lash-attachments".into());
-        let region = std::env::var("LASH_MINIO_REGION").unwrap_or_else(|_| "us-east-1".into());
+    fn minio_config_for_ci() -> Option<S3AttachmentStoreConfig> {
+        if std::env::var("LASH_REQUIRE_MINIO").as_deref() != Ok("1") {
+            return None;
+        }
         Some(S3AttachmentStoreConfig {
-            endpoint_url: Some(endpoint_url),
-            region,
-            bucket,
-            prefix: Some(format!(
-                "tests/{}",
-                std::env::var("LASH_MINIO_PREFIX").unwrap_or_else(|_| uuid_like_suffix())
-            )),
-            access_key_id: Some(
-                std::env::var("LASH_MINIO_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".into()),
-            ),
-            secret_access_key: Some(Redacted::new(
-                std::env::var("LASH_MINIO_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-            )),
+            endpoint_url: Some("http://127.0.0.1:9000".to_string()),
+            region: "us-east-1".to_string(),
+            bucket: "lash-attachments".to_string(),
+            prefix: Some(format!("tests/{}", uuid_like_suffix())),
+            access_key_id: Some("minioadmin".to_string()),
+            secret_access_key: Some(Redacted::new("minioadmin".to_string())),
             path_style: true,
         })
+    }
+
+    #[test]
+    fn config_without_credentials_does_not_read_aws_environment() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--ignored",
+                "--exact",
+                "tests::credential_seep_child_process",
+            ])
+            .env("AWS_ACCESS_KEY_ID", "ambient-access-key")
+            .env("AWS_SECRET_ACCESS_KEY", "ambient-secret-key")
+            .env("AWS_SESSION_TOKEN", "ambient-session-token")
+            .output()
+            .expect("run isolated credential-seep witness");
+        assert!(
+            output.status.success(),
+            "credential-seep witness failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run by config_without_credentials_does_not_read_aws_environment in an isolated process"]
+    fn credential_seep_child_process() {
+        let config = S3AttachmentStoreConfig::new("public-bucket", "us-east-1");
+        let builder = amazon_s3_builder(&config);
+        assert_eq!(
+            builder.get_config_value(&AmazonS3ConfigKey::AccessKeyId),
+            None
+        );
+        assert_eq!(
+            builder.get_config_value(&AmazonS3ConfigKey::SecretAccessKey),
+            None
+        );
+        assert_eq!(builder.get_config_value(&AmazonS3ConfigKey::Token), None);
+        assert_eq!(
+            builder.get_config_value(&AmazonS3ConfigKey::SkipSignature),
+            Some("true".to_string())
+        );
+        builder.build().expect("build unsigned S3 client");
     }
 
     fn unique_case_suffix() -> String {
