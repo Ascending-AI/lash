@@ -4,6 +4,7 @@ load(
     "WORKSPACE_CLIPPY_TARGETS",
     "WORKSPACE_COMPILE_TARGETS",
     "WORKSPACE_BAZEL_TEST_TARGETS",
+    "WORKSPACE_DEFERRED_TEST_TARGETS",
     "WORKSPACE_DOCTEST_TARGETS",
     "WORKSPACE_RUST_SOURCE_TARGETS",
     "WORKSPACE_TEST_TARGETS",
@@ -30,6 +31,13 @@ filegroup(
 test_suite(
     name = "workspace_tests",
     tests = WORKSPACE_BAZEL_TEST_TARGETS,
+)
+
+# Slow suites excluded from the PR Bazel partition. CI runs this aggregate
+# on lash-regress diffs and on trunk.
+test_suite(
+    name = "deferred_tests",
+    tests = WORKSPACE_DEFERRED_TEST_TARGETS,
 )
 
 # Runtime inputs for the few tests whose asserted contract spans package

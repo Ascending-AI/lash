@@ -103,15 +103,27 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("unknown change statuses", plan["reason"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_rust_change_runs_every_expensive_family(self) -> None:
+    def test_rust_change_runs_core_families_not_workbench(self) -> None:
         plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")])
         self.assertEqual("true", plan["rust_code"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual("true", plan["rust"])
+        self.assertEqual("true", plan["stores"])
+        self.assertEqual("false", plan["workbench"])
+        self.assertEqual("false", plan["regress"])
+        self.assertEqual("false", plan["schema"])
 
-    def test_readme_prefixed_rust_file_runs_every_expensive_family(self) -> None:
+    def test_workbench_only_skips_core_and_postgres(self) -> None:
+        plan = ci_plan.classify([("M", "examples/agent-workbench/src/main.rs")])
+        self.assertEqual("workbench-only diff", plan["reason"])
+        self.assertEqual("false", plan["rust"])
+        self.assertEqual("false", plan["stores"])
+        self.assertEqual("true", plan["workbench"])
+
+    def test_readme_prefixed_rust_file_runs_core_families(self) -> None:
         plan = ci_plan.classify([("A", "crates/x/src/readme_gen.rs")])
         self.assertEqual("false", plan["docs_only"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual("true", plan["rust"])
+        self.assertEqual("false", plan["workbench"])
 
     def test_each_global_invalidator_runs_everything(self) -> None:
         paths = [
@@ -150,16 +162,28 @@ def successful_needs() -> dict[str, dict[str, object]]:
 
 
 def apply_event_deferrals(needs: dict, event: str) -> dict:
-    """Give every event-deferred job the result `event` expects of it.
-
-    Trunk-only jobs skip on both deferred events; the queue-required compile
-    lanes skip on pull requests only and must succeed in the queue.
-    """
+    """Give every event-deferred job the result `event` expects of it."""
 
     for job in ci_plan.TRUNK_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     for job in ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
-        needs[job]["result"] = "skipped" if event == "pull_request" else "success"
+        rust_on = needs["plan"]["outputs"].get("rust") == "true"
+        fail_open = needs["plan"]["outputs"].get("fail_open") == "true"
+        if event == "pull_request":
+            needs[job]["result"] = "skipped"
+        elif event == "merge_group":
+            needs[job]["result"] = "success" if rust_on or fail_open else "skipped"
+        elif event == "push":
+            needs[job]["result"] = "skipped"
+        else:
+            needs[job]["result"] = "success" if rust_on else "skipped"
+    if event == "push":
+        for job in ci_plan.PUSH_SKIP_CORE_JOBS:
+            needs[job]["result"] = "skipped"
+    if event in ci_plan.DEFERRED_EVENTS:
+        needs["unicode-tests"]["result"] = (
+            "success" if needs["plan"]["outputs"].get("regress") == "true" else "skipped"
+        )
     return needs
 
 
@@ -198,6 +222,7 @@ class ConclusionTests(unittest.TestCase):
                         needs["plan"]["outputs"].update({"docs_only": "true", **{f: "false" for f in ci_plan.FAMILIES}})
                         for gated in ci_plan.GATED_JOBS:
                             needs[gated]["result"] = "skipped"
+                        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
                         needs[job]["result"] = result
                         problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                         self.assertTrue(any(job in problem for problem in problems))
@@ -217,20 +242,30 @@ class ConclusionTests(unittest.TestCase):
         needs["plan"]["outputs"].update({"docs_only": "true", **{family: "false" for family in ci_plan.FAMILIES}})
         for job in ci_plan.GATED_JOBS:
             needs[job]["result"] = "skipped"
+        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs))
 
     def test_wrongly_skipped_job_fails(self) -> None:
         needs = successful_needs()
         needs["workspace-tests"]["result"] = "skipped"
         problems = ci_plan.evaluate_conclusion(needs)
-        self.assertTrue(any("required it to run" in problem for problem in problems))
+        self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
     def test_inconsistent_classifier_output_fails(self) -> None:
         needs = successful_needs()
-        needs["plan"]["outputs"].update({"docs_only": "false", "fail_open": "false", "rust": "false"})
+        needs["plan"]["outputs"].update(
+            {
+                "docs_only": "false",
+                "fail_open": "false",
+                "rust": "false",
+                "workbench": "false",
+            }
+        )
         needs["workspace-tests"]["result"] = "skipped"
         problems = ci_plan.evaluate_conclusion(needs)
-        self.assertTrue(any("wrongly skipped" in problem for problem in problems))
+        self.assertTrue(
+            any("rust and plan.workbench are both false" in problem for problem in problems)
+        )
 
     def test_skipped_ungated_job_fails(self) -> None:
         needs = successful_needs()
@@ -292,7 +327,10 @@ class ProducerConclusionTests(unittest.TestCase):
 
     def test_skipped_consumer_cascade_rejected(self):
         for event in ("push", "workflow_dispatch", "pull_request"):
-            for consumer in ("workspace-tests", "restate-postgres-workers", "restate-postgres-workers-summary"):
+            consumers = ["restate-postgres-workers", "restate-postgres-workers-summary"]
+            if event != "push":
+                consumers = ["workspace-tests", *consumers]
+            for consumer in consumers:
                 with self.subTest(event=event, consumer=consumer):
                     needs = self.event_needs(event)
                     needs[consumer]["result"] = "skipped"
@@ -392,36 +430,44 @@ class PostgresMatrixTests(unittest.TestCase):
         self.assertIn("scripts/ci_plan.py postgres-matrix", step["run"])
 
     def test_compatibility_lanes_are_deferred_off_the_pull_request_path(self) -> None:
-        """PG16 runs everywhere; PG14/PG18 run wherever a change can reach trunk."""
+        """PG16 runs on rust PRs/queues; PG14/PG18 run on schema diffs or dispatch."""
         self.assertEqual(
             [{"postgres": "16", "role": "primary"}],
             ci_plan.postgres_matrix("pull_request"),
         )
-        for event in ("merge_group", "push", "workflow_dispatch"):
-            with self.subTest(event=event):
-                self.assertEqual(
-                    [
-                        {"postgres": "14", "role": "compatibility"},
-                        {"postgres": "16", "role": "primary"},
-                        {"postgres": "18", "role": "compatibility"},
-                    ],
-                    ci_plan.postgres_matrix(event),
-                )
+        self.assertEqual(
+            [{"postgres": "16", "role": "primary"}],
+            ci_plan.postgres_matrix("merge_group"),
+        )
+        self.assertEqual(
+            [
+                {"postgres": "14", "role": "compatibility"},
+                {"postgres": "16", "role": "primary"},
+                {"postgres": "18", "role": "compatibility"},
+            ],
+            ci_plan.postgres_matrix("workflow_dispatch"),
+        )
+        self.assertEqual(
+            [
+                {"postgres": "14", "role": "compatibility"},
+                {"postgres": "16", "role": "primary"},
+                {"postgres": "18", "role": "compatibility"},
+            ],
+            ci_plan.postgres_matrix("pull_request", schema=True),
+        )
 
     def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
         for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
             roles = {leg["role"] for leg in ci_plan.postgres_matrix(event)}
             with self.subTest(event=event, role="compatibility"):
-                if event == "pull_request":
-                    # The lane does not exist on a pull request at all; a leg
-                    # that ran no tests would be a hollow green.
-                    self.assertNotIn("compatibility", roles)
-                else:
+                if event == "workflow_dispatch":
                     self.assertIn("compatibility", roles)
                     self.assertEqual(
                         self.COMPATIBILITY,
                         selected_postgres_test_steps(event, "compatibility"),
                     )
+                else:
+                    self.assertNotIn("compatibility", roles)
             with self.subTest(event=event, role="primary"):
                 self.assertIn("primary", roles)
                 expected = (
@@ -481,7 +527,14 @@ class PostgresMatrixTests(unittest.TestCase):
                     problems = ci_plan.evaluate_conclusion(
                         needs, event_name=event, ref="refs/heads/main"
                     )
-                    self.assertTrue(any("postgres-store" in problem for problem in problems))
+                    if event == "push" and result == "skipped":
+                        self.assertFalse(
+                            any("postgres-store" in problem for problem in problems)
+                        )
+                    else:
+                        self.assertTrue(
+                            any("postgres-store" in problem for problem in problems)
+                        )
             with self.subTest(event=event, result="missing"):
                 needs = successful_needs()
                 apply_event_deferrals(needs, event)
@@ -523,7 +576,8 @@ class FuzzSmokeTests(unittest.TestCase):
             ]
         )
         self.assertEqual("false", plan["fail_open"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual("true", plan["rust"])
+        self.assertEqual("false", plan["workbench"])
 
     def test_committed_seed_corpus_is_present_and_non_empty(self) -> None:
         import check_fuzz_corpus
@@ -588,8 +642,8 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
 
     JOBS = ("lashlang-git-consumer", "package-feature-checks", "runtime-feature-boundary")
     CONDITION = (
-        "github.event_name == 'merge_group' || "
-        "(github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')"
+        "(github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
+        " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
     )
 
     def board(self, event: str, docs_only: bool = False) -> dict:
@@ -601,9 +655,8 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
             for job in ci_plan.GATED_JOBS:
                 needs[job]["result"] = "skipped"
             if event in ci_plan.DEFERRED_EVENTS:
-                # Pre-existing policy, unchanged here: the PostgreSQL job is
-                # already required on both deferred events whatever the plan.
-                needs["postgres-store"]["result"] = "success"
+                needs["postgres-store"]["result"] = "skipped"
+            needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
         apply_event_deferrals(needs, event)
         return needs
 
@@ -637,18 +690,20 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
                         problems,
                     )
 
-    def test_success_is_required_on_a_docs_only_merge_group(self) -> None:
+    def test_docs_only_merge_group_skips_the_compile_lanes(self) -> None:
         needs = self.board("merge_group", docs_only=True)
+        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
         for job in self.JOBS:
-            for result in ("skipped", "failure", "cancelled"):
+            self.assertEqual("skipped", needs[job]["result"])
+            for result in ("success", "failure", "cancelled"):
                 with self.subTest(job=job, result=result):
-                    needs = self.board("merge_group", docs_only=True)
-                    needs[job]["result"] = result
-                    problems = ci_plan.evaluate_conclusion(needs, "merge_group")
+                    trial = self.board("merge_group", docs_only=True)
+                    trial[job]["result"] = result
+                    problems = ci_plan.evaluate_conclusion(trial, "merge_group")
                     self.assertIn(
                         f"queue-required compile job {job} ended with {result!r} on a"
-                        " merge_group event, expected success",
+                        " merge_group event, expected skipped",
                         problems,
                     )
 
@@ -665,31 +720,30 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
                         ci_plan.evaluate_conclusion(needs, "pull_request"),
                     )
 
-    def test_push_and_dispatch_keep_the_rust_family_expectation(self) -> None:
-        for event in ("push", "workflow_dispatch"):
-            needs = self.board(event)
-            self.assertEqual([], ci_plan.evaluate_conclusion(needs, event, "refs/heads/main"))
-            for job in self.JOBS:
-                with self.subTest(event=event, job=job):
-                    wrongly_skipped = self.board(event)
-                    wrongly_skipped[job]["result"] = "skipped"
-                    self.assertIn(
-                        f"{job} ended with 'skipped' although plan.rust required it to run",
-                        ci_plan.evaluate_conclusion(wrongly_skipped, event, "refs/heads/main"),
-                    )
-                    # A docs-only trunk run may still skip them: unchanged.
-                    docs = self.board(event, docs_only=True)
-                    docs[job]["result"] = "skipped"
-                    self.assertEqual(
-                        [], ci_plan.evaluate_conclusion(docs, event, "refs/heads/main")
-                    )
+    def test_push_skips_compile_lanes_and_dispatch_keeps_rust_family(self) -> None:
+        push = self.board("push")
+        self.assertEqual([], ci_plan.evaluate_conclusion(push, "push", "refs/heads/main"))
+        for job in self.JOBS:
+            self.assertEqual("skipped", push[job]["result"])
+        dispatch = self.board("workflow_dispatch")
+        self.assertEqual(
+            [],
+            ci_plan.evaluate_conclusion(dispatch, "workflow_dispatch", "refs/heads/main"),
+        )
+        for job in self.JOBS:
+            wrongly_skipped = self.board("workflow_dispatch")
+            wrongly_skipped[job]["result"] = "skipped"
+            self.assertIn(
+                f"{job} ended with 'skipped' although plan.rust required it to run",
+                ci_plan.evaluate_conclusion(
+                    wrongly_skipped, "workflow_dispatch", "refs/heads/main"
+                ),
+            )
 
     def test_the_other_deferred_jobs_are_untouched(self) -> None:
         still_deferred = (
             "heavy-tests",
             "stack-budget",
-            "confidence-fast",
-            "confidence-fast-summary",
             "s3-store",
             "functional-e2e",
             "functional-e2e-process-operations",

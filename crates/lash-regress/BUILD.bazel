@@ -146,7 +146,9 @@ lash_rust_integration_test(
     manifest_dir = "crates/lash-regress",
     package_name = "lash-regress",
     rustc_env = {},
-    tags = [],
+    tags = [
+        "pr-deferred",
+    ],
     version = "0.0.0-dev",
 )
 
