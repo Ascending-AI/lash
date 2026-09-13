@@ -641,8 +641,6 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
     }
 }
 
-
-
 #[async_trait::async_trait]
 impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
     async fn admit_tool_intent_submission(

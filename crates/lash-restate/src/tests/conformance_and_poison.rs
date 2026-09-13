@@ -850,12 +850,16 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
 
     {
         let process_verdict_key = "lash:fig1767-process-cmd.journal-budget";
+        let parent_end_decision_key = "lash:fig1767-process-cmd.parent-end-cancel-decision:v1";
         let process_record_key = "lash:fig1767-process-cmd";
 
         let records = context.records.lock_recover();
         let process_verdict_bytes = records
             .get(process_verdict_key)
             .expect("process budget verdict journal entry");
+        let parent_end_decision_bytes = records
+            .get(parent_end_decision_key)
+            .expect("parent-end cancellation decision journal entry");
         let process_record_bytes = records
             .get(process_record_key)
             .expect("process effect record journal entry");
@@ -877,6 +881,11 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
             process_verdict_bytes.as_slice(),
             b"\"Proceed\"",
             "process command budget verdict byte sequence mismatch"
+        );
+        assert_eq!(
+            parent_end_decision_bytes.as_slice(),
+            br##"{"Err":{"type":"process_unknown","message":{"process_id":"fig1767-proc"}}}"##,
+            "parent-end cancellation decision byte sequence mismatch"
         );
         assert_eq!(
             process_record_bytes,
@@ -940,11 +949,12 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         context.runs.lock_recover().as_slice(),
         [
             "lash:fig1767-process-cmd.journal-budget",
+            "lash:fig1767-process-cmd.parent-end-cancel-decision:v1",
             "lash:fig1767-process-cmd",
             "lash:fig1767-tool-batch.journal-budget",
             "lash:fig1767-tool-batch"
         ],
-        "each eager effect must journal its budget verdict before its recorded effect"
+        "each eager effect must journal its decisions after its budget verdict and before its recorded effect"
     );
 }
 

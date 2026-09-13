@@ -1,4 +1,27 @@
 use super::*;
+use restate_sdk::serde::Json;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum JournaledParentEndCancelDecision {
+    Issued { record: Box<ProcessRecord> },
+    AlreadyStanding { record: Box<ProcessRecord> },
+    Terminal,
+}
+
+fn process_command_journal_name(invocation: &RuntimeEffectInvocation, operation: &str) -> String {
+    format!("{}.{operation}:v1", restate_effect_name(invocation))
+}
+
+fn process_command_journal_error(
+    operation: &str,
+    error: TerminalError,
+) -> RuntimeEffectControllerError {
+    RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateEffectController,
+        format!("Restate process {operation} journaling failed: {error}"),
+    )
+}
 
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
@@ -226,17 +249,28 @@ where
             requester,
             attribution,
         } => {
-            let record = registry
-                .request_process_cancel(&process_ref, origin, requester, attribution)
-                .await?;
+            let admission_registry = Arc::clone(&registry);
+            let Json(admission) = context
+                .run_json_send(
+                    process_command_journal_name(invocation, "process-cancel-admission"),
+                    None,
+                    async move {
+                        admission_registry
+                            .request_process_cancel(&process_ref, origin, requester, attribution)
+                            .await
+                    },
+                )
+                .await
+                .map_err(|error| process_command_journal_error("cancel admission", error))?;
+            let record = admission?;
             context
                 .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
                 .await
                 .map_err(|err| {
-                    PluginError::Runtime(RuntimeError::new(
+                    RuntimeEffectControllerError::new(
                         RuntimeErrorCode::RestateProcessCancel,
                         format!("Restate process cancellation failed: {err}"),
-                    ))
+                    )
                 })?;
             Ok(ProcessEffectOutcome::Cancel {
                 record: Box::new(record),
@@ -258,65 +292,101 @@ where
                     }
                 }
                 lash_core::ProcessParentEndPolicy::Cancel => {
-                    let result: Result<(), lash_core::PluginError> = async {
-                        let process_ref = registry.resolve_process_ref(&process_id).await?;
-                        let record =
-                            registry
-                                .get_process_ref(&process_ref)
-                                .await?
-                                .ok_or_else(|| {
-                                    lash_core::runtime::registry_transitions::unknown_process(
-                                        &process_id,
+                    let decision_registry = Arc::clone(&registry);
+                    let decision_process_id = process_id.clone();
+                    let decision_identity = identity.clone();
+                    let decision = context
+                        .run_json_send(
+                            process_command_journal_name(
+                                invocation,
+                                "parent-end-cancel-decision",
+                            ),
+                            None,
+                            async move {
+                                let result: Result<JournaledParentEndCancelDecision, PluginError> = async {
+                                    let process_ref = decision_registry
+                                        .resolve_process_ref(&decision_process_id)
+                                        .await?;
+                                    let record = decision_registry
+                                        .get_process_ref(&process_ref)
+                                        .await?
+                                        .ok_or_else(|| {
+                                            lash_core::runtime::registry_transitions::unknown_process(
+                                                &decision_process_id,
+                                            )
+                                        })?;
+                                    if record.is_terminal() {
+                                        return Ok(JournaledParentEndCancelDecision::Terminal);
+                                    }
+                                    if record.cancel_request.is_some() {
+                                        return Ok(
+                                            JournaledParentEndCancelDecision::AlreadyStanding {
+                                                record: Box::new(record),
+                                            },
+                                        );
+                                    }
+                                    let requester = serde_json::to_string(&record.lifecycle.parent)
+                                        .map_err(|error| {
+                                            PluginError::Runtime(RuntimeError::new(
+                                                RuntimeErrorCode::RecordEncodingFailed,
+                                                error.to_string(),
+                                            ))
+                                        })?;
+                                    let record = decision_registry
+                                        .request_process_cancel(
+                                            &process_ref,
+                                            lash_core::CancelOrigin::ParentEnded,
+                                            requester,
+                                            Some(
+                                                lash_core::RuntimeReplayAttribution::ToolIntent(
+                                                    decision_identity,
+                                                ),
+                                            ),
+                                        )
+                                        .await?;
+                                    Ok(JournaledParentEndCancelDecision::Issued {
+                                        record: Box::new(record),
+                                    })
+                                }
+                                .await;
+                                result
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            process_command_journal_error("parent-end decision", error)
+                        });
+                    let result: Result<(), RuntimeEffectControllerError> = match decision {
+                        Ok(Json(Ok(JournaledParentEndCancelDecision::Issued { record })))
+                        | Ok(Json(Ok(JournaledParentEndCancelDecision::AlreadyStanding {
+                            record,
+                        }))) => match RestateProcessCancelRequest::from_record(&record) {
+                            Ok(request) => context
+                                .request_process_workflow_cancel(request)
+                                .await
+                                .map_err(|err| {
+                                    RuntimeEffectControllerError::new(
+                                        RuntimeErrorCode::RestateProcessCancel,
+                                        format!("Restate process cancellation failed: {err}"),
                                     )
-                                })?;
-                        if record.is_terminal() || record.cancel_request.is_some() {
-                            return Ok(());
-                        }
-                        let requester =
-                            serde_json::to_string(&record.lifecycle.parent).map_err(|error| {
-                                PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::RecordEncodingFailed,
-                                    error.to_string(),
-                                ))
-                            })?;
-                        let record = registry
-                            .request_process_cancel(
-                                &process_ref,
-                                lash_core::CancelOrigin::ParentEnded,
-                                requester,
-                                Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                                    identity.clone(),
-                                )),
-                            )
-                            .await?;
-                        context
-                            .request_process_workflow_cancel(
-                                RestateProcessCancelRequest::from_record(&record)?,
-                            )
-                            .await
-                            .map_err(|err| {
-                                PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::RestateProcessCancel,
-                                    format!("Restate process cancellation failed: {err}"),
-                                ))
-                            })?;
-                        Ok(())
-                    }
-                    .await;
+                                }),
+                            Err(error) => Err(error.into()),
+                        },
+                        Ok(Json(Ok(JournaledParentEndCancelDecision::Terminal))) => Ok(()),
+                        Ok(Json(Err(error))) => Err(error.into()),
+                        Err(error) => Err(error),
+                    };
                     match result {
                         Ok(()) => lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity,
                             process_id,
                         },
-                        Err(error) => {
-                            let error = RuntimeEffectControllerError::from(error);
-                            lash_core::ToolIntentParentEndOutcome::Refused {
-                                identity,
-                                process_id,
-                                code: error.code.as_str().to_string(),
-                                message: error.message,
-                            }
-                        }
+                        Err(error) => lash_core::ToolIntentParentEndOutcome::Refused {
+                            identity,
+                            process_id,
+                            code: error.code.as_str().to_string(),
+                            message: error.message,
+                        },
                     }
                 }
             };
