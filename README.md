@@ -12,7 +12,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 
 - **Durable per-turn commits** — every completed turn lands as one atomic `RuntimeCommit` against a `SessionGraph`. Effects are the replay boundary; turns are the semantic commit boundary. → [persistence](https://lash.run/persistence.html)
 - **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. The default `NativeEffectHost` runs in-process; the first-party Restate adapter replays effects from host history, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and retries the final idempotent commit. → [durability](https://lash.run/architecture/durability.html)
-- **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs `lashlang` programs in a sandboxed VM where every effect crosses the host. → [RLM](https://lash.run/rlm.html)
+- **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in a sandboxed VM where every effect crosses the host. → [RLM](https://lash.run/rlm.html)
 - **Tool providers and plugins** — ordinary host operations are `ToolProvider`s; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed. → [tools](https://lash.run/tools.html), [plugins](https://lash.run/plugins.html)
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`. → [providers](https://lash.run/architecture/providers.html)
 - **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink + self-contained HTML viewer; optional OpenTelemetry export. → [tracing](https://lash.run/tracing.html)
@@ -111,7 +111,7 @@ loop. The docs walk through them at <https://lash.run/examples.html>.
 # Durable chat app: SQLite or Postgres, RLM, app-owned tools, Restate turns
 OPENROUTER_API_KEY=sk-or-... cargo run -p agent-service        # then open http://127.0.0.1:3000
 
-# Adds durable background work: Lashlang processes, subagents, cron triggers (Restate required)
+# Adds durable background work: durable processes, subagents, cron triggers (Restate required)
 OPENROUTER_API_KEY=sk-or-... just agent-workbench 3000         # then open http://127.0.0.1:3000
 
 # Lash as a bot inside someone else's product: standard mode, session per channel
