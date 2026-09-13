@@ -86,6 +86,8 @@ def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
         r"\(package\(([^)]+)\) & kind\(([^)]+)\)"
         r"(?: & binary\(([^)]+)\))?\)"
     )
+    if source.strip() == "none()":
+        return set()
     matches = term_pattern.findall(source.strip())
     self_check = " + ".join(
         f"(package({package}) & kind({kind})"
@@ -106,6 +108,29 @@ class BazelTestContractTests(unittest.TestCase):
             check=True,
         )
 
+    def test_inventory_carries_every_package_dependency_set(self) -> None:
+        """The dependency fact that replaces a nested `cargo metadata` call.
+
+        `crates/lash-core/tests/integration_boundary.rs` proves dependency
+        direction from this list, so a package entry that lost it (or a
+        `lash-internal-core` entry whose dependencies went empty) would turn
+        that architecture gate into a vacuous pass.
+        """
+        inventory = json.loads(
+            (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
+        )
+        for package in inventory["packages"]:
+            with self.subTest(package=package["package"]):
+                dependencies = package["dependencies"]
+                self.assertIsInstance(dependencies, list)
+                self.assertEqual(sorted(set(dependencies)), dependencies)
+        core = next(
+            package
+            for package in inventory["packages"]
+            if package["package"] == "lash-internal-core"
+        )
+        self.assertIn("serde", core["dependencies"])
+
     def test_generated_suite_partitions_every_executable_test(self) -> None:
         targets = test_targets()
         all_labels = {target["label"] for target in targets}
@@ -114,8 +139,8 @@ class BazelTestContractTests(unittest.TestCase):
         deferred_labels = set(generated_list("WORKSPACE_DEFERRED_TEST_TARGETS"))
 
         self.assertEqual(110, len(all_labels))
-        self.assertEqual(89, len(bazel_labels))
-        self.assertEqual(20, len(cargo_labels))
+        self.assertEqual(93, len(bazel_labels))
+        self.assertEqual(16, len(cargo_labels))
         self.assertEqual(1, len(deferred_labels))
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertFalse(bazel_labels & deferred_labels)
@@ -148,9 +173,6 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual(
             {
                 "cargo-frontend-assets": 4,
-                "cargo-heavy-suite": 1,
-                "cargo-nested-suite": 2,
-                "cargo-path-assets": 1,
                 "cargo-service-gate": 11,
                 "cargo-trybuild": 1,
             },
@@ -176,7 +198,10 @@ class BazelTestContractTests(unittest.TestCase):
                     None if kind == "unit-test" else target["cargo"],
                 )
             )
-        self.assertEqual(4, len(expected_nextest))
+        # Every deterministic Cargo-owned binary has moved to the Bazel
+        # partition: what remains is service-gated, trybuild, or
+        # frontend-asset-bound, all of which the filter excludes by design.
+        self.assertEqual(set(), expected_nextest)
         self.assertEqual(expected_nextest, generated_nextest_terms())
 
     def test_workspace_suite_and_cli_default_to_the_generated_partition(self) -> None:
@@ -428,58 +453,91 @@ class BazelTestContractTests(unittest.TestCase):
             flags,
         )
 
-    def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
+    def run_workspace_test_step(self, trusted: bool, workbench: bool):
+        """Execute the workspace job's test step against a recording `cargo`."""
+
         jobs = workflow()["jobs"]
         workspace_step = job_step(jobs["workspace-tests"], "Test workspace")
         self.assertEqual(
             "${{ needs.plan.outputs.bazel_trusted }}",
             workspace_step["env"]["BAZEL_TRUSTED"],
         )
-        script = workspace_step["run"]
-        expected_filter = (
-            ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"
-        ).read_text(encoding="utf-8").strip()
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = pathlib.Path(temporary)
+            args_log = temporary_path / "cargo-args"
+            args_log.write_text("", encoding="utf-8")
+            fake_cargo = temporary_path / "cargo"
+            fake_cargo.write_text(
+                "#!/usr/bin/env bash\nprintf '%q ' \"$@\" >> \"$CARGO_ARGS_LOG\"\nprintf '\\n' >> \"$CARGO_ARGS_LOG\"\n",
+                encoding="utf-8",
+            )
+            fake_cargo.chmod(0o755)
+            environment = os.environ | {
+                "BAZEL_TRUSTED": str(trusted).lower(),
+                "CARGO_ARGS_LOG": str(args_log),
+                "LASH_CI_FEATURES": "",
+                "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
+            }
+            script_with_plan = workspace_step["run"].replace(
+                "${{ needs.plan.outputs.workbench }}", str(workbench).lower()
+            )
+            completed = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", script_with_plan],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            invocations = [
+                shlex.split(line)
+                for line in args_log.read_text(encoding="utf-8").splitlines()
+            ]
+            return completed, invocations
 
-        for trusted in (True, False):
-            with self.subTest(trusted=trusted), tempfile.TemporaryDirectory() as temporary:
-                temporary_path = pathlib.Path(temporary)
-                args_log = temporary_path / "cargo-args"
-                fake_cargo = temporary_path / "cargo"
-                fake_cargo.write_text(
-                    "#!/usr/bin/env bash\nprintf '%q ' \"$@\" >> \"$CARGO_ARGS_LOG\"\nprintf '\\n' >> \"$CARGO_ARGS_LOG\"\n",
-                    encoding="utf-8",
-                )
-                fake_cargo.chmod(0o755)
-                environment = os.environ | {
-                    "BAZEL_TRUSTED": str(trusted).lower(),
-                    "CARGO_ARGS_LOG": str(args_log),
-                    "LASH_CI_FEATURES": "",
-                    "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
-                }
-                script_with_plan = script.replace(
-                    "${{ needs.plan.outputs.rust }}", "true"
-                ).replace(
-                    "${{ needs.plan.outputs.workbench }}", "false"
-                )
-                subprocess.run(
-                    ["bash", "-euo", "pipefail", "-c", script_with_plan],
-                    cwd=ROOT,
-                    env=environment,
-                    check=True,
-                )
-                invocations = [
-                    shlex.split(line)
-                    for line in args_log.read_text(encoding="utf-8").splitlines()
-                ]
-                self.assertEqual(2, len(invocations))
-                nextest = invocations[1]
-                self.assertEqual(["nextest", "run"], nextest[:2])
-                filter_index = nextest.index("-E")
-                if trusted:
-                    self.assertEqual(expected_filter, nextest[filter_index + 1])
-                else:
-                    self.assertIn("not (", nextest[filter_index + 1])
-                    self.assertIn("lash-internal-postgres-store", nextest[filter_index + 1])
+    def test_a_trusted_event_runs_no_cargo_rust_workspace_partition(self) -> None:
+        """The Bazel partition owns every deterministic Rust binary.
+
+        `tools/bazel/cargo_owned_nextest_filter.txt` is therefore `none()`, and
+        a trusted event with no workbench diff must refuse to run rather than
+        launder an empty selection into a green Cargo job.
+        """
+        self.assertEqual(
+            "none()",
+            (ROOT / "tools/bazel/cargo_owned_nextest_filter.txt")
+            .read_text(encoding="utf-8")
+            .strip(),
+        )
+        completed, invocations = self.run_workspace_test_step(
+            trusted=True, workbench=False
+        )
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("without workbench", completed.stderr)
+        self.assertEqual([], invocations)
+
+    def test_a_trusted_event_runs_exactly_the_workbench_partition(self) -> None:
+        expected_filter = (
+            ROOT / "tools/bazel/workbench_nextest_filter.txt"
+        ).read_text(encoding="utf-8").strip()
+        completed, invocations = self.run_workspace_test_step(
+            trusted=True, workbench=True
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(2, len(invocations))
+        nextest = invocations[1]
+        self.assertEqual(["nextest", "run"], nextest[:2])
+        self.assertEqual(expected_filter, nextest[nextest.index("-E") + 1])
+
+    def test_an_untrusted_event_keeps_the_full_cargo_workspace_run(self) -> None:
+        completed, invocations = self.run_workspace_test_step(
+            trusted=False, workbench=False
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(2, len(invocations))
+        nextest = invocations[1]
+        self.assertEqual(["nextest", "run"], nextest[:2])
+        expression = nextest[nextest.index("-E") + 1]
+        self.assertIn("not (", expression)
+        self.assertIn("lash-internal-postgres-store", expression)
 
     def test_doctests_are_removed_from_bazel_and_from_cargo(self) -> None:
         """Doctests were removed by ruling (2026-09-13), Bazel and Cargo alike.

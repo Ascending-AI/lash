@@ -798,18 +798,24 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # Build and execute the Cargo-owned partition on one runner. Its generated
-  # nextest filter is intersected with profile.ci, preserving ordinary cases
-  # in the Cargo-owned PR filter (service-gated, trybuild, and workbench
-  # binaries are excluded so they are not compiled just to self-skip).
-  # Untrusted pull requests receive no cache credentials, so they omit the
-  # filter and retain the full workspace coverage that predates this cutover.
+  # The Cargo-owned partition. On trusted events that is the agent-workbench
+  # binary alone: its Node.js browser projection gate keeps it Cargo-owned,
+  # while every deterministic Rust binary is now executed by the Bazel
+  # partition above. There is deliberately no parallel Cargo run of the Rust
+  # workspace on a trusted event. Untrusted pull requests receive no cache
+  # credentials and therefore no Bazel partition, so they keep running the full
+  # Cargo workspace suite exactly as they do today.
   workspace-tests:
     name: Test Cargo workspace partition
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    if: github.event_name != 'push' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.workbench == 'true')
+    if: >-
+      github.event_name != 'push'
+      && (
+        needs.plan.outputs.workbench == 'true'
+        || (needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true')
+      )
     steps:
       - name: Check out repository
         env:
@@ -906,35 +912,25 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Trusted events select the generated Cargo-owned binary partition;
-      # untrusted pull requests omit the filter and retain full-workspace
-      # coverage. In either mode profile.ci excludes the multi-minute heavy
-      # cases run by heavy-tests below and the trybuild ui binary run by
-      # test-doc's seal step. Keep the recovery helpers in this target because
-      # their certification fixtures are dev-only.
+      # Trusted events select the generated Cargo-owned binary partition, which
+      # is now the workbench binary alone; untrusted pull requests omit the
+      # filter and retain full-workspace coverage. In either mode profile.ci
+      # excludes the nested-Cargo fault-matrix chunks run by heavy-tests below
+      # and the trybuild ui binary run by test-doc's seal step. Keep the
+      # recovery helpers in this target because their certification fixtures
+      # are dev-only.
       - name: Test workspace
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
         run: |
-          rust="${{ needs.plan.outputs.rust }}"
           workbench="${{ needs.plan.outputs.workbench }}"
           case "${BAZEL_TRUSTED}" in
             true)
-              terms=()
-              if [ "${rust}" = "true" ]; then
-                terms+=("$(tr -d '\n' < tools/bazel/cargo_owned_nextest_filter.txt)")
-              fi
-              if [ "${workbench}" = "true" ]; then
-                terms+=("$(tr -d '\n' < tools/bazel/workbench_nextest_filter.txt)")
-              fi
-              if [ "${#terms[@]}" -eq 0 ]; then
-                echo "cargo partition selected with neither rust nor workbench" >&2
+              if [ "${workbench}" != "true" ]; then
+                echo "cargo partition selected on a trusted event without workbench" >&2
                 exit 1
               fi
-              filter="${terms[0]}"
-              for term in "${terms[@]:1}"; do
-                filter="(${filter}) + (${term})"
-              done
+              filter="$(tr -d '\n' < tools/bazel/workbench_nextest_filter.txt)"
               nextest_args=(-E "${filter}")
               ;;
             false)
@@ -983,10 +979,13 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # The heavy suites excluded from the per-push workspace job by `profile.ci`'s
-  # default-filter (see .config/nextest.toml): the fault-matrix chunk tests,
-  # which each fork real `cargo` invocations and run 3-9 minutes serially, and
-  # the lash-sim runner/minimizer fixture cases. Deferred to trunk runs
+  # The heavy suite excluded from the per-push workspace job by `profile.ci`'s
+  # default-filter (see .config/nextest.toml): the five fault-matrix chunk
+  # tests, which each fork real `cargo test ... -- --list` invocations and run
+  # 3-9 minutes serially. They are the only tests Cargo still owns for their
+  # own sake -- the property they prove is Cargo's own name-based test
+  # selection, which no hermetic action can supply, so the Bazel label skips
+  # them by name and this job is where they run. Deferred to trunk runs
   # (push/dispatch) like the other trunk-only jobs: any one of these tests set
   # the wall-clock of the ordinary suite, and their behavior almost never varies
   # with a PR's diff.

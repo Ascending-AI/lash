@@ -396,26 +396,18 @@ fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) ->
 fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
     use std::os::unix::fs::PermissionsExt;
 
+    let repo_root = repository_root();
     let temp = tempfile::tempdir().expect("confidence-gate probe tempdir");
     let cargo_dir = temp.path().join(".cargo/bin");
     std::fs::create_dir_all(&cargo_dir).expect("create fake cargo directory");
     let cargo_path = cargo_dir.join("cargo");
-    std::fs::write(
+    // The recorder is a declared test input, so it is present in a Cargo
+    // checkout and in a hermetic action's runfiles alike.
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-cargo.sh"),
         &cargo_path,
-        r#"#!/usr/bin/env bash
-if [ "${1:-}" = "nextest" ] && [ "${2:-}" = "--version" ]; then
-  exit 1
-fi
-{
-  printf 'BEGIN\n'
-  for arg in "$@"; do
-    printf '%s\n' "$arg"
-  done
-  printf 'END\n'
-} >> "$LASH_FAKE_CARGO_LOG"
-"#,
     )
-    .expect("write fake cargo");
+    .expect("install fake cargo from fixture");
     let mut permissions = std::fs::metadata(&cargo_path)
         .expect("stat fake cargo")
         .permissions();
@@ -423,13 +415,25 @@ fi
     std::fs::set_permissions(&cargo_path, permissions).expect("make fake cargo executable");
     let log_path = temp.path().join("cargo.log");
     let out_dir = temp.path().join("confidence");
-    let repo_root = repository_root();
+
+    // The gate itself prepends `$HOME/.cargo/bin`; prepending the fixture
+    // directory to PATH as well keeps the recorder ahead of any real Cargo on
+    // the runner regardless of how the gate resolves it.
+    let path = match std::env::var_os("PATH") {
+        Some(existing) => {
+            let mut entries = vec![cargo_dir.clone()];
+            entries.extend(std::env::split_paths(&existing));
+            std::env::join_paths(entries).expect("join fake cargo PATH")
+        }
+        None => cargo_dir.clone().into_os_string(),
+    };
 
     let output = std::process::Command::new("bash")
         .arg(repo_root.join("scripts/confidence-gate.sh"))
         .arg(format!("fast:{shard}"))
         .current_dir(repo_root)
         .env("HOME", temp.path())
+        .env("PATH", path)
         .env("LASH_FAKE_CARGO_LOG", &log_path)
         .env("LASH_CONFIDENCE_OUT_DIR", &out_dir)
         .output()
@@ -457,9 +461,17 @@ fi
     commands
 }
 
+/// The repository root, both under Cargo (an absolute path two levels above
+/// the crate) and under Bazel, where `CARGO_MANIFEST_DIR` is the
+/// runfiles-relative package directory and the root is the working directory.
 fn repository_root() -> &'static std::path::Path {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
-        .expect("lash-core has repository root two ancestors above")
+        .expect("lash-core has repository root two ancestors above");
+    if root.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        root
+    }
 }

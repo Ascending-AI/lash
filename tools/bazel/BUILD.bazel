@@ -6,3 +6,12 @@ exports_files([
 ])
 
 exports_files(["patches/libsqlite3-sys-hermetic-manifest-dir.patch"])
+
+# The checked-in workspace fact that replaces a nested `cargo metadata` call in
+# the lash-core dependency-direction test. Kept current by
+# `tools/bazel/generate_build_files.py --check`.
+filegroup(
+    name = "target_inventory",
+    srcs = ["target-inventory.json"],
+    visibility = ["//visibility:public"],
+)

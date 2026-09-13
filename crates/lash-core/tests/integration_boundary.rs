@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 #[test]
 // Architecture lint: lexical vocabulary guard, not behavior proof. Dependency
-// direction is checked behaviorally through Cargo metadata below.
+// direction is checked behaviorally through the workspace inventory below.
 fn lint_crate_sources_do_not_name_integration_protocols() {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut failures = Vec::new();
@@ -24,37 +24,30 @@ fn lint_crate_sources_do_not_name_integration_protocols() {
 }
 
 #[test]
-fn cargo_metadata_keeps_protocol_crates_out_of_lash_core_dependencies() {
-    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-        .to_path_buf();
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = std::process::Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--no-deps", "--locked"])
-        .current_dir(&workspace)
-        .output()
-        .expect("run cargo metadata");
-    assert!(
-        output.status.success(),
-        "cargo metadata failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("parse cargo metadata JSON");
-    let packages = metadata["packages"]
+fn workspace_inventory_keeps_protocol_crates_out_of_lash_core_dependencies() {
+    // `tools/bazel/target-inventory.json` is generated from Cargo's locked
+    // workspace metadata by tools/bazel/generate_build_files.py and kept in
+    // sync by its `--check` mode (a CI gate). Reading the checked-in fact keeps
+    // this dependency-direction proof identical while letting the test run in a
+    // hermetic action that has no Cargo.
+    let inventory_path = workspace_root().join("tools/bazel/target-inventory.json");
+    let inventory: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&inventory_path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", inventory_path.display())),
+    )
+    .expect("parse workspace target inventory JSON");
+    let packages = inventory["packages"]
         .as_array()
-        .expect("metadata packages array");
+        .expect("inventory packages array");
     let core = packages
         .iter()
-        .find(|package| package["name"].as_str() == Some(env!("CARGO_PKG_NAME")))
-        .expect("current package in workspace metadata");
+        .find(|package| package["package"].as_str() == Some(env!("CARGO_PKG_NAME")))
+        .expect("current package in workspace inventory");
     let dependency_names = core["dependencies"]
         .as_array()
         .expect("current package dependency array")
         .iter()
-        .filter_map(|dependency| dependency["name"].as_str())
+        .filter_map(|dependency| dependency.as_str())
         .collect::<Vec<_>>();
 
     let forbidden_library_targets = [
@@ -68,13 +61,14 @@ fn cargo_metadata_keeps_protocol_crates_out_of_lash_core_dependencies() {
         .filter(|package| {
             package["targets"].as_array().is_some_and(|targets| {
                 targets.iter().any(|target| {
-                    target["name"]
-                        .as_str()
-                        .is_some_and(|name| forbidden_library_targets.contains(&name))
+                    target["kind"].as_str() == Some("lib")
+                        && target["cargo"]
+                            .as_str()
+                            .is_some_and(|name| forbidden_library_targets.contains(&name))
                 })
             })
         })
-        .filter_map(|package| package["name"].as_str())
+        .filter_map(|package| package["package"].as_str())
         .collect::<Vec<_>>();
     assert_eq!(
         forbidden_package_names.len(),
@@ -87,6 +81,22 @@ fn cargo_metadata_keeps_protocol_crates_out_of_lash_core_dependencies() {
             !dependency_names.contains(&forbidden),
             "dependency direction violation: core depends on integration package {forbidden}"
         );
+    }
+}
+
+/// The workspace root, both under Cargo (an absolute path above the crate) and
+/// under Bazel, where `CARGO_MANIFEST_DIR` is the runfiles-relative package
+/// directory and the root is the working directory.
+fn workspace_root() -> PathBuf {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf();
+    if root.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        root
     }
 }
 

@@ -131,11 +131,11 @@ alongside it. Kiln invokes this cleanup before
 deleting a fork.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
-Of its 109 executable test binaries, `//:workspace_tests` owns 89 deterministic
-binaries. The remaining 20 labels carry `manual`, a reason tag, and a durable
+Of its 109 executable test binaries, `//:workspace_tests` owns 93 deterministic
+binaries. The remaining 16 labels carry `manual`, a reason tag, and a durable
 `cargo_only` explanation in `tools/bazel/target-inventory.json`; this keeps both
 the aggregate and `bazel test //...` from treating an unconfigured service,
-special scheduler, or path fixture as proof. The partition is generated from
+trybuild fixture cache, or frontend asset workflow as proof. The partition is generated from
 Cargo metadata and checked by `scripts/test_bazel_test_contract.py` so new or
 reclassified targets cannot disappear into a hand-maintained list.
 
@@ -149,40 +149,68 @@ with a Cargo-owned live-service suite is not by itself a Bazel blocker.
   database here, exactly as it did in the Cargo workspace job, and the
   `Test Postgres store` job below executes it against a real database.
 
-`lash-core__unit_test` and `lash-sim__unit_test` were tried in the partition
-and moved back: the reasons were real, not bookkeeping. `lash-core`'s
-`durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence` executes
-`scripts/confidence-gate.sh` against a fake Cargo on `PATH`; `lash-sim`'s
-`postgres_effect_history_native_claim_is_consistent_across_reviews_docs_and_gate`
-walks up from `CARGO_MANIFEST_DIR` to read repository-root docs and gate files,
-and its `generated_sim_search_mode_keeps_summary_lean_and_labels_shards` case
-reported simulator nondeterminism under Bazel's scheduling. Their reasons in
-`tools/bazel/target-inventory.json` now name those cases.
+The four binaries that `tools/bazel/cargo_owned_nextest_filter.txt` once
+selected are in the partition as of 2026-09-14, which retires the
+`Test Cargo workspace partition` Rust run on trusted events entirely — the job
+now runs only for the agent-workbench binary, and only when
+`examples/agent-workbench/**` changed. Each blocker was fixed as a test defect
+rather than exempted:
 
-The remaining `Test Cargo workspace partition` compile was re-measured against
-the pool on 2026-09-13 and stays on Cargo. Four binaries are selected there by
-`tools/bazel/cargo_owned_nextest_filter.txt`, and moving a subset buys nothing:
-the job's cost is `cargo nextest run --workspace`, which compiles every
-workspace test binary to run those four, so the Cargo compile disappears only
-if all four move. They do not:
+- `//crates/lash-core:integration_boundary__test` shelled out to `cargo
+  metadata` at the workspace root to prove that core declares no dependency on
+  an integration protocol crate. The generator now records each package's
+  declared dependency names in `tools/bazel/target-inventory.json`, and the
+  test reads that checked-in fact. Every assertion is unchanged, including the
+  one that each forbidden library target still resolves to a workspace package,
+  so a renamed crate fails the test rather than vacuously passing.
+  `generate_build_files.py --check` and
+  `scripts/test_bazel_test_contract.py::test_inventory_carries_every_package_dependency_set`
+  keep the fact current.
+- `//crates/lash-core:lash-core__unit_test` ran the confidence-gate routing
+  probes against a `cargo` recorder written to a temporary directory, then
+  executed `scripts/confidence-gate.sh` with the repository root as its working
+  directory. Under Bazel `CARGO_MANIFEST_DIR` is package-relative, so the
+  derived root was the empty path and the spawn failed with `NotFound`. The
+  recorder is now a declared test input
+  (`crates/lash-core/tests/fixtures/fake-cargo.sh`), the gate script and the
+  helpers it sources ride in runfiles as `//:confidence_gate_scripts`, the
+  probe prepends the recorder directory to `PATH` as well as setting `HOME`,
+  and the root resolver maps the empty path to the working directory.
+  `turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work`
+  passes in the single libtest process; the earlier `StoreCommitContended`
+  report did not reproduce on the pool.
+- `//crates/lash-sim:lash-sim__unit_test` walked up from `CARGO_MANIFEST_DIR`
+  to read repository-root docs and gate files. `//:confidence_gate_corpus`
+  declares those four files and the walk now recognises the runfiles root. The
+  `generated_sim_search_mode_keeps_summary_lean_and_labels_shards` case passed
+  under Bazel's scheduling on every run measured for this change; no
+  determinism fix was needed and none was faked.
+- `//crates/lash-typescript:integration__test` already passed, because its
+  Test262 and WPT trees ride in runfiles. It stayed on Cargo only because
+  moving it alone left the Cargo compile in place; with the other three moved,
+  that reason is gone. It carries `no-remote-exec`: its no-abort guarantee
+  forks a dozen children that each parse deliberately deep sources right up to
+  the stack bound, and the pool's 4 GiB per-action budget (`memory_kb` in
+  `.bazelrc`) SIGKILLs them. The same label passes locally in 44 s, which is
+  how CI's Bazel job executes tests, so the tag pins placement rather than
+  softening what the test proves.
 
-- `//crates/lash-core:lash-core__unit_test` fails in a Bazel test action on the
-  fake-Cargo confidence-gate case above, and independently on
-  `turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work`,
-  which passes alone and fails with `StoreCommitContended` when the binary runs
-  as one libtest process. nextest's process-per-test isolation is load-bearing
-  here, so a `bazel test` or a bare libtest run of this binary is a weaker gate,
-  not the same one.
-- `//crates/lash-core:integration_boundary__test` shells out to `cargo
-  metadata` at the workspace root. A Bazel test action has neither `cargo` on
-  `PATH` nor the workspace manifests in its runfiles.
-- `//crates/lash-sim:lash-sim__unit_test` fails the two cases named above and
-  took 152 s as a single libtest process.
-- `//crates/lash-typescript:integration__test` is the one that does pass —
-  `PASSED in 37.8s` with `--strategy=TestRunner=local`, because its Test262 and
-  WPT trees ride in runfiles. Moving it alone would add its 38 s to the
-  near-critical-path `Test Bazel partition` job while leaving the Cargo compile
-  in place, so it stays where it is.
+`//crates/lash-sim:lash-sim__unit_test` declares `timeout = "long"`. It carries
+the generated-simulation and minimizer fixture replays and ran 227-300 s on the
+pool, which straddles Bazel's default `medium` 300 s bound.
+
+Five tests do not move, and are excluded from the Bazel label by name rather
+than silently: `durable_fault_matrix_real_cargo_filters_chunk_0..4` each fork a
+real `cargo test -p … -- --list` against the workspace to prove the confidence
+gate's name filters still select tests. That is a claim about Cargo's own test
+selection, which a hermetic action without Cargo cannot make.
+`tools/bazel/generate_build_files.py` passes libtest `--skip` for them on
+`//crates/lash-core:lash-core__unit_test`, and the trunk-only `Test heavy
+suites` job (`profile.ci-heavy`) is where they run — it now contains nothing
+else. The `lash-sim` runner and minimizer fixture cases that used to share that
+job are deterministic compute and run in the Bazel partition as cached actions;
+they are no longer excluded from `profile.ci` either, so the untrusted Cargo
+path runs them too.
 
 Bazel bakes `CARGO_MANIFEST_DIR` as a path relative to the execution root,
 where Cargo bakes an absolute one. A Bazel-built test binary is therefore only
@@ -191,12 +219,10 @@ which is neither a Bazel test action's runfiles root nor nextest's per-crate
 working directory. That rules out feeding pool-built binaries to nextest
 through `--binaries-metadata`.
 
-The 20 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
-binary, the two `lash-sim` cross-backend binaries, the `lash-sim` unit binary,
-the `lash-runtime` trybuild binary, the `lash-core` unit and nested-metadata
-binaries, the TypeScript integration binary, the agent-workbench unit binary
-that includes a Node.js browser projection gate, and three workflow-graph
-frontend binaries. Use the existing Cargo recipes for these correctness
+The 16 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
+binary, the two `lash-sim` cross-backend binaries, the `lash-runtime` trybuild
+binary, the agent-workbench unit binary that includes a Node.js browser
+projection gate, and three workflow-graph frontend binaries. Use the existing Cargo recipes for these correctness
 contracts:
 
 - `scripts/check_feature_coverage.py` and the explicit no-default-feature
@@ -346,9 +372,8 @@ ran no tests would be a hollow green.
 Three jobs stay entirely Cargo-owned, and not for want of trying:
 
 - `Test heavy suites` runs the nested-Cargo fault-matrix chunks, which fork
-  real `cargo test` invocations of their own, and the generated simulation and
-  minimizer fixtures scheduled by `profile.ci-heavy`. Bazel cannot own a suite
-  whose work is a Cargo build.
+  real `cargo test` invocations of their own. Bazel cannot own a suite whose
+  work is a Cargo build.
 - `Seal-test the API surface` runs the `lash-runtime` trybuild binary. Bazel can
   build that binary from the shared cache, but the 742 s is not the harness
   compile: trybuild spawns its own `cargo` against `CARGO_TARGET_DIR` to build
@@ -374,11 +399,14 @@ and keeps its Cargo recipe.
 The main CI workflow makes this a single authoritative partition. Trusted
 same-repository pull requests and merge-queue groups run `//:workspace_tests`
 with the authenticated shared cache. `main` pushes skip that core board (the
-queue already witnessed the SHA) and keep breadth jobs. On rust PRs the
-ordinary nextest job reads the generated
-`tools/bazel/cargo_owned_nextest_filter.txt` (service-gated, trybuild, and
-workbench binaries excluded so they are not compiled just to self-skip).
-Workbench unit tests run only when `examples/agent-workbench/**` changed.
+queue already witnessed the SHA) and keep breadth jobs. A rust PR runs no Cargo
+workspace job at all on a trusted event: `tools/bazel/cargo_owned_nextest_filter.txt`
+is `none()`, and the job's trusted branch refuses to run without a workbench
+diff rather than launder an empty selection into a green. Workbench unit tests
+run only when `examples/agent-workbench/**` changed, selected by
+`tools/bazel/workbench_nextest_filter.txt`. An untrusted (fork or Dependabot)
+pull request receives no cache credentials and therefore no Bazel partition, so
+it keeps the full Cargo workspace run unchanged.
 The `Lint` job builds
 `//:workspace_clippy` in place of the workspace `cargo clippy`, and the
 `Check workspace` job builds `//:workspace_compile` in place of

@@ -472,16 +472,24 @@ async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_wo
         ),
     );
     let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
-    let session_id = SessionId::from("root");
+    // Commit admission is a process-global FIFO keyed by session id
+    // (`runtime::commit_admission`), so every test that names its session
+    // `root` -- over three hundred of them in this crate -- shares one lane.
+    // This case queues behind a lease takeover and is the one that observes
+    // the shared lane shedding it as `StoreCommitContended`, which is a
+    // retryable refusal the runtime is right to raise and this test never
+    // meant to exercise. A session id of its own removes the sharing; the
+    // durable assertions below are unchanged.
+    let session_id = SessionId::from("native-unresolved-cancel-takeover-session");
     crate::testing::store_fixtures::bind_conformance_session(&runtime_store, &session_id).await;
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(tool.clone()),
-        transport,
-        EmbeddedRuntimeHost::new(config),
-        Arc::clone(&runtime_store),
-    )
-    .await;
+    let mut runtime = TestRuntime::new(transport)
+        .plugins(Vec::new())
+        .tools(Arc::new(tool.clone()))
+        .host(EmbeddedRuntimeHost::new(config))
+        .store(Arc::clone(&runtime_store))
+        .with_session_id(session_id.clone())
+        .build()
+        .await;
 
     let turn_id = TurnId::from("native-unresolved-cancel-takeover");
     let address = crate::TurnAddress::new(&session_id, &turn_id);

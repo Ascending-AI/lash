@@ -181,12 +181,15 @@ def lash_rust_unit_test(
         manifest_dir,
         package_name,
         version,
+        args = [],
         build_script = None,
         extra_compile_data = [],
+        extra_data = [],
         library = None,
         library_crate_name = None,
         test_env = {},
-        tags = []):
+        tags = [],
+        timeout = None):
     deps = all_crate_deps(normal = True, normal_dev = True)
     if build_script:
         deps = deps + [build_script]
@@ -194,12 +197,13 @@ def lash_rust_unit_test(
         deps = deps + [library]
     rust_test(
         name = name,
+        args = args,
         aliases = _aliases_for(deps, library, library_crate_name),
         compile_data = _compile_data() + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _all_package_files() + extra_compile_data,
+        data = _all_package_files() + extra_compile_data + extra_data,
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
@@ -211,6 +215,7 @@ def lash_rust_unit_test(
             ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
         ),
         tags = tags,
+        timeout = timeout,
         version = version,
     )
 

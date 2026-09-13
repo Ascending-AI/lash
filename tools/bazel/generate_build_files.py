@@ -111,32 +111,9 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
-    if package_name == "lash-internal-core" and kind == "unit-test":
-        tags.extend(["manual", "cargo-nested-suite"])
-        reasons.append(
-            "shares a unit-test binary with the fault-matrix tests, which execute"
-            " scripts/confidence-gate.sh against a fake Cargo on PATH, and with"
-            " turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work,"
-            " which needs nextest's process-per-test isolation: it passes alone and"
-            " fails with StoreCommitContended inside a single libtest process"
-        )
-    if package_name == "lash-sim" and kind == "unit-test":
-        tags.extend(["manual", "cargo-heavy-suite"])
-        reasons.append(
-            "shares a unit-test binary with the specially scheduled heavy"
-            " simulation tests, a repository-root docs/gate walk from"
-            " CARGO_MANIFEST_DIR, and a search-mode case whose determinism"
-            " depends on the Cargo runner's scheduling"
-        )
-    if package_name == "lash-internal-core" and target_name == "integration_boundary":
-        tags.extend(["manual", "cargo-nested-suite"])
-        reasons.append("invokes Cargo metadata against the workspace")
     if package_name == "lash-runtime" and target_name == "ui":
         tags.extend(["manual", "cargo-trybuild"])
         reasons.append("uses trybuild and its Cargo-managed compiler fixture cache")
-    if package_name == "lash-internal-typescript" and kind == "test":
-        tags.extend(["manual", "cargo-path-assets"])
-        reasons.append("uses Cargo-relative Test262 and WPT asset trees")
     if package_name == "workflow-graph-roundtrip" and kind == "test":
         tags.extend(["manual", "cargo-frontend-assets"])
         reasons.append("uses the Cargo-owned generated frontend asset workflow")
@@ -149,6 +126,14 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
+    if package_name == "lash-internal-typescript" and kind == "test":
+        # Partition-owned, but not remotely executable: the no-abort guarantee
+        # forks a dozen children that each parse deliberately deep sources
+        # right up to the stack bound. Under the pool's 4 GiB per-action budget
+        # (`memory_kb` in `.bazelrc`) they are SIGKILLed; the same label passes
+        # locally in 44 s, and CI's Bazel job executes tests locally on its
+        # runner. Pin the placement rather than soften what the test proves.
+        tags.append("no-remote-exec")
     if package_name == "lash-regress" and target_name == "unicodesets":
         tags.append("pr-deferred")
         reasons.append(
@@ -259,6 +244,34 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             unit_tags, unit_cargo_reason = cargo_test_policy(
                 package["name"], "unit-test", library["name"]
             )
+            unit_extra_data = []
+            unit_args = []
+            if package["name"] == "lash-internal-core":
+                # The fault-matrix routing probes execute the real
+                # scripts/confidence-gate.sh against a recording `cargo`.
+                unit_extra_data.append("//:confidence_gate_scripts")
+                # The five `..._real_cargo_filters_chunk_*` cases each fork a
+                # real `cargo test ... -- --list` against the workspace to prove
+                # the gate's name filters still select tests. That is a claim
+                # about Cargo's own selection, so it cannot be proved inside a
+                # hermetic action without Cargo; the trunk-only `Test heavy
+                # suites` job (profile.ci-heavy) owns them and is the only place
+                # they run. Excluded by name here so the label is honest about
+                # what it executed.
+                unit_args.append(
+                    "--skip=runtime::tests::runtime_scenarios::fault_matrix"
+                    "::durable_fault_matrix_real_cargo_filters_chunk_"
+                )
+            unit_timeout = None
+            if package["name"] == "lash-sim":
+                # The Postgres effect-history consistency case reads the gate
+                # script and the repository-root documents it must agree with.
+                unit_extra_data.append("//:confidence_gate_corpus")
+                # This binary carries the generated-simulation and minimizer
+                # fixture replays (measured 182-418 s each under Cargo). The
+                # whole binary ran 227-300 s on the pool, which straddles
+                # Bazel's default `medium` 300 s bound; `long` is 900 s.
+                unit_timeout = "long"
             unit_test_env = {}
             if package["name"] == "lash-perf":
                 # This instrumentation binary shares process-global counters.
@@ -268,20 +281,27 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             chunks.append(
                 "lash_rust_unit_test(\n"
                 f"    name = {quote(primary_target + '__unit_test')},\n"
-                f"    build_script = {quote(':build_script') if has_build_script else 'None'},\n"
+                + (f"    args = {string_list(unit_args)},\n" if unit_args else "")
+                + f"    build_script = {quote(':build_script') if has_build_script else 'None'},\n"
                 f"    crate_features = {string_list(features)},\n"
                 f"    crate_name = {quote(library['name'])},\n"
                 f"    crate_root = {quote(relative(library['src_path']).replace(package_dir + '/', ''))},\n"
                 f"    declared_features = {string_list(declared_features)},\n"
                 f"    extra_compile_data = {string_list(unit_compile_data)},\n"
-                f"    manifest_dir = {quote(package_dir)},\n"
-                f"    package_name = {quote(package['name'])},\n"
+                + (
+                    f"    extra_data = {string_list(unit_extra_data)},\n"
+                    if unit_extra_data
+                    else ""
+                )
+                + f"    manifest_dir = {quote(package_dir)},\n"
+                + f"    package_name = {quote(package['name'])},\n"
                 + (
                     f"    test_env = {json.dumps(unit_test_env, sort_keys=True)},\n"
                     if unit_test_env
                     else ""
                 )
                 + f"    tags = {string_list(unit_tags)},\n"
+                + (f"    timeout = {quote(unit_timeout)},\n" if unit_timeout else "")
                 + f"    version = {quote(version)},\n"
                 + ")\n\n"
             )
@@ -318,6 +338,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         test_env = {}
         test_env.update(rustc_env)
         extra_data = []
+        if (
+            package["name"] == "lash-internal-core"
+            and target["name"] == "integration_boundary"
+        ):
+            # The checked-in workspace fact that replaces a nested
+            # `cargo metadata` call in the dependency-direction test.
+            extra_data.append("//tools/bazel:target_inventory")
         if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
             # The warning-capture contract installs a scoped tracing subscriber.
             # Other tests in this libtest process must not emit concurrently.
@@ -494,6 +521,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     )
     return "".join(chunks), {
         "declared_features": declared_features,
+        # Every declared dependency name of this package, normal, dev and build
+        # alike — exactly what `cargo metadata --no-deps` reports for it.
+        # Checked in so an architecture test can assert dependency direction
+        # without shelling out to Cargo from inside a hermetic test action.
+        "dependencies": sorted(
+            {dependency["name"] for dependency in package["dependencies"]}
+        ),
         "manifest": manifest,
         "package": package["name"],
         "resolved_features": features,
@@ -603,8 +637,11 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         "cargo-trybuild",
         "cargo-frontend-assets",
     )
+    # `none()` rather than an empty expression: every Cargo-owned deterministic
+    # binary has moved to the Bazel partition, and an empty string would be a
+    # nextest syntax error at the call site rather than an empty selection.
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
-        " + ".join(cargo_nextest_terms) + "\n"
+        " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
     )
     workbench_terms = sorted(
         nextest_filter_term(package["package"], target)

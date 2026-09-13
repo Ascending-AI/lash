@@ -89,29 +89,30 @@ filter = '''
 test-group = "docker-services"
 
 [profile.ci]
-# The per-push profile. The heavy suites below are excluded here and run by
-# the trunk-only `Test heavy suites` CI job under `profile.ci-heavy`: each of
-# these tests is a 3-9 minute serial run (the fault-matrix chunks fork real
-# `cargo` invocations; the lash-sim runner/minimizer cases replay generated
-# fixtures), so a single one of them set the wall-clock of every per-push
-# ordinary suite. The trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
+# The per-push profile. Only the Cargo-owned heavy set is excluded here: the
+# five fault-matrix chunk tests, each a 3-9 minute serial run that forks real
+# `cargo` invocations of its own, run by the trunk-only `Test heavy suites` CI
+# job under `profile.ci-heavy`. The lash-sim runner/minimizer fixture cases are
+# no longer excluded: they are deterministic compute, so the Bazel partition
+# executes them as cached actions on every trusted event and hiding them here
+# would leave the Cargo path (untrusted forks) with no run of them at all. The
+# trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
 # `Seal-test the API surface` step in the test-doc job already runs the same
 # suite on every push, so a workspace-side run would be a second report of the
 # same defect. Keep this expression and the `ci-heavy` default-filter exact
 # complements over the heavy set.
 #
-# Trusted main CI additionally intersects this profile with the generated
-# `tools/bazel/cargo_owned_nextest_filter.txt` binary partition. Fork and
-# Dependabot pull requests omit that expression and therefore retain this
-# profile's full-workspace behavior.
+# Trusted main CI runs this profile only for the agent-workbench binary, whose
+# Node.js browser projection gate keeps it Cargo-owned
+# (`tools/bazel/workbench_nextest_filter.txt`). Fork and Dependabot pull
+# requests omit that expression and therefore retain this profile's
+# full-workspace behavior.
 default-filter = '''
   not (
       (
         package(lash-internal-core)
         & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
       )
-    + (package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts))
-    + (package(lash-sim) & test(/minimize::tests::(minimizer_preserves_named_contract_execution_fixture_reasons|minimizer_preserves_provider_worker_backend_fixture_reasons|minimizer_writes_replayable_regression_package)/))
     + (package(lash-runtime) & binary(ui))
   )
 '''
@@ -144,22 +145,41 @@ filter = '''
 '''
 priority = 97
 
+# Generated simulation/minimizer cases: completed cold-run times were 182-418s,
+# above the five-minute ordinary bound. They reach this profile only on the
+# untrusted Cargo path (a fork or Dependabot pull request); trusted events run
+# them as `//crates/lash-sim:lash-sim__unit_test`. Start them with the long tail
+# and allow the measured 418.254s while still terminating a pathological run.
+[[profile.ci.overrides]]
+filter = '''
+  package(lash-sim)
+  & (
+      test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)
+    + test(/minimize::tests::/)
+  )
+'''
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }
+
 # The trunk-only heavy profile: the exact complement of `profile.ci`'s
 # default-filter, minus the trybuild `ui` binary (whose per-push gate is the
 # test-doc seal step, not this job). Run by the `Test heavy suites` job in
 # `.github/workflows/ci.yml` on push and workflow_dispatch. Same failure
 # semantics as `ci`: report the whole run, and a flaky pass is a failure.
+#
+# These five cases are the only tests Cargo still owns for their own sake: each
+# forks a real `cargo test ... -- --list` against the workspace to prove the
+# confidence gate's name filters still select tests, which is a claim about
+# Cargo's selection and cannot be proved without Cargo. The Bazel label
+# `//crates/lash-core:lash-core__unit_test` skips them by name for the same
+# reason (see tools/bazel/generate_build_files.py).
 [profile.ci-heavy]
 fail-fast = false
 flaky-result = "fail"
 final-status-level = "slow"
 default-filter = '''
-    (
-      package(lash-internal-core)
-      & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
-    )
-  + (package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts))
-  + (package(lash-sim) & test(/minimize::tests::(minimizer_preserves_named_contract_execution_fixture_reasons|minimizer_preserves_provider_worker_backend_fixture_reasons|minimizer_writes_replayable_regression_package)/))
+  package(lash-internal-core)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
 '''
 
 # Start the nested-Cargo fault probes first. Isolated runs measured 205-219s;
@@ -172,17 +192,3 @@ filter = '''
 '''
 priority = 100
 slow-timeout = { period = "300s", terminate-after = 5 }
-
-# Generated simulation/minimizer cases: completed cold-run times were 182-418s;
-# allow the 411.799s runner case and 418.254s minimizer case, but still
-# terminate a pathological run.
-[[profile.ci-heavy.overrides]]
-filter = '''
-  package(lash-sim)
-  & (
-      test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)
-    + test(/minimize::tests::/)
-  )
-'''
-priority = 98
-slow-timeout = { period = "600s", terminate-after = 1 }

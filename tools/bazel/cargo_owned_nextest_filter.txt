@@ -1,1 +1,1 @@
-(package(lash-internal-core) & kind(lib)) + (package(lash-internal-core) & kind(test) & binary(integration_boundary)) + (package(lash-internal-typescript) & kind(test) & binary(integration)) + (package(lash-sim) & kind(lib))
+none()

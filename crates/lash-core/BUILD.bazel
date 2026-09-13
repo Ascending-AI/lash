@@ -33,6 +33,9 @@ lash_rust_library(
 
 lash_rust_unit_test(
     name = "lash-core__unit_test",
+    args = [
+        "--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_",
+    ],
     build_script = None,
     crate_features = [
         "default",
@@ -48,12 +51,12 @@ lash_rust_unit_test(
         "testing",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//:confidence_gate_scripts",
+    ],
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    tags = [
-        "cargo-nested-suite",
-        "manual",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 
@@ -73,15 +76,15 @@ lash_rust_integration_test(
         "testing",
     ],
     extra_compile_data = [],
+    extra_data = [
+        "//tools/bazel:target_inventory",
+    ],
     library = ":lash-core",
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
     rustc_env = {},
-    tags = [
-        "cargo-nested-suite",
-        "manual",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 

@@ -251,6 +251,30 @@ class ConclusionTests(unittest.TestCase):
         problems = ci_plan.evaluate_conclusion(needs)
         self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
+    def test_a_trusted_rust_event_expects_no_cargo_workspace_run(self) -> None:
+        """The Bazel partition owns every deterministic Rust binary.
+
+        On a trusted event the Cargo job runs only for the agent-workbench
+        binary, so a rust-only diff must expect it skipped -- and a Cargo run
+        that happened anyway is a policy violation, not a bonus.
+        """
+        needs = successful_needs()
+        needs["plan"]["outputs"]["workbench"] = "false"
+        needs["workspace-tests"]["result"] = "skipped"
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs))
+
+        needs["workspace-tests"]["result"] = "success"
+        self.assertTrue(
+            any("workspace-tests" in problem for problem in ci_plan.evaluate_conclusion(needs))
+        )
+
+    def test_an_untrusted_rust_event_still_requires_the_cargo_workspace_run(self) -> None:
+        needs = successful_needs()
+        needs["plan"]["outputs"]["workbench"] = "false"
+        needs["workspace-tests"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, bazel_is_trusted=False)
+        self.assertTrue(any("workspace-tests" in problem for problem in problems))
+
     def test_inconsistent_classifier_output_fails(self) -> None:
         needs = successful_needs()
         needs["plan"]["outputs"].update(
