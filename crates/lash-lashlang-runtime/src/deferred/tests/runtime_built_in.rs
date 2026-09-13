@@ -107,3 +107,75 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
     ));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validation() {
+    let program = lashlang::parse("await web.fetch({})?").expect("parse");
+    let duplicate_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
+        lash_core::ToolDefinition::raw(
+            "tool:first_fetch",
+            "first_fetch",
+            "First fetch",
+            lash_core::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "boolean" }),
+        )
+        .with_tool_binding(ToolBinding::new(["web"], "fetch")),
+        lash_core::ToolDefinition::raw(
+            "tool:second_fetch",
+            "second_fetch",
+            "Second fetch",
+            lash_core::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "boolean" }),
+        )
+        .with_tool_binding(ToolBinding::new(["web"], "fetch")),
+    ]);
+
+    let mut retained = DeferredResolutionRecord::default();
+    let retained_ctx = link_context_with_controller(
+        &mut retained,
+        "exec-code:retained-negative",
+        Arc::new(FaultJournalController::new(JournalFault::None)),
+    );
+    retained
+        .resolutions
+        .insert("web.fetch".to_string(), Resolution::NotAvailable);
+    let effective = resolve_and_build_deferred_environment(
+        &program,
+        &LashlangSurface::default(),
+        &duplicate_catalog,
+        None,
+        &mut retained,
+        &retained_ctx,
+    )
+    .await
+    .expect("retained negative masks duplicate claimants before validation");
+
+    assert!(
+        !effective
+            .resources
+            .provides_module_operation("web", "fetch")
+    );
+    assert!(matches!(
+        retained.get("web.fetch"),
+        Some(Resolution::NotAvailable)
+    ));
+
+    let mut fresh = DeferredResolutionRecord::default();
+    let fresh_ctx = link_context_with_controller(
+        &mut fresh,
+        "exec-code:fresh-duplicate",
+        Arc::new(FaultJournalController::new(JournalFault::None)),
+    );
+    let error = resolve_and_build_deferred_environment(
+        &program,
+        &LashlangSurface::default(),
+        &duplicate_catalog,
+        None,
+        &mut fresh,
+        &fresh_ctx,
+    )
+    .await
+    .expect_err("fresh duplicate claimants must still fail validation");
+
+    assert!(matches!(error, DeferredResolutionError::Ambient(_)));
+}

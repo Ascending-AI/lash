@@ -333,11 +333,11 @@ pub async fn resolve_and_fold_deferred(
     Ok(host_environment)
 }
 
-/// Production deferred-link path. Live resolution classifies availability from
-/// the complete unmasked environment, including runtime-supplied built-ins.
-/// Journal replay skips that live build, so a committed decision can still
-/// mask every later claimant for its exact path before catalog collision
-/// validation runs.
+/// Production deferred-link path. Live resolution first masks outcomes retained
+/// for this link, then classifies availability from the remaining environment,
+/// including runtime-supplied built-ins. Journal replay skips that live build,
+/// so a committed decision likewise masks every later claimant for its exact
+/// path before catalog collision validation runs.
 pub async fn resolve_and_build_deferred_environment(
     program: &lashlang::Program,
     surface: &LashlangSurface,
@@ -353,10 +353,16 @@ pub async fn resolve_and_build_deferred_environment(
             .map_err(DeferredResolutionError::Ambient);
     }
     let referenced_for_ambient = referenced.clone();
+    let recorded_paths = record
+        .resolutions
+        .keys()
+        .filter(|path| referenced.contains(*path))
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let outcomes = journal_deferred_outcomes(
         referenced,
         move || {
-            let host_environment = surface.host_environment(catalog)?;
+            let host_environment = surface.host_environment_masking(catalog, &recorded_paths)?;
             Ok(referenced_for_ambient
                 .iter()
                 .filter(|path| already_provided(&host_environment, path))
