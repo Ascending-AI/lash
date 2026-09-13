@@ -696,7 +696,7 @@ mod restate_tests {
         // second await returns immediately, and a late completion cannot win.
         let wait_host = RestateEffectHost::new(
             ingress_url,
-            RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
+            lash_restate::RestateAuthorityId::new("agent-service-effect-group-test").unwrap(),
         );
         let wait_scope = ExecutionScope::turn(
             format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),
@@ -922,6 +922,7 @@ finish "done via Restate E2E"
             // fixture is Lashlang by construction rather than by omission.
             lash::rlm::RlmDialect::Lashlang,
             std::env::var("RESTATE_INGRESS_URL").ok(),
+            Some(lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap()),
         );
         LiveRestateTestHarness {
             state,

@@ -430,6 +430,7 @@ mod dialect_pin_tests {
                 AgentServiceDurability::Local,
                 rlm_dialect,
                 None,
+                None,
             )
         }
         #[cfg(not(feature = "restate"))]

@@ -969,6 +969,7 @@ finish "done through route"
             // fixture is Lashlang by construction rather than by omission.
             lash::rlm::RlmDialect::Lashlang,
             None,
+            None,
         );
         let chat = state
             .with_db(|db| db.create_chat("route replay", "mock-model", None))
