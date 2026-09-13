@@ -32,14 +32,11 @@ on:
   # Trunk breadth, not a second copy of the queue run (FIG-2789). The queue
   # validates the required core board on its merge-group commit and merges main
   # by fast-forwarding to that same commit, so this push carries an identical
-  # tree. It runs again because the breadth families — Test heavy suites, Test
-  # S3 store, Functional E2E, Restate workers E2E, Fuzz smoke, Confidence fast —
-  # are deliberately off the merge-queue critical path and are gated to
-  # `push`/`workflow_dispatch` only. Those jobs consume this run's checkout and
-  # build, so the core board re-runs alongside them instead of in a separate
-  # pipeline; that overlap is the accepted cost of keeping breadth off the
-  # queue. Do not remove this trigger without first giving the breadth families
-  # another home.
+  # tree. Push skips that core board and keeps the breadth families — Test heavy
+  # suites, Test S3 store, Functional E2E, Restate workers E2E, Fuzz smoke,
+  # deferred Unicode — which are off the merge-queue critical path and gated to
+  # `push`/`workflow_dispatch` only. Do not remove this trigger without first
+  # giving the breadth families another home.
   push:
     branches:
       - main
@@ -118,10 +115,12 @@ jobs:
     timeout-minutes: 10
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
-      confidence: ${{ steps.classify.outputs.confidence }}
       stores: ${{ steps.classify.outputs.stores }}
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
+      workbench: ${{ steps.classify.outputs.workbench }}
+      regress: ${{ steps.classify.outputs.regress }}
+      schema: ${{ steps.classify.outputs.schema }}
       rust_code: ${{ steps.classify.outputs.rust_code }}
       deps_config: ${{ steps.classify.outputs.deps_config }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
@@ -205,16 +204,16 @@ jobs:
           python3 scripts/ci_plan.py classify \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
-      # PG16 is the sole primary lane and runs on every event. The PG14/PG18
-      # compatibility lanes are deferred off the pull-request critical path;
-      # the merge queue and every push to main still run all three, so nothing
-      # reaches trunk without compatibility evidence. scripts/ci_plan.py owns
-      # the rule and scripts/test_ci_plan.py pins it per event.
+      # PG16 is the sole primary lane on rust pull requests and merge groups.
+      # PG14/PG18 run when the diff touches a durable schema crate, or on
+      # workflow_dispatch. Push skips the postgres job (queue already witnessed
+      # the SHA). scripts/ci_plan.py owns the rule.
       - name: Resolve PostgreSQL matrix
         id: postgres-matrix
         run: |
           python3 scripts/ci_plan.py postgres-matrix \
-            --event "${GITHUB_EVENT_NAME}" >> "${GITHUB_OUTPUT}"
+            --event "${GITHUB_EVENT_NAME}" \
+            --schema "${{ steps.classify.outputs.schema }}" >> "${GITHUB_OUTPUT}"
 
       - name: Summarize plan
         env:
@@ -232,6 +231,7 @@ jobs:
     name: Facade-only examples
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    if: github.event_name != 'push'
 
     steps:
       - name: Check out repository
@@ -260,6 +260,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
+    if: github.event_name != 'push'
     # Trusted events replace the workspace check and the workspace doctests
     # with cached Bazel actions, which need the shared cache credentials.
     # Untrusted events never see them and keep the Cargo commands below.
@@ -399,6 +400,7 @@ jobs:
     name: Repository gates
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    if: github.event_name != 'push'
 
     steps:
       - name: Check out repository
@@ -477,7 +479,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    if: github.event_name != 'push' && needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -523,7 +525,7 @@ jobs:
     # configuration is resolved nowhere else, and the change classifier
     # certifies the diff, not the health of the base the group is built over
     # (FIG-2854).
-    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
+    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
 
     steps:
       - name: Check out repository
@@ -579,7 +581,7 @@ jobs:
     # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
     # on every merge group -- including docs-only ones. Every matrix leg keeps
     # one exact package feature graph independently visible and cacheable.
-    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
+    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -672,7 +674,7 @@ jobs:
     # on every merge group -- including docs-only ones. The independent feature
     # resolutions run concurrently; fail-fast stays off so one failure never
     # suppresses evidence from another required graph.
-    if: github.event_name == 'merge_group' || (github.event_name != 'pull_request' && needs.plan.outputs.rust == 'true')
+    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -757,7 +759,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true'
+    if: github.event_name != 'push' && needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
     environment: build-cache
     steps:
       - name: Check out repository
@@ -805,7 +807,8 @@ jobs:
 
   # Build and execute the Cargo-owned partition on one runner. Its generated
   # nextest filter is intersected with profile.ci, preserving ordinary cases
-  # in all 22 Cargo-owned binaries and the existing heavy/trybuild split.
+  # in the Cargo-owned PR filter (service-gated, trybuild, and workbench
+  # binaries are excluded so they are not compiled just to self-skip).
   # Untrusted pull requests receive no cache credentials, so they omit the
   # filter and retain the full workspace coverage that predates this cutover.
   workspace-tests:
@@ -813,7 +816,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    if: github.event_name != 'push' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.workbench == 'true')
     steps:
       - name: Check out repository
         env:
@@ -920,20 +923,46 @@ jobs:
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
         run: |
-          nextest_args=()
+          rust="${{ needs.plan.outputs.rust }}"
+          workbench="${{ needs.plan.outputs.workbench }}"
           case "${BAZEL_TRUSTED}" in
             true)
-              nextest_args=(-E "$(<tools/bazel/cargo_owned_nextest_filter.txt)")
+              terms=()
+              if [ "${rust}" = "true" ]; then
+                terms+=("$(<tools/bazel/cargo_owned_nextest_filter.txt)")
+              fi
+              if [ "${workbench}" = "true" ]; then
+                terms+=("$(<tools/bazel/workbench_nextest_filter.txt)")
+              fi
+              if [ "${#terms[@]}" -eq 0 ]; then
+                echo "cargo partition selected with neither rust nor workbench" >&2
+                exit 1
+              fi
+              filter="${terms[0]}"
+              for term in "${terms[@]:1}"; do
+                filter="(${filter}) + (${term})"
+              done
+              nextest_args=(-E "${filter}")
               ;;
             false)
+              skip='not (package(lash-internal-postgres-store) + package(lash-internal-s3-store) + test(cross_backend) + (package(lash-runtime) & binary(ui)))'
+              if [ "${workbench}" != "true" ]; then
+                skip="${skip} & not package(agent-workbench)"
+              fi
+              nextest_args=(-E "${skip}")
               ;;
             *)
               echo "invalid Bazel trust decision: ${BAZEL_TRUSTED}" >&2
               exit 1
               ;;
           esac
+          excludes=(--exclude lash-internal-postgres-store --exclude lash-internal-s3-store)
+          if [ "${workbench}" != "true" ]; then
+            excludes+=(--exclude agent-workbench)
+          fi
           # shellcheck disable=SC2086
           cargo build --workspace --locked ${LASH_CI_FEATURES} \
+            "${excludes[@]}" \
             --example sqlite-await-event-helper --example postgres-await-event-helper
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
@@ -1033,6 +1062,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
+    if: github.event_name != 'push'
     # Trusted events run the workspace clippy as cached Bazel actions, which
     # need the shared cache credentials. Untrusted events never see them and
     # keep the Cargo command below.
@@ -1226,56 +1256,6 @@ jobs:
       - name: Check version-bump recreation fixtures
         run: python3 scripts/check_version_bump_fixtures.py
 
-      # Duration history for the advisory trend signal (FIG-1532). Runtime
-      # wall-clock ceilings are advisory (FIG-1385), which leaves a regression
-      # that allocates nothing — added blocking I/O, lock contention, a stray
-      # sleep — with no gate at all. The remedy is trend, not threshold: each
-      # main run appends its per-scenario medians here and the harness warns
-      # when a scenario has sat above its own trailing median for several
-      # consecutive main runs.
-      #
-      # The store is this cache and nothing else: no new service, no secret,
-      # and no write to a tracked branch. The key is unique per run *attempt*
-      # — `gh run rerun` reuses `run_id`, so keying on it alone would make a
-      # rerun collide with the entry its own first attempt wrote — and the
-      # prefix restore-key picks the newest previous entry. Only main-push runs
-      # consume and extend this advisory series. A missing or evicted cache
-      # degrades to "insufficient data", never to a failure.
-      #
-      # Both steps are `continue-on-error` because neither is allowed to gate:
-      # a cache-service outage or a key collision must cost the advisory
-      # signal for one run, never the lint job. That is the same rule the trend
-      # code itself follows (FIG-1385: this signal reports, it does not gate).
-      # Reset the series wholesale — after a scenario is redefined, say — with
-      # `gh cache delete` on the `perf-duration-history-quick-*` keys.
-      - name: Restore runtime perf duration history
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .benchmarks/perf-history
-          key: perf-duration-history-quick-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            perf-duration-history-quick-
-
-      # Exercise every database-free runtime and Lashlang measurement path and
-      # enforce the cheap budget/phase inventory before release.
-      - name: Run performance harness smoke
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          python3 scripts/profile_runtime.py --profile quick --smoke --enforce-inventory --out .benchmarks/perf-smoke/runtime.json \
-            --duration-history .benchmarks/perf-history/runtime-quick.jsonl
-          python3 scripts/profile_lashlang.py --debug --iterations 10 --profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json
-
-      # Only trunk extends the durable series.
-      - name: Save runtime perf duration history
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .benchmarks/perf-history
-          key: perf-duration-history-quick-${{ github.run_id }}-${{ github.run_attempt }}
-
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
@@ -1288,36 +1268,16 @@ jobs:
       - name: Check production file-size budget
         run: bash scripts/check-production-file-size.sh
 
-  confidence-fast:
-    name: Confidence fast (${{ matrix.shard }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+  unicode-tests:
+    name: Test deferred Unicode suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.confidence == 'true'
-
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - scenario-harnesses
-          - fault-matrix
-          - sim-unit-perf-guards
-          - sim-generated
-          - minimizer-fixtures
-        include:
-          - shard: scenario-harnesses
-            runner: ubuntu-24.04
-          - shard: fault-matrix
-            runner: ubuntu-24.04
-          - shard: sim-unit-perf-guards
-            runner: ubuntu-24.04
-          - shard: sim-generated
-            runner: ubuntu-24.04
-          - shard: minimizer-fixtures
-            runner: ubuntu-24.04
-
+    if: >-
+      needs.plan.outputs.regress == 'true'
+      || github.event_name == 'push'
+      || github.event_name == 'workflow_dispatch'
+    environment: build-cache
     steps:
       - name: Check out repository
         env:
@@ -1330,101 +1290,42 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Install protoc and nextest
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc,nextest
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Run confidence fast shard
-        run: bash scripts/confidence-gate.sh "fast:${{ matrix.shard }}"
-
-      - name: Upload confidence fast shard artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: confidence-fast-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
-          path: target/confidence/fast/${{ matrix.shard }}
-          if-no-files-found: warn
-
-      - name: Report cache disk capacity
-        if: always()
-        run: bash scripts/ci/report-cache.sh
-
-  confidence-fast-summary:
-    name: Confidence fast summary
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: always() && github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.confidence == 'true'
-    needs:
-      - plan
-      - confidence-fast
-
-    steps:
-      - name: Check out repository
+      - name: Configure shared build cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
         env:
-          CHECKOUT_TOKEN: ${{ github.token }}
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Test deferred Unicode suites (Bazel)
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
         run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --cache_test_results=yes --test_output=errors \
+            //:deferred_tests
 
-      - name: Download confidence fast shard artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: confidence-fast-*-attempt-${{ github.run_attempt }}
-          path: target/confidence/fast-download
-          merge-multiple: false
+      - name: Test deferred Unicode suites (Cargo)
+        if: needs.plan.outputs.bazel_trusted != 'true'
+        run: cargo test -p lash-regress --test unicodesets --locked
 
-      - name: Assemble confidence fast shard tree
-        run: |
-          rm -rf target/confidence/fast
-          mkdir -p target/confidence/fast
-          for shard in scenario-harnesses fault-matrix sim-unit-perf-guards sim-generated minimizer-fixtures; do
-            cp -a "target/confidence/fast-download/confidence-fast-${shard}-attempt-${{ github.run_attempt }}" "target/confidence/fast/${shard}"
-          done
-
-      - name: Validate confidence fast summary
-        run: bash scripts/confidence-gate.sh fast:summary
-
-      - name: Upload confidence fast summary artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: confidence-fast-summary-attempt-${{ github.run_attempt }}
-          path: target/confidence/fast
-          if-no-files-found: error
+      - name: Remove client credentials
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }}, ${{ matrix.role }})
@@ -1444,10 +1345,7 @@ jobs:
     # The stable matrix always supplies real PostgreSQL evidence on pull requests
     # and merge groups. The heavier PG16 store/perf coverage remains deferred to
     # relevant trunk runs per the 2026-08-25 CI-scope ruling.
-    if: >-
-      github.event_name == 'pull_request'
-      || github.event_name == 'merge_group'
-      || needs.plan.outputs.stores == 'true'
+    if: github.event_name != 'push' && needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -2779,8 +2677,7 @@ jobs:
       - lint
       - diff-hygiene
       - secret-scan
-      - confidence-fast
-      - confidence-fast-summary
+      - unicode-tests
       - postgres-store
       - s3-store
       - fuzz-smoke

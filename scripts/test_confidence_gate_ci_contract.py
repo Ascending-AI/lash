@@ -153,7 +153,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
     def test_full_stage_jobs_share_exactly_one_build_artifact(self):
         jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
         consumers = {"confidence-harnesses", "confidence-generated", "confidence-minimizer",
-                     "confidence-backends", "confidence-workers", "confidence-coverage",
+                     "confidence-backends", "confidence-coverage",
                      "confidence-mutation-core", "confidence-mutation-sim",
                      "confidence-mutation-packages", "sim-search"}
         self.assertEqual(consumers | {"confidence", "confidence-build", "confidence-conclusion"}, set(jobs))
@@ -487,17 +487,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         trunk_only = {
             "heavy-tests",
             "stack-budget",
-            "confidence-fast",
-            "confidence-fast-summary",
             "s3-store",
             "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
         }
-        # FIG-2854: these three dedicated compile lanes left the shared
-        # deferral. They still skip on pull requests, but every merge group --
-        # docs-only ones included -- must show them green, so they carry their
-        # own guard and their own conclusion expectation.
         queue_required = {
             "lashlang-git-consumer",
             "package-feature-checks",
@@ -513,9 +507,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 "if: always() && " + guard, "if: " + guard
             ), job)
         queue_guard = (
-            "if: github.event_name == 'merge_group' "
-            "|| (github.event_name != 'pull_request' "
-            "&& needs.plan.outputs.rust == 'true')"
+            "if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
+            " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
         )
         for job in sorted(queue_required):
             self.assertIn(queue_guard, workflow_job_block(workflow, job), job)
@@ -544,26 +537,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in queue_required:
             needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
-        push_problems = evaluate(needs, "push")
-        self.assertEqual(len(push_problems), len(trunk_only) + 3)
-        for problem in push_problems:
-            self.assertTrue("although plan." in problem or "workers E2E job" in problem)
+        push_needs = {
+            job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
+            for job, value in needs.items()
+        }
+        push_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
+        for job in plan["PUSH_SKIP_CORE_JOBS"]:
+            push_needs[job] = {"result": "skipped", "outputs": {}}
+        for job in trunk_only:
+            push_needs[job] = {"result": "success", "outputs": {}}
+        self.assertEqual(evaluate(push_needs, "push", "refs/heads/main"), [])
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
-            needs[job] = {"result": "skipped", "outputs": {}}
-        for job in trunk_only:
-            needs[job] = {"result": "success", "outputs": {}}
-        self.assertEqual(
-            plan["evaluate_conclusion"](needs, "push", "refs/heads/feature"), []
-        )
-        for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
         self.assertIn(
             "ungated job restate-postgres-workers ended with 'skipped', expected success",
             plan["evaluate_conclusion"](needs, "pull_request"),
-        )
-        self.assertIn(
-            "ungated job restate-postgres-workers ended with 'skipped', expected success",
-            plan["evaluate_conclusion"](needs, "push", "refs/heads/main"),
         )
 
         # Workers E2E is neutral on plain branch pushes, but runs on PRs,
@@ -600,8 +588,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}", postgres)
         for event, expected in (
             ("pull_request", [("16", "primary")]),
-            ("merge_group", [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")]),
-            ("push", [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")]),
+            ("merge_group", [("16", "primary")]),
+            ("push", [("16", "primary")]),
             (
                 "workflow_dispatch",
                 [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
@@ -631,11 +619,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "success", "outputs": {}}
-        pr_needs["postgres-store"] = {"result": "skipped", "outputs": {}}
-        self.assertIn(
-            "postgres-store ended with 'skipped' on a pull_request event, expected success",
-            evaluate(pr_needs, "pull_request"),
-        )
+        for job in plan["GATED_JOBS"]:
+            pr_needs[job] = {"result": "skipped", "outputs": {}}
+        pr_needs[plan["BAZEL_TEST_JOB"]] = {"result": "skipped", "outputs": {}}
+        self.assertEqual([], evaluate(pr_needs, "pull_request"))
 
         # The release gate is what makes the full profile mandatory: a release
         # SHA is certified only by a green workflow_dispatch CI run.
@@ -657,25 +644,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
     def test_ci_shards_fast_confidence_not_broad_replay_backend(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
-        self.assertIn("confidence-fast:", workflow)
-        self.assertIn("confidence-fast-summary:", workflow)
-        self.assertIn('bash scripts/confidence-gate.sh "fast:${{ matrix.shard }}"', workflow)
-        self.assertIn("bash scripts/confidence-gate.sh fast:summary", workflow)
-        self.assertIn(
-            "pattern: confidence-fast-*-attempt-${{ github.run_attempt }}", workflow
-        )
-        self.assertIn(
-            "name: confidence-fast-summary-attempt-${{ github.run_attempt }}",
-            workflow,
-        )
-        summary = workflow_job_block(workflow, "confidence-fast-summary")
-        self.assertIn("- confidence-fast\n", summary)
+        self.assertNotIn("confidence-fast:", workflow)
+        self.assertNotIn("confidence-fast-summary:", workflow)
+        self.assertIn("confidence:", confidence_workflow)
         self.assertNotIn("Confidence gate fast lane", workflow)
         self.assertNotIn("bash scripts/confidence-gate.sh fast\n", workflow)
         for shard in FAST_SHARDS:
-            self.assertIn(f"- {shard}", workflow)
             self.assertIn(shard, gate)
 
         min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
@@ -759,10 +736,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             for selector, path in computed.items()
         }
         expected_consumed_paths = {
-            computed_relative["fast:summary"],
-            computed_relative["fast:scenario-harnesses"].replace(
-                "scenario-harnesses", "${{ matrix.shard }}"
-            ),
             str(pathlib.PurePosixPath(computed_relative["full"]).parent / "**"),
             str(
                 pathlib.PurePosixPath(computed_relative["sim-search:2/9"]).parent
@@ -772,13 +745,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         expected_consumed_paths.update(
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
-                          "workers", "coverage", "mutation-core", "mutation-sim",
-                          "mutation-packages-${{ matrix.package }}")
+                           "coverage", "mutation-core", "mutation-sim",
+                           "mutation-packages-${{ matrix.package }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
-        self.assertIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
-        self.assertIn("path: target/confidence/fast", workflow)
+        self.assertNotIn("path: target/confidence/fast/${{ matrix.shard }}", workflow)
+        self.assertNotIn("  confidence-fast:", workflow)
         self.assertIn("path: target/confidence/**", confidence_workflow)
         self.assertIn(
             "path: target/confidence/sim-search/**", confidence_workflow
@@ -999,26 +972,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
     def test_lint_job_runs_database_free_budgeted_perf_smoke(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
+        perf = (ROOT / ".github/workflows/perf.yml").read_text(encoding="utf-8")
 
         self.assertIn("runs-on: ubuntu-24.04", lint)
-        # PR-time smoke enforces the machine-independent inventory only;
-        # allocation ceilings are calibrated on the release profile and
-        # enforced by --enforce-budgets in perf.yml and the Release job.
-        # Wall-clock ceilings gate nowhere — they are advisory (FIG-1385).
-        self.assertIn(
-            "profile_runtime.py --profile quick --smoke "
-            "--enforce-inventory --out .benchmarks/perf-smoke/runtime.json",
-            lint,
-        )
-        self.assertNotIn("--profile quick --enforce-budgets", lint)
-        self.assertIn(
-            "profile_lashlang.py --debug --iterations 10 "
-            "--profile-iterations 10 --out .benchmarks/perf-smoke/lashlang.json",
-            lint,
-        )
-        smoke = lint[lint.index("- name: Run performance harness smoke") :]
-        smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
-        self.assertNotIn("--scenario all", smoke)
+        self.assertNotIn("Run performance harness smoke", lint)
+        self.assertNotIn("profile_runtime.py --profile quick --smoke", lint)
+        self.assertIn("profile_runtime.py", perf)
         self.assertIn(
             "python3 scripts/check_included_file_formatting.py",
             lint,
@@ -1292,21 +1251,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
     def test_all_confidence_fast_shards_use_github_hosted_runners(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        confidence_fast = workflow_job_block(workflow, "confidence-fast")
-
-        for shard in (
-            "scenario-harnesses",
-            "fault-matrix",
-            "sim-unit-perf-guards",
-            "sim-generated",
-            "minimizer-fixtures",
-        ):
-            self.assertIn(
-                f"- shard: {shard}\n            runner: ubuntu-24.04",
-                confidence_fast,
-            )
-        self.assertNotIn("ubuntu-latest", confidence_fast)
-        self.assertNotIn("Restore cargo cache (GitHub)", confidence_fast)
+        self.assertNotIn("  confidence-fast:", workflow)
+        heavy = workflow_job_block(workflow, "heavy-tests")
+        self.assertIn("ubuntu-24.04", heavy)
+        self.assertNotIn("ubuntu-latest", heavy)
 
     def test_broad_lane_is_manual_or_scheduled_confidence_not_ci_cd(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1747,8 +1695,8 @@ derive_mutation_jobs() {{
         )
         self.assertIn(f"test({oracle})", scenario_cargo)
         self.assertIn(oracle, scenario_bazel)
-        self.assertIn("github.event_name == 'pull_request'", postgres_store_job)
-        self.assertIn("github.event_name == 'merge_group'", postgres_store_job)
+        self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
+        self.assertIn("github.event_name != 'push'", postgres_store_job)
 
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured
@@ -2311,7 +2259,6 @@ derive_mutation_jobs() {{
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",
-            "confidence-fast",
         ):
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-mold", block)
@@ -2419,16 +2366,17 @@ class ReleaseConfidenceTests(unittest.TestCase):
 
 
 class MutationRequestTests(unittest.TestCase):
-    def test_mutation_request_uses_existing_runner_outside_required_ci(self):
-        workflow = yaml.safe_load((ROOT / ".github/workflows/mutation.yml").read_text())
-        triggers = workflow.get("on", workflow.get(True))
-        self.assertIn("workflow_dispatch", triggers)
-        self.assertIn("labeled", triggers["pull_request"]["types"])
-        job = workflow["jobs"]["mutation"]
-        self.assertIn("mutation-requested", job["if"])
-        self.assertIn("bash scripts/confidence-gate.sh mutation", [s.get("run") for s in job["steps"]])
+    def test_mutation_lives_on_weekly_confidence_not_a_pr_workflow(self):
+        self.assertFalse((ROOT / ".github/workflows/mutation.yml").exists())
         ci = yaml.safe_load(WORKFLOW.read_text())
         self.assertNotIn("mutation", ci["jobs"]["ci-conclusion"]["needs"])
+        confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
+        for job in (
+            "confidence-mutation-core",
+            "confidence-mutation-sim",
+            "confidence-mutation-packages",
+        ):
+            self.assertIn(job, confidence["jobs"])
         gate = GATE.read_text()
         request = gate.split('  # Every mutation in the targeted files, using the same weekly runner.', 1)[1].split('fi', 1)[0]
         self.assertIn("run_area_targeted_mutation_evidence", request)

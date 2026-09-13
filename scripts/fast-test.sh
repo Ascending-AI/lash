@@ -29,6 +29,10 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 
+# Implementer loops do not talk to live stores. CI owns Postgres/S3/E2E.
+unset LASH_POSTGRES_DATABASE_URL LASH_REQUIRE_POSTGRES \
+  LASH_S3_ENDPOINT LASH_REQUIRE_S3 LASH_MINIO_ENDPOINT
+
 base_rev=""
 dry_run=0
 classify_only=0

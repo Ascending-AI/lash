@@ -759,9 +759,12 @@
         },
         {
           "cargo": "unicodesets",
+          "cargo_only": "RGI Unicode suites are too slow for the PR Bazel partition; they run on lash-regress diffs and on trunk",
           "kind": "test",
           "label": "//crates/lash-regress:unicodesets__test",
-          "tags": []
+          "tags": [
+            "pr-deferred"
+          ]
         }
       ]
     },
