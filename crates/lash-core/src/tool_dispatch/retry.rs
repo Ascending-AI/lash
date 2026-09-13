@@ -162,7 +162,10 @@ pub(crate) async fn normalized_outcome(
     result: ToolOutcome,
     duration_ms: u64,
 ) -> ToolDispatchOutcome {
-    let output = normalize_tool_result_attachments(context, &tool_name, result).await;
+    let output = Box::pin(normalize_tool_result_attachments(
+        context, &tool_name, result,
+    ))
+    .await;
     super::context::outcome(tool_name, args, output, duration_ms)
 }
 

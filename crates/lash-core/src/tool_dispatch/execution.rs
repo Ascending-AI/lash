@@ -149,7 +149,7 @@ pub(crate) async fn execute_orchestrating_tool<'run>(
         super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
             .map(|manifest| manifest.name)
     else {
-        return unavailable_prepared_tool_outcome(prepared);
+        return unavailable_prepared_tool_outcome(context, prepared).await;
     };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
@@ -211,7 +211,7 @@ pub(crate) async fn execute_internal_process_tool<'run>(
         super::preparation::resolve_internal_manifest_by_id(context, &prepared.tool_id)
             .map(|manifest| manifest.name)
     else {
-        return unavailable_prepared_tool_outcome(prepared);
+        return unavailable_prepared_tool_outcome(context, prepared).await;
     };
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
@@ -254,9 +254,18 @@ pub(crate) async fn execute_internal_process_tool<'run>(
     outcome
 }
 
-fn unavailable_prepared_tool_outcome(prepared: PreparedToolCall) -> ToolDispatchOutcome {
-    let mut unavailable = outcome(
-        prepared.tool_name,
+async fn unavailable_prepared_tool_outcome(
+    context: &ToolDispatchContext<'_>,
+    prepared: PreparedToolCall,
+) -> ToolDispatchOutcome {
+    let tool_name = context
+        .tools
+        .resolve_manifest_by_id(&prepared.tool_id)
+        .map(|manifest| manifest.name)
+        .unwrap_or(prepared.tool_name);
+    let mut unavailable = normalized_outcome(
+        context,
+        tool_name,
         prepared.args,
         runtime_failure(
             ToolFailureClass::Unavailable,
@@ -264,7 +273,8 @@ fn unavailable_prepared_tool_outcome(prepared: PreparedToolCall) -> ToolDispatch
             "Tool is unavailable in this session",
         ),
         0,
-    );
+    )
+    .await;
     unavailable.record.call_id = Some(prepared.call_id);
     unavailable
 }

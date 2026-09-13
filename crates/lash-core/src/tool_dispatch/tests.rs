@@ -897,7 +897,10 @@ async fn dispatch_orchestrating_tool_call(
     tool_name: &str,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
-    dispatch_orchestrating_tool_call_with_prepared_name(context, tool_name, tool_name, args).await
+    Box::pin(dispatch_orchestrating_tool_call_with_prepared_name(
+        context, tool_name, tool_name, args,
+    ))
+    .await
 }
 
 async fn dispatch_orchestrating_tool_call_with_prepared_name(
@@ -925,7 +928,12 @@ async fn dispatch_orchestrating_tool_call_with_prepared_name(
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .build();
-    crate::tool_dispatch::execute_orchestrating_tool(context, prepared, tool_context).await
+    Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+        context,
+        prepared,
+        tool_context,
+    ))
+    .await
 }
 
 use crate::testing::MockSessionManager;
