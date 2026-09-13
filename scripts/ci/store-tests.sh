@@ -116,8 +116,7 @@ case "${suite}" in
   # narrowing to the conformance binary would silently drop attempt atomicity.
   # The suites self-serialize on a per-process guard and share one database, so
   # the binaries must not overlap: Cargo runs them one at a time, and
-  # `--local_test_jobs=1` makes Bazel do the same. Doctests are not in this set
-  # on either path; `cargo test --doc --workspace` in the test-doc job owns them.
+  # `--local_test_jobs=1` makes Bazel do the same.
   pg-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046

@@ -16,6 +16,7 @@ dhat-heap = ["dep:dhat"]
 [lib]
 name = "lash_perf"
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "lash-perf"

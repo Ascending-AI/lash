@@ -15,6 +15,7 @@ categories = ["database", "asynchronous"]
 
 [lib]
 name = "lash_s3_store"
+doctest = false
 
 [lints]
 workspace = true

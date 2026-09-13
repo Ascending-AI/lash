@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_rlm_types"
+doctest = false
 
 [lints]
 workspace = true

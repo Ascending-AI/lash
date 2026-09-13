@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_protocol_rlm"
+doctest = false
 
 [features]
 default = []

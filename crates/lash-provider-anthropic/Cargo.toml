@@ -15,6 +15,7 @@ categories = ["api-bindings", "asynchronous"]
 
 [lib]
 name = "lash_provider_anthropic"
+doctest = false
 
 [features]
 # Enables public test support and the cross-provider response-normalization

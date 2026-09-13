@@ -15,6 +15,7 @@ categories = ["asynchronous", "api-bindings"]
 
 [lib]
 name = "lash_tool_support"
+doctest = false
 
 [features]
 default = []

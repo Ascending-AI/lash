@@ -1,8 +1,12 @@
 # Lash TypeScript dialect
 
-`lash-typescript` is the source front-end for the durable Lash heap VM. SWC is
+`lash-typescript` is the source front-end for the durable Lash heap VM, and the
+only one: TypeScript is the sole RLM authoring language, and `lashlang` names
+the dialect-neutral IR and VM it lowers into (ADR 0096). SWC is
 confined to `src/adapter/`; the adapter produces a Lash-owned normalized tree,
 which lowers into `lashlang::Program`. Runtime type annotations are erased.
+There is no dialect choice to make: no language selector, no session pin, and
+no second surface to be at parity with.
 
 ## Dialect contract
 

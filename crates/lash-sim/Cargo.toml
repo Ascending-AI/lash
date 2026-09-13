@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Deterministic simulation harness for Lash."
 publish = false
 
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 

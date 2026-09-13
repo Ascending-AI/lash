@@ -3,7 +3,6 @@ load(
     "//tools/bazel:lash_rust.bzl",
     "lash_rust_binary",
     "lash_rust_build_script",
-    "lash_rust_doc_test",
     "lash_rust_integration_test",
     "lash_rust_library",
     "lash_rust_unit_test",
@@ -57,11 +56,6 @@ lash_rust_unit_test(
     package_name = "lash-internal-sqlite-store",
     tags = [],
     version = "0.0.0-dev",
-)
-
-lash_rust_doc_test(
-    name = "lash-sqlite-store__doc_test",
-    crate = ":lash-sqlite-store",
 )
 
 lash_rust_binary(

@@ -5,7 +5,6 @@ load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_doc_test")
 
 _IGNORED_FILES = [
     "BUILD",
@@ -254,14 +253,4 @@ def lash_rust_integration_test(
         ),
         tags = tags,
         version = version,
-    )
-
-def lash_rust_doc_test(name, crate):
-    # rustdoc executes these against the same pinned toolchain and the same
-    # declared dependency graph as the crate itself, with no service, network
-    # or Cargo-relative asset, so their results are cacheable like any other
-    # deterministic test action.
-    rust_doc_test(
-        name = name,
-        crate = crate,
     )

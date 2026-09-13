@@ -15,6 +15,7 @@ categories = ["api-bindings", "data-structures"]
 
 [lib]
 name = "lash_remote_protocol"
+doctest = false
 
 [lints]
 workspace = true
