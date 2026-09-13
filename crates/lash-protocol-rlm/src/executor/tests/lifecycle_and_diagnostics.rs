@@ -213,6 +213,11 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
 #[test]
 pub(super) fn every_host_setup_failure_is_classified_as_host() {
     block_on(async {
+        // The seventh `Host` classification in `executor/mod.rs` is the
+        // `LinkedProgramCacheError` catch-all. It intentionally has no row:
+        // the cache currently constructs only `Parse` and `Link`, which are
+        // classified by the preceding arms, so no host-classified variant can
+        // be injected through its public API.
         let cases = [
             (
                 HostSetupFailureSite::DeferredResolution,
