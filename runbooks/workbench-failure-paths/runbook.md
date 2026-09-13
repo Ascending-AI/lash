@@ -148,7 +148,7 @@ Screenshot `04-paid-output-refused.png`; save state, observations, and trace row
 ## Phase 4 — Failed durable process in the work rail
 
 Boot fresh with `failed-process`. Submit `start deterministic failing process`; the parent
-turn may finish successfully. Poll `GET /api/work` until the row labelled
+turn may complete successfully. Poll `GET /api/work` until the row labelled
 `FIG425_deterministic_failure` is terminal with status `failed` and error exactly
 `deterministic durable process failure`.
 

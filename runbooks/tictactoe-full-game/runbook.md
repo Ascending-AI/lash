@@ -117,7 +117,7 @@ ply screenshot — expected, keep both names for the scorecard).
 ## Phase 4 — Backend and disk evidence
 
 - `GET /api/chats/{chat_id}/messages`: the transcript is **semantically streamed** — each
-  agent turn stores several rows (assistant reasoning/lashlang segments, `tool` rows, a
+  agent turn stores several rows (assistant reasoning/code segments, `tool` rows, a
   final assistant prose row). Gates: one `user` row per click, in order; every user row is
   followed by at least one `assistant` row; **exactly one `play_move` tool row per agent
   O move** — count only the move rows, not all `tool` rows: the model may legitimately

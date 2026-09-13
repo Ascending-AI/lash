@@ -173,7 +173,7 @@ order.
 - Mid-turn phases need a turn that stays in flight long enough to act on. A short marker
   echo settles in under ten seconds and collapses the window; use this deliberately long
   generation for Phases 3–6: *"Write out the numbers 1 through 45, each on its own line,
-  with one short sentence after each. Do not finish early."* Before any mid-turn action,
+  with one short sentence after each. Do not stop early."* Before any mid-turn action,
   verify that `/api/state.active_turns` is non-empty and that the named control is enabled.
   A collapsed window is a harness gap, not a finding: rerun with a fresh session rather
   than converting a mid-turn assertion into a post-turn one.

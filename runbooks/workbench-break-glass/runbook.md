@@ -18,7 +18,7 @@ scripted evidence. This runbook covers only the operator and browser story.
 ## Scenario-specific golden rules
 
 1. Boot only with `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked`. Its first call
-   emits a ten-minute foreground Lashlang sleep; its second call deterministically
+   emits a ten-minute foreground TypeScript sleep; its second call deterministically
    finishes `session recovered after break glass`.
 2. Identify the exact `WorkbenchTurnWorkflow` invocation by the active turn id. Never
    kill by service prefix, most-recent guess, container, or process id.
@@ -56,8 +56,8 @@ ids and require equality. Screenshot `00-break-glass-ready.png`.
 
 Submit `enter the deterministic exec block`. Poll until all of these agree:
 
-- the page is running, Stop is visible, and the Lashlang code/execution surface shows a
-  foreground `sleep for "10m"` that has started but not completed;
+- the page is running, Stop is visible, and the TypeScript code/execution surface shows a
+  foreground `await sleep(600000)` (ten minutes) that has started but not completed;
 - `/api/state.active_turns` contains exactly one address for the recorded session;
 - `active-turns.json` contains that exact `session_id` and `turn_id`;
 - `trace.jsonl` associates the same turn with the running code path.

@@ -2,8 +2,8 @@
 
 Read [../RULES.md](../RULES.md) first.
 
-**Classification:** judged browser scenario, economy tier. Run both `lashlang`
-and `typescript` in fresh Workbench data directories. The subject is the Host
+**Classification:** judged browser scenario, economy tier. Run one `typescript`
+row in a fresh Workbench data directory. The subject is the Host
 Application's rendered retry outcome and captured outgoing request, not exact
 model prose. Use `deepseek/deepseek-v4-flash` through the Workbench's OpenRouter
 route and record the served model from evidence.

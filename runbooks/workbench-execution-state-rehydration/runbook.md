@@ -11,7 +11,7 @@
 > never substitute the destructive reset.
 
 **Purpose.** Prove that a replacement Workbench process rehydrates the session's **RLM
-execution state** — the Lashlang variables bound by earlier code — from the durable
+execution state** — the TypeScript variables bound by earlier code — from the durable
 checkpoint, and that it does so identically on SQLite and PostgreSQL. The checkpoint is a keyed component set: the execution-state root holds logical
 binding names and inline small values or content-addressed leaf references. Large values
 live in separate typed MessagePack leaves. A changed root and changed leaves commit in
@@ -30,7 +30,7 @@ committed *transcript* nodes return after a process replacement. Transcript surv
 not state survival: a session can render every past message while its bound variables are
 gone. This scenario targets the other half of the checkpoint and deliberately places a
 **no-new-binding turn** between the binding turn and the restart. RLM requires a
-terminating `finish`, so every successful turn executes Lashlang; "runs no code" is not a
+terminating `finish`, so every successful turn executes code; "runs no code" is not a
 satisfiable condition. The relevant distinction is whether that required code changed
 execution state.
 
@@ -41,7 +41,7 @@ the post-restart code ran — never on the assistant's ability to recall.
 ## Scenario-specific golden rules
 
 1. **The marker must live in a variable, not only in the transcript.** The recall gate is
-   the traced Lashlang execution plus the pre-execution provider request. "The agent
+   the traced TypeScript execution plus the pre-execution provider request. "The agent
    answered correctly" is never sufficient on its own: the marker is also in committed
    history, so prose alone proves nothing about execution state.
 2. **The middle turn must create no new binding.** It will execute at least the required
@@ -52,7 +52,7 @@ the post-restart code ran — never on the assistant's ability to recall.
 3. **Do not use timeline code-block absence as evidence.** Settled code-block rows are
    expected to render; when using one as UI evidence, assert its presence positively.
    Its absence cannot discriminate a reference-only commit from a dirty executor. The
-   browser and `/api/state` prove the turn settled; `trace.jsonl` proves what Lashlang
+   browser and `/api/state` prove the turn settled; `trace.jsonl` proves what code
    executed.
 4. **Replace only the web process (blocked by FIG-1164).** The historical
    `agent-workbench-restart` invocation used the same data directory and backend environment as
@@ -64,7 +64,7 @@ the post-restart code ran — never on the assistant's ability to recall.
    stack and the PostgreSQL stack. A pass in one geometry and a failure in the other is a
    backend-contract divergence → Abort/RCA naming the failing backend; it is not a partial
    pass.
-6. **Recall by reading, not by re-assigning.** If the post-restart Lashlang source assigns
+6. **Recall by reading, not by re-assigning.** If the post-restart TypeScript source assigns
    or redefines the variable before reading it, the run learned nothing about hydration.
    Re-prompt once with an explicit "do not assign it" instruction; a second re-assignment
    is a finding about the scenario's promptability, reported as such.
@@ -101,11 +101,11 @@ traces establish executed operations; they do not expose exact submitted compone
 ## Working material
 
 - Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort before boot.
-- Execute both `lashlang` and `typescript` rows, each on SQLite and PostgreSQL with
-  independent fresh data directories, ports, markers, and artifacts. Set
-  `LASH_RUNBOOK_DIALECT` and `OPENROUTER_MODEL=deepseek/deepseek-v4-pro` on boot and restart;
-  verify served dialect and model from the request/execution trace. Outcome prompts and
-  gates apply to the active dialect; never feed Lashlang source to the TypeScript row.
+- Execute the `typescript` row on SQLite and on PostgreSQL with independent fresh data
+  directories, ports, markers, and artifacts. Set `LASH_RUNBOOK_DIALECT=typescript` and
+  `OPENROUTER_MODEL=deepseek/deepseek-v4-pro` on boot and restart; verify the served
+  dialect and model from the request/execution trace. Prompts ask for outcomes and every
+  gate reads the TypeScript surface.
 - Source the fork's `env.sh` before `just` recipes that invoke Cargo.
 - SQLite pass:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
@@ -124,7 +124,7 @@ traces establish executed operations; they do not expose exact submitted compone
   `llm_call_started` and `exec_code_started` are top-level record types: select a record
   with `type == "exec_code_started"`; its exact executed source is at top-level `code`.
 - The bound-variable preamble the runtime builds from live execution state opens with the
-  literal sentence `These variables are already bound in lashlang.` Its presence, plus the
+  literal sentence `These variables are already bound in TypeScript.` Its presence, plus the
   variable name and marker in the same request, is the hydration witness used below.
 
 The browser/API surface does not expose whether the hydrated execution-state body was
@@ -142,10 +142,10 @@ three ids to agree. In the PostgreSQL pass, additionally require the startup tra
 report the Postgres backend. Record the current trace end offset as the Phase-1 boundary.
 Screenshot `00-ready.png`.
 
-## Phase 1 — Bind a variable through executed Lashlang
+## Phase 1 — Bind a variable through executed TypeScript
 
 Choose a short single-line marker such as `FIG636-EXEC-<run-id>`. Submit one turn asking
-the agent to run Lashlang that binds a session variable named `fig636_marker` to that
+the agent to run TypeScript that binds a session variable named `fig636_marker` to that
 exact literal and then finishes with the single word `stored`. Poll until the pill is idle
 and `/api/state.active_turns` is empty.
 
@@ -161,7 +161,7 @@ screenshot the settled pair as `01-bound.png`.
 ## Phase 2 — Commit a turn with no new binding
 
 Submit a short conversational turn and explicitly require the agent to answer without
-declaring, assigning, or mutating any Lashlang variable. It must still terminate with
+declaring, assigning, or mutating any TypeScript variable. It must still terminate with
 `finish`. Poll until idle.
 
 Gate all of the following:
@@ -194,7 +194,7 @@ pre-restart rows to render in their original order. Screenshot `03-reconstructed
 ## Phase 4 — Prove the variable returned before the model spoke
 
 Submit one turn instructing the agent to read the existing variable `fig636_marker` and
-finish with its value, to run exactly one Lashlang block, and not to assign or redefine
+call `finish(...)` with its value, to run exactly one TypeScript cell, and not to assign or redefine
 the variable. Poll until idle.
 
 From trace records written **after** the Phase 2 restart boundary, take the first
@@ -240,10 +240,9 @@ its Restate container, and (PostgreSQL pass) its Postgres container are gone.
 | Hydration before execution | post-restart provider request carries the bound variable and marker | | `04-provider-request.json` |
 | Recall by reading | traced code references the variable without assigning it | | `04-recall-exec.json`, `04-recall.png` |
 | Retained large leaf | payload length/digest and counter 166 survive dirty-root and cold reopen | | `01-payload-oracle.json`, `04-leaf-recall.png` |
-| Dialect agreement | served Lashlang and TypeScript rows pass independently | | four independent artifact sets |
 | Cross-backend agreement | SQLite and PostgreSQL passes reach identical per-gate verdicts | | both artifact sets |
 
-**Aggregate:** did a cold process recover the session's bound Lashlang state — not merely
+**Aggregate:** did a cold process recover the session's bound TypeScript state — not merely
 its transcript — across a no-new-binding turn in both durable geometries?
 
 ---
