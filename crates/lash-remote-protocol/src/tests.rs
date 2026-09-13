@@ -23,18 +23,18 @@ fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolErro
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
-/// Refusal witness (FIG-1123): the generation-60 decoder rejects its immediate
+/// Refusal witness (FIG-1123): the generation-61 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_59_is_refused() {
-    const PREDECESSOR: u32 = 59;
+fn immediate_predecessor_remote_protocol_generation_60_is_refused() {
+    const PREDECESSOR: u32 = 60;
     assert_eq!(
         PREDECESSOR + 1,
         REMOTE_PROTOCOL_VERSION,
         "remote-protocol generation adjacency pin"
     );
     let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-59 remote envelope must be refused");
+        .expect_err("generation-60 remote envelope must be refused");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
@@ -1213,7 +1213,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 60,
+            expected: 61,
         }
     ));
 
@@ -1403,7 +1403,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 60,
+            "protocol_version": 61,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1418,7 +1418,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 60,
+            actual: 61,
             expected: 41,
         }
     ));
@@ -1464,7 +1464,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 60,
+            expected: 61,
         }
     ));
 
@@ -1481,10 +1481,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(
-        REMOTE_PROTOCOL_VERSION, 60,
-        "reasoning retention wire-shape pin"
-    );
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 61, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1524,8 +1521,18 @@ fn remote_process_dtos_json_round_trip() {
         wake_session_id: Some(SessionId::from("session")),
         observers: vec![SessionId::from("session".to_string())],
         event_types: vec![remote_process_event_type()],
+        lifecycle: Some(crate::RemoteProcessLifecyclePolicy {
+            parent: crate::RemoteParentScope::Host,
+            on_parent_end: crate::RemoteOnParentEnd::Abandon,
+        }),
     };
     start.validate().expect("valid process start request");
+    let mut missing_lifecycle = start.clone();
+    assert!(missing_lifecycle.lifecycle.take().is_some());
+    assert!(
+        matches!(missing_lifecycle.validate(), Err(RemoteProtocolError::InvalidEnvelope { message, .. }) if message.contains("lifecycle"))
+    );
+
     let mut invalid_max_attempts = start.clone();
     invalid_max_attempts.max_attempts = Some(0);
     assert!(matches!(
@@ -1817,7 +1824,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 60,
+            expected: 61,
         })
     ));
 }
@@ -1856,7 +1863,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1892,7 +1899,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1947,7 +1954,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1979,7 +1986,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 60,
+                expected: 61,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2360,7 +2367,8 @@ fn remote_process_record() -> RemoteProcessRecord {
         }),
         status: RemoteProcessStatus::Running,
         outcome: None,
-    }
+    lifecycle: crate::RemoteProcessLifecyclePolicy { parent: crate::RemoteParentScope::Host, on_parent_end: crate::RemoteOnParentEnd::Abandon },
+}
 }
 
 fn remote_process_event() -> RemoteProcessEvent {

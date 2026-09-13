@@ -808,6 +808,10 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(ProcessIdentity::new("recent-pushdown-kind")),
         )

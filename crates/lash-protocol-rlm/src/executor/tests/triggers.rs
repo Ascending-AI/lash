@@ -537,6 +537,10 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         );
         let context = lash_core::testing::code_execution_context_for_process(&registration);
         let owner_error = context
@@ -811,6 +815,10 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         );
         let context = lash_core::testing::code_execution_context_for_process(&registration);
         let owner_error = context

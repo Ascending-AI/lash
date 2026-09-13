@@ -17,6 +17,10 @@ fn record(process_id: &ProcessId, label: &str, created_at_ms: u64) -> ProcessRec
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(ProcessIdentity::new("test-engine").with_label(Some(label)))
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(

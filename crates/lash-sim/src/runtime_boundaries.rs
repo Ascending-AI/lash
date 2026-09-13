@@ -253,8 +253,11 @@ impl RuntimeBoundaryHarness {
                         format!("{effect_id}:intent-child"),
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Abandon,
                 },
             ))]);
         let controller = self.ensure_effect_controller().await?;
@@ -1238,6 +1241,10 @@ impl RuntimeBoundaryHarness {
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("register process: {err}")))?;

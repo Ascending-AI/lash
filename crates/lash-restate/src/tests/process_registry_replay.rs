@@ -88,6 +88,10 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(process_env_ref))

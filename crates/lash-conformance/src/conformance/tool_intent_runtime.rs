@@ -73,6 +73,10 @@ pub async fn public_signal_intent_wakes_parked_process(
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "signal.resume".to_string(),

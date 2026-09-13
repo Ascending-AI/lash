@@ -49,6 +49,10 @@ fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration
         },
         lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -361,6 +365,10 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
                     },
                     lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_identity(lash_core::ProcessIdentity::new("test")),
             )

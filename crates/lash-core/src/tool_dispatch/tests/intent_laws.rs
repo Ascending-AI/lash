@@ -33,6 +33,10 @@ async fn register_intent_law_target(
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types(event_types.iter().map(|event_type| {
                 crate::ProcessEventType {
@@ -391,6 +395,10 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("mutate the formerly missing target after the recorded refusal");
@@ -709,6 +717,12 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
 #[tokio::test]
 async fn parent_end_policies_are_literal_and_redrive_stable() {
     let mut context = dispatch_context();
+    context.effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(
+        context
+            .effect_controller
+            .scoped_for(crate::ExecutionScope::turn("session", "parent-policy-turn"))
+            .expect("parent-policy law has an admitted turn"),
+    );
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     context.processes = crate::testing::effect_backed_process_service(registry.clone());
     let policies = [
@@ -724,10 +738,28 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
                     session_id: SessionId::from("session"),
                     request: crate::ProcessStartRequest::external(
                         format!("ignored-parent-policy-{index}"),
-                        crate::ProcessOriginator::host_scoped("parent-policy-law"),
+                        crate::ProcessOriginator::session(crate::SessionScope::new(
+                            SessionId::from("session"),
+                        )),
                         json!({"policy_index": index}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Turn {
+                                session_id: SessionId::from("session"),
+                                turn_id: context
+                                    .effect_controller
+                                    .scoped()
+                                    .turn_id()
+                                    .expect("test dispatch is turn scoped")
+                                    .clone(),
+                            },
+                            match policy {
+                                crate::ProcessParentEndPolicy::Abandon => {
+                                    crate::OnParentEnd::Abandon
+                                }
+                                crate::ProcessParentEndPolicy::Cancel => crate::OnParentEnd::Cancel,
+                            },
+                        ),
                     ),
-                    on_parent_end: policy,
                 }))
             })
             .collect(),
@@ -858,6 +890,10 @@ async fn retry_drains_only_the_final_attempts_intents() {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "attempt.retry.final".to_string(),

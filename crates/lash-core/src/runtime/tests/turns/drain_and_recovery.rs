@@ -92,6 +92,10 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -487,6 +491,10 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -690,6 +698,10 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(SessionId::from("root"))),
@@ -801,6 +813,10 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(SessionId::from("root"))),
@@ -910,6 +926,10 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(crate::SessionScope::new("root")),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(SessionId::from("root"))),

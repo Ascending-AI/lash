@@ -9,6 +9,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             id,
             input,
             disposition,
+            lifecycle,
             max_attempts,
             env_spec,
             originator,
@@ -22,6 +23,9 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             input.try_into()?,
             disposition.into(),
             originator.try_into()?,
+            lifecycle
+                .expect("validated required lifecycle")
+                .try_into()?,
         )
         .with_max_attempts(max_attempts)
         .with_wake_session_id(wake_session_id)
@@ -43,6 +47,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             id,
             input,
             disposition,
+            lifecycle,
             max_attempts,
             env_spec,
             originator,
@@ -55,6 +60,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             id,
             input: input.try_into()?,
             disposition: disposition.into(),
+            lifecycle: Some(lifecycle.into()),
             max_attempts,
             env_spec: env_spec.map(Into::into),
             originator: originator.into(),

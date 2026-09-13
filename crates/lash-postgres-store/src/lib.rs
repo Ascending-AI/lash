@@ -328,10 +328,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 86 combines full admitted effect addresses and truthful attribution with
 // all-or-none pending-input claim identity and token fencing. Both incompatible
 // component-85 parent shapes are rejected and recreated.
-// Version 87 adds exact artifact-owner edges, permanent execution-owner
+// Version 87 requires lifecycle policy in process record_json. Older components
+// require recreation rather than inventing policy.
+// Version 88 adds exact artifact-owner edges, permanent execution-owner
 // publication fences, and durable Process Prune artifact-release evidence.
-// Component-86 stores are rejected and recreated.
-const SCHEMA_VERSION: i32 = 87;
+// Component-87 stores are rejected and recreated.
+const SCHEMA_VERSION: i32 = 88;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

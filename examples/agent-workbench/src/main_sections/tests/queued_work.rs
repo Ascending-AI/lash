@@ -358,6 +358,10 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
+                    lash::process::ProcessLifecyclePolicy::new(
+                        lash::process::ParentScope::Host,
+                        lash::process::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
@@ -521,6 +525,10 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
+                    lash::process::ProcessLifecyclePolicy::new(
+                        lash::process::ParentScope::Host,
+                        lash::process::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
@@ -616,6 +624,10 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
+                    lash::process::ProcessLifecyclePolicy::new(
+                        lash::process::ParentScope::Host,
+                        lash::process::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
@@ -860,6 +872,10 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
+                    lash::process::ProcessLifecyclePolicy::new(
+                        lash::process::ParentScope::Host,
+                        lash::process::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),
@@ -1229,6 +1245,10 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
+                    lash::process::ProcessLifecyclePolicy::new(
+                        lash::process::ParentScope::Host,
+                        lash::process::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash::process::ProcessEventType {
                     name: "producer.wake".to_string(),

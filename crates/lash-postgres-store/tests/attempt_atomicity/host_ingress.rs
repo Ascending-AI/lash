@@ -33,6 +33,10 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
                 },
                 lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash::process::ProcessEventType {
                 name: event_type.to_string(),

@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 pub(super) async fn exercise_attempt_capabilities(attempt: &crate::AttemptContext<'_>) {
     let _ = attempt.session_id();
     let _ = attempt.execution_scope_id();
+    let _ = attempt.child_process_parent_scope().await;
     let _ = attempt.agent_frame_id();
     let _ = attempt.cancellation_token();
     let _ = attempt.async_process_id();

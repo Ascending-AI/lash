@@ -151,9 +151,6 @@ pub struct StartProcessIntent {
     pub session_id: SessionId,
     /// Complete durable process-start request.
     pub request: crate::ProcessStartRequest,
-    /// Ratified action applied when the owning scope ends.
-    #[serde(default)]
-    pub on_parent_end: ProcessParentEndPolicy,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -526,16 +523,28 @@ mod tests {
     }
 
     #[test]
-    fn start_process_intent_without_a_parent_policy_decodes_as_cancel() {
-        let intent = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
-            "session_id": "session",
-            "request": crate::ProcessStartRequest::external(
-                "child",
-                crate::ProcessOriginator::host_scoped("parent-policy-default-law"),
-                serde_json::json!({"recorded": true}),
+    fn start_process_intent_without_a_lifecycle_policy_is_refused() {
+        let request = crate::ProcessStartRequest::external(
+            "child",
+            crate::ProcessOriginator::host(),
+            serde_json::Value::Null,
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
             ),
+        );
+        let mut payload = serde_json::to_value(request).expect("serialize start request");
+        assert!(
+            payload
+                .as_object_mut()
+                .expect("request object")
+                .remove("lifecycle")
+                .is_some()
+        );
+        let error = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
+            "session_id": "session", "request": payload,
         }))
-        .expect("decode a start intent without an explicit parent policy");
-        assert_eq!(intent.on_parent_end, ProcessParentEndPolicy::Cancel);
+        .expect_err("lifecycle absence must be refused");
+        assert!(error.to_string().contains("lifecycle"));
     }
 }

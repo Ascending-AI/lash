@@ -17,6 +17,10 @@ async fn ordered_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register punctuation fixture");

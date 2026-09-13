@@ -24,6 +24,7 @@ fn registration(process_id: &ProcessId) -> ProcessRegistration {
         },
         crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
 }
 
@@ -525,6 +526,7 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
         },
         crate::RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
     lifecycle_registration.env_ref = Some(crate::ProcessExecutionEnvRef::new("process-env:test"));
     registry

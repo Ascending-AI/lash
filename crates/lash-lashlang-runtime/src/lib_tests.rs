@@ -662,6 +662,12 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
         Arc::clone(&artifact_store),
         "parent:root",
         test_process_start(&output, site.clone(), "."),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect("first start prepares");
@@ -669,6 +675,12 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
         Arc::clone(&artifact_store),
         "parent:root",
         test_process_start(&output, site.clone(), "."),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect("replayed start prepares");
@@ -676,13 +688,19 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
         Arc::clone(&artifact_store),
         "parent:root",
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect("sibling start prepares");
 
-    assert_eq!(first.registration.id, replayed.registration.id);
-    assert_eq!(first.registration.identity, replayed.registration.identity);
-    assert_ne!(first.registration.id, sibling.registration.id);
+    assert_eq!(first.request.id, replayed.request.id);
+    assert_eq!(first.request.identity, replayed.request.identity);
+    assert_ne!(first.request.id, sibling.request.id);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -737,6 +755,12 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
             Arc::clone(&store) as Arc<dyn LashlangArtifactStore>,
             "parent:four-shape",
             bad_start,
+            lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+            lash_core::RecoveryContract::Rerunnable,
         )
         .await
         .expect_err("the real prepare entry point must reject immutable mismatches");
@@ -786,6 +810,12 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
         Arc::clone(&store) as Arc<dyn LashlangArtifactStore>,
         "parent:four-shape",
         start,
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect("the real prepare entry point explicitly omits both live-host fixtures");
@@ -830,6 +860,10 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
             input.to_process_input().expect("valid engine input"),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(input.process_identity());
         let context = lash_core::testing::process_engine_run_context_for_validation(
@@ -936,6 +970,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             )
             .unwrap(),
         ),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect("matching immutable signature passes");
@@ -950,6 +990,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             )
             .unwrap(),
         ),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect_err("different outer parameter name must fail before registration");
@@ -982,6 +1028,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             Arc::clone(&artifact_store),
             "parent:root",
             start_with(definition),
+            lash_core::ProcessOriginator::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+            lash_core::RecoveryContract::Rerunnable,
         )
         .await
         .expect_err(description);
@@ -1005,6 +1057,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         Arc::clone(&artifact_store),
         "parent:root",
         start_with(wrong_ref),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect_err("identity with a different process ref must fail");
@@ -1037,6 +1095,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         forged_store,
         "parent:root",
         start_with(mismatching_identity),
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
     )
     .await
     .expect_err("forged signature with unchanged refs must fail before registration");
@@ -1090,9 +1154,19 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
         args,
     };
 
-    let error = prepare_lashlang_process_start(artifact_store, "parent:root", start)
-        .await
-        .expect_err("forged receiving artifact must fail before registration");
+    let error = prepare_lashlang_process_start(
+        artifact_store,
+        "parent:root",
+        start,
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
+    )
+    .await
+    .expect_err("forged receiving artifact must fail before registration");
     assert!(matches!(
         error,
         LashlangRuntimeError::InvalidArtifact { .. }
@@ -1133,9 +1207,19 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     };
     let artifact_store: Arc<dyn LashlangArtifactStore> = store;
 
-    prepare_lashlang_process_start(artifact_store, "parent:root", start)
-        .await
-        .expect("later string union arm accepts the value");
+    prepare_lashlang_process_start(
+        artifact_store,
+        "parent:root",
+        start,
+        lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+        lash_core::RecoveryContract::Rerunnable,
+    )
+    .await
+    .expect("later string union arm accepts the value");
 }
 
 #[test]

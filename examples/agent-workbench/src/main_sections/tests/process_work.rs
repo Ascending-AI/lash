@@ -113,6 +113,10 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
                 },
                 lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
+                lash::process::ProcessLifecyclePolicy::new(
+                    lash::process::ParentScope::Host,
+                    lash::process::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([lash::process::ProcessEventType {
                 name: "progress".to_string(),
@@ -190,6 +194,10 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
             },
             lash::process::RecoveryContract::ExternallyOwned,
             lash::process::ProcessProvenance::host(),
+            lash::process::ProcessLifecyclePolicy::new(
+                lash::process::ParentScope::Host,
+                lash::process::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register failed process");
@@ -311,6 +319,10 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
             lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                 &session_id,
             )),
+            lash::process::ProcessLifecyclePolicy::new(
+                lash::process::ParentScope::Host,
+                lash::process::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register process");
@@ -461,6 +473,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         input,
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
+        lash::process::ProcessLifecyclePolicy::new(
+            lash::process::ParentScope::Host,
+            lash::process::OnParentEnd::Abandon,
+        ),
     )
     .with_process_provenance(provenance)
     .with_identity(identity)
@@ -545,8 +561,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.outcome.is_none());
     let registration_digest = record
         .registration_fingerprint
-        .strip_prefix("process-registration-definition:v5:blake3:")
-        .expect("process registration uses the v5 BLAKE3 definition-fingerprint family");
+        .strip_prefix("process-registration-definition:v6:blake3:")
+        .expect("process registration uses the v6 BLAKE3 definition-fingerprint family");
     assert_eq!(registration_digest.len(), 64);
     assert!(
         registration_digest
@@ -889,6 +905,10 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::new(ProcessOriginator::host_scoped("batch-service")),
+            lash::process::ProcessLifecyclePolicy::new(
+                lash::process::ParentScope::Host,
+                lash::process::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register externally-owned work");
@@ -1093,6 +1113,10 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
                     Some(session_id) => ProcessProvenance::session(SessionScope::new(session_id)),
                     None => ProcessProvenance::host(),
                 },
+                lash::process::ProcessLifecyclePolicy::new(
+                    lash::process::ParentScope::Host,
+                    lash::process::OnParentEnd::Abandon,
+                ),
             ))
             .await
             .expect("register work-rail process");

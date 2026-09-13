@@ -351,6 +351,10 @@ finish "registered"
                 // Worker-rebuild recovery tests need the row to be re-executable.
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION_ID)),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
         }
 

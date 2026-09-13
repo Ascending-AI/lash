@@ -140,6 +140,9 @@ pub enum RuntimeErrorCode {
     /// ADR 0051 effect-host implementor diagnostic for a write or cancellation
     /// refused because the recorded target is already terminal.
     ProcessAlreadyTerminal,
+    /// Effect-host implementor diagnostic for a child registration refused
+    /// because its declared parent scope has already ended.
+    ProcessParentEnded,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -604,6 +607,7 @@ impl RuntimeErrorCode {
             Self::ProcessPanicked => "process_panicked",
             Self::ProcessNotVisible => "process_not_visible",
             Self::ProcessAlreadyTerminal => "process_already_terminal",
+            Self::ProcessParentEnded => "process_parent_ended",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessIncarnationSuperseded => "process_incarnation_superseded",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
@@ -834,6 +838,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessPanicked
                 | Self::ProcessNotVisible
                 | Self::ProcessAlreadyTerminal
+                | Self::ProcessParentEnded
                 | Self::ProcessNoLongerRetained
                 | Self::ProcessIncarnationSuperseded
                 | Self::ProcessRegistryUnavailable
@@ -987,6 +992,7 @@ impl RuntimeErrorCode {
             "process_panicked" => Self::ProcessPanicked,
             "process_not_visible" => Self::ProcessNotVisible,
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
+            "process_parent_ended" => Self::ProcessParentEnded,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_incarnation_superseded" => Self::ProcessIncarnationSuperseded,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
@@ -1398,6 +1404,7 @@ mod tests {
             | RuntimeErrorCode::ProcessPanicked
             | RuntimeErrorCode::ProcessNotVisible
             | RuntimeErrorCode::ProcessAlreadyTerminal
+            | RuntimeErrorCode::ProcessParentEnded
             | RuntimeErrorCode::ProcessNoLongerRetained
             | RuntimeErrorCode::ProcessIncarnationSuperseded
             | RuntimeErrorCode::ProcessRegistryUnavailable
@@ -1566,6 +1573,7 @@ mod tests {
             RuntimeErrorCode::ProcessPanicked,
             RuntimeErrorCode::ProcessNotVisible,
             RuntimeErrorCode::ProcessAlreadyTerminal,
+            RuntimeErrorCode::ProcessParentEnded,
             RuntimeErrorCode::ProcessNoLongerRetained,
             RuntimeErrorCode::ProcessIncarnationSuperseded,
             RuntimeErrorCode::ProcessRegistryUnavailable,

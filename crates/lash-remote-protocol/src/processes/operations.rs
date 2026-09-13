@@ -171,3 +171,65 @@ impl RemoteProcessEventsResponse {
         Ok(())
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProcessStartRequest {
+    pub id: ProcessId,
+    pub input: RemoteProcessInput,
+    pub disposition: RemoteRecoveryContract,
+    pub lifecycle: Option<RemoteProcessLifecyclePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
+    pub originator: RemoteProcessOriginator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<RemoteProcessIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observers: Vec<SessionId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub event_types: Vec<RemoteProcessEventType>,
+}
+
+impl RemoteProcessStartRequest {
+    pub fn validate(&self) -> Result<(), RemoteProtocolError> {
+        require_non_empty("RemoteProcessStartRequest", "id", &self.id)?;
+        if self.max_attempts == Some(0) {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessStartRequest",
+                message: "max_attempts must be greater than zero when provided".to_string(),
+            });
+        }
+        self.lifecycle
+            .as_ref()
+            .ok_or_else(|| RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessStartRequest",
+                message: "lifecycle policy is required".to_string(),
+            })?
+            .validate("RemoteProcessStartRequest", &self.originator)?;
+        self.input.validate("RemoteProcessStartRequest")?;
+        if let Some(env_spec) = &self.env_spec {
+            env_spec.validate("RemoteProcessStartRequest")?;
+        }
+        if let Some(identity) = &self.identity {
+            identity.validate("RemoteProcessStartRequest")?;
+        }
+        self.originator.validate("RemoteProcessStartRequest")?;
+        if let Some(wake_session_id) = &self.wake_session_id {
+            require_non_empty(
+                "RemoteProcessStartRequest",
+                "wake_session_id",
+                wake_session_id,
+            )?;
+        }
+        for observer in &self.observers {
+            require_non_empty("RemoteProcessStartRequest", "observers", observer)?;
+        }
+        for event_type in &self.event_types {
+            event_type.validate("RemoteProcessStartRequest")?;
+        }
+        Ok(())
+    }
+}

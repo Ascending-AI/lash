@@ -7135,7 +7135,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -7276,6 +7275,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -8284,7 +8289,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -8425,6 +8429,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -8863,7 +8873,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -9004,6 +9013,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -9200,7 +9215,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -9341,6 +9355,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -10018,7 +10038,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -10159,6 +10178,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -10538,7 +10563,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -10679,6 +10703,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -11035,7 +11065,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -11176,6 +11205,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -11278,7 +11313,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -11419,6 +11453,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -13223,7 +13263,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -13364,6 +13403,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -13466,7 +13511,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -13607,6 +13651,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -17286,7 +17336,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -17427,6 +17476,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -17529,7 +17584,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -17670,6 +17724,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -18349,7 +18409,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -18490,6 +18549,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -18592,7 +18657,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -18733,6 +18797,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -20420,7 +20490,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -20561,6 +20630,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -20663,7 +20738,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -20804,6 +20878,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -21676,7 +21756,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -21817,6 +21896,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -22169,7 +22254,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -22310,6 +22394,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -22412,7 +22502,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -22553,6 +22642,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -22655,7 +22750,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -22796,6 +22890,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -22898,7 +22998,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -23039,6 +23138,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -23141,7 +23246,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -23282,6 +23386,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -23446,7 +23556,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -23587,6 +23696,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -23689,7 +23804,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -23830,6 +23944,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -25309,7 +25429,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -25450,6 +25569,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -25552,7 +25677,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -25693,6 +25817,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -25795,7 +25925,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -25936,6 +26065,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -26038,7 +26173,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -26179,6 +26313,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -27340,7 +27480,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -27481,6 +27620,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -27583,7 +27728,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -27724,6 +27868,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -28225,7 +28375,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -28366,6 +28515,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -28468,7 +28623,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -28609,6 +28763,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -29000,7 +29160,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -29141,6 +29300,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -29243,7 +29408,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -29384,6 +29548,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -29756,7 +29926,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -29897,6 +30066,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -29999,7 +30174,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -30140,6 +30314,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -30972,7 +31152,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -31113,6 +31292,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -31215,7 +31400,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -31356,6 +31540,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -32777,7 +32967,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -32918,6 +33107,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -33020,7 +33215,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -33161,6 +33355,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-001"
@@ -34281,7 +34481,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -34422,6 +34621,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -34524,7 +34729,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -34665,6 +34869,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -34767,7 +34977,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -34908,6 +35117,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -35010,7 +35225,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -35151,6 +35365,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -35253,7 +35473,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -35394,6 +35613,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -35496,7 +35721,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -35637,6 +35861,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -36117,7 +36347,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -36258,6 +36487,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -36360,7 +36595,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -36501,6 +36735,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -37039,7 +37279,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -37180,6 +37419,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -37282,7 +37527,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -37423,6 +37667,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -37693,7 +37943,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -37834,6 +38083,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -37936,7 +38191,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -38077,6 +38331,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -38694,7 +38954,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -38835,6 +39094,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -38937,7 +39202,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -39078,6 +39342,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-004"
@@ -39734,7 +40004,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -39875,6 +40144,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -39977,7 +40252,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -40118,6 +40392,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-002"
@@ -40880,7 +41160,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -41021,6 +41300,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"
@@ -41123,7 +41408,6 @@
               "intents": [
                 {
                   "intent": {
-                    "on_parent_end": "abandon",
                     "request": {
                       "disposition": "externally_owned",
                       "event_types": [
@@ -41264,6 +41548,12 @@
                       "originator": {
                         "scope": "lash-sim-durable-effect",
                         "type": "host"
+                      },
+                      "lifecycle": {
+                        "parent": {
+                          "kind": "host"
+                        },
+                        "on_parent_end": "abandon"
                       }
                     },
                     "session_id": "session-003"

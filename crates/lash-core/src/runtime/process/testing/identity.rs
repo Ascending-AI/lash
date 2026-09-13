@@ -117,6 +117,10 @@ fn engine_entry(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(
             ProcessIdentity::new("test-engine")

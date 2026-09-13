@@ -245,6 +245,21 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 registration.id, existing.registration_fingerprint, registration_fingerprint
             )));
         }
+        // FIG-2963: ledger-based refusal replaces this
+        if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
+            && let lash_core::ParentScope::Process {
+                process_id,
+                incarnation,
+            } = &registration.lifecycle.parent
+            && let Some(parent) = load_process_tx(&mut tx, process_id).await?.as_ref()
+            && parent.incarnation == *incarnation
+            && parent.is_terminal()
+        {
+            return Err(lash_core::PluginError::ParentEnded {
+                process_id: registration.id.clone(),
+                parent: registration.lifecycle.parent.clone(),
+            });
+        }
         let now = self.clock.timestamp_ms();
         let change_seq = next_process_change_seq_tx(&mut tx).await?;
         let mut record = ProcessRecord::from_prepared_registration(
@@ -1538,7 +1553,6 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 }
-
 impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
     fn with_runtime_clock(
         &self,
@@ -1547,7 +1561,6 @@ impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
         Some(Arc::new(self.clone().with_clock(clock)))
     }
 }
-
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
@@ -1569,7 +1582,6 @@ impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
         .transpose()
     }
 }
-
 /// This registry's registration truth for a bound effect host (ADR 0049).
 struct PostgresRegistrationProbe {
     pool: sqlx::PgPool,

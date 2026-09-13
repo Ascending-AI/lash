@@ -40,6 +40,10 @@ fn registration() -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(
         ProcessIdentity::new("runbook")
@@ -118,6 +122,10 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_identity(ProcessIdentity::new("runbook-retarget"))
             .with_extra_event_types([ProcessEventType {

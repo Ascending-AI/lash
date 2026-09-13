@@ -365,6 +365,12 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -382,10 +388,15 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         "ignored-derived-child-id",
-                        lash_core::ProcessOriginator::host_scoped("postgres-process-parent-law"),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            lash_core::SessionId::from(call.context.session_id()),
+                        )),
                         serde_json::json!({"process_parent_child": child}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            parent_scope.clone(),
+                            lash_core::OnParentEnd::Cancel,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             ))])
         } else {
@@ -466,6 +477,10 @@ async fn segmented_registration(
             .expect("encode PostgreSQL Lashlang process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION)),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_identity(identity)
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
@@ -986,6 +1001,10 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION)),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )

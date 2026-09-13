@@ -291,6 +291,10 @@ pub(super) async fn trigger_lashlang_registration(
                 node_id: "trigger:resource.updated".to_string(),
             }),
         ),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -344,6 +348,10 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_signal_event_types(
@@ -414,6 +422,10 @@ pub(super) async fn sleeping_process_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -477,6 +489,10 @@ pub(super) async fn sleeping_then_tool_process_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1101,6 +1117,10 @@ pub(super) fn counting_tool_registration(
         },
         disposition,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_execution_env_ref(Some(env_ref))
 }

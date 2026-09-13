@@ -702,6 +702,10 @@ fn registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 

@@ -868,6 +868,12 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
         &self,
         call: lash_core::ToolCall<'_>,
     ) -> lash_core::ToolAttemptOutcome {
+        let parent_scope = call
+            .context
+            .child_process_parent_scope()
+            .await
+            .expect("recorded attempt carries its parent scope");
+
         self.calls.fetch_add(1, Ordering::SeqCst);
         let child = call
             .args
@@ -885,10 +891,15 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
                     session_id: SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(
                         format!("ignored-{child}"),
-                        lash_core::ProcessOriginator::host_scoped("process-parent-law"),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            SessionId::from(call.context.session_id()),
+                        )),
                         serde_json::json!({"process_parent_child": child}),
+                        lash_core::ProcessLifecyclePolicy::new(
+                            parent_scope.clone(),
+                            lash_core::OnParentEnd::Cancel,
+                        ),
                     ),
-                    on_parent_end: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             ))])
         } else {
@@ -1025,6 +1036,10 @@ pub(super) async fn process_parent_lashlang_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1080,6 +1095,10 @@ pub(super) async fn segmented_child_await_registration(
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
             "segmented-child-await-root",
         )),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1413,6 +1432,10 @@ pub(super) async fn process_parents_teardown_after_durable_end_across_segments_a
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new("process-parent-law")),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_execution_env_ref(Some(env_ref));
     registry
@@ -1589,6 +1612,10 @@ pub(super) async fn snapshot_lashlang_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1647,6 +1674,10 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(creator_scope.clone()),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_extra_event_types([process_wake_event_type()])
     .with_execution_env_ref(Some(env_ref))

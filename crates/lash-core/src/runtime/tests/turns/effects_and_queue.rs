@@ -70,6 +70,10 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -2077,6 +2081,10 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),

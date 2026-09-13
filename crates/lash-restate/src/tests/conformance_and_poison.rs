@@ -1326,6 +1326,10 @@ pub(super) fn external_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1337,6 +1341,10 @@ pub(super) fn rerunnable_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1355,6 +1363,10 @@ pub(super) fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistrat
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 
@@ -1366,6 +1378,10 @@ pub(super) fn owner_bound_registration(id: &str) -> ProcessRegistration {
         },
         lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
 }
 

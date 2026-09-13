@@ -605,8 +605,11 @@ impl ToolProvider for AttemptIntentTools {
                         "provider-supplied-id-is-replaced",
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
                         json!({"source": "recorded-attempt"}),
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
                     ),
-                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     session_id: SessionId::from("session"),
@@ -2341,6 +2344,10 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
                 },
                 crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types(event_types),
             &[SessionId::from("session")],

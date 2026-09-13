@@ -668,6 +668,10 @@ impl TriggerRouter {
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::new(subscription.registrant.clone())
                 .with_caused_by(Some(trigger_causal_ref.clone())),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
         )
         .with_identity(subscription.target_identity.clone())
         .with_extra_event_types(subscription.event_types.clone())

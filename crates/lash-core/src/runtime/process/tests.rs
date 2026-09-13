@@ -13,6 +13,7 @@ fn registration(id: &str) -> ProcessRegistration {
         },
         crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
 }
 
@@ -537,6 +538,7 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
+        ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
     )
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("process-env:cleanup")));
     let registered = registry

@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 65;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 66;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -319,33 +319,55 @@ fn assert_fixture_schema_version(found: u32) {
 
 #[test]
 fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    for relative_path in crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS {
-        let predecessor_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
-        let predecessor: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&predecessor_path).unwrap_or_else(|error| {
-                panic!(
-                    "read recorded durable-read predecessor {}: {error}",
-                    predecessor_path.display()
-                )
-            }))
-            .expect("decode recorded durable-read predecessor");
-        let predecessor = predecessor["fixture_schema_version"]
-            .as_u64()
-            .and_then(|version| u32::try_from(version).ok())
-            .expect("recorded durable-read predecessor carries a u32 schema version");
-        assert_eq!(
-            predecessor, 64,
-            "the frozen predecessor artifact is the actual origin/main fixture"
-        );
-        assert_eq!(
-            predecessor + 1,
+    // Preserve every frozen integration parent while requiring the actual
+    // current predecessor to remain adjacent to this build's generation.
+    for (paths, predecessor_version, successor_version) in [
+        (crate::ANCIENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 62, 63),
+        (
+            crate::OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            63,
+            64,
+        ),
+        (
+            crate::HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            64,
+            65,
+        ),
+        (
+            crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            65,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
-            "durable-read fixture adjacency pin"
-        );
-        assert!(
-            std::panic::catch_unwind(|| assert_fixture_schema_version(predecessor)).is_err(),
-            "the immediate predecessor fixture schema must be refused"
-        );
+        ),
+    ] {
+        for relative_path in paths {
+            let predecessor_path =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
+            let predecessor: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&predecessor_path).unwrap_or_else(|error| {
+                    panic!(
+                        "read recorded durable-read predecessor {}: {error}",
+                        predecessor_path.display()
+                    )
+                }))
+                .expect("decode recorded durable-read predecessor");
+            let predecessor = predecessor["fixture_schema_version"]
+                .as_u64()
+                .and_then(|version| u32::try_from(version).ok())
+                .expect("recorded durable-read predecessor carries a u32 schema version");
+            assert_eq!(
+                predecessor, predecessor_version,
+                "each frozen parent artifact retains its recorded source generation"
+            );
+            assert_eq!(
+                predecessor + 1,
+                successor_version,
+                "durable-read fixture adjacency pin"
+            );
+            assert!(
+                std::panic::catch_unwind(|| assert_fixture_schema_version(predecessor)).is_err(),
+                "the immediate predecessor fixture schema must be refused"
+            );
+        }
     }
 }
 
@@ -559,6 +581,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([ProcessEventType {
                 name: "fixture.wake".to_string(),
@@ -599,6 +625,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .expect("register fixture process to prune");
@@ -1756,6 +1786,10 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_execution_env_ref(Some(env_ref))
     .with_identity(

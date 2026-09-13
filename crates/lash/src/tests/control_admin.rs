@@ -442,13 +442,14 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
 
 #[tokio::test]
 async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .process_registry(registry.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -468,6 +469,10 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
     )
     .with_observers(["process-observation-events".to_string()])
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
@@ -477,7 +482,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             ..lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded)
         },
     ));
-    session
+    let started = session
         .admin()
         .processes()
         .start(
@@ -485,6 +490,16 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             native_scope(lash_core::ExecutionScope::process(process_id)),
         )
         .await?;
+    assert_eq!(
+        lash_core::ProcessQuery::get_process(registry.as_ref(), &started.id)
+            .await?
+            .expect("started record")
+            .lifecycle,
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon
+        )
+    );
     session
         .admin()
         .processes()
@@ -679,6 +694,10 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 "host-process",
                 lash_core::ProcessOriginator::host(),
                 serde_json::Value::Null,
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_observers(["host-cancel".to_string()]),
             native_scope(lash_core::ExecutionScope::process("host-process")),
@@ -738,6 +757,10 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     process_id,
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -827,6 +850,10 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     process_id,
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_observers(["host-cancel-all".to_string()]),
                 native_scope(lash_core::ExecutionScope::process(process_id)),
@@ -983,6 +1010,10 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             ))
             .await?;
 

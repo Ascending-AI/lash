@@ -200,6 +200,10 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
                 "process-env:postgres-cleanup",

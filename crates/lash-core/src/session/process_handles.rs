@@ -581,6 +581,10 @@ mod tests {
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -696,6 +700,10 @@ mod tests {
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -815,6 +823,10 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             );
             if process_id == "local-signal" {
                 registration = registration.with_extra_event_types([crate::ProcessEventType {

@@ -1830,6 +1830,10 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -1932,6 +1936,10 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -2075,6 +2083,10 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::session(target_scope.clone()),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),

@@ -99,6 +99,10 @@ pub(super) async fn register_lifecycle_row(
             },
             disposition,
             lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
         ))
         .await
         .map(|_| ())
@@ -120,6 +124,10 @@ pub(super) async fn register_rerunnable_lifecycle_row(
                 },
                 RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )

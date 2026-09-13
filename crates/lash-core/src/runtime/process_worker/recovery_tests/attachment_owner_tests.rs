@@ -311,6 +311,10 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
                 },
                 RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref)),
         )

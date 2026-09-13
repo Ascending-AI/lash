@@ -144,7 +144,8 @@ pub use usage_activity::*;
 // Window 60: FIG-1123 carries explicit reasoning-retention capabilities,
 // selections, and genuine-user-segment boundaries. Exact-match negotiation
 // refuses peers that cannot preserve the retention contract.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 60;
+// Window 61: FIG-2960 requires an explicit lifecycle policy on process starts and records.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 61;
 
 /// One versioned remote-protocol message.
 ///

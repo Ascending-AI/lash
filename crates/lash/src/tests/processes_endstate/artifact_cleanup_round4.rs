@@ -35,6 +35,10 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )
@@ -77,6 +81,10 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )
@@ -192,6 +200,10 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )
