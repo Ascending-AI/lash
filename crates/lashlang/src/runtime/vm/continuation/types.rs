@@ -24,6 +24,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         }
 
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             format_version: u32,
             reference_semantics: bool,
@@ -38,7 +39,6 @@ impl<'de> Deserialize<'de> for VmContinuation {
             last_value: Option<Value>,
             #[serde(deserialize_with = "continuation_serde::deserialize_slots")]
             slots: Vec<Option<Value>>,
-            projected_slots: Vec<bool>,
             #[serde(deserialize_with = "continuation_serde::deserialize_record")]
             globals: Record,
             iterator_stack: Vec<VmIteratorContinuation>,
@@ -66,7 +66,6 @@ impl<'de> Deserialize<'de> for VmContinuation {
             execution_nonce: wire.execution_nonce,
             last_value: wire.last_value,
             slots: wire.slots,
-            projected_slots: wire.projected_slots,
             globals: wire.globals,
             iterator_stack: wire.iterator_stack,
             frame_stack: wire.frame_stack,

@@ -106,7 +106,6 @@ async fn a_non_monotonic_handler_stack_is_refused() {
         operand_stack: vec![Value::String("boom".into())],
         last_value: None,
         slots: vec![None; function.slot_names.len()],
-        projected_slots: vec![false; function.slot_names.len()],
         globals: Record::new(),
         iterator_stack: Vec::new(),
         frame_stack: vec![VmFrameContinuation {
@@ -114,7 +113,6 @@ async fn a_non_monotonic_handler_stack_is_refused() {
             function: None,
             operand_stack_base: 0,
             slots: vec![None; program.chunk.slot_names.len()],
-            projected_slots: vec![false; program.chunk.slot_names.len()],
             globals: Record::new(),
             iterator_stack: Vec::new(),
             return_target: VmFrameReturnContinuation::Direct,

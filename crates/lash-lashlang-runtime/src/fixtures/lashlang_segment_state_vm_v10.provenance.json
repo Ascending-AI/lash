@@ -1,0 +1,11 @@
+{
+  "schema": "lash.lashlang-segment-predecessor-provenance.v1",
+  "source_commit": "ccab40166d0dc9296f48e58c89cce7e5de21175b",
+  "captured_by": "process::segment_trace_tests::capture_unversioned_segment_state_from_writer before removing the outer version field",
+  "relationship": "source commit immediately before the FIG-2868 VM continuation v11 cutover",
+  "vm_continuation_format_version": 10,
+  "artifact": {
+    "path": "lashlang_segment_state_vm_v10.json",
+    "sha256": "b609b463abfb5b14b8b286f9a0651569ef9cd1b16cc36248737d3c7f9080d2fd"
+  }
+}
