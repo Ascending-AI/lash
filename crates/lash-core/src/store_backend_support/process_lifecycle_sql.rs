@@ -19,12 +19,12 @@
 use crate::{ProcessStatus, WakeDeliveryState};
 
 /// Quote one process status for interpolation into backend SQL.
-pub fn process_status_sql_literal(status: ProcessStatus) -> String {
+pub(crate) fn process_status_sql_literal(status: ProcessStatus) -> String {
     format!("'{}'", status.label())
 }
 
 /// Quote a process-status list as the body of a SQL `IN (...)` list.
-pub fn process_status_sql_literal_list(statuses: &[ProcessStatus]) -> String {
+pub(crate) fn process_status_sql_literal_list(statuses: &[ProcessStatus]) -> String {
     statuses
         .iter()
         .copied()
@@ -33,31 +33,29 @@ pub fn process_status_sql_literal_list(statuses: &[ProcessStatus]) -> String {
         .join(", ")
 }
 
+/// A predicate that admits no row.
+///
+/// Used only for the unreachable empty-partition case: `IN ()` is not valid
+/// SQL in either backend, and a bare `FALSE` is not a predicate the `<column>
+/// IN (...)` shape can carry.
+const NO_ROW_PREDICATE: &str = "1 = 0";
+
+/// A predicate that admits every row: the complement of [`NO_ROW_PREDICATE`].
+const EVERY_ROW_PREDICATE: &str = "1 = 1";
+
 /// The live process statuses spelled as the body of a SQL `IN (...)` list.
-pub fn live_process_statuses_sql() -> String {
+///
+/// Empty only if no variant is live, which the exhaustive
+/// [`ProcessStatus::is_live`] match makes a deliberate choice rather than an
+/// oversight; the predicate builders below turn that case into a predicate
+/// instead of an invalid `IN ()`.
+pub(crate) fn live_process_statuses_sql() -> String {
     let live = ProcessStatus::ALL
         .iter()
         .copied()
         .filter(ProcessStatus::is_live)
         .collect::<Vec<_>>();
-    if live.is_empty() {
-        // Admit no row rather than interpolating the invalid SQL `IN ()`.
-        return "FALSE".to_string();
-    }
     process_status_sql_literal_list(&live)
-}
-
-/// The retired process statuses spelled as the body of a SQL `IN (...)` list.
-pub fn retired_process_statuses_sql() -> String {
-    let retired = ProcessStatus::ALL
-        .iter()
-        .copied()
-        .filter(ProcessStatus::is_retired)
-        .collect::<Vec<_>>();
-    if retired.is_empty() {
-        return "FALSE".to_string();
-    }
-    process_status_sql_literal_list(&retired)
 }
 
 /// `<column> IN (<live statuses>)`: the live-worklist predicate.
@@ -65,7 +63,11 @@ pub fn retired_process_statuses_sql() -> String {
 /// `column` is a SQL identifier the caller owns (`status`, `p.status`,
 /// `processes.status`); it is never user input.
 pub fn live_process_status_predicate_sql(column: &str) -> String {
-    format!("{column} IN ({})", live_process_statuses_sql())
+    let live = live_process_statuses_sql();
+    if live.is_empty() {
+        return NO_ROW_PREDICATE.to_string();
+    }
+    format!("{column} IN ({live})")
 }
 
 /// `<column> NOT IN (<live statuses>)`: the retention complement of
@@ -76,7 +78,12 @@ pub fn live_process_status_predicate_sql(column: &str) -> String {
 /// from retention; `live_and_retired_statuses_partition_the_vocabulary` keeps
 /// the two sets complementary.
 pub fn retired_process_status_predicate_sql(column: &str) -> String {
-    format!("{column} NOT IN ({})", live_process_statuses_sql())
+    let live = live_process_statuses_sql();
+    if live.is_empty() {
+        // Nothing is live, so every row is retired.
+        return EVERY_ROW_PREDICATE.to_string();
+    }
+    format!("{column} NOT IN ({live})")
 }
 
 /// Quote one wake-delivery state for interpolation into backend SQL.
@@ -85,7 +92,7 @@ pub fn wake_delivery_state_sql_literal(state: WakeDeliveryState) -> String {
 }
 
 /// Quote a wake-delivery state list as the body of a SQL `IN (...)` list.
-pub fn wake_delivery_state_sql_literal_list(states: &[WakeDeliveryState]) -> String {
+pub(crate) fn wake_delivery_state_sql_literal_list(states: &[WakeDeliveryState]) -> String {
     states
         .iter()
         .copied()
@@ -96,21 +103,22 @@ pub fn wake_delivery_state_sql_literal_list(states: &[WakeDeliveryState]) -> Str
 
 /// The undelivered wake-delivery states spelled as the body of a SQL `IN (...)`
 /// list: the deliveries a prune must still account for.
-pub fn undelivered_wake_delivery_states_sql() -> String {
+pub(crate) fn undelivered_wake_delivery_states_sql() -> String {
     let undelivered = WakeDeliveryState::ALL
         .iter()
         .copied()
         .filter(|state| state.is_undelivered())
         .collect::<Vec<_>>();
-    if undelivered.is_empty() {
-        return "FALSE".to_string();
-    }
     wake_delivery_state_sql_literal_list(&undelivered)
 }
 
 /// `<column> IN (<undelivered states>)`.
 pub fn undelivered_wake_delivery_state_predicate_sql(column: &str) -> String {
-    format!("{column} IN ({})", undelivered_wake_delivery_states_sql())
+    let undelivered = undelivered_wake_delivery_states_sql();
+    if undelivered.is_empty() {
+        return NO_ROW_PREDICATE.to_string();
+    }
+    format!("{column} IN ({undelivered})")
 }
 
 #[cfg(test)]

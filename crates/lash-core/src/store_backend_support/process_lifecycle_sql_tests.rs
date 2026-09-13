@@ -20,8 +20,13 @@ fn live_and_retired_statuses_partition_the_vocabulary() {
 #[test]
 fn generated_fragments_match_the_previous_literals() {
     assert_eq!(live_process_statuses_sql(), "'running', 'waiting'");
+    let retired = ProcessStatus::ALL
+        .iter()
+        .copied()
+        .filter(ProcessStatus::is_retired)
+        .collect::<Vec<_>>();
     assert_eq!(
-        retired_process_statuses_sql(),
+        process_status_sql_literal_list(&retired),
         "'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'"
     );
     assert_eq!(

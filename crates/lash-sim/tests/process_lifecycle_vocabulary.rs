@@ -64,37 +64,38 @@ fn is_comment(line: &str) -> bool {
     trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*')
 }
 
-fn collapse_spaces(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut previous_space = false;
-    for character in line.chars() {
-        let space = character.is_whitespace();
-        if space {
-            if !previous_space {
-                out.push(' ');
-            }
-        } else {
-            out.push(character);
-        }
-        previous_space = space;
-    }
-    out
+/// Lowercase the line and drop every space, so a retyped predicate cannot hide
+/// behind casing or spacing: `status in ('running','waiting')` and
+/// `status='running'` normalise to the same shapes as the canonical spelling.
+fn normalise(line: &str) -> String {
+    line.chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
-/// Every `<column> <op> '<label>` shape a retyped predicate takes.
+/// Every `<column> <op> '<label>` shape a retyped predicate takes, matched
+/// against the normalised line. The labels are themselves lowercase, so a
+/// case-folded comparison loses nothing.
 fn violations_in(line: &str, column: &str, labels: &[String]) -> Vec<String> {
-    let collapsed = collapse_spaces(line);
+    let normalised = normalise(line);
+    let column = normalise(column);
     let mut found = Vec::new();
-    for operator in [" IN ('", " NOT IN ('", " = '", " <> '"] {
+    for (operator, spelling) in [
+        ("in('", " IN ('"),
+        ("notin('", " NOT IN ('"),
+        ("='", " = '"),
+        ("<>'", " <> '"),
+    ] {
         let needle = format!("{column}{operator}");
         let mut search_from = 0;
-        while let Some(offset) = collapsed[search_from..].find(&needle) {
+        while let Some(offset) = normalised[search_from..].find(&needle) {
             let start = search_from + offset + needle.len();
             if let Some(label) = labels
                 .iter()
-                .find(|label| collapsed[start..].starts_with(*label))
+                .find(|label| normalised[start..].starts_with(label.as_str()))
             {
-                found.push(format!("{column}{operator}{label}'"));
+                found.push(format!("{column}{spelling}{label}'"));
             }
             search_from = start;
         }
@@ -208,6 +209,10 @@ fn the_gate_rejects_a_reintroduced_literal() {
         "                 AND delivery.state IN ('pending', 'enqueuing')",
         "             SET state = 'discarded', discard_reason = 'target_gone'",
         "                 WHERE earlier.state <> 'enqueued'",
+        // Lowercase keywords and squeezed spacing are the same predicate.
+        "         WHERE status in ('running','waiting') OR status='running'",
+        "         where PROCESSES.STATUS Not In ('running', 'waiting')",
+        "                 AND delivery.state<>'enqueued'",
     ] {
         let mut hits = violations_in(witness, "status", &status_labels);
         hits.extend(violations_in(witness, "state", &state_labels));
