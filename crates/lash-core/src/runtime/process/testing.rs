@@ -37,10 +37,15 @@ mod local_helpers;
 #[path = "testing/parent_end.rs"]
 mod parent_end;
 mod raw_state;
+mod registration_refusals;
 mod retention;
 mod support;
 mod types;
 mod worklist;
+pub use registration_refusals::{
+    REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
+    accepted_process_registration, refused_process_registrations,
+};
 pub use support::TestProcessRegistryWriteExt;
 use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
 use types::{ManagedLeaseMap, ManagedProcessRecord};

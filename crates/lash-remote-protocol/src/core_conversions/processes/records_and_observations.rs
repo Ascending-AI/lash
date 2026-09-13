@@ -245,6 +245,20 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             .with_execution_env_ref(env_ref.map(|env_ref| {
                 lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())
             }));
+        // `ProcessRecord::from_registration` `.expect()`s on any core validation
+        // error, so peer input must clear core's validator here or a malformed
+        // record aborts the host (FIG-2985). Running the core validator itself,
+        // rather than mirroring its rules, means the two cannot drift: a new
+        // core rule refuses peer input the day it lands. The DTO-level
+        // `validate` above still refuses what it can see, so most shapes fail
+        // before this point with a field-named message.
+        let registration =
+            lash_core::runtime::prepare_process_registration(registration).map_err(|error| {
+                RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessRecord",
+                    message: format!("process registration is not valid: {error}"),
+                }
+            })?;
         let mut record = lash_core::ProcessRecord::from_registration(
             registration,
             lash_core::ProcessIncarnation::from_registration_sequence(incarnation),

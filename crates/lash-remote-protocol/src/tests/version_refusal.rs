@@ -101,13 +101,9 @@ fn historical_remote_protocol_generation_64_is_refused() {
 
 /// Captured by main's Envelope writer at 9680a9bd86bd; no hand-edited wire bytes.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_65_is_refused() {
+fn historical_remote_protocol_generation_65_is_refused() {
     const PREDECESSOR: u32 = 65;
-    assert_eq!(
-        PREDECESSOR + 1,
-        REMOTE_PROTOCOL_VERSION,
-        "remote-protocol generation adjacency pin"
-    );
+    assert_eq!(PREDECESSOR + 1, 66, "historical generation adjacency pin");
     let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v65.json");
     let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
     assert_eq!(predecessor["protocol_version"], PREDECESSOR);
@@ -130,7 +126,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 66,
+            expected: 67,
         })
     ));
 }
