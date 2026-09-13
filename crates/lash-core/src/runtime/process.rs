@@ -56,8 +56,9 @@ pub use model::{
     ProcessRef, ProcessRegistration, ProcessSessionDeleteReport, ProcessSpawnProvenance,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
     ProcessStatusFilter, ProcessTombstone, RecoveryContract, SessionId, SessionScope,
-    SessionScopeId, WaitKind, WaitState, ensure_process_lease_schema_version,
-    load_process_execution_env, process_runtime_session_ids, publish_process_execution_env,
+    SessionScopeId, WaitKind, WaitState, artifact_owner_is_permanently_retired,
+    ensure_process_lease_schema_version, load_process_execution_env, process_runtime_session_ids,
+    publish_process_execution_env,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,

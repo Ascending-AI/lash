@@ -500,7 +500,7 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         let mut state = self.envs.lock_recover();
         if state.retired_owners.contains(owner) {
             return Err(crate::PluginError::Session(
-                "artifact owner has been permanently retired".to_string(),
+                ARTIFACT_OWNER_RETIRED_MESSAGE.to_string(),
             ));
         }
         if let Some(existing) = state.bytes.get(env_ref.as_str())
@@ -615,6 +615,22 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
             .get(env_ref.as_str())
             .cloned())
     }
+}
+
+/// Message every artifact store reports when a write targets an owner that a permanent retirement
+/// fence has already closed.
+pub const ARTIFACT_OWNER_RETIRED_MESSAGE: &str = "artifact owner has been permanently retired";
+
+/// Reports whether `error` is an artifact store refusing a write because the owner was permanently
+/// retired, as opposed to any other store failure.
+///
+/// Callers that stage an artifact before the effect that owns it is journaled use this to tell
+/// "this turn already ran and fenced the staging owner" apart from a real store fault.
+pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Session(message) if message.contains(ARTIFACT_OWNER_RETIRED_MESSAGE)
+    )
 }
 
 pub async fn publish_process_execution_env(
