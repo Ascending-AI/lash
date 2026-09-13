@@ -126,6 +126,17 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
+    if package_name == "lash-internal-core" and kind == "unit-test":
+        # Partition-owned, but not remotely executable: rustc for the
+        # workspace's largest test binary -- 446 files, over seventeen hundred
+        # cases -- is killed without a diagnostic on the shared pool. A
+        # per-target `exec_properties` budget cannot fix it, because Bazel
+        # applies `--remote_default_exec_properties` only to actions that carry
+        # none, so raising `memory_kb` there drops the executor-runtime
+        # property the pool schedules on. CI's Bazel job compiles and runs this
+        # label on its own runner instead. Pin the placement rather than split
+        # the binary or drop cases from it.
+        tags.append("no-remote-exec")
     if package_name == "lash-internal-typescript" and kind == "test":
         # Partition-owned, but not remotely executable: the no-abort guarantee
         # forks a dozen children that each parse deliberately deep sources
@@ -246,15 +257,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             )
             unit_extra_data = []
             unit_args = []
-            unit_exec_properties = {}
             if package["name"] == "lash-internal-core":
-                # Rustc for this binary is the workspace's largest single
-                # compile -- 446 files and over seventeen hundred test cases --
-                # and the pool kills it without a diagnostic at the 4 GiB
-                # default per-action budget (`memory_kb` in `.bazelrc`). Raise
-                # the budget for this action rather than splitting the binary
-                # or dropping cases from it.
-                unit_exec_properties["memory_kb"] = "8388608"
                 # The fault-matrix routing probes execute the real
                 # scripts/confidence-gate.sh against a recording `cargo`.
                 unit_extra_data.append("//:confidence_gate_scripts")
@@ -295,13 +298,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 f"    crate_name = {quote(library['name'])},\n"
                 f"    crate_root = {quote(relative(library['src_path']).replace(package_dir + '/', ''))},\n"
                 f"    declared_features = {string_list(declared_features)},\n"
-                + (
-                    "    exec_properties = "
-                    f"{json.dumps(unit_exec_properties, sort_keys=True)},\n"
-                    if unit_exec_properties
-                    else ""
-                )
-                + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
+                f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
                     if unit_extra_data

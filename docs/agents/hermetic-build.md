@@ -195,10 +195,13 @@ rather than exempted:
   how CI's Bazel job executes tests, so the tag pins placement rather than
   softening what the test proves.
 
-`//crates/lash-core:lash-core__unit_test` declares
-`exec_properties = {"memory_kb": "8388608"}`. Rustc for the workspace's largest
-single compile is killed without a diagnostic at the pool's 4 GiB default
-per-action budget; the budget is raised rather than splitting the binary.
+`//crates/lash-core:lash-core__unit_test` carries `no-remote-exec` for the same
+class of reason: rustc for the workspace's largest test binary is killed
+without a diagnostic on the shared pool, and a per-target `exec_properties`
+budget cannot fix it, because Bazel applies
+`--remote_default_exec_properties` only to actions that carry none -- raising
+`memory_kb` there drops the executor-runtime property the pool schedules on.
+CI's Bazel job compiles and runs the label on its own runner.
 
 `//crates/lash-sim:lash-sim__unit_test` declares `timeout = "long"`. It carries
 the generated-simulation and minimizer fixture replays and ran 227-300 s on the
