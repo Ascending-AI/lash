@@ -69,14 +69,13 @@ impl RuntimeExecutionContext<'_> {
                 }
                 let child_execution_trace_hook =
                     child_trace_hooks.get(&child.call.call_id).cloned();
-                let outcome = context
-                    .execute_prepared_tool_batch_child(
-                        child,
-                        parent_invocation.clone(),
-                        child_execution_trace_hook,
-                        None,
-                    )
-                    .await?;
+                let outcome = Box::pin(context.execute_prepared_tool_batch_child(
+                    child,
+                    parent_invocation.clone(),
+                    child_execution_trace_hook,
+                    None,
+                ))
+                .await?;
                 launches.push(outcome.launch);
                 triggers.extend(outcome.triggers);
                 context = context.with_cancellation_token(tool_cancel.clone());

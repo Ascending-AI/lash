@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo"
-# The orb-provided build geometry is mandatory for every cargo command.
+# The Kiln-provided build geometry is mandatory for every cargo command.
 # shellcheck source=env.sh
 source "$repo/env.sh"
 

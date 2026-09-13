@@ -1582,7 +1582,7 @@ impl crate::ToolProvider for ParentEndFailureIntentTool {
     async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     request: crate::ProcessStartRequest::external(
@@ -1628,7 +1628,7 @@ impl crate::ToolProvider for CasSurvivorIntentTools {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
-            crate::ToolIntents::v1(vec![crate::ToolIntent::EmitProcessEvent(
+            crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
                 crate::EmitProcessEventIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from("cas-survivor-intent-target"),

@@ -196,7 +196,7 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
         ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
         ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
@@ -238,8 +238,8 @@ pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver,
-        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant,
+        RecordedGrantInstallError, Resolution as DeferredToolResolution,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
     };
     /// Author a fixed-tool provider without hand-rolling `tool_manifests` /
     /// `resolve_contract`: supply the [`ToolDefinition`]s once and an

@@ -690,7 +690,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         });
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "echo": line })),
-            lash_core::ToolIntents::v1(vec![intent]),
+            lash_core::ToolIntents::v2(vec![intent]),
         )
     }
 }
@@ -886,7 +886,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(

@@ -29,16 +29,18 @@ impl ProcessArtifactCleanup {
 
 /// Result of acknowledging one durable process-artifact cleanup record.
 ///
-/// Acknowledgement removes the exact cleanup record even when the host-facing
-/// process id has since been registered again. The stale outcome makes that
-/// replacement visible without allowing the predecessor cleanup to retain
-/// dead artifact-owner edges indefinitely.
+/// Acknowledgement observes the current process incarnation and the exact
+/// cleanup row within one statement or transaction snapshot. When that
+/// snapshot contains a successor incarnation, implementations prioritize
+/// [`ProcessArtifactCleanupAck::StaleIncarnation`] whether or not this call
+/// deleted the predecessor row. Repeated calls therefore remain idempotently
+/// stale after the cleanup row is gone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use = "stale process incarnations must not be acknowledged silently"]
 pub enum ProcessArtifactCleanupAck {
     /// The exact cleanup record was removed and no successor is live.
     Acknowledged { process_ref: ProcessRef },
-    /// The exact cleanup record was removed while a successor incarnation is live.
+    /// A successor incarnation was detected; the cleanup row may already be absent.
     StaleIncarnation {
         expected: ProcessRef,
         found: ProcessRef,

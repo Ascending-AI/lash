@@ -787,6 +787,20 @@ pub fn code_execution_context_with_invocation(
         .into_runtime()
 }
 
+/// Build an empty code-execution context with a caller-supplied effect
+/// controller and stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_effect_controller_and_invocation(
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
 /// Build a code-execution context with a concrete tool surface and the stable
 /// parent invocation production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
@@ -797,6 +811,44 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
     TestExecutionContextBuilder::new()
         .provider(provider)
         .tool_catalog(tool_catalog)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with caller-supplied tool and
+/// effect hosts plus the stable parent invocation.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .shared_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// Build a concrete code-execution context with an already admitted effect
+/// scope. Durable-controller tests use this instead of the shared-controller
+/// shortcut, whose intentionally synthetic runtime-operation scope is suitable
+/// only for scope-agnostic fakes.
+#[doc(hidden)]
+pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    effect_controller: crate::ScopedEffectController<'static>,
+    invocation: crate::RuntimeInvocation,
+) -> crate::RuntimeExecutionContext<'static> {
+    TestExecutionContextBuilder::new()
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .borrowed_effect_controller(effect_controller)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()
@@ -1036,12 +1088,58 @@ pub async fn execute_tool_intents_with_services(
     .await
 }
 
+/// Execute a recorded tool-intent drain with the production trigger router.
+///
+/// Durable-adapter tests use this narrow seam to prove replay refusal before
+/// trigger-store ingestion.
+#[doc(hidden)]
+pub async fn execute_tool_intents_with_services_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: crate::TriggerRouter,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        Some(trigger_router),
+        session_id,
+        tool_call_id,
+        intents,
+        None,
+    )
+    .await
+}
+
 /// Execute a recorded tool-intent drain through the production process-command
 /// route and notify a test hook after a child Start has committed.
 #[doc(hidden)]
 pub async fn execute_tool_intents_with_services_and_hook(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        None,
+        session_id,
+        tool_call_id,
+        intents,
+        child_trace_hook,
+    )
+    .await
+}
+
+async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
     session_id: &SessionId,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
@@ -1061,6 +1159,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
             .session_id(session_id)
             .session_lifecycle(Arc::new(MockSessionManager::default()))
             .processes(processes)
+            .trigger_router(trigger_router)
             .borrowed_effect_controller(scoped_effect_controller)
             .dispatch_parent_invocation(parent_invocation),
     );

@@ -261,49 +261,66 @@ async fn execute_code_inner(
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
-    let mut host_environment = match lashlang_surface.host_environment(ctx.tool_catalog().as_ref())
-    {
-        Ok(host_environment) => host_environment,
-        Err(err) => {
-            emit_step_trace(
-                &ctx,
-                &lashlang_execution_trace_config,
-                Err(&format!("invalid Lashlang host tool surface: {err}")),
-            );
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                format!("invalid Lashlang host tool surface: {err}"),
-                start,
-                Vec::new(),
-            );
-        }
+    let parsed_program = match source.dialect {
+        SourceDialect::Lashlang => lashlang::parse(code).ok(),
+        SourceDialect::Typescript => lash_typescript::parse(code).ok(),
     };
 
-    // gather → resolve → link: fold any deferred call-paths the program
-    // references into the host environment before compiling. The resolution
-    // record lives in the (snapshotted) execution state, so a re-driven or
-    // recovered link replays it without re-calling the resolver. The flat Tool
-    // Catalog is never mutated — resolution is link-scoped only. A resolver is
-    // present only under hosts that configure RLM deferral; most hosts ship
-    // none and this is a no-op.
-    if deferred_tool_resolver.is_some() || !state.deferred_resolutions.is_empty() {
+    // gather → journal → mask → fold: every parsed resource-bearing cell first
+    // consults the deferred journal, even if no live resolver and no checkpoint
+    // projection are available. This is what closes the postcommit / before-
+    // projection crash window. Journal outcomes then mask exact paths while the
+    // ambient Tool Catalog is built, before its collision validation can
+    // preempt recorded authority. Unrelated catalog errors remain ordinary host
+    // failures.
+    let mut host_environment = if let Some(program) = parsed_program
+        .as_ref()
+        .filter(|_| state.deferred_resolutions.link_key.is_some())
+    {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
-        let program = match source.dialect {
-            SourceDialect::Lashlang => lashlang::parse(code).ok(),
-            SourceDialect::Typescript => lash_typescript::parse(code).ok(),
-        };
-        if let Some(program) = program {
-            host_environment = lash_lashlang_runtime::resolve_and_fold_deferred(
-                &program,
-                host_environment,
-                deferred_tool_resolver.as_ref(),
-                &mut state.deferred_resolutions,
-            )
-            .await;
+        match lash_lashlang_runtime::resolve_and_build_deferred_environment(
+            program,
+            &lashlang_surface,
+            ctx.tool_catalog().as_ref(),
+            deferred_tool_resolver.as_ref(),
+            &mut state.deferred_resolutions,
+            &ctx,
+        )
+        .await
+        {
+            Ok(environment) => environment,
+            Err(error) => {
+                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                    start,
+                    Vec::new(),
+                );
+            }
         }
-    }
+    } else {
+        match lashlang_surface.host_environment(ctx.tool_catalog().as_ref()) {
+            Ok(environment) => environment,
+            Err(error) => {
+                emit_step_trace(
+                    &ctx,
+                    &lashlang_execution_trace_config,
+                    Err(&format!("invalid Lashlang host tool surface: {error}")),
+                );
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    format!("invalid Lashlang host tool surface: {error}"),
+                    start,
+                    Vec::new(),
+                );
+            }
+        }
+    };
 
     let mut live_global_names = state
         .rlm

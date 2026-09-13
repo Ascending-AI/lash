@@ -102,3 +102,50 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         turn_policy
     );
 }
+
+pub(super) async fn empty_tool_call_identifiers_leave_no_row(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    for (id, call_id, tool_name, needle) in [
+        ("empty-call-id", "", "tool", "call id"),
+        ("empty-tool-name", "call", "", "tool name"),
+        ("whitespace-call-id", "  ", "tool", "call id"),
+    ] {
+        let process_id = ProcessId::from(id);
+        let registration = ProcessRegistration::new(
+            &process_id,
+            ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    call_id,
+                    crate::ToolId::new("tool-id"),
+                    tool_name,
+                    serde_json::json!({}),
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::host(),
+            ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        )
+        .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(format!(
+            "process-env:{id}"
+        ))));
+        let error = registry
+            .register_process(registration)
+            .await
+            .expect_err("empty tool-call identifiers must be refused");
+        assert!(
+            error.to_string().contains(needle),
+            "refusal for {id} should mention {needle}: {error}"
+        );
+        assert!(
+            registry
+                .get_process(&process_id)
+                .await
+                .expect("read after refusal")
+                .is_none(),
+            "refused registration {id} must not leave a row"
+        );
+    }
+}

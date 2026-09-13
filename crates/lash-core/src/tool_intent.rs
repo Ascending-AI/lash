@@ -5,8 +5,13 @@ pub use lash_sansio::ProcessParentEndPolicy;
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
+///
+/// Version 2 binds `EmitTrigger` occurrence idempotency to the declaration's
+/// replay key. Version-1 batches and host submissions are refused before any
+/// declaration effect so an occurrence committed under the former caller-key
+/// semantics cannot be emitted again under the new key.
 /// **Integrator class 3: protocol and process-engine implementors.**
-pub const TOOL_INTENT_PROTOCOL_V1: u16 = 1;
+pub const TOOL_INTENT_PROTOCOL_V2: u16 = 2;
 /// Maximum declarations accepted from one recorded attempt.
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
@@ -29,15 +34,15 @@ pub struct ToolIntents {
 
 impl Default for ToolIntents {
     fn default() -> Self {
-        Self::v1(Vec::new())
+        Self::v2(Vec::new())
     }
 }
 
 impl ToolIntents {
-    /// Construct a version-1 declaration batch for protocol and process-engine implementors.
-    pub fn v1(intents: Vec<ToolIntent>) -> Self {
+    /// Construct a version-2 declaration batch for protocol and process-engine implementors.
+    pub fn v2(intents: Vec<ToolIntent>) -> Self {
         Self {
-            protocol_version: TOOL_INTENT_PROTOCOL_V1,
+            protocol_version: TOOL_INTENT_PROTOCOL_V2,
             intents,
         }
     }
@@ -91,8 +96,10 @@ impl ToolIntent {
 /// This is an **integrator class 3: protocol and process-engine implementor**
 /// seam. Process registries persist it so independent facade handles and
 /// crash redrives consult the same first writer before realization.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ToolIntentSubmissionRecord {
+    /// Version selecting the admission and realization contract.
+    pub protocol_version: u16,
     /// Canonical `(session, scope, call, index)` identity and replay key.
     pub identity: ToolIntentIdentity,
     /// First submitted command kind.
@@ -122,12 +129,47 @@ impl ToolIntentSubmissionRecord {
             &serde_json::to_vec(&intent)?,
         );
         Ok(Self {
+            protocol_version: TOOL_INTENT_PROTOCOL_V2,
             identity,
             kind,
             payload_hash,
             intent,
             outcome: None,
             parent_end_settled: false,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct ToolIntentSubmissionRecordWire {
+    protocol_version: Option<u16>,
+    identity: ToolIntentIdentity,
+    kind: ToolIntentKind,
+    payload_hash: String,
+    intent: ToolIntent,
+    #[serde(default)]
+    outcome: Option<crate::ToolIntentExecutionOutcome>,
+    #[serde(default)]
+    parent_end_settled: bool,
+}
+
+impl<'de> Deserialize<'de> for ToolIntentSubmissionRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = ToolIntentSubmissionRecordWire::deserialize(deserializer)?;
+        Ok(Self {
+            // Rows written before the protocol discriminator existed are
+            // classified as v1 solely so ingress can refuse them before
+            // realization. They are never upgraded or accepted implicitly.
+            protocol_version: wire.protocol_version.unwrap_or(1),
+            identity: wire.identity,
+            kind: wire.kind,
+            payload_hash: wire.payload_hash,
+            intent: wire.intent,
+            outcome: wire.outcome,
+            parent_end_settled: wire.parent_end_settled,
         })
     }
 }
@@ -197,8 +239,9 @@ pub struct EmitProcessEventIntent {
 /// A leaf attempt cannot emit a trigger synchronously: an emission that
 /// outlives a failed attempt would advertise a cause that never committed.
 /// Declaring this intent instead moves the emission behind the attempt's own
-/// commit, where the recorded occurrence's `idempotency_key` is the
-/// exactly-once backstop for redrive.
+/// commit, where the shared realization router stamps the recorded occurrence's
+/// `idempotency_key` with this declaration's replay key as the exactly-once
+/// backstop for redrive.
 ///
 /// Three consequences of carrying a whole [`crate::TriggerOccurrenceRequest`]:
 ///
@@ -208,11 +251,12 @@ pub struct EmitProcessEventIntent {
 ///   submission recorded before the change is refused as `DuplicateIdentity`
 ///   after it. New fields belong behind `skip_serializing_if` unless a
 ///   deliberate identity break is the point.
-/// - `request.idempotency_key` is caller-supplied, unlike the replay keys Lash
-///   derives for the process kinds. Two distinct declarations that share a key
-///   collapse into one occurrence at the store and both report success, so the
-///   key must be a function of the committed cause — the attempt's replay key
-///   plus whatever the tool made durable.
+/// - `request.idempotency_key` remains caller-supplied declaration material. It
+///   feeds the serialized first-writer payload hash and therefore submission
+///   identity/conflict detection. At the shared realization boundary the
+///   router replaces it with the declaration replay key as the occurrence's
+///   store-side dedupe key, so distinct declarations cannot collapse while
+///   redriving the same declaration remains exactly-once.
 /// - `session_id` here is the authority the intent executor validates the
 ///   declaration against; `request.session_id` is the occurrence's own routing
 ///   scope, which the router carries onto the occurrence record and never
@@ -221,8 +265,10 @@ pub struct EmitTriggerIntent {
     /// Session whose authority owns the emission. Validated: a declaration
     /// naming another session is refused before it reaches the router.
     pub session_id: SessionId,
-    /// Complete durable trigger-occurrence request handed to the router. Its
-    /// own `session_id` is the occurrence's routing scope, not an authority.
+    /// Complete durable trigger-occurrence request. At realization the router
+    /// replaces its caller-supplied `idempotency_key` with the declaration
+    /// replay key. Its own `session_id` is the occurrence's routing scope, not
+    /// an authority.
     pub request: crate::TriggerOccurrenceRequest,
 }
 

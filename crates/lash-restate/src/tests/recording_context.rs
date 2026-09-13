@@ -79,6 +79,16 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "direct_local",
         ),
         (
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "deferred_tool_resolution:v1:[\"web.fetch\"]".to_string(),
+            },
+            // FIG-2910 intentionally consumes one Restate journal ordinal
+            // before any dependent effect in a resource-bearing ExecCode body.
+            // Pre-cutover in-flight bodies must be drained or recreated; this
+            // command is never folded into the outer DirectLocal run.
+            "journaled_run",
+        ),
+        (
             RuntimeEffectCommand::Checkpoint {
                 checkpoint: lash_core::CheckpointKind::AfterWork,
             },
@@ -1159,7 +1169,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                                 "tool-intent-corpus-call",
                                 "tool_intent_corpus",
                             )),
-                            intents: lash_core::ToolIntents::v1(vec![
+                            intents: lash_core::ToolIntents::v2(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
                                         session_id: SessionId::from(
@@ -1312,11 +1322,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        // The mid-drain prefix ends before the durable-wait index call, so
-        // its v2 capture is unchanged by the scope-keyed index cutover.
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v2-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1345,6 +1353,55 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
     }
 }
 
+#[tokio::test]
+pub(super) async fn checked_in_v2_mid_drain_journal_refuses_v1_tool_intent_without_duplicate_effect()
+ {
+    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/tool_intent_journals/v2-mid-drain.json"
+    ))
+    .expect("decode the v2 mid-drain endpoint corpus fixture");
+    assert!(
+        fixture.captured_from_endpoint_interruption,
+        "{} must name its real endpoint-interruption provenance",
+        fixture.crash_point
+    );
+
+    let (command_frames, output, signal_events) = replay_tool_intent_corpus_fixture(&fixture).await;
+    assert_eq!(
+        command_frames,
+        Vec::<u16>::new(),
+        "{} response command frames",
+        fixture.crash_point
+    );
+    assert_eq!(
+        output,
+        Some(serde_json::json!([{
+            "identity": {
+                "execution_scope_id": "tool-intent-corpus-turn",
+                "intent_index": 0,
+                "minting_emission_replay_key": "tool-intent-drain:tool-intent-corpus-call",
+                "replay_key": "tool-intent:v2:blake3:b9d8ee83094dc1094ae4feff142c51941d4a07b150b5cf6f1ff6998a16883201",
+                "session_id": "tool-intent-corpus-session",
+                "tool_call_id": "tool-intent-corpus-call"
+            },
+            "intent_index": 0,
+            "kind": "signal_process",
+            "refusal": {
+                "reason": "unsupported_protocol_version",
+                "recorded": 1
+            },
+            "status": "refused"
+        }])),
+        "{} output",
+        fixture.crash_point
+    );
+    assert_eq!(
+        signal_events, 0,
+        "{} must refuse before reconstructing the signal effect",
+        fixture.crash_point
+    );
+}
+
 /// The untouched pre-cutover endpoint artifacts now encounter the earlier
 /// effect-envelope shape fence. That refusal happens before their recorded
 /// signal effect is reconstructed, so a fresh registry stays empty.
@@ -1365,6 +1422,16 @@ pub(super) async fn checked_in_pre_cutover_tool_intent_journals_refuse_loudly_wi
         (
             "v2-full-drain",
             include_bytes!("../../tests/fixtures/tool_intent_journals/v2-full-drain.json")
+                .as_slice(),
+        ),
+        (
+            "v3-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-mid-intent.json")
+                .as_slice(),
+        ),
+        (
+            "v3-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v3-full-drain.json")
                 .as_slice(),
         ),
     ] {
@@ -1722,16 +1789,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v2-mid-drain",
+            "v4-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v3-mid-intent",
+            "v4-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v3-full-drain", "full_drain", full),
+        ("v4-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {

@@ -66,6 +66,7 @@ where
     assert_fresh_instances(&first, &second, "process_registry");
     drop((first, second));
     lifecycle::registration_contract(make()).await;
+    lifecycle::empty_tool_call_identifiers_leave_no_row(make()).await;
     super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
@@ -76,6 +77,7 @@ where
     F: Fn() -> ReopenableProcessRegistry,
 {
     lifecycle::registration_contract(make().open).await;
+    lifecycle::empty_tool_call_identifiers_leave_no_row(make().open).await;
     super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(

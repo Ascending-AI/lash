@@ -4,7 +4,7 @@ use crate::SessionId;
 use crate::{ProcessEventLog as _, ProcessLifecycle as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
-    crate::ToolIntents::v1(
+    crate::ToolIntents::v2(
         event_types
             .iter()
             .enumerate()
@@ -224,7 +224,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None));
-    let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+    let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
             session_id: SessionId::from("session"),
             process_id: ProcessId::from("intent-law-target"),
@@ -349,7 +349,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None));
-    let intents = crate::ToolIntents::v1(vec![
+    let intents = crate::ToolIntents::v2(vec![
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
             session_id: SessionId::from("session"),
             process_id: ProcessId::from("intent-law-target"),
@@ -729,7 +729,7 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
         crate::ProcessParentEndPolicy::Abandon,
         crate::ProcessParentEndPolicy::Cancel,
     ];
-    let intents = crate::ToolIntents::v1(
+    let intents = crate::ToolIntents::v2(
         policies
             .into_iter()
             .enumerate()
@@ -934,7 +934,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
     assert_eq!(events[0].payload, json!({"attempt": 2}));
 }
 #[tokio::test]
-async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
+async fn empty_v2_batch_without_a_recorded_call_id_is_a_noop() {
     let outcomes = execute_final_tool_intents(
         &dispatch_context(),
         None,
@@ -942,7 +942,7 @@ async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
         None,
     )
     .await
-    .expect("empty v1 batch is a no-op");
+    .expect("empty v2 batch is a no-op");
     assert!(outcomes.is_empty());
 }
 
@@ -989,7 +989,7 @@ async fn register_trigger_intent_subscription_with_schema(
 }
 
 fn recorded_trigger_intents() -> crate::ToolIntents {
-    crate::ToolIntents::v1(vec![crate::ToolIntent::EmitTrigger(
+    crate::ToolIntents::v2(vec![crate::ToolIntent::EmitTrigger(
         crate::EmitTriggerIntent {
             session_id: SessionId::from("session"),
             request: crate::TriggerOccurrenceRequest::new(
@@ -1230,6 +1230,188 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
             "public-caller redrive changed the frame for {key}"
         );
     }
+}
+
+/// The occurrence dedupe point belongs to the durable declaration, not to the
+/// caller-selected key inside its payload. Distinct declaration replay keys
+/// must produce distinct occurrences even when callers reuse that key, while
+/// redriving those same declarations must not add another occurrence.
+#[tokio::test]
+async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key() {
+    use crate::TriggerStore as _;
+
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    register_trigger_intent_subscription(&store).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None));
+    let declaration = crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
+        session_id: SessionId::from("session"),
+        request: crate::TriggerOccurrenceRequest::new(
+            "intent.trigger.emitted",
+            "intent-law-source",
+            json!({"declared": true}),
+            "shared-caller-key",
+        ),
+    });
+    let mut context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::new(crate::TestLocalProcessRegistry::default()),
+        crate::ToolIntents::v2(vec![declaration.clone(), declaration]),
+        Arc::clone(&calls),
+    );
+    context.trigger_router = Some(crate::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+        crate::testing::process_work_wiring_for_registry(Arc::new(
+            crate::TestLocalProcessRegistry::default(),
+        )
+            as Arc<dyn crate::ProcessRegistry>),
+    ));
+
+    let first = run_fixed_intent_attempt(&context).await;
+    let replay_keys = first
+        .intent_outcomes
+        .iter()
+        .map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed { identity, .. } => {
+                identity.replay_key.clone()
+            }
+            outcome => panic!("both trigger declarations must execute: {outcome:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(
+        replay_keys[0], replay_keys[1],
+        "the two declarations must have distinct replay keys"
+    );
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read distinct declaration occurrences");
+    assert_eq!(
+        occurrences.len(),
+        2,
+        "same caller key must not collapse distinct declarations"
+    );
+    assert_eq!(
+        occurrences
+            .iter()
+            .map(|occurrence| occurrence.idempotency_key.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        replay_keys.iter().cloned().collect(),
+        "each occurrence must be stamped with its declaration replay key"
+    );
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "the attempt body replays");
+    assert_eq!(
+        redriven.intent_outcomes, first.intent_outcomes,
+        "redrive reports the same declaration outcomes"
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("read occurrences after redrive")
+            .len(),
+        2,
+        "redriving the same replay keys must not add occurrences"
+    );
+}
+
+/// A fresh coordinator reconstructing a committed predecessor attempt must
+/// reject its v1 declaration batch before touching the trigger store. The
+/// predecessor occurrence witnesses the dangerous crash window: it was
+/// ingested under the caller key, but no executed intent report exists.
+#[tokio::test]
+async fn cold_public_coordinator_refuses_v1_trigger_batch_before_store_ingress() {
+    use crate::TriggerStore as _;
+
+    let store = Arc::new(crate::facade_support::InMemoryTriggerStore::default());
+    register_trigger_intent_subscription(&store).await;
+    let controller = Arc::new(IntentReplayController::new(None));
+    let request = crate::TriggerOccurrenceRequest::new(
+        "intent.trigger.emitted",
+        "intent-law-source",
+        json!({"declared": true}),
+        "predecessor-caller-key",
+    );
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let router = crate::TriggerRouter::new(
+        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+        crate::testing::process_work_wiring_for_registry(
+            Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
+        ),
+    );
+    let predecessor = crate::ToolIntents {
+        protocol_version: 1,
+        intents: vec![crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
+            session_id: SessionId::from("session"),
+            request: request.clone(),
+        })],
+    };
+    let predecessor_calls = Arc::new(AtomicUsize::new(0));
+    let mut predecessor_context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::clone(&registry),
+        predecessor,
+        Arc::clone(&predecessor_calls),
+    );
+    predecessor_context.trigger_router = Some(router.clone());
+    router
+        .emit(
+            request.clone(),
+            &predecessor_context.effect_controller.scoped(),
+        )
+        .await
+        .expect("seed the predecessor caller-key occurrence");
+    let first = run_fixed_intent_attempt(&predecessor_context).await;
+    assert!(
+        matches!(
+            first.intent_outcomes.as_slice(),
+            [crate::ToolIntentExecutionOutcome::Refused {
+                refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 1 },
+                ..
+            }]
+        ),
+        "predecessor refusal: {:?}",
+        first.intent_outcomes
+    );
+
+    let current_calls = Arc::new(AtomicUsize::new(0));
+    let mut cold_context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        registry,
+        recorded_trigger_intents(),
+        Arc::clone(&current_calls),
+    );
+    cold_context.trigger_router = Some(router);
+    let redriven = run_fixed_intent_attempt(&cold_context).await;
+
+    assert_eq!(predecessor_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        current_calls.load(Ordering::SeqCst),
+        0,
+        "attempt must replay"
+    );
+    assert_eq!(redriven.intent_outcomes, first.intent_outcomes);
+    let occurrences = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("read occurrences after cold replay");
+    assert_eq!(occurrences.len(), 1, "cold replay adds no occurrence");
+    assert_eq!(
+        occurrences[0].occurrence_id,
+        "trigger:predecessor-caller-key"
+    );
+    assert_eq!(
+        store
+            .list_deliveries()
+            .await
+            .expect("read deliveries after cold replay")
+            .len(),
+        1,
+        "cold replay adds no delivery"
+    );
 }
 
 /// The at-most-once half: a crash after the occurrence is ingested and its

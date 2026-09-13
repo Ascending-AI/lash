@@ -706,20 +706,14 @@ impl RuntimeExecutionContext<'_> {
             duration_ms,
         )
         .await;
-        let output = result.into_done_output().unwrap_or_else(|_| {
-            ToolCallOutput::failure(ToolFailure::runtime(
-                ToolFailureClass::Internal,
-                "pending_tool_not_finalized",
-                "pending tool result reached a completed-output projection path",
-            ))
-        });
-        let record = ToolCallRecord {
-            call_id: None,
-            tool: tool_name,
+        let mut outcome = crate::tool_dispatch::normalized_outcome(
+            self.dispatch.as_ref(),
+            tool_name,
             args,
-            output,
+            result,
             duration_ms,
-        };
+        )
+        .await;
         let mut attempts = attempts;
         attempts.push(crate::trace::trace_tool_attempt(
             attempts
@@ -727,15 +721,11 @@ impl RuntimeExecutionContext<'_> {
                 .saturating_add(1)
                 .try_into()
                 .unwrap_or(u32::MAX),
-            &record,
+            &outcome.record,
             None,
         ));
-        ToolDispatchOutcome {
-            record,
-            attempts,
-            intents: crate::ToolIntents::default(),
-            intent_outcomes: Vec::new(),
-        }
+        outcome.attempts = attempts;
+        outcome
     }
 
     async fn await_pending_tool_dispatch_outcome(

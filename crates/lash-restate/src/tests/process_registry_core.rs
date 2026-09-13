@@ -1177,7 +1177,7 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
         self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::SignalProcess(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::SignalProcess(
                 lash_core::SignalProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from("restate-recorded-intent-target"),

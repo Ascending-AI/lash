@@ -1273,7 +1273,7 @@ pub(crate) use store::{
 pub use tool_intent::{
     CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, ProcessParentEndPolicy,
     SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, ToolAttemptOutcome,
+    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, ToolAttemptOutcome,
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
     ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
 };

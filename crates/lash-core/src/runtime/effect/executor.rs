@@ -576,12 +576,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Build a local executor for Lash's own conformance helpers.
-    ///
-    /// This is deliberately hidden from the published default documentation;
-    /// it is not an integrator seam for fabricating runtime effect outcomes.
-    #[doc(hidden)]
-    pub fn testing<F, Fut>(run: F) -> Self
+    pub(crate) fn language_runtime_value_with<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
         Fut: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
@@ -596,6 +591,21 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             )),
             replay_trace: None,
         }
+    }
+
+    /// Build a local executor for Lash's own conformance helpers.
+    ///
+    /// This is deliberately hidden from the published default documentation;
+    /// it is not an integrator seam for fabricating runtime effect outcomes.
+    #[doc(hidden)]
+    pub fn testing<F, Fut>(run: F) -> Self
+    where
+        F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
+        Fut: Future<Output = Result<RuntimeEffectOutcome, RuntimeEffectControllerError>>
+            + Send
+            + 'run,
+    {
+        Self::language_runtime_value_with(run)
     }
 
     pub(in crate::runtime) fn turn(

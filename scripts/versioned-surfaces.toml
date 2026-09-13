@@ -924,7 +924,7 @@ symbols = [
 # pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
 # LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
 # SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
-# TOOL_INTENT_PROTOCOL_V1 is a permanently named v1 discriminator, not a mutable
+# TOOL_INTENT_PROTOCOL_V2 is a permanently named v2 discriminator, not a mutable
 # current-version constant.
 
 [[surface]]

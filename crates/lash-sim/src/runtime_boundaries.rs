@@ -246,7 +246,7 @@ impl RuntimeBoundaryHarness {
         let scripted_result = requested_result.clone();
         let call_id = effect_id.clone();
         let recorded_intents =
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(event.actor_alias.clone()),
                     request: lash_core::ProcessStartRequest::external(

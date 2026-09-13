@@ -68,6 +68,45 @@ and work registry are.
   `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
 - Before judged execution, the deterministic companion should be green:
   `cargo test -p agent-workbench button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
+- Also capture the deferred-link replay companion before judged execution:
+  `cargo test --workspace --all-targets --locked --no-fail-fast deferred`. Save the
+  complete output as `00-deferred-link-replay.txt`. This companion is operator-run and
+  deterministic: the judge only inspects its artifact and does not invoke a model tool,
+  provider, account, subscription, process, or other host-affecting operation.
+
+The deferred-link companion must show all of these named cases green:
+
+- `sqlite_reopen_replays_positive_before_ambient_collision_without_resolver` and
+  `sqlite_reopen_replays_negative_before_changed_ambient_without_resolver` prove the
+  file-backed production journal wins after cold reopen, with an empty checkpoint
+  projection and no live resolver. The positive case also changes parent attribution
+  and descriptive label and introduces two colliding ambient definitions, proving the
+  canonical deferred envelope and pre-catalog mask are stable;
+- `independent_link_can_accept_a_new_ambient_binding` proves the mask belongs only to
+  the admitted link identity;
+- `sqlite_fault_after_resolver_return_repeats_discovery_after_reopen`,
+  `sqlite_fault_after_durable_record_never_reresolves_after_reopen`, and
+  `sqlite_fault_before_registration_reinstalls_recorded_route_after_reopen` cover the
+  three named restart boundaries against the file-backed production journal and prove
+  dependent tool execution cannot cross a failed boundary; and
+- `revoked_route_refuses_without_replacing_the_journaled_grant` proves a restored route
+  cannot silently acquire replacement authority.
+
+**Restate deployment cutover.** A resource-bearing RLM cell now emits exactly one
+batched `LanguageRuntimeValue` journal command after `ExecCode` admission and before
+its first dependent effect. Restate classifies that command as `JournaledRun`, so later
+commands in an already-running pre-cutover cell would move by one ordinal. This is an
+intentional clean cutover, not a compatible replay shape: deploy only after draining
+in-flight RLM `ExecCode` invocations, or recreate their Restate state. Do not redrive a
+pre-cutover in-flight cell under this build; Restate's command-shape mismatch must refuse
+it before any dependent effect re-executes. Cells without resource call paths emit no
+new command, and no existing Lash replay key, checkpoint ordinal, or durable format
+version changes.
+
+The native controller remains intentionally process-local: it exercises the same
+ordering and typed failures but does not claim cold-restart persistence. Durable replay
+claims in this companion come from the file-backed SQLite controller; Restate supplies
+the production engine-owned journal under the ordinal cutover above.
 
 Save every API response named below under the run's artifact directory.
 
@@ -186,6 +225,7 @@ Restate container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/world | `/healthz` 200; `work` and `personal` agree in UI/API | | `00-fresh.png`, `01-inbox-world.png` |
+| Deferred-link replay | ambient changes are masked per link; all three restart boundaries replay the recorded authority | | `00-deferred-link-replay.txt` |
 | Registration identity | one enabled registration has the same `subscription_id` in the rail and `/api/triggers` | | `02-registered.png`, `02-registration.json` |
 | Repeated fires | two originals yield exactly two copies; bounded terminal runs | | `03-repeat-inboxes.png`, `04-repeat-work-rail.png` |
 | Disable silence | same reference key disabled; fenced probe creates no copy or process | | `05-disabled.png`, `06-disabled-silent.png` |
