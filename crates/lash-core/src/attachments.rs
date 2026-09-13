@@ -1228,22 +1228,20 @@ pub struct SessionAttachmentStore {
     manifest: Arc<dyn AttachmentManifest>,
     session_id: SessionId,
     max_attachment_bytes: Option<u64>,
-    owner: Mutex<Option<AttachmentOwner>>,
+    owner: Mutex<Option<BoundAttachmentOwner>>,
     clock: Arc<dyn crate::Clock>,
 }
 
 #[derive(Clone)]
-struct AttachmentOwner {
-    kind: crate::AttachmentOwnerKind,
-    id: String,
-    incarnation: Option<crate::ProcessIncarnation>,
+struct BoundAttachmentOwner {
+    owner: crate::AttachmentOwner,
     recorded_intent_ids: Arc<Mutex<BTreeSet<AttachmentId>>>,
 }
 
 pub struct AttachmentOwnerBinding {
     store: Arc<SessionAttachmentStore>,
-    owner: AttachmentOwner,
-    previous: Option<AttachmentOwner>,
+    owner: BoundAttachmentOwner,
+    previous: Option<BoundAttachmentOwner>,
 }
 
 impl Drop for AttachmentOwnerBinding {
@@ -1341,11 +1339,9 @@ impl SessionAttachmentStore {
         self: &Arc<Self>,
         turn_id: impl Into<TurnId>,
     ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(
-            crate::AttachmentOwnerKind::Turn,
-            turn_id.into().into_inner(),
-            None,
-        )
+        self.bind_owner_scoped(crate::AttachmentOwner::Turn {
+            id: turn_id.into().into_inner(),
+        })
     }
 
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
@@ -1353,23 +1349,18 @@ impl SessionAttachmentStore {
         self: &Arc<Self>,
         process_ref: crate::ProcessRef,
     ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(
-            crate::AttachmentOwnerKind::Process,
-            process_ref.process_id.to_string(),
-            Some(process_ref.incarnation),
-        )
+        self.bind_owner_scoped(crate::AttachmentOwner::Process {
+            id: process_ref.process_id.to_string(),
+            incarnation: process_ref.incarnation,
+        })
     }
 
     fn bind_owner_scoped(
         self: &Arc<Self>,
-        kind: crate::AttachmentOwnerKind,
-        owner_id: String,
-        incarnation: Option<crate::ProcessIncarnation>,
+        owner: crate::AttachmentOwner,
     ) -> AttachmentOwnerBinding {
-        let owner = AttachmentOwner {
-            kind,
-            id: owner_id,
-            incarnation,
+        let owner = BoundAttachmentOwner {
+            owner,
             recorded_intent_ids: Arc::new(Mutex::new(BTreeSet::new())),
         };
         let previous = self.owner.lock_recover().replace(owner.clone());
@@ -1380,13 +1371,16 @@ impl SessionAttachmentStore {
         }
     }
 
-    fn restore_owner(&self, completed: &AttachmentOwner, previous: Option<AttachmentOwner>) {
+    fn restore_owner(
+        &self,
+        completed: &BoundAttachmentOwner,
+        previous: Option<BoundAttachmentOwner>,
+    ) {
         let mut owner = self.owner.lock_recover();
-        if owner.as_ref().is_some_and(|current| {
-            current.kind == completed.kind
-                && current.id == completed.id
-                && current.incarnation == completed.incarnation
-        }) {
+        if owner
+            .as_ref()
+            .is_some_and(|current| current.owner == completed.owner)
+        {
             *owner = previous;
         }
     }
@@ -1396,7 +1390,7 @@ impl SessionAttachmentStore {
     /// commit budget; stores are never queried during admission.
     pub(crate) fn recorded_turn_intent_ids(&self, turn_id: &TurnId) -> BTreeSet<AttachmentId> {
         let recorded = self.owner.lock_recover().as_ref().and_then(|owner| {
-            (owner.kind == crate::AttachmentOwnerKind::Turn && owner.id == turn_id.as_str())
+            matches!(&owner.owner, crate::AttachmentOwner::Turn { id } if id == turn_id.as_str())
                 .then(|| Arc::clone(&owner.recorded_intent_ids))
         });
         recorded
@@ -1425,9 +1419,7 @@ impl SessionAttachmentStore {
             session_id: self.session_id.clone(),
             canonical_uri: attachment_uri(&attachment_id),
             intent_at_epoch_ms: self.clock.timestamp_ms(),
-            owner_kind: owner.as_ref().map(|owner| owner.kind),
-            owner_id: owner.as_ref().map(|owner| owner.id.clone()),
-            owner_incarnation: owner.as_ref().and_then(|owner| owner.incarnation),
+            owner: owner.as_ref().map(|bound| bound.owner.clone()),
         };
         // Acquire the write fence first: the intent is recorded before any bytes
         // land (the write-ahead guarantee) and, in the same mutation, the digest

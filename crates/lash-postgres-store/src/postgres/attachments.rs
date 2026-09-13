@@ -339,11 +339,13 @@ impl AttachmentManifest for PostgresSessionStore {
             .bind(intent.session_id.as_str())
             .bind(intent.canonical_uri)
             .bind(intent.intent_at_epoch_ms as i64)
-            .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
-            .bind(intent.owner_id)
+            .bind(intent.owner.as_ref().map(|owner| owner.kind().as_str()))
+            .bind(intent.owner.as_ref().map(|owner| owner.id().to_string()))
             .bind(
                 intent
-                    .owner_incarnation
+                    .owner
+                    .as_ref()
+                    .and_then(lash_core::AttachmentOwner::incarnation)
                     .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
                     .transpose()
                     .map_err(|_| {
@@ -509,12 +511,11 @@ impl AttachmentManifest for PostgresSessionStore {
                         .get::<Option<i64>, _>(7)
                         .map(|value| u64_from_sql("AttachmentManifest", "owner_incarnation", value))
                         .transpose()?;
-                    let (owner_kind, owner_id, owner_incarnation) =
-                        lash_core::store::decode_attachment_owner(
-                            owner_kind.as_deref(),
-                            owner_id,
-                            owner_incarnation,
-                        )?;
+                    let owner = lash_core::store::decode_attachment_owner(
+                        owner_kind.as_deref(),
+                        owner_id,
+                        owner_incarnation,
+                    )?;
                     Ok(AttachmentManifestEntry {
                         attachment_id: attachment_id_from_sql(
                             "AttachmentManifest",
@@ -538,9 +539,7 @@ impl AttachmentManifest for PostgresSessionStore {
                                 u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                             })
                             .transpose()?,
-                        owner_kind,
-                        owner_id,
-                        owner_incarnation,
+                        owner,
                     })
                 })
                 .collect()

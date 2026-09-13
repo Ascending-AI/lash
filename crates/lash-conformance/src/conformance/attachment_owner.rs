@@ -615,9 +615,10 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
             session_id: request.session_id,
             canonical_uri: format!("lash-attachment://{}", reference.id),
             intent_at_epoch_ms: 0,
-            owner_kind: Some(crate::AttachmentOwnerKind::Process),
-            owner_id: Some("absent-process-owner".to_string()),
-            owner_incarnation: Some(crate::ProcessIncarnation::from_registration_sequence(1)),
+            owner: Some(crate::AttachmentOwner::Process {
+                id: "absent-process-owner".to_string(),
+                incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            }),
         },
     );
     for empty in [false, true] {

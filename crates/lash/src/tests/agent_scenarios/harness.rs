@@ -380,9 +380,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 session_id: seed_session_id.clone(),
                 canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
                 intent_at_epoch_ms: 1,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             };
             let lash_core::AttachmentWriteFence::Granted(permit) =
                 lash_core::AttachmentManifest::begin_attachment_write(

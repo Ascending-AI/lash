@@ -930,10 +930,12 @@ impl AttachmentManifest for Store {
             let session_id = intent.session_id.clone();
             let canonical_uri = intent.canonical_uri.as_str().to_string();
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
-            let owner_kind = intent.owner_kind.map(AttachmentOwnerKind::as_str);
-            let owner_id = intent.owner_id;
+            let owner_kind = intent.owner.as_ref().map(|owner| owner.kind().as_str());
+            let owner_id = intent.owner.as_ref().map(|owner| owner.id().to_string());
             let owner_incarnation = intent
-                .owner_incarnation
+                .owner
+                .as_ref()
+                .and_then(lash_core::AttachmentOwner::incarnation)
                 .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
                 .transpose()
                 .map_err(|_| {
@@ -1207,13 +1209,12 @@ impl AttachmentManifest for Store {
                             })
                             .transpose()?;
                         let written_at_ms: Option<i64> = row.get(8)?;
-                        let (owner_kind, owner_id, owner_incarnation) =
-                            lash_core::store::decode_attachment_owner(
-                                owner_kind.as_deref(),
-                                owner_id,
-                                owner_incarnation,
-                            )
-                            .map_err(sqlite_conversion_error)?;
+                        let owner = lash_core::store::decode_attachment_owner(
+                            owner_kind.as_deref(),
+                            owner_id,
+                            owner_incarnation,
+                        )
+                        .map_err(sqlite_conversion_error)?;
                         Ok(AttachmentManifestEntry {
                             attachment_id: crate::attachment_id_from_sql(
                                 "AttachmentManifest",
@@ -1237,9 +1238,7 @@ impl AttachmentManifest for Store {
                                     u64_from_sql("AttachmentManifest", "committed_at_ms", value)
                                 })
                                 .transpose()?,
-                            owner_kind,
-                            owner_id,
-                            owner_incarnation,
+                            owner,
                         })
                     })?;
                     rows.collect::<rusqlite::Result<Vec<_>>>()

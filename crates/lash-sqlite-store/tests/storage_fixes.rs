@@ -666,9 +666,10 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
         session_id: request.session_id,
         canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
         intent_at_epoch_ms: 1,
-        owner_kind: Some(lash_core::AttachmentOwnerKind::Process),
-        owner_id: Some("missing-process".to_string()),
-        owner_incarnation: Some(lash_core::ProcessIncarnation::from_registration_sequence(1)),
+        owner: Some(lash_core::AttachmentOwner::Process {
+            id: "missing-process".to_string(),
+            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        }),
     };
     let lash_core::AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())

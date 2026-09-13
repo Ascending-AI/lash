@@ -479,14 +479,10 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
         1,
         "normalization records one manifest intent"
     );
-    assert_eq!(
-        entries[0].owner_kind,
-        Some(crate::AttachmentOwnerKind::Process)
-    );
-    assert_eq!(
-        entries[0].owner_id.as_deref(),
-        Some("orchestrating-process")
-    );
+    assert!(matches!(
+        &entries[0].owner,
+        Some(crate::AttachmentOwner::Process { id, .. }) if id == "orchestrating-process"
+    ));
 }
 
 #[tokio::test]
@@ -520,9 +516,8 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
         1,
         "normalization records one manifest intent"
     );
-    assert_eq!(
-        entries[0].owner_kind,
-        Some(crate::AttachmentOwnerKind::Process)
-    );
-    assert_eq!(entries[0].owner_id.as_deref(), Some("internal-process"));
+    assert!(matches!(
+        &entries[0].owner,
+        Some(crate::AttachmentOwner::Process { id, .. }) if id == "internal-process"
+    ));
 }

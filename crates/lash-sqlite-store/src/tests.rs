@@ -757,9 +757,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
             session_id: SessionId::from("sess-1"),
             canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
             intent_at_epoch_ms: 1_000,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         };
         let lash_core::AttachmentWriteFence::Granted(permit) =
             lash_core::AttachmentManifest::begin_attachment_write(&store, intent.clone())
@@ -835,9 +833,7 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
         session_id: request.session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
         intent_at_epoch_ms: 1,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     let lash_core::AttachmentWriteFence::Granted(live_permit) =
         lash_core::AttachmentManifest::begin_attachment_write(&*store, live_intent.clone())

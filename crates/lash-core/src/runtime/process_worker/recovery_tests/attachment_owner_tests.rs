@@ -252,11 +252,10 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .expect("list parent-bound process intents");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].session_id, format!("process-env:{PROCESS_ID}"));
-    assert_eq!(
-        entries[0].owner_kind,
-        Some(crate::AttachmentOwnerKind::Process)
-    );
-    assert_eq!(entries[0].owner_id.as_deref(), Some(PROCESS_ID));
+    assert!(matches!(
+        &entries[0].owner,
+        Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID
+    ));
 }
 
 #[tokio::test]
@@ -346,8 +345,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .expect("list process intents");
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|entry| {
-        entry.owner_kind == Some(crate::AttachmentOwnerKind::Process)
-            && entry.owner_id.as_deref() == Some(PROCESS_ID)
+        matches!(&entry.owner, Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID)
     }));
     let attachment_ids = entries
         .iter()
@@ -453,14 +451,21 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
     let owner_incarnations = |entries: &[crate::AttachmentManifestEntry]| {
         assert!(
             entries.iter().all(|entry| {
-                entry.owner_kind == Some(crate::AttachmentOwnerKind::Process)
-                    && entry.owner_id.as_deref() == Some(PROCESS_ID)
+                matches!(
+                    &entry.owner,
+                    Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID
+                )
             }),
             "every intent is process-owned under the reused name"
         );
         entries
             .iter()
-            .map(|entry| entry.owner_incarnation)
+            .map(|entry| {
+                entry
+                    .owner
+                    .as_ref()
+                    .and_then(crate::AttachmentOwner::incarnation)
+            })
             .collect::<std::collections::BTreeSet<_>>()
     };
     let process_env_store = || async {

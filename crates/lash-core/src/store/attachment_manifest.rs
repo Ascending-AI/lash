@@ -85,49 +85,83 @@ pub struct AttachmentIntent {
     pub canonical_uri: String,
     pub intent_at_epoch_ms: u64,
     /// Stable durable owner that can eventually commit or release this intent.
-    /// Both owner fields are absent for direct host puts made outside a runtime
-    /// execution scope; those rows retain fallback timer semantics.
-    pub owner_kind: Option<AttachmentOwnerKind>,
-    pub owner_id: Option<String>,
-    /// Store-minted process incarnation when `owner_kind` is `Process`.
-    /// Turn and unowned intents carry no incarnation.
-    pub owner_incarnation: Option<crate::ProcessIncarnation>,
+    /// `None` for direct host puts made outside a runtime execution scope;
+    /// those rows retain fallback timer semantics.
+    pub owner: Option<AttachmentOwner>,
 }
 
-/// Strictly decode the three-column durable attachment-owner identity.
+/// The durable owner that can eventually commit or release an attachment
+/// intent.
+///
+/// Owner identity is one value, not a bag of independently nullable columns.
+/// The two shapes the durable surfaces accept are the two variants here, so
+/// the pairing rules the SQL `CHECK` constraints enforce — an owner kind
+/// without an id, an id without a kind, a process owner without its
+/// registry-minted incarnation, a turn owner carrying one — are unrepresentable
+/// rather than validated. Process names are reusable, so the incarnation is
+/// part of a process owner's identity and never optional within it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttachmentOwner {
+    /// A durable turn, identified by its operation storage key.
+    Turn { id: String },
+    /// One incarnation of a durable process. The name alone is not an
+    /// identity: a reused process name binds attachments to the new
+    /// incarnation, never the retired one.
+    Process {
+        id: String,
+        incarnation: crate::ProcessIncarnation,
+    },
+}
+
+impl AttachmentOwner {
+    /// The persisted owner-kind discriminant for this owner.
+    pub const fn kind(&self) -> AttachmentOwnerKind {
+        match self {
+            Self::Turn { .. } => AttachmentOwnerKind::Turn,
+            Self::Process { .. } => AttachmentOwnerKind::Process,
+        }
+    }
+
+    /// The persisted owner id: a turn's operation storage key, or a process
+    /// name.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Turn { id } | Self::Process { id, .. } => id,
+        }
+    }
+
+    /// The persisted incarnation, present only for process owners.
+    pub const fn incarnation(&self) -> Option<crate::ProcessIncarnation> {
+        match self {
+            Self::Turn { .. } => None,
+            Self::Process { incarnation, .. } => Some(*incarnation),
+        }
+    }
+}
+
+/// Strictly decode the three durable attachment-owner columns into one owner.
 ///
 /// Process names are reusable, so a process owner without the registry-minted
 /// incarnation is a retired pre-cutover shape and must never be reinterpreted
-/// as the current incarnation with the same name.
-#[doc(hidden)]
-pub type DecodedAttachmentOwner = (
-    Option<AttachmentOwnerKind>,
-    Option<String>,
-    Option<crate::ProcessIncarnation>,
-);
-
+/// as the current incarnation with the same name. Every column combination the
+/// [`AttachmentOwner`] variants cannot express is corrupt stored data.
 #[doc(hidden)]
 pub fn decode_attachment_owner(
     owner_kind: Option<&str>,
     owner_id: Option<String>,
     owner_incarnation: Option<u64>,
-) -> Result<DecodedAttachmentOwner, StoreError> {
+) -> Result<Option<AttachmentOwner>, StoreError> {
     let corrupt = |message: String| StoreError::StoredDataCorrupt {
         record_kind: "AttachmentManifest owner",
         message,
     };
     match (owner_kind, owner_id, owner_incarnation) {
-        (None, None, None) => Ok((None, None, None)),
-        (Some("turn"), Some(owner_id), None) => {
-            Ok((Some(AttachmentOwnerKind::Turn), Some(owner_id), None))
-        }
-        (Some("process"), Some(owner_id), Some(incarnation)) => Ok((
-            Some(AttachmentOwnerKind::Process),
-            Some(owner_id),
-            Some(crate::ProcessIncarnation::from_registration_sequence(
-                incarnation,
-            )),
-        )),
+        (None, None, None) => Ok(None),
+        (Some("turn"), Some(id), None) => Ok(Some(AttachmentOwner::Turn { id })),
+        (Some("process"), Some(id), Some(incarnation)) => Ok(Some(AttachmentOwner::Process {
+            id,
+            incarnation: crate::ProcessIncarnation::from_registration_sequence(incarnation),
+        })),
         (Some("process"), Some(owner_id), None) => Err(corrupt(format!(
             "process attachment owner `{owner_id}` has no incarnation; bare process-owner identities are unsupported"
         ))),
@@ -402,9 +436,8 @@ pub struct AttachmentManifestEntry {
     /// see *that* bytes landed, never present the fence identity that proves it.
     pub written_at_epoch_ms: Option<u64>,
     pub committed_at_epoch_ms: Option<u64>,
-    pub owner_kind: Option<AttachmentOwnerKind>,
-    pub owner_id: Option<String>,
-    pub owner_incarnation: Option<crate::ProcessIncarnation>,
+    /// The row's durable owner, or `None` for an unowned direct host put.
+    pub owner: Option<AttachmentOwner>,
 }
 
 /// The synchronous attachment-manifest surface required from every

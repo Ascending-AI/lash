@@ -522,9 +522,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionS
         session_id: session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{digest}"),
         intent_at_epoch_ms: 1,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     assert!(matches!(
         store
@@ -1202,9 +1200,9 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
             session_id: session_id.clone(),
             canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
             intent_at_epoch_ms: 0,
-            owner_kind: Some(AttachmentOwnerKind::Turn),
-            owner_id: Some(turn_id.to_string()),
-            owner_incarnation: None,
+            owner: Some(AttachmentOwner::Turn {
+                id: turn_id.to_string(),
+            }),
         };
         let permit = match store
             .begin_attachment_write(intent.clone())
@@ -1330,9 +1328,9 @@ async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn Ses
         session_id: session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
         intent_at_epoch_ms: 0,
-        owner_kind: Some(AttachmentOwnerKind::Turn),
-        owner_id: Some(turn_id.to_string()),
-        owner_incarnation: None,
+        owner: Some(AttachmentOwner::Turn {
+            id: turn_id.to_string(),
+        }),
     };
     let permit = match store
         .begin_attachment_write(intent.clone())
@@ -1403,9 +1401,7 @@ fn write_intent(session_id: &SessionId, attachment_id: &AttachmentId) -> Attachm
         session_id: session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
         intent_at_epoch_ms: 0,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     }
 }
 
@@ -2034,4 +2030,87 @@ async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
              rooted={rooted}, present={present}"
         );
     }
+}
+
+/// Every backend reads back the durable attachment owner it was given, as one
+/// value (FIG-2850).
+///
+/// The owner used to ride the intent as three independently nullable fields.
+/// Both SQL schemas enforce the pairing with `CHECK`
+/// constraints; the in-memory store enforced nothing, so a half-populated pair
+/// was accepted there and rejected by every production backend — a divergence
+/// on a public API. The owner is now one [`AttachmentOwner`], so the malformed
+/// input no longer exists to diverge on, and what remains to certify is that
+/// the three owner shapes round-trip identically everywhere: a turn owner
+/// carries no incarnation, a process owner always carries its own, and an
+/// unowned direct host put reads back with no owner at all.
+pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn SessionStoreFactory>) {
+    let namespace = uuid::Uuid::new_v4();
+    let session_id = format!("owner-identity-{namespace}");
+    let store = create(&f, &session_id).await;
+    let turn_owner = crate::AttachmentOwner::Turn {
+        id: format!("owner-identity-turn-{namespace}"),
+    };
+    let process_owner = crate::AttachmentOwner::Process {
+        id: format!("owner-identity-process-{namespace}"),
+        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(7),
+    };
+    let cases: [(&str, Option<crate::AttachmentOwner>); 3] = [
+        ("owner-identity-turn", Some(turn_owner.clone())),
+        ("owner-identity-process", Some(process_owner.clone())),
+        ("owner-identity-unowned", None),
+    ];
+    for (digest, owner) in &cases {
+        crate::conformance::helpers::record_completed_attachment_write(
+            &store,
+            crate::AttachmentIntent {
+                attachment_id: AttachmentId::parse(*digest).expect("valid attachment id"),
+                session_id: SessionId::from(session_id.clone()),
+                canonical_uri: format!("lash-attachment://blake3/{digest}"),
+                intent_at_epoch_ms: 1_000,
+                owner: owner.clone(),
+            },
+        );
+    }
+
+    let entries = store
+        .list_uncommitted(u64::MAX)
+        .expect("list the manifest rows just written");
+    for (digest, owner) in &cases {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.attachment_id.as_str() == *digest)
+            .unwrap_or_else(|| panic!("manifest row for `{digest}` survived its write"));
+        assert_eq!(
+            entry.owner, *owner,
+            "the durable owner of `{digest}` must read back exactly as written"
+        );
+    }
+
+    // The pairing rules the SQL CHECK constraints enforce are properties of the
+    // value, so every backend answers them identically without validating a row.
+    assert_eq!(
+        turn_owner.kind(),
+        lash_core::AttachmentOwnerKind::Turn,
+        "a turn owner projects the turn discriminant"
+    );
+    assert_eq!(
+        turn_owner.incarnation(),
+        None,
+        "a turn owner never carries an incarnation"
+    );
+    assert_eq!(
+        process_owner.kind(),
+        lash_core::AttachmentOwnerKind::Process,
+        "a process owner projects the process discriminant"
+    );
+    assert_eq!(
+        process_owner.incarnation(),
+        Some(lash_core::ProcessIncarnation::from_registration_sequence(7)),
+        "a process owner always carries its incarnation"
+    );
+
+    f.delete_session(&SessionId::from(session_id))
+        .await
+        .unwrap();
 }

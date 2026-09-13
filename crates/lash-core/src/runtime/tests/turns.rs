@@ -504,10 +504,11 @@ fn assert_turn_owned_attachment(store: &RecordingStore, turn_id: &TurnId) {
     let entries = store.attachment_manifest_entries();
     assert_eq!(entries.len(), 1);
     assert_eq!(
-        entries[0].owner_kind,
-        Some(crate::AttachmentOwnerKind::Turn)
+        entries[0].owner,
+        Some(crate::AttachmentOwner::Turn {
+            id: turn_id.as_str().to_string()
+        })
     );
-    assert_eq!(entries[0].owner_id.as_deref(), Some(turn_id.as_str()));
 }
 
 fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {

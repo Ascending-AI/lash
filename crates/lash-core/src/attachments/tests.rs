@@ -22,9 +22,7 @@ impl AttachmentManifest for RecordingManifest {
                 intent_at_epoch_ms: intent.intent_at_epoch_ms,
                 written_at_epoch_ms: None,
                 committed_at_epoch_ms: None,
-                owner_kind: intent.owner_kind,
-                owner_id: intent.owner_id,
-                owner_incarnation: intent.owner_incarnation,
+                owner: intent.owner,
             });
         Ok(crate::AttachmentWriteFence::Granted(
             crate::AttachmentWritePermit::new(crate::AttachmentWriteToken::new()),
@@ -180,9 +178,7 @@ async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
             session_id: SessionId::from("targeted-probe"),
             canonical_uri: attachment_uri(&id),
             intent_at_epoch_ms: 1,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         })
         .expect("record intent");
     let roots = RecordingRootSet {
@@ -1568,8 +1564,12 @@ async fn session_facade_records_bound_owner_on_put() {
         let entry = entries
             .get(&(SessionId::from("session-1"), reference.id))
             .expect("manifest entry");
-        assert_eq!(entry.owner_kind, Some(crate::AttachmentOwnerKind::Turn));
-        assert_eq!(entry.owner_id.as_deref(), Some("turn-1"));
+        assert_eq!(
+            entry.owner,
+            Some(crate::AttachmentOwner::Turn {
+                id: "turn-1".to_string()
+            })
+        );
     }
 
     drop(binding);
@@ -1578,8 +1578,7 @@ async fn session_facade_records_bound_owner_on_put() {
     let host_entry = entries
         .get(&(SessionId::from("session-1"), host_reference.id))
         .expect("host manifest entry");
-    assert_eq!(host_entry.owner_kind, None);
-    assert_eq!(host_entry.owner_id, None);
+    assert_eq!(host_entry.owner, None);
 }
 
 #[tokio::test]
@@ -1606,25 +1605,26 @@ async fn nested_owner_binding_restores_the_previous_owner() {
     let turn = entries
         .get(&(SessionId::from("session-1"), turn_ref.id))
         .expect("turn entry");
-    assert_eq!(turn.owner_kind, Some(crate::AttachmentOwnerKind::Turn));
-    assert_eq!(turn.owner_id.as_deref(), Some("turn-1"));
+    assert_eq!(
+        turn.owner,
+        Some(crate::AttachmentOwner::Turn {
+            id: "turn-1".to_string()
+        })
+    );
     let process = entries
         .get(&(SessionId::from("session-1"), process_ref.id))
         .expect("process entry");
     assert_eq!(
-        process.owner_kind,
-        Some(crate::AttachmentOwnerKind::Process)
-    );
-    assert_eq!(process.owner_id.as_deref(), Some("process-1"));
-    assert_eq!(
-        process.owner_incarnation,
-        Some(crate::ProcessIncarnation::from_registration_sequence(7))
+        process.owner,
+        Some(crate::AttachmentOwner::Process {
+            id: "process-1".to_string(),
+            incarnation: crate::ProcessIncarnation::from_registration_sequence(7),
+        })
     );
     let host = entries
         .get(&(SessionId::from("session-1"), host_ref.id))
         .expect("host entry");
-    assert_eq!(host.owner_kind, None);
-    assert_eq!(host.owner_id, None);
+    assert_eq!(host.owner, None);
 }
 
 #[tokio::test]
@@ -1647,9 +1647,7 @@ fn persistence_manifest_adapter_forwards_root_tracking() {
         session_id: SessionId::from("adapter-session"),
         canonical_uri: attachment_uri(&attachment_id),
         intent_at_epoch_ms: 10,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     let crate::AttachmentWriteFence::Granted(permit) = adapter
         .begin_attachment_write(intent.clone())

@@ -1314,9 +1314,9 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         session_id: SessionId::from(SESSION_ID.to_string()),
         canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
         intent_at_epoch_ms: NOW_MS.saturating_sub(1),
-        owner_kind: Some(lash_core::AttachmentOwnerKind::Turn),
-        owner_id: Some(TURN_ID.to_string()),
-        owner_incarnation: None,
+        owner: Some(lash_core::AttachmentOwner::Turn {
+            id: TURN_ID.to_string(),
+        }),
     };
     let lash_core::AttachmentWriteFence::Granted(clock_permit) = store
         .begin_attachment_write(clock_intent.clone())

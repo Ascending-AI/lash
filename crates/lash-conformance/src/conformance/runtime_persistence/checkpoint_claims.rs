@@ -1043,8 +1043,6 @@ pub(super) fn attachment_intent(id: &str) -> AttachmentIntent {
         session_id: SessionId::from("root"),
         canonical_uri: format!("sha256:{id}"),
         intent_at_epoch_ms: 100,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     }
 }

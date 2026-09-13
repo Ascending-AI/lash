@@ -818,9 +818,10 @@ pub async fn process_prune_deletes_owned_session_stores(
                 session_id,
                 canonical_uri: format!("lash-attachment://process-owned-{index}"),
                 intent_at_epoch_ms: 1,
-                owner_kind: Some(crate::AttachmentOwnerKind::Process),
-                owner_id: Some(PROCESS_ID.to_string()),
-                owner_incarnation: Some(process.incarnation),
+                owner: Some(crate::AttachmentOwner::Process {
+                    id: PROCESS_ID.to_string(),
+                    incarnation: process.incarnation,
+                }),
             },
         );
         requests.push(request);
@@ -1400,9 +1401,7 @@ async fn session_store_factory_rejects_writes_after_delete(
                 session_id: request.session_id.clone(),
                 canonical_uri: "lash-attachment://write-after-delete".to_string(),
                 intent_at_epoch_ms: 1,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             },
         ),
         &request.session_id,
@@ -2382,9 +2381,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
                 session_id: request.session_id.clone(),
                 canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
                 intent_at_epoch_ms: 1,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             },
         )
         .expect("write after a completed sweep"),
@@ -2426,9 +2423,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 session_id: request.session_id.clone(),
                 canonical_uri: format!("lash-attachment://blake3/{aged_uncommitted_id}"),
                 intent_at_epoch_ms: 1_000,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             },
         )
         .expect("record aged_uncommitted intent"),
@@ -2442,9 +2437,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
             session_id: request.session_id.clone(),
             canonical_uri: format!("lash-attachment://blake3/{committed_id}"),
             intent_at_epoch_ms: 1_000,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         },
     );
     // Commit the ref for committed_id.
@@ -2463,9 +2456,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 session_id: request.session_id.clone(),
                 canonical_uri: format!("lash-attachment://blake3/{cond_target_id}"),
                 intent_at_epoch_ms: 1_000,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
+                owner: None,
             },
         )
         .expect("record cond_target intent"),

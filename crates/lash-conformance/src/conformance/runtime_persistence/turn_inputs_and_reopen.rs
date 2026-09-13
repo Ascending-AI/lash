@@ -1533,9 +1533,7 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
         session_id: SessionId::from("root"),
         canonical_uri: format!("lash-attachment://blake3/{id}"),
         intent_at_epoch_ms: at,
-        owner_kind: None,
-        owner_id: None,
-        owner_incarnation: None,
+        owner: None,
     };
     crate::conformance::helpers::record_completed_attachment_write(&store, intent(&intent_id, 100));
     crate::conformance::helpers::record_completed_attachment_write(
@@ -1730,9 +1728,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
             session_id: SessionId::from("root"),
             canonical_uri: "sha256:reopen-attachment".to_string(),
             intent_at_epoch_ms: 100,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
+            owner: None,
         },
     );
 
