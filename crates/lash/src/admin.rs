@@ -2,8 +2,8 @@ use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage,
     PromptContribution, PromptSlot, PromptTemplate, Result, RuntimeHandle, RuntimeSessionState,
     ScopedEffectController, SessionCreateRequest, SessionError, SessionHandle,
-    SessionProcessEventKind, SessionStateService, ToolManifest, ToolProvider, ToolRestoreReport,
-    ToolSourceHandle, ToolState, TurnInput,
+    SessionProcessEventKind, SessionStateService, SessionToolAccess, ToolManifest, ToolProvider,
+    ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
@@ -313,6 +313,13 @@ impl SessionAdmin {
     async fn clear_prompt_slot(&self, slot: PromptSlot) -> Result<()> {
         self.with_writer(async |runtime: &mut LashRuntime| {
             runtime.clear_prompt_slot(slot).await.map_err(Into::into)
+        })
+        .await
+    }
+
+    async fn set_tool_access(&self, access: SessionToolAccess) -> Result<()> {
+        self.with_writer(async |runtime: &mut LashRuntime| {
+            runtime.set_tool_access(access).await.map_err(Into::into)
         })
         .await
     }
@@ -980,6 +987,12 @@ impl SessionConfigAdmin {
     /// Clears prompt slot.
     pub async fn clear_prompt_slot(&self, slot: PromptSlot) -> Result<()> {
         self.control.clear_prompt_slot(slot).await
+    }
+
+    /// Replaces the session's persisted tool authority. The settled value
+    /// controls the next model request and survives reopening the session.
+    pub async fn set_tool_access(&self, access: SessionToolAccess) -> Result<()> {
+        self.control.set_tool_access(access).await
     }
 }
 
