@@ -1,5 +1,263 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug)]
+enum HostSetupFailureSite {
+    DeferredResolution,
+    HostEnvironment,
+    ArtifactStore,
+    RehydrateProjectedGlobals,
+    ResolveProjectedBindings,
+    CancelledSetup,
+}
+
+struct FailingArtifactStore;
+
+#[async_trait::async_trait]
+impl lashlang::LashlangArtifactStore for FailingArtifactStore {
+    async fn put_module_artifact(
+        &self,
+        _artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(lashlang::ArtifactStoreError::Backend(
+            "injected artifact store failure".to_string(),
+        ))
+    }
+
+    async fn get_module_artifact(
+        &self,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        Ok(None)
+    }
+
+    async fn put_artifact_bytes(
+        &self,
+        _artifact_ref: &str,
+        _descriptor: &str,
+        _bytes: &[u8],
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn get_artifact_bytes(
+        &self,
+        _artifact_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
+        Ok(None)
+    }
+}
+
+struct FailingProjectionResolver;
+
+#[async_trait::async_trait]
+impl ProjectionResolver for FailingProjectionResolver {
+    async fn resolve_projection(
+        &self,
+        _reference: &ProjectionRef,
+    ) -> Result<Arc<dyn ProjectedHostDescriptor>, crate::projection::ProjectionResolveError> {
+        Err(crate::projection::ProjectionResolveError::invalid(
+            "injected projection resolution failure",
+        ))
+    }
+}
+
+fn colliding_host_catalog() -> lash_core::ToolCatalog {
+    let definition = |id, name| {
+        lash_core::ToolDefinition::raw(
+            id,
+            name,
+            "colliding test binding",
+            lash_core::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "boolean" }),
+        )
+        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+            ["test"],
+            "collision",
+        ))
+    };
+    lash_core::ToolCatalog::from_tool_definitions(vec![
+        definition("tool:collision_a", "collision_a"),
+        definition("tool:collision_b", "collision_b"),
+    ])
+}
+
+async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
+    let mut state = RlmExecutionState::new();
+    let mut context = lash_core::testing::code_execution_context();
+    let mut request = ExecRequest {
+        language: "lashlang".to_string(),
+        code: "finish 1".to_string(),
+    };
+    let mut artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+        lashlang::global_in_memory_lashlang_artifact_store();
+    let mut surface = LashlangSurface::default();
+    let mut deferred_resolver = None;
+    let mut projected_bindings = RlmProjectedBindings::default();
+    let mut projection_resolver: Arc<dyn ProjectionResolver> = Arc::new(ProjectionRegistry::new());
+
+    match site {
+        HostSetupFailureSite::DeferredResolution => {
+            let provider: Arc<dyn lash_core::ToolProvider> =
+                Arc::new(BindingRecordingDeferredProvider {
+                    executions: Default::default(),
+                    observed_bindings: Default::default(),
+                    enumerations: Default::default(),
+                });
+            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+                provider,
+                lash_core::ToolCatalog::default(),
+                Arc::new(FailingDeferredJournalController),
+                lash_core::testing::exec_code_invocation(
+                    "host-setup-failure",
+                    "turn-1",
+                    0,
+                    0,
+                    "exec-code",
+                    "exec-code:host-setup-failure",
+                ),
+            );
+            request.code =
+                r#"finish await web.fetch({ url: "https://example.test" })?"#.to_string();
+            deferred_resolver = Some(Arc::new(BindingDeferredResolver {
+                calls: Default::default(),
+            })
+                as lash_lashlang_runtime::SharedDeferredToolResolver);
+        }
+        HostSetupFailureSite::HostEnvironment => {
+            context = lash_core::testing::code_execution_context_with_tool_catalog(
+                colliding_host_catalog(),
+            );
+        }
+        HostSetupFailureSite::ArtifactStore => {
+            request.code = "process worker() { finish null }".to_string();
+            artifact_store = Arc::new(FailingArtifactStore);
+            surface = LashlangSurface::new(
+                lashlang::LashlangAbilities::default().with_processes(),
+                lashlang::LashlangLanguageFeatures::default(),
+                lashlang::LashlangHostCatalog::new(),
+            );
+        }
+        HostSetupFailureSite::RehydrateProjectedGlobals => {
+            request.code = "finish len(restored)".to_string();
+            let registry = Arc::new(ProjectionRegistry::new());
+            let descriptor = Arc::new(SnapshotProjectedToolText::default());
+            let reference = registry.register_memory(descriptor.clone());
+            state
+                .rlm
+                .insert_global(
+                    "restored",
+                    FlowValue::List(
+                        (0..256)
+                            .map(|index| {
+                                FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
+                                    format!("restored[{index}]"),
+                                    descriptor.clone(),
+                                    serde_json::json!(reference),
+                                ))
+                            })
+                            .collect::<Vec<_>>()
+                            .into(),
+                    ),
+                )
+                .expect("insert projected values before heap activation");
+            let first = execute_code_with_dialect_and_bounds(
+                &mut state,
+                context.clone(),
+                request.clone(),
+                artifact_store.clone(),
+                surface.clone(),
+                None,
+                RlmProjectedBindings::default(),
+                registry.clone(),
+                RlmLashlangExecutionTraceConfig::default(),
+                lashlang::ExecutionBounds::new(
+                    lashlang::ExecutionBound::Unbounded,
+                    lashlang::ExecutionBound::Unbounded,
+                    lashlang::ExecutionBound::logical_bytes(40 * 1024),
+                ),
+                RlmSourceContext::cell(SourceDialect::Lashlang),
+            )
+            .await;
+            assert_eq!(first.error, None, "activate a bounded heap");
+            projection_resolver = registry;
+        }
+        HostSetupFailureSite::ResolveProjectedBindings => {
+            projected_bindings = RlmProjectedBindings::new()
+                .bind_lazy(
+                    "doc",
+                    ProjectionRef::new("injected", serde_json::json!("missing")),
+                )
+                .expect("bind injected projection");
+            projection_resolver = Arc::new(FailingProjectionResolver);
+        }
+        HostSetupFailureSite::CancelledSetup => {
+            context = lash_core::testing::cancelled_code_execution_context();
+            request.code = "missing =".to_string();
+        }
+    }
+
+    execute_code_unbounded_for_tests(
+        &mut state,
+        context,
+        request,
+        artifact_store,
+        surface,
+        deferred_resolver,
+        projected_bindings,
+        projection_resolver,
+        RlmLashlangExecutionTraceConfig::default(),
+    )
+    .await
+}
+
+#[test]
+pub(super) fn every_host_setup_failure_is_classified_as_host() {
+    block_on(async {
+        let cases = [
+            (
+                HostSetupFailureSite::DeferredResolution,
+                "injected deferred journal commit failure",
+            ),
+            (
+                HostSetupFailureSite::HostEnvironment,
+                "invalid Lashlang host tool surface",
+            ),
+            (
+                HostSetupFailureSite::ArtifactStore,
+                "injected artifact store failure",
+            ),
+            (
+                HostSetupFailureSite::RehydrateProjectedGlobals,
+                "logical memory limit",
+            ),
+            (
+                HostSetupFailureSite::ResolveProjectedBindings,
+                "injected projection resolution failure",
+            ),
+            (
+                HostSetupFailureSite::CancelledSetup,
+                "foreground execution stopped during setup",
+            ),
+        ];
+
+        for (site, expected_message) in cases {
+            let error = Box::pin(inject_host_setup_failure(site))
+                .await
+                .error
+                .unwrap_or_else(|| panic!("{site:?}: injected setup failure must be observed"));
+            assert!(
+                error.message.contains(expected_message),
+                "{site:?}: wrong setup path reached: {error:?}"
+            );
+            assert_eq!(
+                error.kind,
+                lash_core::CellFailureKind::Host,
+                "{site:?}: host setup failures must not blame the program"
+            );
+        }
+    });
+}
+
 #[test]
 pub(super) fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
     assert_eq!(

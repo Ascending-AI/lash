@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Pin the two ways a service-backed suite can silently stop running.
+"""Pin the ways a service-backed suite can silently stop running.
 
 A suite that needs Postgres or MinIO is worthless the moment it skips itself.
-Both mechanisms that keep it honest are one edit away from being lost, and
+The mechanisms that keep it honest are one edit away from being lost, and
 losing either one is invisible: the job still reports green, having compared
 nothing.
 
 Rule 1 -- the require flag. A workflow scope that hands a suite
-``LASH_POSTGRES_DATABASE_URL`` (or ``LASH_MINIO_ENDPOINT``) must also set the
-matching ``LASH_REQUIRE_*`` flag to ``"1"``, in that scope or an enclosing one.
-The flag is what turns "the service is missing" from a skip into a failure, so
-a job that provisions a service and forgets the flag skips green whenever the
-service fails to start -- which is exactly what the release and perf legs did
-before FIG-1217.
+``LASH_POSTGRES_DATABASE_URL`` must also set ``LASH_REQUIRE_POSTGRES`` to
+``"1"``, in that scope or an enclosing one. The flag is what turns "the service
+is missing" from a skip into a failure, so a job that provisions a service and
+forgets the flag skips green whenever the service fails to start -- which is
+exactly what the release and perf legs did before FIG-1217. MinIO test clients
+use fixed CI configuration, so the workflow contract for them is pinned by the
+CI structure check rather than an endpoint/flag pair.
 
 Rule 2 -- the ignored-suite opt-in. A service-backed suite's tests are
 ``#[ignore]``d so a bare local run reports them as skipped instead of passing
@@ -54,7 +55,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # second is what lets a suite skip itself green.
 REQUIRE_FLAG_PAIRS = {
     "LASH_POSTGRES_DATABASE_URL": "LASH_REQUIRE_POSTGRES",
-    "LASH_MINIO_ENDPOINT": "LASH_REQUIRE_MINIO",
 }
 
 # The suites whose tests are `#[ignore]`d, and the flags that ask for them.
