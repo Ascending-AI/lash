@@ -517,8 +517,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     let narrowed = crate::SessionToolAccess::ambient()
         .with_hidden_tools([tool.name])
         .expect("valid hidden tool");
-    runtime
-        .set_tool_access(narrowed)
+    Box::pin(runtime.set_tool_access(narrowed))
         .await
         .expect("narrow persisted tool authority");
     assert!(
@@ -530,8 +529,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
         "host discovery must not retain its pre-update catalog cache"
     );
 
-    runtime
-        .set_tool_access(crate::SessionToolAccess::ambient())
+    Box::pin(runtime.set_tool_access(crate::SessionToolAccess::ambient()))
         .await
         .expect("widen persisted tool authority");
     assert!(
