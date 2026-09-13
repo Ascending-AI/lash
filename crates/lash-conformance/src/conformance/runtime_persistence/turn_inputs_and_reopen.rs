@@ -795,6 +795,28 @@ pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
             .expect("cancel accepted input after lease expiry"),
         &input.input_id,
     );
+    let stale_state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let stale_error = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .completing_turn_input_claim(claim.completion()),
+        )
+        .await
+        .expect_err("cancelled input must reject its zombie claimant's settlement");
+    assert!(matches!(
+        stale_error,
+        StoreError::TurnInputClaimSuperseded {
+            session_id: ref refused_session_id,
+            claim_id: ref refused_claim_id,
+            row_id: Some(ref refused_input_id),
+            ..
+        } if refused_session_id == session_id
+            && refused_claim_id == &claim.claim_id
+            && refused_input_id.as_ref() == input.input_id.as_str()
+    ));
     let vacuum = store
         .vacuum()
         .await
