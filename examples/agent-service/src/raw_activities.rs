@@ -393,6 +393,7 @@ finish "done through raw activities"
             // construction rather than by omission.
             lash::rlm::RlmDialect::Lashlang,
             None,
+            None,
         );
         state
     }
