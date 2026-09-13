@@ -383,7 +383,7 @@ impl lash_core::ToolProvider for ProcessParentIntentTool {
             .and_then(serde_json::Value::as_bool)
             .expect("literal process-parent emit");
         let intents = if emit {
-            lash_core::ToolIntents::v1(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
                     request: lash_core::ProcessStartRequest::external(

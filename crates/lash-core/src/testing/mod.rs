@@ -986,12 +986,58 @@ pub async fn execute_tool_intents_with_services(
     .await
 }
 
+/// Execute a recorded tool-intent drain with the production trigger router.
+///
+/// Durable-adapter tests use this narrow seam to prove replay refusal before
+/// trigger-store ingestion.
+#[doc(hidden)]
+pub async fn execute_tool_intents_with_services_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: crate::TriggerRouter,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        Some(trigger_router),
+        session_id,
+        tool_call_id,
+        intents,
+        None,
+    )
+    .await
+}
+
 /// Execute a recorded tool-intent drain through the production process-command
 /// route and notify a test hook after a child Start has committed.
 #[doc(hidden)]
 pub async fn execute_tool_intents_with_services_and_hook(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
+    session_id: &SessionId,
+    tool_call_id: &str,
+    intents: &crate::ToolIntents,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
+    execute_tool_intents_with_services_and_hook_and_trigger_router(
+        scoped_effect_controller,
+        processes,
+        None,
+        session_id,
+        tool_call_id,
+        intents,
+        child_trace_hook,
+    )
+    .await
+}
+
+async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
+    scoped_effect_controller: crate::ScopedEffectController<'_>,
+    processes: Arc<dyn crate::ProcessService>,
+    trigger_router: Option<crate::TriggerRouter>,
     session_id: &SessionId,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
@@ -1011,6 +1057,7 @@ pub async fn execute_tool_intents_with_services_and_hook(
             .session_id(session_id)
             .session_lifecycle(Arc::new(MockSessionManager::default()))
             .processes(processes)
+            .trigger_router(trigger_router)
             .borrowed_effect_controller(scoped_effect_controller)
             .dispatch_parent_invocation(parent_invocation),
     );

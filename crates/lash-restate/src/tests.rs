@@ -76,6 +76,7 @@ mod endpoint_protocol;
 mod process_tool_replay;
 mod replay_corpus;
 mod tool_context_conformance;
+mod trigger_intent_cutover;
 mod turn_cancel_modes;
 use endpoint_protocol::{
     durable_wait_index_call_response, encode_call_replay, encode_captured_run_and_call_replay,

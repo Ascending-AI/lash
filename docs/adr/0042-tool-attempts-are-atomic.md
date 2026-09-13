@@ -162,6 +162,16 @@ it as a separate admission fact. The laws
 journal-first boundary: environment state is written only after admission, and
 a failed environment write cannot leave a registered process behind.
 
+Protocol v2 makes the declaration replay key the store-side idempotency key for
+an `EmitTrigger` occurrence. The caller-supplied key remains recorded payload,
+but it cannot collapse two distinct declarations; redriving one declaration
+reuses its replay-derived key. Protocol-v1 attempt batches, predecessor host
+keys, and predecessor runtime-owned submission rows are refused before
+realization because resuming them after the cutover could create a second
+occurrence beside one committed under the old caller-key rule. An unversioned
+host key or submission row is classified explicitly as v1 only to produce that
+refusal; it is never upgraded to current behavior.
+
 After the enclosing turn or process reaches its end, recorded start intents are
 handled by a deterministic parent-end step. Version 1 deliberately exposes only
 `Abandon` and `Cancel`, with `Cancel` as the default: `Abandon` is a recorded

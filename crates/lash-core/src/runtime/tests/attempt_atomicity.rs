@@ -685,7 +685,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     );
 }
 
-/// Each admitted v1 declaration realizes exactly one controller command, and
+/// Each admitted v2 declaration realizes exactly one controller command, and
 /// the sentinel attributes that command to the literal stable intent id.
 #[tokio::test]
 async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
@@ -711,7 +711,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         "intent-drain",
     ));
 
-    let intents = crate::ToolIntents::v1(vec![
+    let intents = crate::ToolIntents::v2(vec![
         crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             request: crate::ProcessStartRequest::external(
@@ -796,7 +796,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = crate::ToolIntents::v1(
+    let intents = crate::ToolIntents::v2(
         (0..=crate::TOOL_INTENT_MAX_COUNT)
             .map(|index| {
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
@@ -959,7 +959,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = crate::ToolIntents::v1(vec![crate::ToolIntent::SignalProcess(
+    let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             process_id: ProcessId::from(LIVE_PROCESS.to_string()),
