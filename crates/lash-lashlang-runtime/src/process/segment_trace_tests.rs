@@ -58,8 +58,13 @@ impl lashlang::ExecutionHost for SegmentFixtureHost {
 }
 
 #[test]
-#[ignore = "explicit unversioned predecessor fixture capture utility"]
-fn capture_unversioned_segment_state_from_writer() {
+#[ignore = "run only with the predecessor writer at ccab40166"]
+fn capture_vm_v10_segment_state_from_predecessor_writer() {
+    assert_eq!(
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        10,
+        "capture this fixture only from predecessor writer commit ccab40166"
+    );
     let program = lashlang::compile("finish null").expect("compile fixture program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
@@ -77,17 +82,16 @@ fn capture_unversioned_segment_state_from_writer() {
         started_process_ids: Vec::new(),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
-    wire.as_object_mut()
-        .expect("segment state is an object")
-        .remove("version");
-    let mut bytes = serde_json::to_vec(&wire).expect("serialize unversioned predecessor");
+    wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
+    wire["vm"]["active_execution_elapsed"] = serde_json::json!({"nanos": 0, "secs": 0});
+    let mut bytes = serde_json::to_vec(&wire).expect("serialize v10 predecessor");
     bytes.push(b'\n');
     std::fs::write(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/fixtures/lashlang_segment_state_unversioned.json"),
+            .join("src/fixtures/lashlang_segment_state_vm_v10.json"),
         bytes,
     )
-    .expect("write unversioned predecessor fixture");
+    .expect("write v10 predecessor fixture");
 }
 
 #[test]
