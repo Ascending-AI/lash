@@ -16,6 +16,7 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/sqlite-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-6a89236a/sqlite-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/sqlite-expected.json",

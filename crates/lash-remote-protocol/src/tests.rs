@@ -1295,6 +1295,15 @@ fn protocol_61_session_filter_is_refused_before_removed_field_decode() {
 }
 
 #[test]
+fn remote_protocol_62_session_filter_refuses_retired_session_id() {
+    let wire = br#"{"protocol_version":62,"session_id":"session-blue"}"#;
+    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
+        .expect_err("version-62 filter must reject the retired session_id field");
+    assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
+    assert!(error.to_string().contains("session_id"), "{error}");
+}
+
+#[test]
 fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
     let request = RemoteTriggerOccurrenceRequest::new(
         "ui.button.pressed",

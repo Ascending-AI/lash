@@ -582,7 +582,7 @@ impl TriggerOwnerScope {
     /// `session:<id>`, `host:<binding>`, or the reserved platform `host` namespace.
     pub fn namespace(&self) -> String {
         match self {
-            Self::Session { session_id } => format!("session:{session_id}"),
+            Self::Session { session_id } => lash_sansio::session_owner_namespace(session_id),
             Self::Host { binding_id } => format!("host:{binding_id}"),
             Self::Platform => "host".to_string(),
         }
@@ -707,7 +707,7 @@ impl TriggerSubscriptionFilter {
     /// Constructs a `TriggerSubscriptionFilter` using for session semantics for store and
     /// durable-substrate implementors while persisting trigger subscriptions and occurrences.
     pub fn for_session(session_id: impl Into<SessionId>) -> Self {
-        Self::for_registrant_scope(TriggerOwnerScope::session(session_id).namespace())
+        Self::for_registrant_scope(lash_sansio::session_owner_namespace(session_id.into()))
     }
 
     /// Constructs a `TriggerSubscriptionFilter` using for registrant scope semantics for store and

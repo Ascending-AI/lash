@@ -15,7 +15,7 @@ use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
 const MAX_DIFF_VALUE_JSON_BYTES: usize = 2_048;
 const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 
-/// The exact serialized envelope bytes and the SHA-256 verdict derived from
+/// The exact serialized envelope bytes and the BLAKE3 verdict derived from
 /// those same bytes.
 ///
 /// Durable substrates record this value as one unit. Replay validation parses
@@ -39,6 +39,28 @@ impl CanonicalRuntimeEffectEnvelope {
         let hash =
             crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v3", json.as_bytes());
         Ok(Self { json, hash })
+    }
+
+    pub(crate) fn decode(encoded: &str) -> Result<Self, RuntimeEffectControllerError> {
+        let canonical: Self = serde_json::from_str(encoded).map_err(|err| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
+                format!("failed to decode canonical runtime effect envelope: {err}"),
+            )
+        })?;
+        let value: Value = serde_json::from_str(&canonical.json).map_err(|err| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
+                format!("failed to decode canonical runtime effect payload: {err}"),
+            )
+        })?;
+        if is_pre_cutover_trigger_list_envelope(&value) {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
+                "pre-effect-20 trigger-list envelope uses the retired filter.session_id encoding; recreate the effect journal instead of replaying it across the cutover",
+            ));
+        }
+        Ok(canonical)
     }
 
     pub fn hash(&self) -> &str {
@@ -80,6 +102,15 @@ impl CanonicalRuntimeEffectEnvelope {
         self.hash = hash.into();
         self
     }
+}
+
+fn is_pre_cutover_trigger_list_envelope(value: &Value) -> bool {
+    value.pointer("/command/type").and_then(Value::as_str) == Some("trigger")
+        && value.pointer("/command/command/op").and_then(Value::as_str) == Some("list")
+        && value
+            .pointer("/command/command/filter")
+            .and_then(Value::as_object)
+            .is_some_and(|filter| filter.contains_key("session_id"))
 }
 
 /// Compact, content-free mismatch evidence retained on the controller error.
@@ -364,6 +395,79 @@ mod tests {
 
     fn canonical(input: Value) -> CanonicalRuntimeEffectEnvelope {
         CanonicalRuntimeEffectEnvelope::capture(&envelope(input)).expect("canonical envelope")
+    }
+
+    fn session_list_envelope() -> RuntimeEffectEnvelope {
+        RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::turn("session-blue", "turn-blue"),
+                    "trigger:list",
+                )
+                .expect("valid trigger-list address"),
+                crate::RuntimeAttribution::for_session("session-blue"),
+                "trigger:list",
+            ),
+            RuntimeEffectCommand::Trigger {
+                command: Box::new(crate::TriggerCommand::List {
+                    owner_scope: crate::TriggerOwnerScope::session("session-blue"),
+                    filter: crate::TriggerSubscriptionFilter::for_session("session-blue"),
+                }),
+            },
+        )
+    }
+
+    /// Captured from origin/main 93aea8f3d6367e3b1a958df0f05caf2a835f20b7
+    /// with the throwaway capture command recorded in the FIG-2886 fix report.
+    const PREDECESSOR_SESSION_LIST_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"trigger:list\"},\"effect_id\":\"trigger:list\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"trigger\",\"command\":{\"op\":\"list\",\"owner_scope\":{\"type\":\"session\",\"session_id\":\"session-blue\"},\"filter\":{\"session_id\":\"session-blue\"}}}}","hash":"51ba8b5ff2d3fe2ff5f5009d4f8fc42946b11e86575901a64393b3e01c912db1"}"#;
+
+    #[test]
+    fn predecessor_session_list_envelope_is_typed_version_refusal() {
+        let outer: Value =
+            serde_json::from_str(PREDECESSOR_SESSION_LIST_ENVELOPE).expect("predecessor fixture");
+        let inner: Value = serde_json::from_str(
+            outer["json"]
+                .as_str()
+                .expect("predecessor canonical envelope json"),
+        )
+        .expect("predecessor runtime envelope");
+        assert_eq!(
+            inner.pointer("/command/command/filter/session_id"),
+            Some(&Value::String("session-blue".to_string())),
+            "fixture must prove it carries the retired pre-cutover list shape"
+        );
+
+        let error = CanonicalRuntimeEffectEnvelope::decode(PREDECESSOR_SESSION_LIST_ENVELOPE)
+            .expect_err("v3 journal envelope must be refused before replay comparison");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
+        );
+        assert!(!error.code.is_replay_mismatch());
+    }
+
+    #[test]
+    fn current_session_list_envelope_decode_recapture_is_hash_fixpoint() {
+        let captured = session_list_envelope()
+            .canonical_form()
+            .expect("capture current session list envelope");
+        let encoded = serde_json::to_string(&captured).expect("encode canonical envelope");
+        let decoded = CanonicalRuntimeEffectEnvelope::decode(&encoded)
+            .expect("decode current canonical envelope");
+        let reconstructed: RuntimeEffectEnvelope =
+            serde_json::from_str(decoded.json()).expect("decode runtime envelope");
+        let recaptured = reconstructed
+            .canonical_form()
+            .expect("recapture runtime envelope");
+
+        assert_eq!(decoded.hash(), recaptured.hash());
+        assert_eq!(decoded.json(), recaptured.json());
+        let current_inner: Value =
+            serde_json::from_str(decoded.json()).expect("inspect current runtime envelope");
+        assert_eq!(
+            current_inner.pointer("/command/command/filter/session_id"),
+            None
+        );
     }
 
     fn mismatch_paths(recorded: Value, reconstructed: Value) -> Vec<String> {

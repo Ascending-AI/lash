@@ -657,6 +657,17 @@ fn trigger_subscription_dtos_round_trip_core_values() {
 }
 
 #[test]
+fn core_and_remote_session_filter_constructors_are_byte_identical() {
+    let core = lash_core::TriggerSubscriptionFilter::for_session("session-blue");
+    let remote = RemoteTriggerSubscriptionFilter::for_session("session-blue");
+
+    assert_eq!(
+        serde_json::to_vec(&core).expect("core session filter json"),
+        serde_json::to_vec(&remote).expect("remote session filter json")
+    );
+}
+
+#[test]
 fn process_start_requests_round_trip_core_values() {
     let external = lash_core::ProcessStartRequest::external(
         "process:external",

@@ -209,7 +209,60 @@ where
                 expected: expected_version,
             });
         }
-        serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)
+
+        struct EnvelopeFields(Vec<(String, serde_json::Value)>);
+
+        impl<'de> serde::Deserialize<'de> for EnvelopeFields {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct Visitor;
+
+                impl<'de> serde::de::Visitor<'de> for Visitor {
+                    type Value = EnvelopeFields;
+
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str("a remote protocol envelope object")
+                    }
+
+                    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+                    where
+                        A: serde::de::MapAccess<'de>,
+                    {
+                        let mut fields = Vec::new();
+                        let mut names = std::collections::BTreeSet::new();
+                        while let Some(name) = map.next_key::<String>()? {
+                            if !names.insert(name.clone()) {
+                                return Err(serde::de::Error::custom(format_args!(
+                                    "duplicate field `{name}`"
+                                )));
+                            }
+                            fields.push((name, map.next_value()?));
+                        }
+                        Ok(EnvelopeFields(fields))
+                    }
+                }
+
+                deserializer.deserialize_map(Visitor)
+            }
+        }
+
+        let EnvelopeFields(fields) =
+            serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
+        let body = fields
+            .into_iter()
+            .filter(|(name, _)| name != "protocol_version")
+            .collect::<serde_json::Map<_, _>>();
+        let body = serde_json::from_value(serde_json::Value::Object(body))
+            .map_err(RemoteProtocolError::MessageDecode)?;
+        Ok(Self {
+            protocol_version: probe.protocol_version,
+            body,
+        })
     }
 }
 
