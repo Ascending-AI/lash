@@ -43,6 +43,26 @@ mkdir -p "$artifact_dir"
 crash_container="${compose_project}-crash-window"
 test_output="$artifact_dir/process-operations-e2e.log"
 
+run_postgres_conformance_test() {
+  local selector="$1"
+  local listing
+  local test_count
+
+  listing="$(
+    cargo test --locked -p lash-internal-postgres-store --test conformance \
+      "$selector" -- --exact --list
+  )" || return
+  test_count="$(awk '/: test$/ { count++ } END { print count + 0 }' <<<"$listing")"
+  printf '%s\n' "$listing"
+  if [ "$test_count" -ne 1 ]; then
+    echo "Expected exactly one PostgreSQL conformance test for '$selector', found $test_count" >&2
+    return 4
+  fi
+
+  cargo test --locked -p lash-internal-postgres-store --test conformance \
+    "$selector" -- --exact --nocapture --test-threads=1
+}
+
 cleanup() {
   status=$?
   docker rm -f "$crash_container" >/dev/null 2>&1 || true
@@ -132,8 +152,7 @@ LASH_REQUIRE_MINIO=1 \
 
 postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-internal-postgres-store --test conformance \
-  postgres_wake_delivery_crash_matrix_when_configured -- --nocapture --test-threads=1 \
+  run_postgres_conformance_test wake_delivery::wake_delivery_crash_matrix \
   2>&1 | tee "$artifact_dir/01-wake-delivery.log" | tee -a "$test_output"
 echo "scenario 1 evidence: TargetGone and Expired typed discards plus blocked-head redrive passed on PostgreSQL" | tee -a "$test_output"
 echo "scenario 6 evidence: prune/re-register delivered a strictly higher sequence; forced rewind surfaced sequence_rewound" | tee -a "$test_output"
@@ -202,9 +221,7 @@ PY
 echo "scenario 8 evidence: selected A settled alone; unselected B remained pending; replay and refusal stayed typed" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-internal-postgres-store --test conformance \
-  postgres_process_trigger_retention_satisfies_conformance_when_configured \
-  -- --nocapture --test-threads=1 \
+  run_postgres_conformance_test process_trigger_retention \
   2>&1 | tee "$artifact_dir/07-retention.log" | tee -a "$test_output"
 echo "scenario 7 evidence: receipts survived; pruned-process deliveries reconciled; guarded tombstones refused compaction" | tee -a "$test_output"
 
