@@ -289,3 +289,38 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
         "{error}"
     );
 }
+
+/// The prompt's "Literal target" is a rule, not a suggestion.
+///
+/// `start` refused a non-literal target from the day it shipped; the
+/// registration path did not, so an aliased target linked and the runtime
+/// derived a subscription key from a name the registration never shows. The
+/// two paths now refuse with the same diagnostic.
+#[test]
+fn a_trigger_target_is_a_literal_process_binding() {
+    for target in ["alias", "targets.remember", "picker()"] {
+        let error = reject(&format!(
+            r#"
+            const remember = defineProcess({{
+              name: "remember", signals: {{}},
+              run: async (tick: unknown) => {{ return true; }}
+            }});
+            const alias = remember;
+            const targets = {{ remember: remember }};
+            const picker = () => remember;
+            const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
+            finish(await registerTrigger({{
+              source: schedule,
+              target: {target},
+              inputs: (event) => ({{ tick: event }})
+            }}));
+            "#
+        ));
+        assert_eq!(
+            error.code,
+            DiagnosticCode::ProcessTargetStaticRequired,
+            "{target}: {error}"
+        );
+    }
+    accept(&program("tick: unknown", "(event) => ({ tick: event })"));
+}

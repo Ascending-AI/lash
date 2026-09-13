@@ -105,10 +105,13 @@ fn prompt_diet_sizes_and_capability_gates() {
     }
     let durable =
         crate::dialect::typescript::typescript_process_prompt(&lashlang::LashlangAbilities::all());
-    // Raised from 900 with FIG-2986: the trigger signature alone grew by 21
-    // characters when `inputs` became an arrow, so the old ceiling could not be
-    // met by any wording. Still a binding ratchet, with ~20 characters of slack.
-    assert!(durable.chars().count() <= 1050, "{}", durable.len());
+    // Raised from 900 with FIG-2986, by the smallest amount the ruled change
+    // forces: `inputs?: (event: unknown) => Record<string, unknown>` is 21
+    // characters longer than `inputs: Record<string, unknown>`, and the prose
+    // has to say the arrow is erased or a model writes logic inside it, which
+    // costs 13 more. 900 + 21 + 13 = 934, the prompt's exact length, so this is
+    // as tight a ratchet as the old one was.
+    assert!(durable.chars().count() <= 935, "{}", durable.len());
 }
 
 #[test]

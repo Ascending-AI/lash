@@ -86,6 +86,12 @@ impl Lowerer {
         let source = entries
             .iter()
             .find_map(|(name, value)| (*name == "source").then_some(*value));
+        if let Some(target) = entries
+            .iter()
+            .find_map(|(name, value)| (*name == "target").then_some(*value))
+        {
+            self.require_literal_process_target(target)?;
+        }
         for (_, value) in &entries {
             self.reject_trigger_event_spellings(value, source)?;
         }
@@ -99,6 +105,30 @@ impl Lowerer {
             lowered.push((name.into(), value));
         }
         Ok(LashExpr::Record(lowered))
+    }
+
+    /// The registration target names a top-level `defineProcess` binding.
+    ///
+    /// `start` has always required that (`ProcessTargetStaticRequired`); the
+    /// registration path did not, so `const t = p` followed by
+    /// `registerTrigger({ target: t, ... })` linked, and the runtime derived a
+    /// subscription key from an alias no reader of the registration can see.
+    /// The prompt has said "Literal target" the whole time; this is the rule
+    /// that makes it true, on all four registration spellings.
+    fn require_literal_process_target(&self, target: &Expr) -> Result<(), Diagnostic> {
+        if let Expr::Ident(name) = target
+            && matches!(
+                self.binding(name).map(|binding| &binding.role),
+                Ok(BindingRole::ProcessDefinition(_))
+            )
+        {
+            return Ok(());
+        }
+        Err(Diagnostic::new(
+            DiagnosticCode::ProcessTargetStaticRequired,
+            "a trigger target is the name of a top-level defineProcess binding, never an alias or an expression",
+            None,
+        ))
     }
 
     /// The two spellings a model reaches for that no longer exist.

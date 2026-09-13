@@ -289,7 +289,7 @@ Signals: {go:null}; waitSignal is run-only."#,
         }
         if abilities.triggers {
             lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs?: (event: unknown) => Record<string, unknown>; name?: string}): Promise<unknown>;
-Literal target; the `inputs` arrow is an erased template, not a callback: its parameter is the fired event. Omit it for a one-parameter target."#);
+Literal target; inputs match params, arrow erased."#);
         }
     }
     if abilities.sleep {
@@ -886,6 +886,12 @@ mod tests {
                 .expect("valid timer tick type"),
             )
             .expect("valid timer trigger source");
+        // ... and the trigger operations themselves. Without them `triggers`
+        // is an unknown module, every registration misuse below rejects with
+        // `TS_LINK_ERROR: unknown module 'triggers'`, and the fixture proves
+        // nothing about the shapes it names.
+        lashlang::add_trigger_resource_operations(&mut resources)
+            .expect("valid trigger operations");
         let host =
             lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all());
         // Identifiers that exist only in Lashlang's surface. A model reading
@@ -945,6 +951,22 @@ mod tests {
         assert!(
             leaks.is_empty(),
             "model-facing TypeScript diagnostics leak Lashlang identifiers: {leaks:#?}"
+        );
+
+        // The registration misuse above must reject for the reason the prompt
+        // gives ("Literal target"), not incidentally on some earlier field. A
+        // fixture that only asserts "rejected" cannot tell those apart, and
+        // this one could not: before FIG-2986 the program linked outright once
+        // the host declared `triggers`.
+        let aliased_target = misuses
+            .iter()
+            .find_map(|(label, source)| label.contains("non-literal target").then_some(*source))
+            .expect("the non-literal target misuse is listed");
+        assert_eq!(
+            lash_typescript::link(aliased_target, &host)
+                .expect_err("an aliased trigger target is not a literal target")
+                .code,
+            lash_typescript::DiagnosticCode::ProcessTargetStaticRequired
         );
 
         let prompt = typescript_process_prompt(&lashlang::LashlangAbilities::all());
