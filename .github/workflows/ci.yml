@@ -929,10 +929,10 @@ jobs:
             true)
               terms=()
               if [ "${rust}" = "true" ]; then
-                terms+=("$(<tools/bazel/cargo_owned_nextest_filter.txt)")
+                terms+=("$(tr -d '\n' < tools/bazel/cargo_owned_nextest_filter.txt)")
               fi
               if [ "${workbench}" = "true" ]; then
-                terms+=("$(<tools/bazel/workbench_nextest_filter.txt)")
+                terms+=("$(tr -d '\n' < tools/bazel/workbench_nextest_filter.txt)")
               fi
               if [ "${#terms[@]}" -eq 0 ]; then
                 echo "cargo partition selected with neither rust nor workbench" >&2
@@ -963,7 +963,7 @@ jobs:
           # shellcheck disable=SC2086
           cargo build --workspace --locked ${LASH_CI_FEATURES} \
             "${excludes[@]}" \
-            --example sqlite-await-event-helper --example postgres-await-event-helper
+            --example sqlite-await-event-helper
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
             --no-fail-fast "${nextest_args[@]}"

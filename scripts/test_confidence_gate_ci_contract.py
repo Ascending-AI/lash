@@ -1961,7 +1961,7 @@ derive_mutation_jobs() {{
             workspace_tests,
         )
         self.assertIn(
-            "--example sqlite-await-event-helper --example postgres-await-event-helper",
+            "--example sqlite-await-event-helper",
             workspace_tests,
         )
         self.assertIn(
