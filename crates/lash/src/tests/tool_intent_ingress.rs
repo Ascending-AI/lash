@@ -773,14 +773,13 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
 }
 
 fn cancel_intent(session_id: &SessionId) -> lash_core::ToolIntent {
-    cancel_intent_with_reason(session_id, "kind-swap probe")
+    cancel_intent_for_target(session_id, PROCESS)
 }
 
-fn cancel_intent_with_reason(session_id: &SessionId, reason: &str) -> lash_core::ToolIntent {
+fn cancel_intent_for_target(session_id: &SessionId, target: &str) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(PROCESS.to_string()),
-        reason: Some(reason.to_string()),
+        process_id: ProcessId::from(target),
     })
 }
 
@@ -1036,15 +1035,45 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
-    for (call_id, first_reason, duplicate_reason) in [
-        ("cancel-same-reason", "same", "same"),
-        ("cancel-changed-reason", "first", "changed"),
+    let targets = [
+        "cancel-same-target",
+        "cancel-first-target",
+        "cancel-other-target",
+    ];
+    for target in targets {
+        let record = registry
+            .register_process_with_observers(
+                lash_core::ProcessRegistration::new(
+                    target,
+                    lash_core::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash_core::RecoveryContract::ExternallyOwned,
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
+                ),
+                &[SessionId::from(SESSION)],
+            )
+            .await?;
+        assert!(!record.is_terminal());
+        assert!(record.cancel_request.is_none());
+    }
+    for (call_id, first_target, duplicate_target) in [
+        ("cancel-same-target", targets[0], targets[0]),
+        ("cancel-changed-target", targets[1], targets[2]),
     ] {
+        assert_eq!(
+            first_target == duplicate_target,
+            call_id == "cancel-same-target"
+        );
         let key = ingress.key(call_id, 0);
         let first = ingress
             .submit(
                 key.clone(),
-                cancel_intent_with_reason(&SessionId::from(SESSION), first_reason),
+                cancel_intent_for_target(&SessionId::from(SESSION), first_target),
             )
             .await;
         assert!(matches!(
@@ -1060,7 +1089,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
         let duplicate = ingress
             .submit(
                 key,
-                cancel_intent_with_reason(&SessionId::from(SESSION), duplicate_reason),
+                cancel_intent_for_target(&SessionId::from(SESSION), duplicate_target),
             )
             .await;
         assert!(matches!(
@@ -1077,11 +1106,11 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
     let (left, right) = tokio::join!(
         ingress.submit(
             concurrent_key.clone(),
-            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
         ingress.submit(
             concurrent_key,
-            cancel_intent_with_reason(&SessionId::from(SESSION), "concurrent"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
     );
     let concurrent_outcomes = [left, right];
@@ -1118,15 +1147,29 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
         "the racing duplicate is a typed refusal"
     );
 
-    assert_eq!(
-        registry
-            .events_after(&ProcessId::from(PROCESS), 0)
+    let mut realized = 0;
+    for target in [targets[0], targets[1], PROCESS] {
+        let count = registry
+            .events_after(&ProcessId::from(target), 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
-            .count(),
-        3,
+            .count();
+        assert_eq!(count, 1, "each admitted target is cancelled once");
+        realized += count;
+    }
+    assert_eq!(
+        realized, 3,
         "each ingress identity realizes one cancellation"
+    );
+    assert!(
+        registry
+            .get_process(&ProcessId::from(targets[2]))
+            .await?
+            .expect("retained alternate target")
+            .cancel_request
+            .is_none(),
+        "the conflicting duplicate never cancels its different target"
     );
     Ok(())
 }
@@ -1190,11 +1233,11 @@ async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handle
     let (left_outcome, right_outcome) = tokio::join!(
         left.submit(
             key.clone(),
-            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
         right.submit(
             key,
-            cancel_intent_with_reason(&SessionId::from(SESSION), "cross-handle"),
+            cancel_intent_for_target(&SessionId::from(SESSION), PROCESS),
         ),
     );
     let outcomes = [left_outcome, right_outcome];

@@ -2,9 +2,12 @@
 
 use lash_sansio::ProcessId;
 mod event_replay;
+use caller_departure::caller_departed_rows_are_reclaimed_by_retention;
 use event_replay::{
-    canonical_process_event_payload_replay, long_cancellation_reason_replay_is_backend_safe,
+    canonical_process_event_payload_replay, long_cancellation_requester_replay_is_backend_safe,
 };
+mod caller_departure;
+mod cancellation;
 mod lifecycle;
 mod status_filters;
 use status_filters::list_filters_match_extracted_and_json_fields;
@@ -68,6 +71,12 @@ where
     drop((first, second));
     lifecycle::registration_contract(make()).await;
     lifecycle::empty_tool_call_identifiers_leave_no_row(make()).await;
+    let cancellation_registry = make();
+    Box::pin(cancellation::contract(
+        Arc::clone(&cancellation_registry),
+        cancellation_registry,
+    ))
+    .await;
     super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
@@ -79,6 +88,12 @@ where
 {
     lifecycle::registration_contract(make().open).await;
     lifecycle::empty_tool_call_identifiers_leave_no_row(make().open).await;
+    let cancellation_handles = make();
+    Box::pin(cancellation::contract(
+        cancellation_handles.open,
+        cancellation_handles.reopen,
+    ))
+    .await;
     super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(
@@ -459,7 +474,7 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
     generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
     canonical_process_event_payload_replay(Arc::clone(&registry)).await;
-    long_cancellation_reason_replay_is_backend_safe(Arc::clone(&registry)).await;
+    long_cancellation_requester_replay_is_backend_safe(Arc::clone(&registry)).await;
     wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
     producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
@@ -2127,7 +2142,8 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         crate::NativeRuntimeEffectController::request_process_cancel(
             Arc::clone(&registry),
             &process_id,
-            Some("cancel after prune".to_string()),
+            crate::CancelOrigin::OperatorRequested,
+            "test:cancel-after-prune".to_string(),
             None,
         )
         .await,
@@ -2470,52 +2486,5 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     assert_eq!(
         terminal_replay, closed,
         "a recorded outcome cannot be retracted into a caller departure"
-    );
-}
-
-/// Retention reclaims caller-departed rows on every backend (FIG-1383).
-///
-/// Nothing may ever honestly terminalize such a row, so excluding it from
-/// retention would leak rows without bound. Reclaiming is not an outcome
-/// claim: the tombstone records the label the row actually carried.
-async fn caller_departed_rows_are_reclaimed_by_retention(registry: Arc<dyn ProcessRegistry>) {
-    let reclaimed_id = "caller-departure-reclaimed";
-    let retained_id = "caller-departure-retained";
-    registry
-        .register_process(registration(reclaimed_id))
-        .await
-        .expect("register reclaimable row");
-    registry
-        .register_process(registration(retained_id))
-        .await
-        .expect("register still-running row");
-    let departed = registry
-        .record_caller_departure(&ProcessId::from(reclaimed_id))
-        .await
-        .expect("record caller departure");
-    let (_, projection_cursor) = changes_after_full_relist_if_required(&registry, 4096).await;
-    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-    registry
-        .prune_terminal_processes(
-            departed.updated_at_ms.saturating_add(1),
-            None,
-            crate::ProjectionWatermark::UpTo(projection_cursor),
-        )
-        .await
-        .expect("prune retired rows");
-    assert!(
-        matches!(
-            registry.get_process(&ProcessId::from(reclaimed_id)).await,
-            Err(crate::PluginError::ProcessNoLongerRetained { .. })
-        ),
-        "retention must reclaim a row nothing may ever terminalize"
-    );
-    assert!(
-        registry
-            .get_process(&ProcessId::from(retained_id))
-            .await
-            .expect("read still-running row")
-            .is_some(),
-        "an externally-owned row whose caller is still present must survive retention"
     );
 }

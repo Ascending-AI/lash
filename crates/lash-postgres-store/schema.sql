@@ -637,7 +637,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 88)
+VALUES ('lash-postgres-store', 89)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -746,7 +746,7 @@ impl SessionAdmin {
         let summary = processes
             .cancel(&session_id, process_id, scope)
             .await
-            .map(lash_core::ProcessCancelReceipt::from_record)
+            .and_then(lash_core::ProcessCancelReceipt::from_record)
             .map_err(EmbedError::Plugin)?;
         self.runtime.record_process_changed(
             SessionProcessEventKind::Cancelled,

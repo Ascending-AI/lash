@@ -60,7 +60,6 @@ impl SharedDatabaseLock {
 const SESSION: &str = "pg-process-parent-law";
 const SEGMENTED_PARENT: &str = "pg-segmented-process-parent";
 const TOOL_PARENT: &str = "pg-tool-call-parent";
-const PARENT_END_REASON: &str = "recorded start intent parent ended with cancel policy";
 
 #[derive(Default)]
 struct ParentEndFaultState {
@@ -736,8 +735,15 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .append_event(
             already_cancelled,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                already_cancelled,
-                Some(PARENT_END_REASON.to_string()),
+                &registry
+                    .resolve_process_ref(already_cancelled)
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:public_process_parents_are_literal_and_crash_atomic_on_postgres",
+                    11,
+                ),
             ),
         )
         .await
@@ -846,8 +852,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                             "replay_key": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392"
                         },
                         "process_id": "tool-intent:v2:blake3:7b63739b0e0f8a62d63a8e31b3d095ff26b879b925732116f04ba01266ff7392",
-                        "policy": "cancel",
-                        "reason": "recorded start intent parent ended with cancel policy"
+                        "policy": "cancel"
                     }
                 }
             }

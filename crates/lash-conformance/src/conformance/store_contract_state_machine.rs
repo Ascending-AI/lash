@@ -78,7 +78,7 @@ pub enum StoreContractOp {
     },
     CancelRequest {
         process: u8,
-        reason: u8,
+        requester: u8,
     },
     Terminal {
         process: u8,
@@ -771,18 +771,23 @@ async fn apply_operation(
                 }
             }
         }
-        StoreContractOp::CancelRequest { process, reason } => {
+        StoreContractOp::CancelRequest { process, requester } => {
             let id = process_id(*process);
-            if let Ok(appended) = handles
-                .registry
-                .append_event(
-                    &id,
-                    ProcessEventAppendRequest::cancel_requested(
-                        &id,
-                        Some(format!("reason-{reason}")),
-                    ),
-                )
-                .await
+            if let Ok(process_ref) = handles.registry.resolve_process_ref(&id).await
+                && let Ok(appended) = handles
+                    .registry
+                    .append_event_ref(
+                        &process_ref,
+                        ProcessEventAppendRequest::cancel_requested(
+                            &process_ref,
+                            &lash_core::CancelRequest::new(
+                                lash_core::CancelOrigin::OperatorRequested,
+                                format!("actor:state-machine:{requester}"),
+                                11,
+                            ),
+                        ),
+                    )
+                    .await
                 && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
             {
                 apply_process_event_projection(expected, &appended.event)

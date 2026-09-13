@@ -602,8 +602,15 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         .append_event(
             &ProcessId::from(process_id),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("cancel while suspended".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from(process_id))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:fig779_suspended_process_redrive_observes_durable_cancellation",
+                    11,
+                ),
             ),
         )
         .await
@@ -1151,10 +1158,8 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
     registry
         .append_event(
             &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("cancel landed after successor send".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix", 11)),
         )
         .await
         .expect("record between-attempt cancellation");

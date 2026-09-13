@@ -54,10 +54,8 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
     registry
         .append_event(
             &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("exercise repeated cleanup failure".to_string()),
-            ),
+            crate::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_abandoned", 11)),
         )
         .await
         .expect("append durable cancellation");

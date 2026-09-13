@@ -88,46 +88,35 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
-    async fn cancel(
-        &self,
-        process_ref: crate::ProcessRef,
-        reason: Option<String>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::Cancel {
-                process_ref,
-                reason,
-                replay: None,
-            })
-            .await?
-        {
-            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
-            _ => Err(wrong_process_outcome("cancel")),
-        }
-    }
-
     async fn cancel_named(
         &self,
         process_id: &ProcessId,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        match self.registry.resolve_process_ref(process_id).await {
-            Ok(process_ref) => self.cancel(process_ref, reason).await,
+        let command = match self.registry.resolve_process_ref(process_id).await {
+            Ok(process_ref) => crate::ProcessCommand::Cancel {
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            },
             Err(refusal @ crate::PluginError::ProcessUnknown { .. })
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
-                match self
-                    .run(crate::ProcessCommand::CancelRefused {
-                        process_id: ProcessId::from(process_id.to_string()),
-                        reason,
-                        refusal,
-                    })
-                    .await?
-                {
-                    crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
-                    _ => Err(wrong_process_outcome("cancel_refused")),
+                crate::ProcessCommand::CancelRefused {
+                    process_id: process_id.clone(),
+                    origin,
+                    requester,
+                    refusal,
                 }
             }
-            Err(error) => Err(error),
+            Err(error) => return Err(error),
+        };
+        match self.run(command).await? {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
+            _ => Err(wrong_process_outcome("cancel")),
         }
     }
 
@@ -136,14 +125,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::ParentEnd {
                 identity,
                 process_id,
                 policy,
-                reason,
             })
             .await?
         {
@@ -712,33 +699,32 @@ impl ProcessCapability {
         let runner = self.command_runner(current, &scope)?;
         let _ = (managed, session_id);
         runner
-            .cancel_named(process_id, Some("requested by host".to_string()))
+            .cancel_named(
+                process_id,
+                crate::CancelOrigin::OperatorRequested,
+                serde_json::to_string(runner.effect_controller_handle.scoped().execution_scope())
+                    .expect("execution scopes contain only serializable identities"),
+                None,
+            )
             .await
-    }
-
-    pub(in crate::runtime::session_manager) async fn cancel_process_with_reason(
-        &self,
-        current: &CurrentSessionCapability,
-        managed: &ManagedSessionCapability,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let runner = self.command_runner(current, &scope)?;
-        let _ = (managed, session_id);
-        runner.cancel_named(process_id, reason).await
     }
 
     pub(in crate::runtime::session_manager) async fn cancel_recorded_intent(
         &self,
         current: &CurrentSessionCapability,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        runner.cancel_named(process_id, reason).await
+        runner
+            .cancel_named(
+                process_id,
+                crate::CancelOrigin::ModelRequested,
+                identity.replay_key.clone(),
+                Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+            )
+            .await
     }
 
     pub(in crate::runtime::session_manager) async fn finish_recorded_intent_parent(
@@ -747,11 +733,10 @@ impl ProcessCapability {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         self.command_runner(current, &scope)?
-            .parent_end(identity, process_id, policy, reason)
+            .parent_end(identity, process_id, policy)
             .await
     }
 

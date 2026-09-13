@@ -1545,7 +1545,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         &self,
         _session_id: &SessionId,
         _process_id: &ProcessId,
-        _reason: Option<String>,
+        _identity: lash_core::ToolIntentIdentity,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
         Err(lash_core::PluginError::Session(
@@ -1559,7 +1559,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         _identity: lash_core::ToolIntentIdentity,
         _process_id: ProcessId,
         _policy: lash_core::ProcessParentEndPolicy,
-        _reason: String,
         _scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ToolIntentParentEndOutcome, lash_core::PluginError> {
         Err(lash_core::PluginError::Session(

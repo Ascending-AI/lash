@@ -1,17 +1,19 @@
 use crate::ProcessId;
+use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::{HashMap, HashSet};
 
 use crate::SessionId;
 use crate::plugin::PluginError;
 
 use super::events::{
-    ProcessEvent, ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessWakeDelivery,
+    ProcessAwaitOutput, ProcessEvent, ProcessEventAppendRequest, ProcessEventKind,
+    ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessWakeDelivery,
     default_process_event_types, is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
 };
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted,
-    ProcessStatus, RecoveryContract, WaitState,
+    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRef, ProcessRegistration,
+    ProcessStarted, ProcessStatus, RecoveryContract, WaitState,
 };
 
 pub fn validate_generic_process_event_append(
@@ -60,6 +62,8 @@ pub enum ProcessTransition {
     SetExternalRef(ProcessExternalRef),
     /// Record a request for recovery to abandon the process.
     RequestAbandon(AbandonRequest),
+    /// Record a typed process cancellation request.
+    RequestCancel(CancelRequest),
     /// Record that the caller of an externally-owned process departed.
     RecordCallerDeparture,
     /// Enter a durable wait state.
@@ -186,6 +190,24 @@ pub fn prepare_process_transition(
             }
             let mut append = ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref);
             if record.external_ref.is_some() {
+                route_transition_refusal_to_fold(&mut append)?;
+            }
+            append
+        }
+        ProcessTransition::RequestCancel(request) => {
+            if !record.is_terminal()
+                && record
+                    .cancel_request
+                    .as_deref()
+                    .is_some_and(|existing| existing.same_cancellation_as(&request))
+            {
+                return Ok(ProcessTransitionPlan::Unchanged);
+            }
+            let mut append = ProcessEventAppendRequest::cancel_requested(
+                &ProcessRef::from_record(record),
+                &request,
+            );
+            if record.is_terminal() || record.cancel_request.is_some() {
                 route_transition_refusal_to_fold(&mut append)?;
             }
             append
@@ -320,8 +342,8 @@ pub fn apply_process_event_projection(
         )));
     }
 
-    match event.event_type.as_str() {
-        "process.first_started" => {
+    match ProcessEventKind::from_event_type(&event.event_type) {
+        ProcessEventKind::FirstStarted => {
             let started = lifecycle_payload(event, "started")?;
             let resumed_from_handover = event
                 .payload
@@ -346,7 +368,7 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        "process.waiting" => {
+        ProcessEventKind::Waiting => {
             if record.is_terminal() {
                 return Err(PluginError::Session(format!(
                     "terminal process `{}` cannot enter a wait state",
@@ -362,7 +384,7 @@ pub fn apply_process_event_projection(
             record.wait = Some(lifecycle_payload(event, "wait")?);
             record.status = ProcessStatus::Waiting;
         }
-        "process.resumed" => {
+        ProcessEventKind::Resumed => {
             if record.status == ProcessStatus::CallerDeparted {
                 return Err(PluginError::Session(format!(
                     "caller-departed process `{}` cannot resume",
@@ -372,7 +394,7 @@ pub fn apply_process_event_projection(
             record.wait = None;
             record.status = ProcessStatus::Running;
         }
-        "process.external_ref_set" => {
+        ProcessEventKind::ExternalRefSet => {
             let external_ref = lifecycle_payload(event, "external_ref")?;
             match record.external_ref.as_ref() {
                 None => record.external_ref = Some(external_ref),
@@ -386,7 +408,37 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        "process.abandon_requested" => {
+        ProcessEventKind::CancelRequested => {
+            let request = cancel_request_payload(&event.payload)?;
+            // Replaying the stored StartFailed event must repair its own fold
+            // even though that same event made this record terminal.
+            let own_terminal_replay = record.status == ProcessStatus::Cancelled
+                && record.last_event_sequence == event.sequence
+                && request.origin == CancelOrigin::StartFailed
+                && event
+                    .semantics
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|terminal| terminal.status == ProcessStatus::Cancelled);
+            if record.is_terminal() && !own_terminal_replay {
+                return Err(PluginError::ProcessAlreadyTerminal {
+                    process_id: record.id.clone(),
+                    status: record.status,
+                });
+            }
+            match record.cancel_request.as_deref() {
+                None => record.cancel_request = Some(Box::new(request)),
+                Some(existing) if existing.same_cancellation_as(&request) => {}
+                Some(existing) => {
+                    return Err(PluginError::ProcessCancelConflict {
+                        process_ref: ProcessRef::from_record(record),
+                        existing: Box::new(existing.clone()),
+                        requested: Box::new(request),
+                    });
+                }
+            }
+        }
+        ProcessEventKind::AbandonRequested => {
             if record.is_terminal() {
                 return Err(PluginError::Session(format!(
                     "terminal process `{}` cannot accept an abandon request",
@@ -405,10 +457,13 @@ pub fn apply_process_event_projection(
                 }
             }
         }
-        "process.caller_departed" => {
+        ProcessEventKind::CallerDeparted => {
             apply_caller_departure(record)?;
         }
-        _ => {}
+        ProcessEventKind::ObserverAdded
+        | ProcessEventKind::ObserverRemoved
+        | ProcessEventKind::SubscriptionRetargeted
+        | ProcessEventKind::Custom => {}
     }
 
     if let Some(terminal) = event.semantics.terminal.clone() {
@@ -468,6 +523,24 @@ fn process_external_ref_conflict(
     ))
 }
 
+fn cancel_request_payload(payload: &serde_json::Value) -> Result<CancelRequest, PluginError> {
+    serde_json::from_value(payload.clone()).map_err(|error| {
+        PluginError::Session(format!("invalid process.cancel_requested payload: {error}"))
+    })
+}
+
+fn process_replay_payloads_match(
+    event_type: &str,
+    existing: &serde_json::Value,
+    requested: &serde_json::Value,
+) -> Result<bool, PluginError> {
+    if ProcessEventKind::from_event_type(event_type) == ProcessEventKind::CancelRequested {
+        return Ok(cancel_request_payload(existing)?
+            .same_cancellation_as(&cancel_request_payload(requested)?));
+    }
+    Ok(crate::identity_json::payloads_equal(existing, requested))
+}
+
 fn repair_lifecycle_projection(
     record: &ProcessRecord,
     event: &ProcessEvent,
@@ -491,7 +564,11 @@ pub fn prepare_process_event_append(
         && let Some(existing) = replay_lookup
     {
         if existing.event_type == request.event_type
-            && crate::identity_json::payloads_equal(&existing.payload, &request.payload)
+            && process_replay_payloads_match(
+                &request.event_type,
+                &existing.payload,
+                &request.payload,
+            )?
         {
             let repair_record = if last_event_sequence == Some(existing.sequence) {
                 repair_lifecycle_projection(record, &existing)?
@@ -548,12 +625,37 @@ pub fn prepare_process_event_append(
         .map_err(|err| {
             PluginError::Session(format!("invalid `{}` payload: {err}", request.event_type))
         })?;
-    let semantics = materialize_process_event_semantics(
+    let mut semantics = materialize_process_event_semantics(
         &ProcessId::from(process_id),
         sequence,
         &request.payload,
         &declared.semantics,
     )?;
+    if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::CancelRequested {
+        let cancel = cancel_request_payload(&request.payload)?;
+        if cancel.origin == CancelOrigin::StartFailed
+            && record.first_started.is_none()
+            && record.external_ref.is_none()
+        {
+            let cancellation =
+                crate::ToolCancellation::runtime("process start failed before execution")
+                    .with_origin(cancel.origin);
+            semantics.terminal = Some(ProcessTerminalSemantics {
+                status: ProcessStatus::Cancelled,
+                outcome: ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                    cancellation,
+                )),
+            });
+        }
+    }
+    if let Some(terminal) = semantics.terminal.as_mut() {
+        terminal.outcome = terminal.outcome.clone().with_cancel_origin(
+            record
+                .cancel_request
+                .as_deref()
+                .map(|request| request.origin),
+        );
+    }
     if semantics.terminal.is_some() && record.is_terminal() {
         return Err(PluginError::ProcessAlreadyTerminal {
             process_id: ProcessId::from(process_id.to_string()),

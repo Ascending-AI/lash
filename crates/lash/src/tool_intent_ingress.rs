@@ -553,7 +553,6 @@ impl ToolIntentIngress {
                 identity: action.identity.clone(),
                 process_id: action.parent_end.process_id.clone(),
                 policy: action.parent_end.policy,
-                reason: "host-ingress start intent parent scope ended".to_string(),
             };
             let (outcome, _) = self
                 .run_command_with_replay_key(&action.identity, replay_key, command)
@@ -819,8 +818,12 @@ impl ToolIntentIngress {
                 None,
             ),
             lash_core::ProcessEffectOutcome::Cancel { record } => (
-                serde_json::to_value(lash_core::ProcessCancelReceipt::from_record(*record))
-                    .unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(
+                    lash_core::ProcessCancelReceipt::from_record(*record).map_err(|error| {
+                        RealizationFailure::Command(kind, crate::EmbedError::Plugin(error))
+                    })?,
+                )
+                .unwrap_or(serde_json::Value::Null),
                 None,
             ),
             lash_core::ProcessEffectOutcome::CancelRefused { refusal } => {
@@ -934,13 +937,11 @@ impl ToolIntentIngress {
                     .await?;
                 lash_core::ProcessCommand::Cancel {
                     process_ref,
-                    reason: intent.reason,
-                    replay: Some(lash_core::RuntimeReplay {
-                        key: identity.replay_key.clone(),
-                        attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
-                            identity.clone(),
-                        )),
-                    }),
+                    origin: lash_core::CancelOrigin::ModelRequested,
+                    requester: identity.replay_key.clone(),
+                    attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                        identity.clone(),
+                    )),
                 }
             }
             lash_core::ToolIntent::EmitProcessEvent(intent) => {

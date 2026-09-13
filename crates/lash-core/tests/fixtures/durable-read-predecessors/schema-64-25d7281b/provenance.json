@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 64,
+  "source_commit": "25d7281b4b48de0fe0c0ef34380af89ff509f03a",
+  "relationship": "FIG-2960 parent immediately before the FIG-2961 typed cancellation cutover",
+  "artifacts": {
+    "sqlite-expected.json": "216e872e8a7aee16f49a84d158778d7c58992686c9af198f819b11d84ce44e1f",
+    "postgres-expected.json": "a09460b39687dd291ff4f4ecaf0b610efd90a442542e5e689cc6d77fa1a0a131"
+  }
+}

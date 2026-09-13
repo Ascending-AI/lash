@@ -1,4 +1,5 @@
 use crate::SessionId;
+use lash_sansio::CancelRequest;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,9 @@ pub struct ObservedProcess {
     /// Pending Abandon Request the sweep reconciles once the lease lapses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandon_request: Option<AbandonRequest>,
+    /// The first accepted process cancellation request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<CancelRequest>,
     pub input: ProcessInput,
     pub originator: ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -338,6 +342,7 @@ impl ObservedProcess {
             lease_holder,
             lease_expires_at_ms,
             abandon_request: record.abandon_request.map(|request| *request),
+            cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
@@ -469,8 +474,17 @@ mod tests {
         registry
             .append_event(
                 &ProcessId::from("visible-process"),
-                ProcessEventAppendRequest::new("process.cancel_requested", json!({"why": "test"}))
-                    .with_replay_key("visible-process:cancel-requested"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("visible-process"))
+                        .await
+                        .expect("retained observed target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:observation-test",
+                        11,
+                    ),
+                ),
             )
             .await
             .expect("append event");
@@ -501,6 +515,15 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "process.observer_added"),
             "observer membership changes are part of the durable audit tail"
+        );
+        assert_eq!(
+            snapshot.items[0].process.cancel_request,
+            Some(crate::CancelRequest::new(
+                crate::CancelOrigin::OperatorRequested,
+                "actor:observation-test",
+                11
+            )),
+            "the observation carries the accepted cancellation fact"
         );
         let cancelled = snapshot.items[0]
             .events
@@ -655,8 +678,17 @@ mod tests {
         registry
             .append_event(
                 &ProcessId::from("older"),
-                ProcessEventAppendRequest::new("process.cancel_requested", json!({}))
-                    .with_replay_key("older:cancel-requested"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("older"))
+                        .await
+                        .expect("retained observed target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:observation-test",
+                        11,
+                    ),
+                ),
             )
             .await
             .expect("update older process");

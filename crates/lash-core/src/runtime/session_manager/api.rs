@@ -430,36 +430,16 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn cancel_with_reason(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.services
-            .processes
-            .cancel_process_with_reason(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                process_id,
-                reason,
-                scope,
-            )
-            .await
-    }
-
     async fn cancel_recorded_intent(
         &self,
         _session_id: &SessionId,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.services
             .processes
-            .cancel_recorded_intent(&self.services.current, process_id, reason, scope)
+            .cancel_recorded_intent(&self.services.current, process_id, identity, scope)
             .await
     }
 
@@ -469,7 +449,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         self.services
@@ -479,7 +458,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 identity,
                 process_id,
                 policy,
-                reason,
                 scope,
             )
             .await

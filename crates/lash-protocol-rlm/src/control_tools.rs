@@ -298,7 +298,6 @@ mod tests {
             _identity: lash_core::ToolIntentIdentity,
             _process_id: ProcessId,
             _policy: lash_core::ProcessParentEndPolicy,
-            _reason: String,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ToolIntentParentEndOutcome, PluginError> {
             Err(PluginError::Session(
@@ -363,7 +362,7 @@ mod tests {
             &self,
             _session_id: &SessionId,
             _process_id: &ProcessId,
-            _reason: Option<String>,
+            _identity: lash_core::ToolIntentIdentity,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessRecord, PluginError> {
             Err(PluginError::Session(

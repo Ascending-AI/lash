@@ -359,7 +359,6 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
             session_id: SessionId::from("session"),
             process_id: ProcessId::from("missing-intent-target"),
-            reason: Some("literal refusal law".to_string()),
         }),
     ]);
     let context = fixed_intent_dispatch_context(
@@ -806,9 +805,12 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
         vec![0, 1],
         "Abandon is a recorded no-op and Cancel emits exactly one command"
     );
+    let cancel: crate::CancelRequest = serde_json::from_value(first_events[1][0].payload.clone())
+        .expect("decode typed parent-end cancellation");
+    assert_eq!(cancel.origin, crate::CancelOrigin::ParentEnded);
     assert_eq!(
-        first_events[1][0].payload["reason"],
-        json!("recorded start intent parent ended with cancel policy")
+        cancel.requester,
+        r#"{"kind":"turn","session_id":"session","turn_id":"parent-policy-turn"}"#
     );
     context.recorded_intent_outcomes.record(&outcomes);
     intent_executor::execute_parent_end_actions(&context)

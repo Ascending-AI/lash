@@ -99,10 +99,19 @@ impl ToolProvider for LookupRuntimeTool {
     }
 }
 
-async fn persisted_provider_parts(tool_calling: bool, session_id: &str) -> Vec<Part> {
+struct PersistedProviderResponse {
+    parts: Vec<Part>,
+    provider_calls: usize,
+}
+
+async fn persisted_provider_response(
+    tool_calling: bool,
+    session_id: &str,
+) -> PersistedProviderResponse {
+    let calls = Arc::new(AtomicUsize::new(0));
     let provider = ProviderPartPersistenceProvider {
         tool_calling,
-        calls: Arc::new(AtomicUsize::new(0)),
+        calls: calls.clone(),
     };
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
@@ -163,7 +172,7 @@ async fn persisted_provider_parts(tool_calling: bool, session_id: &str) -> Vec<P
         .await
         .expect("turn");
     let read_view = turn.state.read_view().expect("turn read view");
-    read_view
+    let parts = read_view
         .messages()
         .iter()
         .filter(|message| message.role == MessageRole::Assistant)
@@ -175,34 +184,89 @@ async fn persisted_provider_parts(tool_calling: bool, session_id: &str) -> Vec<P
         })
         .expect("provider-bearing assistant message persisted")
         .parts
-        .iter()
-        .filter(|part| matches!(part.kind, PartKind::Reasoning | PartKind::Prose))
-        .cloned()
-        .collect()
+        .to_vec();
+    PersistedProviderResponse {
+        parts,
+        provider_calls: calls.load(Ordering::SeqCst),
+    }
 }
 
 #[tokio::test]
 async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts() {
-    let final_parts = persisted_provider_parts(false, "final-provider-parts").await;
-    let tool_calling_parts = persisted_provider_parts(true, "tool-calling-provider-parts").await;
+    let final_response = persisted_provider_response(false, "final-provider-parts").await;
+    let tool_calling_response =
+        persisted_provider_response(true, "tool-calling-provider-parts").await;
 
     assert_eq!(
-        final_parts.iter().map(|part| part.kind).collect::<Vec<_>>(),
-        [PartKind::Reasoning, PartKind::Prose]
-    );
-    assert_eq!(
-        tool_calling_parts
+        final_response
+            .parts
             .iter()
             .map(|part| part.kind)
             .collect::<Vec<_>>(),
         [PartKind::Reasoning, PartKind::Prose]
     );
     assert_eq!(
-        final_parts[0].reasoning_meta,
-        tool_calling_parts[0].reasoning_meta
+        tool_calling_response
+            .parts
+            .iter()
+            .map(|part| part.kind)
+            .collect::<Vec<_>>(),
+        [PartKind::Reasoning, PartKind::Prose, PartKind::ToolCall]
     );
-    assert_eq!(
-        final_parts[1].response_meta,
-        tool_calling_parts[1].response_meta
-    );
+    assert_eq!(final_response.provider_calls, 1);
+    assert_eq!(tool_calling_response.provider_calls, 2);
+
+    let persisted_tool_call = &tool_calling_response.parts[2];
+    assert_eq!(persisted_tool_call.tool_call_id.as_deref(), Some("call-1"));
+    assert_eq!(persisted_tool_call.tool_name.as_deref(), Some("lookup"));
+
+    let expected_reasoning_meta = ProviderReasoningReplay {
+        item_id: Some("reasoning-1".to_string()),
+        encrypted_content: Some("opaque-reasoning".to_string()),
+        origin: Some(lash_core::ProviderRouteIdentity::new(
+            "stub",
+            "stub",
+            "mock-model",
+        )),
+        ..ProviderReasoningReplay::default()
+    };
+    assert!(final_response.parts[0].reasoning_meta.is_some());
+    let final_reasoning_meta = final_response.parts[0]
+        .reasoning_meta
+        .as_ref()
+        .expect("final response reasoning metadata persisted");
+    assert_eq!(final_reasoning_meta, &expected_reasoning_meta);
+    assert!(tool_calling_response.parts[0].reasoning_meta.is_some());
+    let tool_calling_reasoning_meta = tool_calling_response.parts[0]
+        .reasoning_meta
+        .as_ref()
+        .expect("tool-calling response reasoning metadata persisted");
+    assert_eq!(tool_calling_reasoning_meta, &expected_reasoning_meta);
+    assert_eq!(final_reasoning_meta, tool_calling_reasoning_meta);
+
+    let expected_response_meta = ResponseTextMeta {
+        id: Some("message-1".to_string()),
+        status: Some("completed".to_string()),
+        phase: Some("final_answer".to_string()),
+        provider_payload: Some("opaque-text".to_string()),
+        origin: Some(lash_core::ProviderRouteIdentity::new(
+            "stub",
+            "stub",
+            "mock-model",
+        )),
+        ..ResponseTextMeta::default()
+    };
+    assert!(final_response.parts[1].response_meta.is_some());
+    let final_response_meta = final_response.parts[1]
+        .response_meta
+        .as_ref()
+        .expect("final response text metadata persisted");
+    assert_eq!(final_response_meta, &expected_response_meta);
+    assert!(tool_calling_response.parts[1].response_meta.is_some());
+    let tool_calling_response_meta = tool_calling_response.parts[1]
+        .response_meta
+        .as_ref()
+        .expect("tool-calling response text metadata persisted");
+    assert_eq!(tool_calling_response_meta, &expected_response_meta);
+    assert_eq!(final_response_meta, tool_calling_response_meta);
 }

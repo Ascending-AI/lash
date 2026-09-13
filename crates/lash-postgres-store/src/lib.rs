@@ -234,7 +234,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 55 indexes the loser drain's queue read: one group's children that
 // hold no settlement rank yet. An index and nothing else, so stores at 50
 // through 54 take a creation-only migration at open; SQLite carries the same
-// index unversioned, and `RUNTIME_EFFECT_REPLAY_GROUP_UNSETTLED_INDEX_DDL` says why.
+// index unversioned; the PostgreSQL definition remains in the authoritative schema SQL.
 // Version 56 adds the nullable trigger-occurrence reclaim eligibility arm and
 // its partial maintenance index. Stores at 50 through 55 take a creation-only
 // migration that arms legacy zero-fan-out rows from their occurrence time while
@@ -330,10 +330,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // component-85 parent shapes are rejected and recreated.
 // Version 87 requires lifecycle policy in process record_json. Older components
 // require recreation rather than inventing policy.
-// Version 88 adds exact artifact-owner edges, permanent execution-owner
+// Version 88 folds typed cancellation into process records. Prior stores must be
+// recreated rather than silently forgetting pending prose cancellation events.
+// Version 89 adds exact artifact-owner edges, permanent execution-owner
 // publication fences, and durable Process Prune artifact-release evidence.
-// Component-87 stores are rejected and recreated.
-const SCHEMA_VERSION: i32 = 88;
+// Component-88 stores are rejected and recreated.
+const SCHEMA_VERSION: i32 = 89;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

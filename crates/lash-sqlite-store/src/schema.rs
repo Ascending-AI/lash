@@ -861,10 +861,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// rejected rather than fabricating an execution scope or session owner.
 /// Version 34 requires the host-declared lifecycle policy in every process record.
 /// Earlier process registries are rejected rather than inventing a policy.
-/// Version 35 makes Process Prune retain exact artifact-release evidence until
-/// every configured artifact store acknowledges owner severance. Component-34
+/// Version 35 replaces prose cancellation events with a typed, record-folded fact.
+/// Earlier registries are rejected so an accepted cancellation is never lost.
+/// Version 36 makes Process Prune retain exact artifact-release evidence until
+/// every configured artifact store acknowledges owner severance. Version-35
 /// registries are rejected rather than inventing cleanup acknowledgements.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 35;
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 36;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

@@ -456,9 +456,11 @@ where
         }
         Ok(self
             .registry
-            .count_events_through(process_id, "process.cancel_requested", i64::MAX as u64)
+            .get_process(process_id)
             .await?
-            > 0)
+            .ok_or_else(|| lash_core::runtime::registry_transitions::unknown_process(process_id))?
+            .cancel_request
+            .is_some())
     }
 
     async fn confirm_process_cancel_requested(
@@ -503,11 +505,11 @@ where
         request: &RestateProcessCancelRequest,
     ) -> Result<(), PluginError> {
         self.registry
-            .append_event(
-                &request.process_id,
+            .append_event_ref(
+                &request.process_ref,
                 lash_core::ProcessEventAppendRequest::cancel_requested(
-                    &request.process_id,
-                    request.reason.clone(),
+                    &request.process_ref,
+                    &request.request,
                 ),
             )
             .await
@@ -704,11 +706,17 @@ where
                         execution_id: Some(execution_id),
                     }));
                 let _ = request.send().await?;
-                if self
-                    .process_cancel_requested(&process_id)
+                let record = self
+                    .registry
+                    .get_process(&process_id)
                     .await
-                    .map_err(HandlerError::from)?
-                {
+                    .map_err(handler_error_from_plugin)?
+                    .ok_or_else(|| {
+                        handler_error_from_plugin(
+                            lash_core::runtime::registry_transitions::unknown_process(&process_id),
+                        )
+                    })?;
+                if record.cancel_request.is_some() {
                     // Cancellation can race the gap after the current segment
                     // retires its promise but before the successor handover is
                     // visible to the cancel endpoint. Forward that durable fact
@@ -716,10 +724,10 @@ where
                     let deliver = controller
                         .context()
                         .workflow_client::<LashProcessWorkflowClient>(successor_key)
-                        .deliver_cancel(Json(RestateProcessCancelRequest {
-                            process_id: process_id.clone(),
-                            reason: Some("process cancelled between segments".to_string()),
-                        }));
+                        .deliver_cancel(Json(
+                            RestateProcessCancelRequest::from_record(&record)
+                                .map_err(handler_error_from_plugin)?,
+                        ));
                     let Json(()) = deliver.call().await?;
                 }
                 Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
@@ -750,14 +758,14 @@ where
 
         if let Some(handover) = self
             .continuations
-            .latest_segment_handover(&request.process_id)
+            .latest_segment_handover(&request.process_ref.process_id)
             .await
             .map_err(handler_error_from_plugin)?
             && handover.segment_ordinal > 0
         {
             let deliver = ctx
                 .workflow_client::<LashProcessWorkflowClient>(process_segment_workflow_key(
-                    &request.process_id,
+                    &request.process_ref.process_id,
                     handover.segment_ordinal,
                 ))
                 .deliver_cancel(Json(request.clone()));
@@ -773,8 +781,11 @@ where
     async fn deliver_cancel(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(_request): Json<RestateProcessCancelRequest>,
+        Json(request): Json<RestateProcessCancelRequest>,
     ) -> HandlerResult<Json<()>> {
+        self.record_cancel_requested(&request)
+            .await
+            .map_err(handler_error_from_plugin)?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
         Ok(Json(()))
     }

@@ -1,6 +1,5 @@
 use super::*;
 use std::collections::VecDeque;
-use std::sync::atomic::AtomicUsize;
 
 /// In-memory process registry for core tests.
 pub struct TestLocalProcessRegistry {
@@ -9,7 +8,6 @@ pub struct TestLocalProcessRegistry {
     pub(super) process_read_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_read_error_after: Arc<Mutex<Option<(usize, PluginError)>>>,
     pub(super) process_events_read_error: Arc<Mutex<Option<PluginError>>>,
-    pub(super) process_events_read_count: Arc<AtomicUsize>,
     pub(super) process_read_absent: Arc<Mutex<bool>>,
     pub(super) process_read_override: Arc<Mutex<Option<ProcessRecord>>>,
     pub(super) process_lease_claim_error: Arc<Mutex<Option<PluginError>>>,

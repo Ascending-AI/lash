@@ -1,3 +1,5 @@
+//! Minimal protocol-plugin fakes shared by Lash tests.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

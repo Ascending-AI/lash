@@ -555,10 +555,8 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming_e
         registry
             .append_event(
                 &process_id,
-                lash_core::ProcessEventAppendRequest::cancel_requested(
-                    &process_id,
-                    Some("operator stopped sleeping process".to_string()),
-                ),
+                lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&process_id).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:process_sleep_wake_settles_recorded_cancel_before_resuming_either_dialect", 11)),
             )
             .await
             .expect("commit cancel before wake");
@@ -648,20 +646,18 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
     registry
         .append_event(
             &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("operator stopped sleeping process".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:process_sleep_wake_registry_failure_retries_before_settling_recorded_cancel", 11)),
         )
         .await
         .expect("commit cancel before wake");
     storage
-        .set_process_events_read_error_for_testing(lash_core::PluginError::Runtime(
+        .set_process_read_error(Some(lash_core::PluginError::Runtime(
             lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::RuntimeStore,
                 "simulated transient wake-boundary registry failure",
             ),
-        ))
+        )))
         .await;
     context.release_sleep();
 
@@ -676,6 +672,7 @@ pub(super) async fn process_sleep_wake_registry_failure_retries_before_settling_
             && first_error_debug.contains("simulated transient wake-boundary registry failure"),
         "wake-boundary registry failure must request Restate redelivery: {first_error_debug}"
     );
+    storage.set_process_read_error(None).await;
     assert_eq!(
         registry
             .get_process(&ProcessId::from(process_id))
@@ -816,10 +813,8 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
     registry
         .append_event(
             &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from(process_id),
-                Some("operator cancelled during the redelivery gap".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_effect", 11)),
         )
         .await
         .expect("commit cancellation in the redelivery gap");
@@ -1389,6 +1384,26 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-effect").into_runtime_invocation(),
     ));
 
+    let record = registry
+        .get_process(&ProcessId::from("task-workflow"))
+        .await
+        .expect("read workflow target")
+        .expect("retained target");
+    assert!(!record.is_terminal());
+    assert!(record.cancel_request.is_none());
+    let cancel = RestateProcessCancelRequest {
+        process_ref: lash_core::ProcessRef::from_record(&record),
+        request: lash_core::CancelRequest::new(
+            lash_core::CancelOrigin::OperatorRequested,
+            "actor:workflow-test",
+            11,
+        ),
+    };
+    workflow
+        .cancel_registration(cancel.clone())
+        .await
+        .expect("workflow cancel while target is nonterminal");
+
     let output = workflow
         .run_registration(
             registration,
@@ -1404,13 +1419,6 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         )
         .await
         .expect("workflow run");
-    workflow
-        .cancel_registration(RestateProcessCancelRequest {
-            process_id: ProcessId::from("task-workflow"),
-            reason: Some("stop".to_string()),
-        })
-        .await
-        .expect("workflow cancel");
 
     assert!(matches!(
         output,
@@ -1429,10 +1437,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
     );
     assert_eq!(
         runner.cancelled.lock_recover().as_slice(),
-        &[RestateProcessCancelRequest {
-            process_id: ProcessId::from("task-workflow"),
-            reason: Some("stop".to_string()),
-        }]
+        std::slice::from_ref(&cancel)
     );
 }
 
