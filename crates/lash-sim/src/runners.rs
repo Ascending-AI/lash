@@ -11,7 +11,7 @@ pub async fn run(cli: SimCli) -> Result<(), String> {
         SimCommand::ReplaySqlite(args) => run_replay_sqlite(args.into_iter()).await,
         SimCommand::ReplayPostgres(args) => run_replay_postgres(args.into_iter()).await,
         SimCommand::BackendContention(args) => run_backend_contention(args.into_iter()).await,
-        SimCommand::SqliteFaults(args) => run_sqlite_faults(args.into_iter()).await,
+        SimCommand::BackendFaults(args) => run_backend_faults(args.into_iter()).await,
         SimCommand::StackProbe(args) => run_stack_probe(args.into_iter()).await,
         SimCommand::Minimize(args) => run_minimize(args.into_iter()).await,
         SimCommand::Help => Err(usage()),
@@ -344,13 +344,21 @@ async fn run_backend_contention(mut args: impl Iterator<Item = String>) -> Resul
     Ok(())
 }
 
-async fn run_sqlite_faults(mut args: impl Iterator<Item = String>) -> Result<(), String> {
+async fn run_backend_faults(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut out = None;
     let mut seed_count = None;
     let mut explicit_seeds = Vec::new();
+    let mut backend = lash_sim::backend_fault::BackendFaultKind::Sqlite;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => out = args.next().map(PathBuf::from),
+            "--backend" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| format!("missing --backend value\n\n{}", usage()))?;
+                backend = lash_sim::backend_fault::BackendFaultKind::parse(&raw)
+                    .ok_or_else(|| format!("unknown --backend value `{raw}`\n\n{}", usage()))?;
+            }
             "--seeds" => {
                 let raw = args
                     .next()
@@ -381,9 +389,15 @@ async fn run_sqlite_faults(mut args: impl Iterator<Item = String>) -> Result<(),
     } else {
         explicit_seeds
     };
-    let report = lash_sim::sqlite_faults::run_sqlite_fault_profile(&out, &seeds)
+    let Some(report) = lash_sim::sqlite_faults::run_backend_fault_profile(backend, &out, &seeds)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| err.to_string())?
+    else {
+        return Err(format!(
+            "{} is not configured: set LASH_POSTGRES_DATABASE_URL",
+            backend.name()
+        ));
+    };
     println!("{}", report.report_path.display());
     Ok(())
 }
@@ -480,7 +494,8 @@ fn usage() -> String {
   lash-sim replay-sqlite <trace> --out <artifact-root>
   lash-sim replay-postgres <trace> --out <artifact-root>
   lash-sim backend-contention --out <artifact-root>
-  lash-sim sqlite-faults --out <artifact-root> [--seeds N | --seed U64 ...]
+  lash-sim backend-faults --out <artifact-root> [--backend sqlite|postgres] [--seeds N | --seed U64 ...]
+                                 (alias: sqlite-faults)
   lash-sim stack-probe agent-contract --contract <semantic-oracle> --stack-bytes <bytes>
   lash-sim minimize <trace> --out <artifact-root>"
         .to_string()

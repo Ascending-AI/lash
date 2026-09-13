@@ -49,9 +49,16 @@ one-shot arms, each targeting a one-based occurrence of one declared point.
 Run the bounded composition witness with:
 
 ```sh
-cargo run -p lash-sim -- sqlite-faults \
+cargo run -p lash-sim -- backend-faults --backend sqlite \
   --out /tmp/lash-sim-sqlite-faults --seed 140050432
 ```
+
+`--backend postgres` runs the same plan against the PostgreSQL injector when
+`LASH_POSTGRES_DATABASE_URL` is set, writing `postgres-faults.json` under
+`lash.sim.postgres-substrate-faults.v2` with `sim.oracle.postgres-*` ids; every
+failure package and replay hint names the backend it was produced on.
+`sqlite-faults` remains a working alias of `backend-faults` for the SQLite
+default, which is what the confidence gate invokes.
 
 Expect `/tmp/lash-sim-sqlite-faults/sqlite-faults.json` to use
 `lash.sim.sqlite-substrate-faults.v2`. Its `composition_witness.plan` records
@@ -82,7 +89,7 @@ bound, not a discovered runtime invariant violation.
   persistence via `SqliteSessionStoreFactory`, with durable peer stores and
   reopened-session evidence in the replay report.
 - The real SQLite transaction wrapper has a production-absent, `testing`
-  feature-gated fault controller. `lash-sim sqlite-faults` deterministically
+  feature-gated fault controller. `lash-sim backend-faults` deterministically
   injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
   `SQLITE_IOERR`, and a mid-sequence close/reopen. Each seed checks typed error
   return, retention of the preceding committed head, rollback of failed work,

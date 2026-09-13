@@ -10,7 +10,7 @@ pub enum SimCommand {
     ReplaySqlite(Vec<String>),
     ReplayPostgres(Vec<String>),
     BackendContention(Vec<String>),
-    SqliteFaults(Vec<String>),
+    BackendFaults(Vec<String>),
     StackProbe(Vec<String>),
     Minimize(Vec<String>),
     Help,
@@ -32,7 +32,9 @@ impl SimCli {
             "replay-sqlite" => SimCommand::ReplaySqlite(rest),
             "replay-postgres" => SimCommand::ReplayPostgres(rest),
             "backend-contention" => SimCommand::BackendContention(rest),
-            "sqlite-faults" => SimCommand::SqliteFaults(rest),
+            // `sqlite-faults` predates the PostgreSQL lane and stays a working
+            // alias: the confidence gate and the README both invoke it by name.
+            "backend-faults" | "sqlite-faults" => SimCommand::BackendFaults(rest),
             "stack-probe" => SimCommand::StackProbe(rest),
             "minimize" => SimCommand::Minimize(rest),
             "-h" | "--help" => SimCommand::Help,

@@ -479,4 +479,18 @@ mod tests {
             vec!["sim.oracle.slow-alive-control-commits.v1"],
         );
     }
+
+    #[test]
+    fn every_slow_alive_oracle_id_is_declared_in_the_inventory() {
+        for id in [
+            "sim.oracle.slow-alive-lease-loss-refusal.v1",
+            "sim.oracle.slow-alive-no-partial-write.v1",
+            "sim.oracle.slow-alive-control-commits.v1",
+        ] {
+            assert!(
+                crate::trace::oracle_observation_class(id).is_some(),
+                "`{id}` is missing from the declared oracle inventory"
+            );
+        }
+    }
 }

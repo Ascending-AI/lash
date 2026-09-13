@@ -17,6 +17,68 @@ use serde_json::{Value, json};
 
 pub const DEFAULT_SQLITE_FAULT_SEED_BASE: u64 = 0x0000_0000_0859_0000;
 
+/// The report schemas and fixed oracle ids of one backend's fault profile.
+///
+/// Every id a profile emits names the backend it judged, so a PostgreSQL
+/// failure is never filed under a SQLite oracle and the declared inventory in
+/// `crate::trace::oracle_observation_class` can list both. SQLite keeps the
+/// exact strings the confidence gate and `crates/lash-sim/README.md` already
+/// document.
+struct BackendFaultNaming {
+    profile_schema: &'static str,
+    plan_schema: &'static str,
+    composition_schema: &'static str,
+    failure_schema: &'static str,
+    harness_oracle: &'static str,
+    typed_error_oracle: &'static str,
+    preserves_committed_work_oracle: &'static str,
+    reopen_preserves_committed_work_oracle: &'static str,
+    no_duplicate_effect_oracle: &'static str,
+    multi_arm_composition_oracle: &'static str,
+}
+
+const SQLITE_NAMING: BackendFaultNaming = BackendFaultNaming {
+    profile_schema: "lash.sim.sqlite-substrate-faults.v2",
+    plan_schema: "lash.sim.sqlite-fault-plan.v1",
+    composition_schema: "lash.sim.sqlite-fault-composition.v1",
+    failure_schema: "lash.sim.sqlite-substrate-fault-failure.v1",
+    harness_oracle: "sim.oracle.sqlite-fault-harness.v1",
+    typed_error_oracle: "sim.oracle.sqlite-fault-typed-error.v1",
+    preserves_committed_work_oracle: "sim.oracle.sqlite-fault-preserves-committed-work.v1",
+    reopen_preserves_committed_work_oracle: "sim.oracle.sqlite-reopen-preserves-committed-work.v1",
+    no_duplicate_effect_oracle: "sim.oracle.sqlite-fault-no-duplicate-effect.v1",
+    multi_arm_composition_oracle: "sim.oracle.sqlite-multi-arm-composition.v1",
+};
+
+const POSTGRES_NAMING: BackendFaultNaming = BackendFaultNaming {
+    profile_schema: "lash.sim.postgres-substrate-faults.v2",
+    plan_schema: "lash.sim.postgres-fault-plan.v1",
+    composition_schema: "lash.sim.postgres-fault-composition.v1",
+    failure_schema: "lash.sim.postgres-substrate-fault-failure.v1",
+    harness_oracle: "sim.oracle.postgres-fault-harness.v1",
+    typed_error_oracle: "sim.oracle.postgres-fault-typed-error.v1",
+    preserves_committed_work_oracle: "sim.oracle.postgres-fault-preserves-committed-work.v1",
+    reopen_preserves_committed_work_oracle: "sim.oracle.postgres-reopen-preserves-committed-work.v1",
+    no_duplicate_effect_oracle: "sim.oracle.postgres-fault-no-duplicate-effect.v1",
+    multi_arm_composition_oracle: "sim.oracle.postgres-multi-arm-composition.v1",
+};
+
+const fn naming(backend: BackendFaultKind) -> &'static BackendFaultNaming {
+    match backend {
+        BackendFaultKind::Sqlite => &SQLITE_NAMING,
+        BackendFaultKind::Postgres => &POSTGRES_NAMING,
+    }
+}
+
+/// The exact `lash-sim` invocation that replays `seed` on `backend`.
+fn exact_replay_command(backend: BackendFaultKind, replay_root: &Path, seed: u64) -> String {
+    format!(
+        "cargo run -p lash-sim -- backend-faults {} --out {} --seed {seed}",
+        backend.replay_backend_argument(),
+        replay_root.display()
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendFaultScenarioKind {
@@ -200,9 +262,9 @@ struct ScenarioFailure {
 }
 
 impl ScenarioFailure {
-    fn harness(reason: impl Into<String>) -> Self {
+    fn harness(backend: BackendFaultKind, reason: impl Into<String>) -> Self {
         Self {
-            oracle_id: "sim.oracle.sqlite-fault-harness.v1",
+            oracle_id: naming(backend).harness_oracle,
             reason: reason.into(),
         }
     }
@@ -264,12 +326,12 @@ pub async fn run_backend_fault_profile(
             Err(failure) => {
                 let failure_path = persist_failure(backend, artifact_root, seed, &failure)?;
                 return Err(format!(
-                    "{} substrate fault seed {seed} failed oracle `{}`: {}; reproduction: {}; replay with `cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}`",
+                    "{} substrate fault seed {seed} failed oracle `{}`: {}; reproduction: {}; replay with `{}`",
                     backend.name(),
                     failure.oracle_id,
                     failure.reason,
                     failure_path.display(),
-                    artifact_root.join("replay").display(),
+                    exact_replay_command(backend, &artifact_root.join("replay"), seed),
                 ));
             }
         }
@@ -291,12 +353,9 @@ pub async fn run_backend_fault_profile(
         );
     }
     let composition_witness = run_composition_witness(&lane, artifact_root, seeds[0]).await?;
-    let report_path = artifact_root.join(match backend {
-        BackendFaultKind::Sqlite => "sqlite-faults.json",
-        BackendFaultKind::Postgres => "postgres-faults.json",
-    });
+    let report_path = artifact_root.join(backend.report_file_name());
     let report = BackendFaultProfileReport {
-        schema: "lash.sim.sqlite-substrate-faults.v2",
+        schema: naming(backend).profile_schema,
         backend,
         status: "passed",
         configured_seeds: seeds.to_vec(),
@@ -315,7 +374,10 @@ pub async fn run_backend_fault_profile(
     Ok(Some(report))
 }
 
-fn generated_multi_arm_plan(seed: u64) -> Result<BackendFaultCompositionPlan, String> {
+fn generated_multi_arm_plan(
+    backend: BackendFaultKind,
+    seed: u64,
+) -> Result<BackendFaultCompositionPlan, String> {
     const PROFILE: &str = "fast-random";
     const MAX_BOUNDARIES: usize = 24;
 
@@ -367,7 +429,7 @@ fn generated_multi_arm_plan(seed: u64) -> Result<BackendFaultCompositionPlan, St
         },
     ];
     Ok(BackendFaultCompositionPlan {
-        schema: "lash.sim.sqlite-fault-plan.v1".to_string(),
+        schema: naming(backend).plan_schema.to_string(),
         workload_seed: seed,
         workload_profile: PROFILE.to_string(),
         workload_max_boundaries: MAX_BOUNDARIES,
@@ -383,7 +445,8 @@ async fn run_composition_witness(
     artifact_root: &Path,
     seed: u64,
 ) -> Result<BackendFaultCompositionWitness, String> {
-    let plan = generated_multi_arm_plan(seed)?;
+    let backend = lane.kind();
+    let plan = generated_multi_arm_plan(backend, seed)?;
     let zero_arm_control =
         run_composition_case(lane, artifact_root, &plan, "zero-arms", Vec::new()).await?;
     let mut single_arm_controls = Vec::with_capacity(plan.arms.len());
@@ -409,12 +472,9 @@ async fn run_composition_witness(
         && paired.durable_prefix_revision == repeated_paired.durable_prefix_revision
         && paired.final_reopened_head_revision == repeated_paired.final_reopened_head_revision
         && paired.injection_observations == repeated_paired.injection_observations;
-    let replay_command = format!(
-        "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
-        artifact_root.join("replay").display()
-    );
+    let replay_command = exact_replay_command(backend, &artifact_root.join("replay"), seed);
     let mut witness = BackendFaultCompositionWitness {
-        schema: "lash.sim.sqlite-fault-composition.v1",
+        schema: naming(backend).composition_schema,
         plan,
         zero_arm_control,
         single_arm_controls,
@@ -422,7 +482,7 @@ async fn run_composition_witness(
         repeated_paired,
         repeat_matches,
         oracle: BackendFaultOracle {
-            oracle_id: "sim.oracle.sqlite-multi-arm-composition.v1",
+            oracle_id: naming(backend).multi_arm_composition_oracle,
             status: "passed",
             assertion: "the generated two-arm plan exhausts a two-attempt operation while zero-arm and either single-arm controls commit, and repeating the seed reproduces fired identities, order, and storage outcome",
             evidence: Value::Null,
@@ -455,6 +515,7 @@ async fn run_composition_case(
     label: &str,
     selected_arm_indices: Vec<usize>,
 ) -> Result<BackendFaultCompositionRun, String> {
+    let backend = lane.kind();
     let case_root = artifact_root.join("composition").join(label);
     if case_root.exists() {
         std::fs::remove_dir_all(&case_root).map_err(|error| error.to_string())?;
@@ -469,14 +530,15 @@ async fn run_composition_case(
 
     // Creation and the durable prefix happen before arming so setup writes
     // cannot consume an operation arm.
-    let store = create_store(Arc::clone(&factory), &session_id)
+    let store = create_store(backend, Arc::clone(&factory), &session_id)
         .await
         .map_err(|failure| failure.reason)?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
-    let prefix = stamped_commit(&state, "composition-prefix").map_err(|failure| failure.reason)?;
+    let prefix =
+        stamped_commit(backend, &state, "composition-prefix").map_err(|failure| failure.reason)?;
     let prefix_result = store
         .commit_runtime_state(prefix)
         .await
@@ -484,7 +546,8 @@ async fn run_composition_case(
     state.apply_persisted_commit_result(prefix_result);
     let durable_prefix_revision = state.head_revision;
     state.turn_index += 1;
-    let target = stamped_commit(&state, "composition-target").map_err(|failure| failure.reason)?;
+    let target =
+        stamped_commit(backend, &state, "composition-target").map_err(|failure| failure.reason)?;
 
     let selected_arms = selected_arm_indices
         .iter()
@@ -549,7 +612,7 @@ async fn run_composition_case(
     }
 
     drop(store);
-    let reopened = open_store(factory, &session_id)
+    let reopened = open_store(backend, factory, &session_id)
         .await
         .map_err(|failure| failure.reason)?;
     let final_state = reopened
@@ -655,13 +718,13 @@ async fn run_seed(
     let seed_root = artifact_root.join(format!("seed-{seed:016x}"));
     if seed_root.exists() {
         std::fs::remove_dir_all(&seed_root)
-            .map_err(|err| ScenarioFailure::harness(format!("reset seed root: {err}")))?;
+            .map_err(|err| ScenarioFailure::harness(backend, format!("reset seed root: {err}")))?;
     }
     std::fs::create_dir_all(&seed_root)
-        .map_err(|err| ScenarioFailure::harness(format!("create seed root: {err}")))?;
+        .map_err(|err| ScenarioFailure::harness(backend, format!("create seed root: {err}")))?;
     let (factory, injector) = lane.armed_factory(&seed_root);
     let session_id = SessionId::from(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
-    let mut store = create_store(Arc::clone(&factory), &session_id).await?;
+    let mut store = create_store(backend, Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -671,17 +734,16 @@ async fn run_seed(
 
     for index in 0..prefix_commits {
         state.turn_index = index;
-        let commit = stamped_commit(&state, &format!("prefix-{index:03}"))?;
-        let result = store
-            .commit_runtime_state(commit)
-            .await
-            .map_err(|err| ScenarioFailure::harness(format!("prefix commit {index}: {err}")))?;
+        let commit = stamped_commit(backend, &state, &format!("prefix-{index:03}"))?;
+        let result = store.commit_runtime_state(commit).await.map_err(|err| {
+            ScenarioFailure::harness(backend, format!("prefix commit {index}: {err}"))
+        })?;
         state.apply_persisted_commit_result(result);
     }
     let durable_prefix_revision = state.head_revision;
     let mut target_state = state.clone();
     target_state.turn_index = prefix_commits;
-    let target_commit = stamped_commit(&target_state, "target")?;
+    let target_commit = stamped_commit(backend, &target_state, "target")?;
     let replay_command = format!(
         "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
         artifact_root.join("replay").display()
@@ -729,7 +791,7 @@ async fn run_seed(
             ));
         }
         oracles.push(BackendFaultOracle {
-            oracle_id: "sim.oracle.sqlite-fault-typed-error.v1",
+            oracle_id: naming(backend).typed_error_oracle,
             status: "passed",
             assertion: "the substrate fault returns StoreError::StorageFailure within the timeout rather than hanging or panicking",
             evidence: json!({
@@ -740,11 +802,11 @@ async fn run_seed(
         });
 
         drop(store);
-        store = open_store(Arc::clone(&factory), &session_id).await?;
+        store = open_store(backend, Arc::clone(&factory), &session_id).await?;
         let after_fault = store
             .load_session()
             .await
-            .map_err(|err| ScenarioFailure::harness(format!("load after fault: {err}")))?
+            .map_err(|err| ScenarioFailure::harness(backend, format!("load after fault: {err}")))?
             .ok_or_else(|| {
                 ScenarioFailure::oracle(backend, scenario, "committed prefix disappeared")
             })?;
@@ -759,7 +821,7 @@ async fn run_seed(
             ));
         }
         oracles.push(BackendFaultOracle {
-            oracle_id: "sim.oracle.sqlite-fault-preserves-committed-work.v1",
+            oracle_id: naming(backend).preserves_committed_work_oracle,
             status: "passed",
             assertion: "reopen retains every commit preceding the fault and publishes none of the failed transaction",
             evidence: json!({
@@ -772,7 +834,7 @@ async fn run_seed(
         drop(store);
         store = tokio::time::timeout(
             Duration::from_secs(5),
-            open_store(Arc::clone(&factory), &session_id),
+            open_store(backend, Arc::clone(&factory), &session_id),
         )
         .await
         .map_err(|_| {
@@ -781,7 +843,7 @@ async fn run_seed(
         let reopened = store
             .load_session()
             .await
-            .map_err(|err| ScenarioFailure::harness(format!("load after reopen: {err}")))?
+            .map_err(|err| ScenarioFailure::harness(backend, format!("load after reopen: {err}")))?
             .ok_or_else(|| {
                 ScenarioFailure::oracle(backend, scenario, "committed prefix disappeared")
             })?;
@@ -796,7 +858,7 @@ async fn run_seed(
             ));
         }
         oracles.push(BackendFaultOracle {
-            oracle_id: "sim.oracle.sqlite-reopen-preserves-committed-work.v1",
+            oracle_id: naming(backend).reopen_preserves_committed_work_oracle,
             status: "passed",
             assertion: "closing the live handle and reopening mid-sequence retains the exact committed head without a hang or panic",
             evidence: json!({
@@ -833,11 +895,11 @@ async fn run_seed(
         ));
     }
     drop(store);
-    let final_store = open_store(factory, &session_id).await?;
+    let final_store = open_store(backend, factory, &session_id).await?;
     let final_read = final_store
         .load_session()
         .await
-        .map_err(|err| ScenarioFailure::harness(format!("final load: {err}")))?
+        .map_err(|err| ScenarioFailure::harness(backend, format!("final load: {err}")))?
         .ok_or_else(|| {
             ScenarioFailure::oracle(backend, scenario, "final committed state disappeared")
         })?;
@@ -852,7 +914,7 @@ async fn run_seed(
         ));
     }
     oracles.push(BackendFaultOracle {
-        oracle_id: "sim.oracle.sqlite-fault-no-duplicate-effect.v1",
+        oracle_id: naming(backend).no_duplicate_effect_oracle,
         status: "passed",
         assertion: "retrying the same durable operation returns its receipt and advances the head exactly once",
         evidence: json!({
@@ -888,17 +950,18 @@ async fn run_seed(
 }
 
 fn stamped_commit(
+    backend: BackendFaultKind,
     state: &RuntimeSessionState,
     operation_suffix: &str,
 ) -> Result<RuntimeCommit, ScenarioFailure> {
     RuntimeCommit::persisted_state_for_test(state, &[])
         .with_operation(OperationId::turn(
             &state.session_id,
-            format!("sqlite-fault-{operation_suffix}"),
+            format!("{}-fault-{operation_suffix}", backend.name()),
             "final",
         ))
         .map(|(commit, _)| commit)
-        .map_err(|err| ScenarioFailure::harness(format!("stamp runtime commit: {err}")))
+        .map_err(|err| ScenarioFailure::harness(backend, format!("stamp runtime commit: {err}")))
 }
 
 fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
@@ -911,24 +974,26 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
 }
 
 async fn create_store(
+    backend: BackendFaultKind,
     factory: Arc<dyn SessionStoreFactory>,
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
     factory
         .create_store(&request(session_id))
         .await
-        .map_err(|err| ScenarioFailure::harness(format!("create store: {err}")))
+        .map_err(|err| ScenarioFailure::harness(backend, format!("create store: {err}")))
 }
 
 async fn open_store(
+    backend: BackendFaultKind,
     factory: Arc<dyn SessionStoreFactory>,
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
     factory
         .open_existing_store(&request(session_id))
         .await
-        .map_err(|err| ScenarioFailure::harness(format!("open store: {err}")))?
-        .ok_or_else(|| ScenarioFailure::harness("reopened store did not exist"))
+        .map_err(|err| ScenarioFailure::harness(backend, format!("open store: {err}")))?
+        .ok_or_else(|| ScenarioFailure::harness(backend, "reopened store did not exist"))
 }
 
 fn persist_failure(
@@ -943,7 +1008,7 @@ fn persist_failure(
     std::fs::create_dir_all(&failure_root).map_err(|err| err.to_string())?;
     let path = failure_root.join("reproduction.json");
     let package = BackendFaultFailurePackage {
-        schema: "lash.sim.sqlite-substrate-fault-failure.v1",
+        schema: naming(backend).failure_schema,
         backend,
         seed,
         scenario: BackendFaultScenarioKind::for_seed(seed),
@@ -951,15 +1016,12 @@ fn persist_failure(
         reason: &failure.reason,
         database_root: artifact_root
             .join(format!("seed-{seed:016x}"))
-            .join("sqlite-store")
+            .join("store")
             .display()
             .to_string(),
         prefix_commits: 1 + ((seed >> 2) as usize % 8),
         injected_fault: BackendFaultScenarioKind::for_seed(seed).fault_point(),
-        exact_replay_command: format!(
-            "cargo run -p lash-sim -- sqlite-faults --out {} --seed {seed}",
-            artifact_root.join("replay").display()
-        ),
+        exact_replay_command: exact_replay_command(backend, &artifact_root.join("replay"), seed),
     };
     write_json(&path, &package)?;
     Ok(path)
@@ -977,10 +1039,12 @@ mod tests {
 
     #[test]
     fn generated_multi_arm_plan_round_trips_with_stable_identity_and_order() {
-        let plan = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
-            .expect("generated multi-arm plan");
-        let repeated = generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE)
-            .expect("repeated generated multi-arm plan");
+        let plan =
+            generated_multi_arm_plan(BackendFaultKind::Sqlite, DEFAULT_SQLITE_FAULT_SEED_BASE)
+                .expect("generated multi-arm plan");
+        let repeated =
+            generated_multi_arm_plan(BackendFaultKind::Sqlite, DEFAULT_SQLITE_FAULT_SEED_BASE)
+                .expect("repeated generated multi-arm plan");
         let encoded = serde_json::to_value(&plan).expect("encode plan");
         let decoded: BackendFaultCompositionPlan =
             serde_json::from_value(encoded).expect("decode plan");
@@ -998,12 +1062,15 @@ mod tests {
 
         let schedules = (0..3)
             .map(|offset| {
-                generated_multi_arm_plan(DEFAULT_SQLITE_FAULT_SEED_BASE + offset)
-                    .expect("generated multi-arm schedule")
-                    .arms
-                    .into_iter()
-                    .map(|planned| planned.arm.point)
-                    .collect::<Vec<_>>()
+                generated_multi_arm_plan(
+                    BackendFaultKind::Sqlite,
+                    DEFAULT_SQLITE_FAULT_SEED_BASE + offset,
+                )
+                .expect("generated multi-arm schedule")
+                .arms
+                .into_iter()
+                .map(|planned| planned.arm.point)
+                .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1136,5 +1203,57 @@ mod tests {
         let body = std::fs::read_to_string(path).expect("failure package");
         assert!(body.contains("deliberate oracle failure"));
         assert!(body.contains("--seed 140050434"));
+        assert!(body.contains("sim.oracle.sqlite-commit-io.v1"));
+        assert!(body.contains("lash.sim.sqlite-substrate-fault-failure.v1"));
+        assert!(body.contains("backend-faults --backend sqlite"));
+    }
+
+    #[test]
+    fn a_postgres_failure_package_replays_on_postgres() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let failure = ScenarioFailure::oracle(
+            BackendFaultKind::Postgres,
+            BackendFaultScenarioKind::CommitIo,
+            "deliberate oracle failure",
+        );
+        let path = persist_failure(
+            BackendFaultKind::Postgres,
+            tmp.path(),
+            DEFAULT_SQLITE_FAULT_SEED_BASE + 2,
+            &failure,
+        )
+        .expect("persist failure");
+        let body = std::fs::read_to_string(path).expect("failure package");
+        assert!(body.contains("backend-faults --backend postgres"));
+        assert!(body.contains("--seed 140050434"));
+        assert!(body.contains("sim.oracle.postgres-commit-io.v1"));
+        assert!(body.contains("lash.sim.postgres-substrate-fault-failure.v1"));
+        assert!(!body.contains("sqlite"));
+    }
+
+    #[test]
+    fn every_backend_fault_oracle_id_is_declared_in_the_inventory() {
+        for backend in BackendFaultKind::ALL {
+            let names = naming(backend);
+            let mut ids = vec![
+                names.harness_oracle,
+                names.typed_error_oracle,
+                names.preserves_committed_work_oracle,
+                names.reopen_preserves_committed_work_oracle,
+                names.no_duplicate_effect_oracle,
+                names.multi_arm_composition_oracle,
+            ];
+            ids.extend(
+                BackendFaultScenarioKind::ALL
+                    .iter()
+                    .map(|scenario| scenario.oracle_id(backend)),
+            );
+            for id in ids {
+                assert!(
+                    crate::trace::oracle_observation_class(id).is_some(),
+                    "`{id}` is missing from the declared oracle inventory"
+                );
+            }
+        }
     }
 }
