@@ -167,27 +167,29 @@ impl RlmSessionExt for crate::LashSession {
     ) -> std::result::Result<lash_rlm_types::RlmSessionConfig, RlmSessionConfigError> {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
-        let recorded = lash_protocol_rlm::rlm_session_config(runtime.protocol_turn_options())
-            .map_err(|err| {
-                RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
-                    err.to_string(),
-                )))
-            })?;
-        let resolved = lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
-            .map_err(RlmSessionConfigError::Conflict)?;
-        if resolved != recorded {
-            let mut options = lash_protocol_rlm::rlm_session_config_options(&resolved)
-                .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
-            if let Some(channel) = runtime.protocol_turn_options().payload.get("channel") {
-                options.payload["channel"] = channel.clone();
-            }
-            runtime
-                .set_protocol_turn_options(options)
-                .await
-                .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
-            self.runtime.publish_from(&runtime);
-        }
-        Ok(resolved)
+        let mut resolved = None;
+        runtime
+            .update_protocol_turn_options(|current| {
+                let recorded = lash_protocol_rlm::rlm_session_config(current).map_err(|err| {
+                    RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
+                        err.to_string(),
+                    )))
+                })?;
+                let next =
+                    lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
+                        .map_err(RlmSessionConfigError::Conflict)?;
+                let mut options = lash_protocol_rlm::rlm_session_config_options(&next)
+                    .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
+                if let Some(channel) = current.payload.get("channel") {
+                    options.payload["channel"] = channel.clone();
+                }
+                resolved = Some(next);
+                Ok::<ProtocolTurnOptions, RlmSessionConfigError>(options)
+            })
+            .await
+            .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))??;
+        self.runtime.publish_from(&runtime);
+        Ok(resolved.expect("a successful protocol-options update resolves the RLM config"))
     }
 }
 

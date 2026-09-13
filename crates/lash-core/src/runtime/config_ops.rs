@@ -368,7 +368,15 @@ impl LashRuntime {
         &mut self,
         options: crate::ProtocolTurnOptions,
     ) -> Result<(), SessionError> {
-        self.apply_protocol_turn_options_patch(options).await
+        match self
+            .update_protocol_turn_options(|_| {
+                Ok::<crate::ProtocolTurnOptions, std::convert::Infallible>(options)
+            })
+            .await?
+        {
+            Ok(_) => Ok(()),
+            Err(never) => match never {},
+        }
     }
 
     /// Override protocol-owned turn options through the commanded durable
@@ -380,23 +388,34 @@ impl LashRuntime {
         &mut self,
         options: crate::ProtocolTurnOptions,
     ) -> Result<(), SessionError> {
-        self.apply_protocol_turn_options_patch(options).await
+        self.set_protocol_turn_options(options).await
     }
 
-    async fn apply_protocol_turn_options_patch(
+    /// Reload the durable session state, derive protocol options from that
+    /// exact value, and settle the derived value before returning.
+    ///
+    /// The nested result keeps a caller's typed decision error separate from
+    /// session reload or settlement failures. The boolean reports whether a
+    /// durable change was required.
+    pub async fn update_protocol_turn_options<E>(
         &mut self,
-        options: crate::ProtocolTurnOptions,
-    ) -> Result<(), SessionError> {
+        update: impl FnOnce(&crate::ProtocolTurnOptions) -> Result<crate::ProtocolTurnOptions, E>,
+    ) -> Result<Result<bool, E>, SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
+        let options = match update(self.state.effective_protocol_turn_options()) {
+            Ok(options) => options,
+            Err(error) => return Ok(Err(error)),
+        };
         if self.state.protocol_turn_options == options {
-            return Ok(());
+            return Ok(Ok(false));
         }
         self.settle_config_patch(ApplyConfigPatch {
             protocol_turn_options: Some(options),
             ..ApplyConfigPatch::default()
         })
-        .await
+        .await?;
+        Ok(Ok(true))
     }
 
     /// Replace this session's persisted tool authority through the commanded

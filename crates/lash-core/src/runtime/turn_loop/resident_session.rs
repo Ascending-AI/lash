@@ -308,7 +308,7 @@ impl ResidentSessionContinuity {
 }
 
 impl LashRuntime {
-    pub(in crate::runtime) fn invalidate_resident_session_state(&mut self) {
+    pub(crate) fn invalidate_resident_session_state(&mut self) {
         self.resident_session.invalidate(&self.state.session_id);
         if let Some(session) = self.session.as_ref() {
             session.invalidate_runtime_caches();
