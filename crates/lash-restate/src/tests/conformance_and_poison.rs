@@ -185,13 +185,32 @@ pub(super) fn conformance_restate_process_work(
     (process_work, transport)
 }
 
-lash_conformance::effect_controller_replay_tests!({
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let make_context = Arc::clone(&context);
-    (context, move || {
-        replayable_conformance_invocation(Arc::clone(&make_context))
-    })
-});
+lash_conformance::effect_controller_replay_tests!(
+    {
+        let context = Arc::new(ReplayableRecordingContext::default());
+        let make_context = Arc::clone(&context);
+        (context, move || {
+            replayable_conformance_invocation(Arc::clone(&make_context))
+        })
+    },
+    |law: &str, context: &Arc<ReplayableRecordingContext>| {
+        let runs = context.runs();
+        match law {
+            "effect-controller-concurrent-replay" => {
+                assert_eq!(runs.len(), 4);
+                assert!(runs.iter().any(|name| name.ends_with(":effect-slow")));
+                assert!(runs.iter().any(|name| name.ends_with(":effect-fast")));
+            }
+            "effect-controller-tool-attempt-fanout" => {
+                assert_eq!(runs.len(), 4);
+                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-slow")));
+                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-fast")));
+            }
+            "effect-controller-journaled-replay" => {}
+            unknown => panic!("unexpected Restate replay conformance law: {unknown}"),
+        }
+    }
+);
 
 lash_conformance::effect_controller_replay_mismatch_tests!({
     let context = Arc::new(ReplayableRecordingContext::default());

@@ -1164,6 +1164,13 @@ macro_rules! effect_controller_replay_tests {
             (effect_controller_tool_attempt_fanout_replay_deterministic, "effect-controller-tool-attempt-fanout"),
         ]);
     };
+    ($fixture:block, $verify:expr) => {
+        $crate::effect_controller_replay_tests!(@catalogue $fixture, $verify; [
+            (effect_controller_journaled_effect_replay, "effect-controller-journaled-replay"),
+            (effect_controller_concurrent_replay_deterministic, "effect-controller-concurrent-replay"),
+            (effect_controller_tool_attempt_fanout_replay_deterministic, "effect-controller-tool-attempt-fanout"),
+        ]);
+    };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1171,6 +1178,16 @@ macro_rules! effect_controller_replay_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
+            }
+        )*
+    };
+    (@catalogue $fixture:block, $verify:expr; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (fixture_guard, make) = $fixture;
+                $crate::registration_macro_support::$law(make).await;
+                ($verify)($label, &fixture_guard);
             }
         )*
     };
