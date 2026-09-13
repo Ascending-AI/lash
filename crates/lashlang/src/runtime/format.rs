@@ -87,7 +87,7 @@ pub(crate) fn append_stringified_value_async<'a>(
                 });
             }
             Value::Image(_) | Value::Resource(_) | Value::List(_) | Value::Record(_) => {
-                append_runtime_json_async(output, value).await;
+                append_runtime_json_async(output, value).await?;
             }
         }
         Ok(())

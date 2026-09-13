@@ -251,3 +251,79 @@ async fn a_projection_inside_an_error_refreshes_across_a_park() {
         )))
     );
 }
+
+/// A template literal over a *container* holding an unrefreshed placeholder.
+/// The stringifier reaches the JSON writer for the list, which used to have no
+/// error channel and wrote a literal `null`, so the cell read `"[null]"` and
+/// finished (FIG-2865).
+#[tokio::test(flavor = "current_thread")]
+async fn a_template_literal_over_a_container_refuses_an_unrefreshed_placeholder() {
+    let mut state = restored_state_with_a_nested_placeholder();
+    let program = compile(r#"finish(`${rows}`);"#);
+    let host = RestoreHost::without_bindings();
+    let error = lashlang::execute(&program, &mut state, &host)
+        .await
+        .expect_err("stringifying a container holding a placeholder must refuse");
+    assert!(
+        matches!(
+            error,
+            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
+                if name == "report" && type_name == "string"
+        ),
+        "unexpected error: {error:?}"
+    );
+}
+
+/// `String(report)` on an unrefreshed placeholder refuses rather than falling
+/// through the synchronous coercion path and reading `"undefined"`.
+#[tokio::test(flavor = "current_thread")]
+async fn string_coercion_of_an_unrefreshed_placeholder_refuses() {
+    let mut state = restored_state_with_a_top_level_placeholder();
+    let program = compile(r#"finish(String(report));"#);
+    let host = RestoreHost::without_bindings();
+    let error = lashlang::execute(&program, &mut state, &host)
+        .await
+        .expect_err("String() over a placeholder must refuse");
+    assert!(
+        matches!(
+            error,
+            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
+                if name == "report" && type_name == "string"
+        ),
+        "unexpected error: {error:?}"
+    );
+}
+
+/// And so does `report + ""`, the other route into scalar coercion.
+#[tokio::test(flavor = "current_thread")]
+async fn concatenating_an_unrefreshed_placeholder_refuses() {
+    let mut state = restored_state_with_a_top_level_placeholder();
+    let program = compile(r#"finish(report + "");"#);
+    let host = RestoreHost::without_bindings();
+    let error = lashlang::execute(&program, &mut state, &host)
+        .await
+        .expect_err("concatenating a placeholder must refuse");
+    assert!(
+        matches!(
+            error,
+            RuntimeError::ProjectedValueUnavailable { ref name, ref type_name }
+                if name == "report" && type_name == "string"
+        ),
+        "unexpected error: {error:?}"
+    );
+}
+
+/// A state restored from canonical snapshot bytes whose `report` global is a
+/// bare projection, not one nested in a container.
+fn restored_state_with_a_top_level_placeholder() -> State {
+    let snapshot = Snapshot::new(Record::from_iter([(
+        "report".to_string(),
+        Value::Projected(ProjectedValue::scalar(
+            "report",
+            Value::String("stale".into()),
+        )),
+    )]));
+    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
+    let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    State::from_snapshot(decoded)
+}

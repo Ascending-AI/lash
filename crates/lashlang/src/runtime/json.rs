@@ -271,10 +271,14 @@ pub(crate) fn append_direct_json(output: &mut String, value: &Value) {
     );
 }
 
+/// Writes the runtime JSON rendering of `value`.
+///
+/// Fallible because a container can hold a projection: a placeholder that lost
+/// its binding refuses rather than being written as `null` (FIG-2865).
 pub(crate) fn append_runtime_json_async<'a>(
     output: &'a mut String,
     value: &'a Value,
-) -> ProjectedFuture<'a, ()> {
+) -> ProjectedFuture<'a, Result<(), super::RuntimeError>> {
     Box::pin(async move {
         match value {
             Value::Null | Value::Undefined => output.push_str("null"),
@@ -293,7 +297,7 @@ pub(crate) fn append_runtime_json_async<'a>(
                     if index > 0 {
                         output.push(',');
                     }
-                    append_runtime_json_async(output, value).await;
+                    append_runtime_json_async(output, value).await?;
                 }
                 output.push(']');
             }
@@ -313,21 +317,20 @@ pub(crate) fn append_runtime_json_async<'a>(
                             .expect("record key json serialization should succeed"),
                     );
                     output.push(':');
-                    append_runtime_json_async(output, value).await;
+                    append_runtime_json_async(output, value).await?;
                 }
                 output.push('}');
             }
-            Value::Projected(projected) => match projected.materialize_async().await {
-                Ok(value) => append_runtime_json_async(output, &value).await,
-                // Mirrors the unexported-reference arm below: this async writer
-                // has no error channel, and a placeholder has no value to write.
-                Err(_) => output.push_str("null"),
-            },
+            Value::Projected(projected) => {
+                let value = projected.materialize_async().await?;
+                append_runtime_json_async(output, &value).await?;
+            }
             Value::Ref(_) => {
                 debug_assert_exported_value("JSON conversion");
                 output.push_str("null");
             }
         }
+        Ok(())
     })
 }
 
