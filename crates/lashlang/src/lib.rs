@@ -51,7 +51,7 @@ pub use introspection::{
     ModuleOperationIntrospection, NamedDataTypeIntrospection, ProcessInputIntrospection,
     ProcessIntrospection, ProcessSignalIntrospection, ResourceOperationIntrospection,
     ResourceTypeIntrospection, TriggerSourceIntrospection, TypeView, ValueConstructorIntrospection,
-    referenced_module_call_paths,
+    referenced_module_call_paths, referenced_receiver_call_paths,
 };
 pub use json_schema::json_schema_to_type_expr;
 pub use lash_sansio::MediaType;

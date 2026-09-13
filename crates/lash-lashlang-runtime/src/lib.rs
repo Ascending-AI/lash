@@ -1299,6 +1299,7 @@ mod bridge;
 mod catalog_tests;
 mod catalogue_preview;
 mod deferred;
+mod deferred_triggers;
 mod process;
 mod typed_output;
 
@@ -1319,7 +1320,13 @@ pub use deferred::{
     DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
     DeferredResolutionRecord, DeferredToolResolver, RecordedGrantInstallError, Resolution,
     SharedDeferredToolResolver, ToolGrant, link_with_deferred_resolution,
-    resolve_and_build_deferred_environment, resolve_and_fold_deferred,
+    resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
+    resolve_and_fold_deferred,
+};
+pub use deferred_triggers::{
+    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
+    DeferredTriggerResolutionRecord, DeferredTriggerResolver, SharedDeferredTriggerResolver,
+    TriggerGrant, TriggerResolution, resolve_and_fold_deferred_triggers,
 };
 pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, lashlang_process_event_types,

@@ -54,6 +54,9 @@ lash = { package = "lash-runtime", path = "../lash" }
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-tool-support = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [[test]]

@@ -707,6 +707,34 @@ impl LashlangHostCatalog {
         self.value_constructors.get(&module_path_key(path))
     }
 
+    /// Whether this catalog already provides the exact dotted constructor
+    /// path. Deferred definition resolvers use this to leave resident
+    /// constructors authoritative.
+    pub fn provides_value_constructor(&self, path: &str) -> bool {
+        self.value_constructors.contains_key(path)
+    }
+
+    /// Remove one trigger-source constructor and its source/event schema from
+    /// an effective link catalog. Replay uses this to ensure a recorded result
+    /// wins over a later ambient definition for the same constructor path.
+    pub fn mask_trigger_source_constructor(&mut self, path: &str) {
+        let event_name = self
+            .trigger_sources
+            .remove(path)
+            .map(|binding| binding.event_type_name().to_string());
+        self.value_constructors.remove(path);
+        let Some(event_name) = event_name else {
+            return;
+        };
+        let event_still_used = self
+            .trigger_sources
+            .values()
+            .any(|binding| binding.event_type_name() == event_name);
+        if !event_still_used {
+            self.named_data_types.remove(&event_name);
+        }
+    }
+
     pub fn trigger_source_event(&self, source_ty: &TypeExpr) -> Option<TypeExpr> {
         let TypeExpr::Ref(name) = source_ty else {
             return None;

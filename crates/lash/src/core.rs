@@ -123,9 +123,10 @@ impl LashCore {
     /// host-configured RLM protocol factory and the default runtime plugin
     /// stack.
     ///
-    /// The host configures the factory (projection resolver, deferred tool
-    /// resolver, execution sink/jsonl path, and — required at construction — the
-    /// Lashlang artifact store) before passing it in.
+    /// The host configures the factory (projection resolver, separate deferred
+    /// tool and trigger-definition resolvers, execution sink/jsonl path, and —
+    /// required at construction — the Lashlang artifact store) before passing
+    /// it in.
     #[cfg(feature = "rlm")]
     pub fn rlm_builder(
         turn_budget: lash_core::TurnBudget,

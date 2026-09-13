@@ -8,7 +8,7 @@ use lash_core::plugin::{
 use lash_core::{TraceContext, facade_support::PluginHost, facade_support::TraceSink};
 use lash_lashlang_runtime::{
     LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
-    SharedDeferredToolResolver,
+    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 
 use super::registration::register_rlm_protocol_plugin;
@@ -68,6 +68,7 @@ pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
     projection_resolver: Arc<dyn ProjectionResolver>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
+    deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: Arc<dyn LashlangArtifactStore>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     /// Whether this deployment has process lifecycle available. Recorded once —
@@ -93,6 +94,7 @@ impl RlmProtocolPluginFactory {
             config,
             projection_resolver: Arc::new(ProjectionRegistry::default()),
             deferred_tool_resolver: None,
+            deferred_trigger_resolver: None,
             artifact_store,
             lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: OnceLock::new(),
@@ -113,6 +115,16 @@ impl RlmProtocolPluginFactory {
     /// Most hosts ship none.
     pub fn with_deferred_tool_resolver(mut self, resolver: SharedDeferredToolResolver) -> Self {
         self.deferred_tool_resolver = Some(resolver);
+        self
+    }
+
+    /// Wire a dedicated trigger-definition resolver. Discovery is link-only:
+    /// registration remains the first operation allowed to activate a route.
+    pub fn with_deferred_trigger_resolver(
+        mut self,
+        resolver: SharedDeferredTriggerResolver,
+    ) -> Self {
+        self.deferred_trigger_resolver = Some(resolver);
         self
     }
 
@@ -332,6 +344,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             projection_resolver: Arc::clone(&self.projection_resolver),
             artifact_store: Arc::clone(&self.artifact_store),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
+            deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),
             execution_trace_config: self.lashlang_execution_trace_config.clone(),
             execution_bounds: config.execution_bounds(),
             channel: config.channel,

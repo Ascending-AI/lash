@@ -106,12 +106,35 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
 pub(super) async fn empty_tool_call_identifiers_leave_no_row(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    for (id, call_id, tool_name, needle) in [
-        ("empty-call-id", "", "tool", "call id"),
-        ("empty-tool-name", "call", "", "tool name"),
-        ("whitespace-call-id", "  ", "tool", "call id"),
-    ] {
-        let process_id = ProcessId::from(id);
+    let cases = [
+        (
+            "empty-call-id",
+            "",
+            "tool",
+            "process `empty-call-id` tool call must carry a call id",
+        ),
+        (
+            "whitespace-call-id",
+            "  ",
+            "tool",
+            "process `whitespace-call-id` tool call must carry a call id",
+        ),
+        (
+            "empty-tool-name",
+            "call",
+            "",
+            "process `empty-tool-name` tool call must carry a tool name",
+        ),
+        (
+            "whitespace-tool-name",
+            "call",
+            "\t",
+            "process `whitespace-tool-name` tool call must carry a tool name",
+        ),
+    ];
+
+    for (process_id, call_id, tool_name, expected) in cases {
+        let process_id = ProcessId::from(process_id);
         let registration = ProcessRegistration::new(
             &process_id,
             ProcessInput::ToolCall {
@@ -128,24 +151,27 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
             ProcessProvenance::host(),
             ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
         )
-        .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(format!(
-            "process-env:{id}"
+        .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
+            "process-env:{process_id}"
         ))));
-        let error = registry
-            .register_process(registration)
-            .await
-            .expect_err("empty tool-call identifiers must be refused");
-        assert!(
-            error.to_string().contains(needle),
-            "refusal for {id} should mention {needle}: {error}"
-        );
+
+        assert_session_refusal(registry.register_process(registration).await, expected);
         assert!(
             registry
                 .get_process(&process_id)
                 .await
-                .expect("read after refusal")
+                .expect("read refused tool-call process")
                 .is_none(),
-            "refused registration {id} must not leave a row"
+            "a refused tool-call registration must not leave a point-readable row"
+        );
+        assert!(
+            !registry
+                .list_processes(&ProcessListFilter::default())
+                .await
+                .expect("list after refused tool-call registration")
+                .iter()
+                .any(|record| record.id == process_id),
+            "a refused tool-call registration must not leave a listed row"
         );
     }
 }

@@ -240,6 +240,7 @@ macro_rules! runtime_persistence_tests {
             (durable_queued_drain_wait_store_laws, "durable-queued-drain"),
             (queued_work_claims_supersede_across_session_lease_generations_with_timing, "root"),
             (claim_liveness_for_lease_less_paths_tracks_session_generations, "claim-liveness"),
+            (accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed, "fig1511-orphaned-accepted"),
             (queued_work_names_a_deferred_lane_apart_from_an_exhausted_one, "deferred-versus-exhausted"),
             (queued_work_redrive_selects_claim_identity_across_ready_gap, "redrive-ready-gap"),
             (turn_input_claims_supersede_across_session_lease_generations_with_timing, "root"),

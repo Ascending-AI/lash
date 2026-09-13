@@ -729,6 +729,109 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
         .expect("successor settles reacquired active input");
 }
 
+pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
+    store: Arc<dyn RuntimePersistence>,
+    lease_timing: &RuntimePersistenceLeaseTiming,
+) {
+    const SESSION_ID: &str = "fig1511-orphaned-accepted";
+    const TURN_ID: &str = "fig1511-orphaned-accepted:turn";
+    let session_id = SessionId::from(SESSION_ID);
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &TurnId::from(TURN_ID),
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "accepted before lease owner crashed",
+        ))
+        .await
+        .expect("enqueue active input");
+    let owner = lease_owner("fig1511-accepted-owner");
+    let lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &owner,
+            "fig1511-accepted-executor",
+            lease_timing.scaffolding_lease_ttl_ms(),
+        )
+        .await
+        .expect("claim session lease")
+        .acquired()
+        .expect("session lease is free");
+    let claim = store
+        .claim_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &owner,
+            &TurnId::from(TURN_ID),
+            crate::CheckpointKind::AfterWork,
+            1,
+        )
+        .await
+        .expect("claim active input")
+        .expect("active input claim exists");
+    assert_eq!(claim.inputs[0].input_id, input.input_id);
+    assert_eq!(claim.inputs[0].state, crate::TurnInputState::Accepted);
+
+    match store
+        .cancel_pending_turn_input(&session_id, &input.input_id)
+        .await
+        .expect("cancel accepted input under live lease")
+    {
+        crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
+            claim: Some(diagnostics),
+            ..
+        } => assert_eq!(
+            diagnostics.claim_id.as_deref(),
+            Some(claim.claim_id.as_str())
+        ),
+        other => panic!("live accepted input must retain its real claim, got {other:?}"),
+    }
+
+    lease_timing.wait_until_expired().await;
+    expect_cancelled_pending_input(
+        store
+            .cancel_pending_turn_input(&session_id, &input.input_id)
+            .await
+            .expect("cancel accepted input after lease expiry"),
+        &input.input_id,
+    );
+    let stale_state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let stale_error = store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+                .completing_turn_input_claim(claim.completion()),
+        )
+        .await
+        .expect_err("cancelled input must reject its zombie claimant's settlement");
+    assert!(matches!(
+        stale_error,
+        StoreError::TurnInputClaimSuperseded {
+            session_id: ref refused_session_id,
+            claim_id: ref refused_claim_id,
+            row_id: Some(ref refused_input_id),
+            ..
+        } if refused_session_id == session_id
+            && refused_claim_id == &claim.claim_id
+            && refused_input_id.as_ref() == input.input_id.as_str()
+    ));
+    let vacuum = store
+        .vacuum()
+        .await
+        .expect("vacuum cancelled accepted input");
+    assert_eq!(vacuum.removed_node_count, 0);
+    assert_eq!(vacuum.removed_pending_turn_input_tombstone_count, 1);
+    assert!(matches!(
+        store
+            .cancel_pending_turn_input(&session_id, &input.input_id)
+            .await
+            .expect("read accepted input after vacuum"),
+        crate::PendingTurnInputCancelOutcome::NotFound
+    ));
+}
+
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimePersistence>,
 ) {

@@ -1499,8 +1499,9 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
 fn pending_turn_input_claim_diagnostics_from_row(
     row: &PendingTurnInputRow,
 ) -> Option<lash_core::PendingTurnInputClaimDiagnostics> {
-    (row.claim_token.is_some() || matches!(row.state, lash_core::TurnInputState::Accepted)).then(
-        || lash_core::PendingTurnInputClaimDiagnostics {
+    row.claim_token
+        .is_some()
+        .then(|| lash_core::PendingTurnInputClaimDiagnostics {
             state: row.state,
             claim_id: row.claim_id.clone(),
             claim_owner: row.claim_owner.clone(),
@@ -1509,8 +1510,7 @@ fn pending_turn_input_claim_diagnostics_from_row(
                 .as_ref()
                 .map(|_| row.claim_session_lease_generation),
             claim_fencing_token: row.claim_fencing_token,
-        },
-    )
+        })
 }
 
 pub(crate) async fn cancel_pending_turn_input_row_tx(
@@ -1526,13 +1526,9 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         lash_core::TurnInputState::Completed => Ok(
             lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),
         ),
-        lash_core::TurnInputState::Accepted => {
-            Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                input,
-                claim: pending_turn_input_claim_diagnostics_from_row(&row),
-            })
-        }
-        lash_core::TurnInputState::PendingActive | lash_core::TurnInputState::DeferredNextTurn => {
+        lash_core::TurnInputState::PendingActive
+        | lash_core::TurnInputState::DeferredNextTurn
+        | lash_core::TurnInputState::Accepted => {
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()

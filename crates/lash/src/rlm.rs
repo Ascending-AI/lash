@@ -195,8 +195,10 @@ impl RlmSessionExt for crate::LashSession {
 // and process-input names are single-homed under `lash::tools` and
 // `lash::process`; they are not re-exported here.
 pub use lash_lashlang_runtime::{
-    LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
-    LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
+    DeferredTriggerProvider, DeferredTriggerProviderRegistry, DeferredTriggerResolutionError,
+    DeferredTriggerResolver, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
+    LashlangHostEnvironment, LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface,
+    LashlangSurfaceContribution, SharedDeferredTriggerResolver, TriggerGrant, TriggerResolution,
 };
 pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,

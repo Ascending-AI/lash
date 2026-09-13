@@ -272,7 +272,10 @@ impl ProviderNormalizer for OpenAiNormalizer {
     }
 
     fn parts_from_wire(&self, body: &Value) -> Vec<LlmOutputPart> {
-        OpenAiCompatibleProvider::chat_response_parts_from_value(body)
+        OpenAiCompatibleProvider::chat_response_parts_from_value_with_decoder(
+            body,
+            &crate::responses_shared::ToolArgumentDecoder::default(),
+        )
     }
 
     fn usage_from_wire(&self, body: &Value) -> LlmUsage {
