@@ -9,6 +9,15 @@ description: >-
   the calling step's `env`, and pair it with an `if: always()` step that
   removes "$RUNNER_TEMP/build-cache".
 
+inputs:
+  save-repository-cache:
+    description: >-
+      Whether this job uploads the Bazel repository cache it warmed. Every
+      Bazel job restores it; exactly one saves it, so a cold key costs one
+      upload rather than one per concurrent job.
+    required: false
+    default: "false"
+
 runs:
   using: composite
   steps:
@@ -79,6 +88,47 @@ runs:
           echo "instance=${instance}"
           echo "runtime=${runtime}"
         } >> "$GITHUB_OUTPUT"
+
+    # Bazel fetches the module graph and every crate repository before it can
+    # analyse a single target. Measured on this workspace: a cold fetch plus
+    # analysis is 72s and leaves a 637 MB repository cache; the same fetch with
+    # that cache already present is 48s. CI wrote the cache under RUNNER_TEMP
+    # and threw it away with the runner, so all three Bazel jobs paid the cold
+    # price on every run. The cache is content-addressed by sha256, so a stale
+    # restore can only miss, never serve wrong bytes: the restore key
+    # deliberately falls back to an older lock file rather than refetch
+    # everything when one pin moves.
+    #
+    # Exactly one job saves. The save half of `actions/cache` runs as a post
+    # step, after this job's Bazel invocation has warmed the directory, which
+    # is why the saving job uses the combined action rather than a save step
+    # here: every step of a composite action runs before the caller's Bazel
+    # command. Three concurrent jobs racing to upload the same 637 MB would
+    # each spend a minute in their post step to have two of the three rejected
+    # as a duplicate key.
+    - name: Restore and save Bazel repository cache
+      if: inputs.save-repository-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/bazel-repository
+        key: >-
+          bazel-repository-v1-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('MODULE.bazel.lock', 'MODULE.bazel', 'Cargo.lock') }}
+        restore-keys: |
+          bazel-repository-v1-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore Bazel repository cache
+      if: inputs.save-repository-cache != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/bazel-repository
+        key: >-
+          bazel-repository-v1-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('MODULE.bazel.lock', 'MODULE.bazel', 'Cargo.lock') }}
+        restore-keys: |
+          bazel-repository-v1-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Configure authenticated cache
       shell: bash

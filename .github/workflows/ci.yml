@@ -1187,6 +1187,12 @@ jobs:
       - name: Configure Bazel shared cache
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
+        # Lint is the designated writer of the shared repository cache:
+        # it is the one Bazel job that runs for every trusted event,
+        # including trunk pushes, so the key stays warm even on a run whose
+        # plan skips the other two.
+        with:
+          save-repository-cache: "true"
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
