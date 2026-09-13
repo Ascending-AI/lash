@@ -367,11 +367,59 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
         { const handle = 5; finish(await handle); }
     "#;
     let program = lash_typescript::parse(source).expect("runtime handle classification");
-    fn has_runtime_await(expr: &lashlang::Expr) -> bool {
-        matches!(expr, lashlang::Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending")
-            || expr.children().any(has_runtime_await)
-    }
-    assert!(has_runtime_await(&program.main));
+    assert!(contains_runtime_await(&program.main));
+}
+
+fn process_handle_main(binding_kind: &str, terminal: &str) -> Vec<u8> {
+    let source = format!(
+        r#"
+        const worker = defineProcess({{ name: "worker", signals: {{}}, run: async () => 1 }});
+        {binding_kind} handle = start(worker);
+        {terminal}
+        "#
+    );
+    let program = lash_typescript::parse(&source).expect("process handle should lower");
+    serde_json::to_vec(&program.main).expect("lowered expression should serialize")
+}
+
+fn assert_let_handle_matches_const(terminal: &str) {
+    assert_eq!(
+        process_handle_main("let", terminal),
+        process_handle_main("const", terminal),
+        "let and const handles must take the same typed lowering"
+    );
+}
+
+fn contains_runtime_await(expr: &lashlang::Expr) -> bool {
+    matches!(expr, lashlang::Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending")
+        || expr.children().any(contains_runtime_await)
+}
+
+#[test]
+fn let_process_handle_direct_await_matches_const_lowering() {
+    assert_let_handle_matches_const("finish(await handle);");
+}
+
+#[test]
+fn let_process_handle_promise_all_matches_const_lowering() {
+    assert_let_handle_matches_const("finish(await Promise.all([handle]));");
+}
+
+#[test]
+fn let_process_handle_all_settled_matches_const_lowering() {
+    assert_let_handle_matches_const("finish(await Promise.allSettled([handle]));");
+}
+
+#[test]
+fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
+    let source = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        let handle = start(worker);
+        handle = 5;
+        finish(await handle);
+    "#;
+    let program = lash_typescript::parse(source).expect("reassigned handle should lower");
+    assert!(contains_runtime_await(&program.main));
 }
 
 #[test]

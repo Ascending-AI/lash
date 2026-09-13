@@ -473,6 +473,10 @@ impl Lowerer {
         Ok(())
     }
 
+    fn clear_role(&mut self, name: &str) -> Result<(), Diagnostic> {
+        self.set_role(name, BindingRole::Plain)
+    }
+
     fn binding(&self, name: &str) -> Result<&Binding, Diagnostic> {
         self.scopes
             .iter()
@@ -634,7 +638,7 @@ impl Lowerer {
                             .unwrap_or(LashExpr::Undefined)
                     };
                     if let Some(name) = process_name
-                        && *kind == VarKind::Const
+                        && matches!(*kind, VarKind::Const | VarKind::Let)
                         && matches!(&value, LashExpr::StartProcess(_))
                     {
                         self.set_role(name, BindingRole::ProcessHandle)?;
@@ -1367,6 +1371,7 @@ impl Lowerer {
                         None,
                     ));
                 }
+                self.clear_role(name)?;
                 Ok(AssignTarget::variable(binding.internal.into()))
             }
             TsAssignTarget::Member { object, property } => {
