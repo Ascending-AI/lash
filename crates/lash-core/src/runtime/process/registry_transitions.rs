@@ -404,35 +404,17 @@ pub const RETIRED_PROCESS_STATUS_LABELS: [&str; 5] = [
 /// Every [`ProcessStatus`] variant, exhaustively, so the retention-label law can
 /// partition the enum instead of a hand-kept sample of it.
 ///
-/// The `match` in this function has no wildcard arm: adding a variant to
-/// `ProcessStatus` stops the crate compiling until the new variant is
-/// classified here, and the law test then decides whether
-/// [`LIVE_PROCESS_STATUS_LABELS`] or [`RETIRED_PROCESS_STATUS_LABELS`] must
-/// grow with it.
+/// `ProcessStatus::ALL` is generated from the same declaration as
+/// `ProcessStatus::label`, whose match has no wildcard arm: adding a variant
+/// stops the crate compiling until it is spelled there, which extends `ALL`,
+/// and the law test below then decides whether [`LIVE_PROCESS_STATUS_LABELS`]
+/// or [`RETIRED_PROCESS_STATUS_LABELS`] must grow with it.
 #[cfg(test)]
 fn all_process_statuses() -> Vec<ProcessStatus> {
-    let statuses = vec![
-        ProcessStatus::Running,
-        ProcessStatus::Waiting,
-        ProcessStatus::Completed,
-        ProcessStatus::Failed,
-        ProcessStatus::Cancelled,
-        ProcessStatus::Abandoned,
-        ProcessStatus::CallerDeparted,
-    ];
-    for status in &statuses {
-        // Exhaustive, wildcard-free: a new variant fails to compile here.
-        match status {
-            ProcessStatus::Running
-            | ProcessStatus::Waiting
-            | ProcessStatus::Completed
-            | ProcessStatus::Failed
-            | ProcessStatus::Cancelled
-            | ProcessStatus::Abandoned
-            | ProcessStatus::CallerDeparted => {}
-        }
-    }
-    statuses
+    // `ProcessStatus::ALL` is generated alongside `ProcessStatus::label` from one
+    // declaration (FIG-2844), so it cannot fall behind the enum the way this
+    // hand-kept list could.
+    ProcessStatus::ALL.to_vec()
 }
 
 // ---------------------------------------------------------------------------

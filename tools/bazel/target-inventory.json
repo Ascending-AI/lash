@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
-  "cargo_target_count": 117,
-  "generated_label_count": 206,
+  "cargo_target_count": 118,
+  "generated_label_count": 207,
   "packages": [
     {
       "declared_features": [],
@@ -967,6 +967,12 @@
           "cargo": "logical_turn",
           "kind": "test",
           "label": "//crates/lash-sim:logical_turn__test",
+          "tags": []
+        },
+        {
+          "cargo": "process_lifecycle_vocabulary",
+          "kind": "test",
+          "label": "//crates/lash-sim:process_lifecycle_vocabulary__test",
           "tags": []
         },
         {

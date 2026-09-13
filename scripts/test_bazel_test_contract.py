@@ -112,8 +112,8 @@ class BazelTestContractTests(unittest.TestCase):
         bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
 
-        self.assertEqual(109, len(all_labels))
-        self.assertEqual(89, len(bazel_labels))
+        self.assertEqual(110, len(all_labels))
+        self.assertEqual(90, len(bazel_labels))
         self.assertEqual(20, len(cargo_labels))
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertEqual(all_labels, bazel_labels | cargo_labels)
@@ -258,7 +258,7 @@ class BazelTestContractTests(unittest.TestCase):
             ],
         )
 
-    def test_ci_enrolls_the_contract_and_uses_a_distinct_runner_identity(self) -> None:
+    def test_ci_enrolls_the_contract_and_configures_the_shared_pool(self) -> None:
         jobs = workflow()["jobs"]
         repository_tests = job_step(jobs["repo-gates"], "Test repository scripts")[
             "run"
@@ -269,46 +269,150 @@ class BazelTestContractTests(unittest.TestCase):
         )
 
         setup = shared_cache_action()
-        runtime = job_step(setup, "Resolve GitHub runner cache identity")
-        self.assertIn("scripts/ci_plan.py bazel-runtime", runtime["run"])
-        with tempfile.TemporaryDirectory() as temporary:
-            github_output = pathlib.Path(temporary) / "output"
-            environment = os.environ | {
-                "GITHUB_OUTPUT": str(github_output),
-                "ImageOS": "ubuntu24",
-                "ImageVersion": "20260907.1",
-                "RUNNER_ARCH": "X64",
-                "RUNNER_OS": "Linux",
-            }
-            subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", runtime["run"]],
-                cwd=ROOT,
-                env=environment,
-                check=True,
-            )
-            self.assertEqual(
-                "bazel_runtime="
-                + ci_plan.github_runner_cache_identity(
-                    "Linux", "X64", "ubuntu24", "20260907.1"
-                ),
-                github_output.read_text(encoding="utf-8").strip(),
-            )
         flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
-        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", flags)
-        self.assertIn("--remote_instance_name=kiln", flags)
+        self.assertIn("--remote_local_fallback=false", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
         self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)
+        self.assertNotIn("github_runner_runtime", flags)
+        self.assertNotIn("spawn_strategy=local", flags)
+
+    def test_no_deployment_fact_is_committed(self) -> None:
+        """Where the pool lives is a deployment fact, not a repository fact.
+
+        The endpoint, the instance, the runtime fingerprint, the client
+        certificate paths and this host's cache directories move when the pool
+        is redeployed or the executor is repinned, and they differ between a
+        development host and a CI runner. `.bazelrc` imports kiln's generated
+        `.kiln.bazelrc` for the local copy, CI reads `build-cache` environment
+        secrets for its own, and neither copy is committed.
+        """
+        bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
+        self.assertIn("try-import %workspace%/.kiln.bazelrc", bazelrc)
         self.assertIn(
-            "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}",
+            "/.kiln.bazelrc", (ROOT / ".gitignore").read_text(encoding="utf-8")
+        )
+        # What the pool is asked FOR stays in the repository.
+        self.assertIn(
+            "build:shared --remote_default_exec_properties=cpu_count=4", bazelrc
+        )
+        self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
+
+        sources = [(pathlib.Path(".bazelrc"), bazelrc)]
+        for path in sorted((ROOT / ".github").rglob("*")):
+            if path.is_file():
+                sources.append(
+                    (
+                        path.relative_to(ROOT),
+                        path.read_text(encoding="utf-8", errors="surrogateescape"),
+                    )
+                )
+        sources.append(
+            (
+                pathlib.Path("scripts/ci_plan.py"),
+                (ROOT / "scripts/ci_plan.py").read_text(encoding="utf-8"),
+            )
+        )
+        patterns = (
+            # Loopback is a property of the runner a service job stands up,
+            # not of where the pool lives.
+            (r"\b(?!127\.|0\.0\.0\.0)\d{1,3}(?:\.\d{1,3}){3}\b", "an IP address"),
+            (r"kiln-runtime-sha256-", "an executor runtime fingerprint"),
+            (r"--remote_instance_name=(?!\$)", "a literal REAPI instance name"),
+            (r"--remote_(?:executor|cache)=grpc", "a literal pool endpoint"),
+            (r"--tls_[a-z_]*=(?![\"$])", "a literal certificate path"),
+            (r"/home/[a-z]+/", "a home-directory path"),
+        )
+        for path, text in sources:
+            for pattern, description in patterns:
+                self.assertIsNone(
+                    re.search(pattern, text),
+                    f"{path} carries {description}; it is a deployment fact and "
+                    "belongs in .kiln.bazelrc or a build-cache secret",
+                )
+
+    def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
+        """A misconfigured environment must name what is wrong, not build wrong.
+
+        A Bazel invocation with no executor falls back to a two-core runner
+        compile and one advertising the wrong runtime matches nothing in the
+        pool, so an empty value can neither be defaulted nor ignored. The
+        values are masked, so a malformed endpoint surfaces from Bazel only as
+        `Invalid DNS name: ***`; the shape is checked here instead. A secret is
+        stored as text and routinely arrives with a trailing newline, which is
+        normalized rather than rejected.
+        """
+        verify = job_step(shared_cache_action(), "Verify shared pool configuration")[
+            "run"
+        ]
+        names = [
+            "CACHE_ENDPOINT",
+            "CACHE_INSTANCE",
+            "KILN_EXECUTOR_RUNTIME",
+            "CACHE_CA",
+            "CACHE_CERT",
+            "CACHE_KEY",
+        ]
+        supplied = {name: f"value-of-{name}" for name in names}
+        supplied["CACHE_ENDPOINT"] = "grpcs://cache.example:8443"
+
+        def run_verify(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+            with tempfile.TemporaryDirectory() as temporary:
+                output = pathlib.Path(temporary) / "output"
+                result = subprocess.run(
+                    ["bash", "-c", verify],
+                    cwd=ROOT,
+                    env=os.environ | environment | {"GITHUB_OUTPUT": str(output)},
+                    capture_output=True,
+                    text=True,
+                )
+                result.stdout = (
+                    output.read_text(encoding="utf-8") if output.exists() else ""
+                )
+                return result
+
+        complete = run_verify(supplied)
+        self.assertEqual(0, complete.returncode, complete.stderr)
+        self.assertIn("endpoint=grpcs://cache.example:8443", complete.stdout)
+
+        trailing = run_verify(
+            supplied
+            | {
+                "CACHE_ENDPOINT": "grpcs://cache.example:8443\n",
+                "KILN_EXECUTOR_RUNTIME": "kiln-runtime-sha256-abc\n",
+            }
+        )
+        self.assertEqual(0, trailing.returncode, trailing.stderr)
+        self.assertIn("endpoint=grpcs://cache.example:8443\n", trailing.stdout)
+        self.assertIn("runtime=kiln-runtime-sha256-abc\n", trailing.stdout)
+
+        for name in names:
+            with self.subTest(missing=name):
+                result = run_verify(supplied | {name: ""})
+                self.assertEqual(1, result.returncode)
+                self.assertIn(name, result.stderr)
+
+        for malformed in ("cache.example:8443", "grpcs://cache.example", "https://x:1"):
+            with self.subTest(endpoint=malformed):
+                result = run_verify(supplied | {"CACHE_ENDPOINT": malformed})
+                self.assertEqual(1, result.returncode)
+                self.assertIn("CACHE_ENDPOINT", result.stderr)
+
+        # Masked before any flag carrying them is written.
+        for value in ("endpoint", "instance", "runtime"):
+            self.assertIn(f'echo "::add-mask::${{{value}}}"', verify)
+        flags = job_step(shared_cache_action(), "Export shared cache flags")["run"]
+        self.assertIn("--remote_executor=${POOL_ENDPOINT}", flags)
+        self.assertIn("--remote_cache=${POOL_ENDPOINT}", flags)
+        self.assertIn("--remote_instance_name=${POOL_INSTANCE}", flags)
+        self.assertIn(
+            "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}",
             flags,
         )
-        self.assertNotIn("kiln_executor_runtime", flags)
-        self.assertNotIn("kiln_executor_runtime", bazel_command)
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
         jobs = workflow()["jobs"]
@@ -399,7 +503,7 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(170, len(clippy))
+        self.assertEqual(171, len(clippy))
         self.assertFalse(clippy & doctests)
         self.assertTrue(
             all(
@@ -540,7 +644,8 @@ class BazelTestContractTests(unittest.TestCase):
         script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
         self.assertIn("--nocache_test_results", script)
         self.assertIn(
-            "--modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache",
+            "--modify_execution_info=TestRunner=+no-cache,"
+            "TestRunner=+no-remote-cache,TestRunner=+no-remote-exec",
             script,
         )
         self.assertNotIn("--cache_test_results=yes", script)

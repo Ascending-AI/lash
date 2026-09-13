@@ -59,11 +59,11 @@ kiln test \
 ```
 
 These build and test commands select the shared Kiln execution pool by default.
-`scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses REAPI
-instance `kiln` at `grpcs://178.105.21.6:8443` with the mutual-TLS client
-certificate under `~/.config/dev-setup/kiln-build-infra/tls`, requires the
-declared NativeLink runtime identity, and fails when the pool or the
-certificate is unavailable. One scheduler dispatches each action to whichever
+`scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses
+the REAPI instance, endpoint and mutual-TLS client certificate `.kiln.bazelrc`
+declares, requires the declared NativeLink runtime identity, and fails when the
+pool or the certificate is unavailable — including when `.kiln.bazelrc` is
+absent, which it says rather than building with no executor. One scheduler dispatches each action to whichever
 pool worker is free: this host or a Hetzner worker. NativeLink executes trusted
 builds directly on the chosen worker. Hermeticity here describes pinned
 tools and declared inputs, not an OS security boundary. `--local` executes
@@ -89,7 +89,7 @@ archive integrity; `rust-toolchain.toml`, rules_rs, and CI all select Rust
 1.98.1. Published manifests keep `rust-version = "1.90"` as their compatibility
 floor.
 
-The shared caches live under `/home/sam/.cache/lash-bazel`; Bazel action keys use
+The shared caches live where `.kiln.bazelrc` points them; Bazel action keys use
 declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
@@ -120,11 +120,10 @@ override it or create a cold target by hand.
 deleting the fork. Do not call the hook directly or manually remove the
 checkout.
 
-Bazel maps each checkout to a hashed directory below
-`/home/sam/.cache/lash-bazel/user-root`; `clean --expunge` removes only the
-calling checkout's output base. It preserves the shared
-`/home/sam/.cache/lash-bazel/repository` and
-`/home/sam/.cache/lash-bazel/disk` caches. Kiln invokes this cleanup before
+Bazel maps each checkout to a hashed directory below the `--output_user_root`
+`.kiln.bazelrc` declares; `clean --expunge` removes only the calling checkout's
+output base. It preserves the shared repository and disk caches that file names
+alongside it. Kiln invokes this cleanup before
 deleting a fork.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
@@ -354,18 +353,50 @@ service jobs take the Cargo branch of `scripts/ci/store-tests.sh`, preserving
 the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.
 
-Every CI job that talks to the shared cache configures it through the
+Every CI job that talks to the shared pool configures it through the
 `.github/actions/bazel-shared-cache` composite action, which pins Bazelisk,
-derives the runner identity, materializes the client certificate, and exports
-`BAZEL_CACHE_FLAGS` and `BAZEL_OUTPUT_USER_ROOT`. Its companion
-`bazel-shared-cache-cleanup` removes the credentials in an `if: always()` step.
+resolves the executor runtime fingerprint, materializes the client certificate,
+and exports `BAZEL_SHARED_CACHE_FLAGS` and `BAZEL_OUTPUT_USER_ROOT`. Pair it
+with an `if: always()` step that removes `"$RUNNER_TEMP/build-cache"`.
 
-GitHub-hosted actions execute locally, not in the shared executor's pinned
-runtime image. Their remote-cache platform property is therefore derived from
-GitHub's `runner.os`, `runner.arch`, `ImageOS`, and `ImageVersion` values. This
-gives each concrete GitHub runner image a deterministic action identity
-distinct from `kiln_executor_runtime`; the cache service and instance remain
-shared, but actions cannot cross the runtime boundary under the same key.
+CI does not compile. Trusted events submit their actions to the same execution
+pool a local fork uses, so the two-core GitHub runner uploads inputs, waits, and
+downloads results. The runner and a fork advertise one `kiln_executor_runtime`
+and share one action cache namespace: a label a fork already built is a cache
+hit in CI and the reverse.
+
+## Where each deployment fact lives
+
+The pool endpoint, the REAPI instance, the executor runtime fingerprint, the
+client certificate and this host's cache directories are deployment facts. They
+move when the pool is redeployed or the executor is repinned, and they differ
+between a development host and a CI runner, so none of them is committed:
+
+| Fact | Locally | In CI |
+| --- | --- | --- |
+| Endpoint, instance, runtime fingerprint | `.kiln.bazelrc` | `CACHE_ENDPOINT`, `CACHE_INSTANCE`, `KILN_EXECUTOR_RUNTIME` |
+| Client certificate | `.kiln.bazelrc` (paths under `~/.config`) | `CACHE_CA`, `CACHE_CERT`, `CACHE_KEY` |
+| Output base and caches | `.kiln.bazelrc` | `$RUNNER_TEMP` |
+
+kiln generates `.kiln.bazelrc` from the installed executor manifest on every
+fork and golden refresh; it is gitignored and `.bazelrc` `try-import`s it. The
+CI values are `build-cache` environment secrets, masked on read and validated
+by `.github/actions/bazel-shared-cache`, which fails with the name of any empty
+one. The build-infra repository writes both sides; nothing here is edited by
+hand. `.bazelrc` keeps only what the pool is asked *for* — the four-CPU,
+4 GiB action shape, `--remote_local_fallback=false`, and the download and
+upload policy — and `scripts/test_bazel_test_contract.py` refuses an IP
+address, an instance name, a fingerprint, a certificate path or a home
+directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
+
+`--jobs=32` counts in-flight remote actions rather than local cores, against
+the eight concurrent slots the pool advertises. `--remote_local_fallback=false`
+makes an unreachable pool a red job rather than a silent two-core compile,
+which is the intended trust posture. Service-backed tests are the one spawn
+that stays on the runner: `scripts/ci/store-tests.sh` adds `no-remote-exec` to
+the `TestRunner` mnemonic, because the database or bucket the job stood up
+listens on the runner's loopback and exists nowhere else. Their compile actions
+still run on the pool.
 
 The Bazel default is the development compilation graph. Timing comparisons
 must use Rust 1.98.1, the resolved default workspace features, equivalent

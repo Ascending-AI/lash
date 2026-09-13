@@ -6,6 +6,11 @@ Accepted. Ratified on FIG-1494; the six sections of the decision are the six
 rulings recorded there. The trigger-store ownership map was ratified on
 FIG-1507 on 2026-08-21.
 
+Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) adds the `process_definitions` name
+registry, modelled on `trigger_subscriptions` and covered by the same
+ownership axiom. Session-scoped names follow the ADR 0049 frontier;
+host- and platform-scoped tombstones are never collected.
+
 ## Context
 
 Lash's durable state grew one row class at a time, and each class arrived with

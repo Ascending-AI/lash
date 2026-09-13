@@ -90,9 +90,9 @@ async fn assert_waiting_process_is_live_not_prunable(
 }
 
 /// A waiting process is live, not prunable. The PostgreSQL half of
-/// `sqlite_waiting_processes_are_live_not_prunable`: both backends spell
-/// `LIVE_PROCESS_STATUS_LABELS` out as SQL literals, so both need the
-/// behavioural referee.
+/// `sqlite_waiting_processes_are_live_not_prunable`: both backends generate the
+/// live predicate from `ProcessStatus`, so both need the behavioural referee
+/// that the generated fragment lands where the query means it to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -187,11 +187,17 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
             }
         }
     }
+    // FIG-2844 generated every query-site predicate from `ProcessStatus`, so
+    // the registry sources hold none: the only literal left is the partial
+    // process index in schema.sql, whose vocabulary FIG-2811 owns.
+    // `store_statements_never_retype_a_lifecycle_literal` (lash-sim) is the
+    // gate that keeps a query-site literal from coming back; this count is the
+    // inventory that keeps a new DDL literal from arriving unnoticed.
     assert_eq!(
-        live_sites, 4,
-        "expected exactly four live-status list literal sites in the PostgreSQL backend \
-         (three registry queries plus the partial process index in schema.sql); \
-         update this count when adding one"
+        live_sites, 1,
+        "expected exactly one live-status list literal site in the PostgreSQL backend, \
+         the partial process index in schema.sql; a query-site literal belongs in a \
+         generated fragment, not here"
     );
     assert_eq!(
         foreign_sites, 1,

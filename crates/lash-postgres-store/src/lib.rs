@@ -963,6 +963,9 @@ mod evidence_retention;
 mod preflight;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
+mod process_lifecycle_sql;
+#[cfg(test)]
+mod process_lifecycle_sql_tests;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
 #[path = "postgres/required_constraints.rs"]
