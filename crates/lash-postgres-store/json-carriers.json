@@ -31,6 +31,10 @@
     "verdict": "deliberately-excluded",
     "reason": "ProcessRecord spans the durable process model; enrolling its nested specs, waits, provenance, and status is a separate process-schema cutover."
   },
+  "lash_process_artifact_cleanup.cleanup_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ProcessArtifactCleanup is an exact projection of ProcessRecord retained only until cleanup acknowledgement; its bytes are gated by the PostgreSQL component version and must be enrolled with the complete process carrier family."
+  },
   "lash_process_events.event_json": {
     "verdict": "deliberately-excluded",
     "reason": "ProcessEvent spans all durable process event variants and must be enrolled with ProcessRecord as one process-schema cutover."

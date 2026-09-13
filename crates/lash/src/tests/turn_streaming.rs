@@ -539,12 +539,43 @@ struct DurableInMemoryProcessEnvStore {
 
 #[async_trait]
 impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &lash_core::ArtifactOwner,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner.put_process_execution_env(env_ref, bytes).await
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
+            .await
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner.retire_process_execution_env_owner(owner).await
     }
 
     async fn get_process_execution_env(

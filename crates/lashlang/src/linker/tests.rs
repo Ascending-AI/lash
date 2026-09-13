@@ -2414,7 +2414,10 @@ async fn module_artifact_store_bytes_reject_corruption() {
     let store = crate::InMemoryLashlangArtifactStore::new();
 
     store
-        .put_module_artifact(&linked.artifact)
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("corruption-test"),
+            &linked.artifact,
+        )
         .await
         .expect("put artifact");
     assert_eq!(

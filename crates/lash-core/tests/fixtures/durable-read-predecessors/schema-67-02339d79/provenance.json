@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 67,
+  "source_commit": "02339d7999b46179099189a6bd73257a849efd42",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-677 schema-68 artifact-ownership and cleanup-evidence cutover",
+  "artifacts": {
+    "postgres-expected.json": "3a598ad5c6d5a65e76a16df7c4e4f4ed2cb95b60e368dad6f29c2c7998237614",
+    "sqlite-expected.json": "328dff423623f90d124382b4550ee11d31e60f3b44fc2a3736edf8682b0eccca"
+  }
+}

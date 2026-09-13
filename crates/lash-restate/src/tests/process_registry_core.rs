@@ -1374,6 +1374,14 @@ finish (await handle)?
             "first turn completed before the pending tool published its completion key: {turn:?}"
         ),
     };
+    first_turn.abort();
+    assert!(
+        first_turn
+            .await
+            .expect_err("the first invocation is crashed at the pending wait")
+            .is_cancelled(),
+        "the first invocation must stop at the injected crash boundary"
+    );
     let resolver = RestateRuntimeEffectController::new(Arc::clone(&context));
     assert_eq!(
         resolver
@@ -1385,11 +1393,6 @@ finish (await handle)?
             .expect("resolve pending replay-test tool"),
         ResolveOutcome::Accepted
     );
-    let first_turn = first_turn.await.expect("first turn task");
-    assert!(matches!(
-        first_turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
-    ));
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(1), signal_wait)
             .await
@@ -1480,7 +1483,7 @@ finish (await handle)?
         .reset_invocation_state_for_replay_preserving_durable_event(
             &RestateDurableWaitAddress::for_key(&completion_key).workflow_key,
         );
-    context.start_replay();
+    context.start_replay_allowing_journal_extension();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
@@ -1511,10 +1514,28 @@ finish (await handle)?
         "Restate replay must return the journaled scalar ToolAttempt instead of re-executing the provider"
     );
     let replayed_envelopes = context.recorded_runtime_effect_envelopes();
+    let appended_envelopes = replayed_envelopes
+        .iter()
+        .filter(|(name, _)| {
+            !first_recorded_envelopes
+                .iter()
+                .any(|(first_name, _)| first_name == name)
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         replayed_envelopes.len(),
-        recorded_effect_count,
-        "replay must consume the journal rather than append another ToolAttempt record"
+        recorded_effect_count + 1,
+        "the resumed invocation may append only its previously uncommitted checkpoint"
+    );
+    assert_eq!(
+        appended_envelopes.len(),
+        1,
+        "the replay prefix must consume every pre-crash journal entry"
+    );
+    assert_eq!(
+        appended_envelopes[0].1.command.kind(),
+        RuntimeEffectKind::Checkpoint,
+        "only the post-wait checkpoint is new after the crash"
     );
     let replayed_scalar = replayed_envelopes
         .iter()
@@ -1668,6 +1689,103 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
         context.runs.lock_recover().is_empty(),
         "process workflow scheduling must not call Restate context from inside ctx.run"
     );
+}
+
+#[tokio::test]
+pub(super) async fn restate_start_failures_preserve_inputs_for_exact_recovery() {
+    for failure in ["workflow", "external_ref"] {
+        let context = Arc::new(RecordingContext::default());
+        if failure == "workflow" {
+            context.fail_next_process_workflow_start();
+        }
+        let host = RestateRuntimeEffectController::new(Arc::clone(&context));
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        if failure == "external_ref" {
+            registry
+                .fail_next_external_ref_write_for_testing(PluginError::Session(
+                    "injected external-ref write failure".to_string(),
+                ))
+                .await;
+        }
+        let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+        let process_id = ProcessId::from(format!("restate-start-recovery-{failure}"));
+        let spec = lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::empty(),
+            recovery_session_policy(),
+        );
+        let expected_ref = spec.stable_ref().expect("stable environment ref");
+        let command = || {
+            let registration = ProcessRegistration::new(
+                process_id.clone(),
+                ProcessInput::ToolCall {
+                    call: lash_core::PreparedToolCall::from_parts(
+                        format!("{process_id}-call"),
+                        "tool:recovery",
+                        "recovery",
+                        serde_json::Value::Null,
+                        None,
+                        serde_json::Value::Null,
+                    ),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            );
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(
+                    RuntimeEffectKind::Process,
+                    &format!("restate-start-recovery-{failure}"),
+                ),
+                RuntimeEffectCommand::process(ProcessCommand::Start {
+                    registration,
+                    observers: vec![SessionId::from("session")],
+                    env_spec: Some(spec.clone()),
+                    execution_context: Box::new(ProcessExecutionContext::default()),
+                }),
+            )
+        };
+        let executor = || {
+            registry_local_executor(registry.clone())
+                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
+        };
+
+        let injected_error = host
+            .execute_effect(command(), executor())
+            .await
+            .expect_err("injected post-registration start failure");
+        assert!(
+            registry
+                .get_process(&process_id)
+                .await
+                .expect("read committed process")
+                .is_some(),
+            "registration committed before the injected {failure} failure; error: {injected_error}"
+        );
+        assert!(
+            env_store
+                .get_process_execution_env(&expected_ref)
+                .await
+                .expect("read preserved start input")
+                .is_some(),
+            "a retriable {failure} failure must not reclaim the committed process input"
+        );
+
+        let outcome = host
+            .execute_effect(command(), executor())
+            .await
+            .expect("exact start retry completes ownership transfer");
+        let RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::Start { record },
+        } = outcome
+        else {
+            panic!("wrong recovery outcome")
+        };
+        assert_eq!(record.env_ref.as_ref(), Some(&expected_ref));
+        assert!(record.external_ref.is_some());
+    }
 }
 
 #[tokio::test]

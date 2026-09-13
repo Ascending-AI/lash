@@ -1196,6 +1196,7 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
+    let (process_env_store, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let registration = store
         .execute_command(
             "fig806-register",
@@ -1204,14 +1205,14 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
                 actor: lash_core::ProcessOriginator::host_scoped("fig806"),
                 draft: lash_core::TriggerSubscriptionDraft::for_process(
                     "fig806/subscription",
-                    lash_core::ProcessExecutionEnvRef::new("process-env:fig806"),
+                    process_env_ref,
                     "ui.button.pressed",
                     source_key.clone(),
                     ProcessInput::Engine {
-                        kind: "fig806-engine".to_string(),
+                        kind: "testing-fixture".to_string(),
                         payload: serde_json::json!({}),
                     },
-                    lash_core::ProcessIdentity::new("fig806-engine"),
+                    lash_core::ProcessIdentity::new("testing-fixture"),
                 )
                 .with_payload_schema(lash_core::LashSchema::any()),
             },
@@ -1227,6 +1228,10 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
+    )
+    .with_process_artifacts(
+        process_env_store,
+        lash_core::testing::process_engine_fixture(),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())
@@ -1317,6 +1322,7 @@ pub(super) async fn register_fig811_subscription(
     subscription_key: &str,
     source_key: &str,
 ) -> String {
+    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let outcome = store
         .execute_command(
             operation_id,
@@ -1326,16 +1332,14 @@ pub(super) async fn register_fig811_subscription(
                 actor: lash_core::ProcessOriginator::host_scoped("fig811"),
                 draft: lash_core::TriggerSubscriptionDraft::for_process(
                     subscription_key,
-                    lash_core::ProcessExecutionEnvRef::new(format!(
-                        "process-env:{subscription_key}"
-                    )),
+                    process_env_ref,
                     "ui.button.pressed",
                     source_key,
                     ProcessInput::Engine {
-                        kind: "fig811-engine".to_string(),
+                        kind: "testing-fixture".to_string(),
                         payload: serde_json::json!({}),
                     },
-                    lash_core::ProcessIdentity::new("fig811-engine"),
+                    lash_core::ProcessIdentity::new("testing-fixture"),
                 )
                 .with_payload_schema(lash_core::LashSchema::any()),
             },
@@ -1390,9 +1394,14 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
     );
 
     let registry = process_registry();
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
+    )
+    .with_process_artifacts(
+        process_env_store,
+        lash_core::testing::process_engine_fixture(),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())
@@ -1517,9 +1526,14 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
     )
     .await;
     let registry = process_registry();
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
+    )
+    .with_process_artifacts(
+        process_env_store,
+        lash_core::testing::process_engine_fixture(),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())

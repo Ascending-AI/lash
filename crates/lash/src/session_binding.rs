@@ -22,6 +22,7 @@ pub(crate) struct BoundSession {
     child_store_provider: Option<Arc<dyn SessionStoreFactory>>,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    process_engines: lash_core::ProcessEngineRegistry,
     catalog: Option<Arc<dyn SessionStoreFactory>>,
 }
 
@@ -44,6 +45,7 @@ impl BoundSession {
             child_store_provider: env.session_store_factory.clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
+            process_engines: env.core.process_engines.clone(),
             catalog,
         }
     }
@@ -75,6 +77,8 @@ impl BoundSession {
                 self.effect_host(),
                 self.process.clone(),
                 self.trigger_store.clone(),
+                Arc::clone(&self.process_env_store),
+                self.process_engines.clone(),
             )
         })
     }

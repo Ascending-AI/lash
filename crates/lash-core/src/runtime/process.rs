@@ -44,9 +44,10 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    AbandonRequest, InMemoryProcessExecutionEnvStore, ObserverInheritance, OnParentEnd,
-    PROCESS_LEASE_SCHEMA_VERSION, ParentScope, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
+    AbandonRequest, ArtifactOwner, InMemoryProcessExecutionEnvStore, ObserverInheritance,
+    OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION, ParentScope, ProcessArtifactCleanup,
+    ProcessArtifactCleanupAck, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
@@ -56,7 +57,7 @@ pub use model::{
     ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
     ProcessStatusFilter, ProcessTombstone, RecoveryContract, SessionId, SessionScope,
     SessionScopeId, WaitKind, WaitState, ensure_process_lease_schema_version,
-    load_process_execution_env, persist_process_execution_env, process_runtime_session_ids,
+    load_process_execution_env, process_runtime_session_ids, publish_process_execution_env,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,

@@ -1,5 +1,8 @@
 use super::*;
-use lash_core::{ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _};
+use lash_core::{
+    ProcessExecutionEnvStore as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+    ProcessRegistrar as _,
+};
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
@@ -8,6 +11,283 @@ use lashlang::LashlangArtifactStore;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+struct FailOnceProcessEnvStore {
+    inner: Arc<lash_core::InMemoryProcessExecutionEnvStore>,
+    retire_failures: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
+    async fn publish_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+        bytes: &[u8],
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
+            .await
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lash_core::PluginError> {
+        if self
+            .retire_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(lash_core::PluginError::Session(
+                "injected environment retirement failure".to_string(),
+            ));
+        }
+        self.inner.retire_process_execution_env_owner(owner).await
+    }
+
+    async fn get_process_execution_env(
+        &self,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        self.inner.get_process_execution_env(env_ref).await
+    }
+}
+
+struct FailOnceLashlangRetirementEngine {
+    store: Arc<Store>,
+    retire_failures: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ProcessEngine for FailOnceLashlangRetirementEngine {
+    fn kind(&self) -> &'static str {
+        "fig677-recovery-engine"
+    }
+
+    async fn run(
+        &self,
+        _context: lash_core::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+        unreachable!("the cleanup recovery fixture never runs a process")
+    }
+
+    async fn retire_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lash_core::PluginError> {
+        if self
+            .retire_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(lash_core::PluginError::Session(
+                "injected module retirement failure".to_string(),
+            ));
+        }
+        self.store
+            .retire_module_artifact_owner(owner)
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+}
+
+async fn scope_retirement_recovery_case(failing_store: &str) {
+    let dir = tempfile::tempdir().expect("scope retirement recovery tempdir");
+    let effect_path = dir.path().join("effects.db");
+    let module_store = Arc::new(
+        Store::open(&dir.path().join("artifacts.db"))
+            .await
+            .expect("open durable module store"),
+    );
+    let env_inner = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new());
+    let env_store = Arc::new(FailOnceProcessEnvStore {
+        inner: Arc::clone(&env_inner),
+        retire_failures: std::sync::atomic::AtomicUsize::new(usize::from(
+            failing_store == "environment",
+        )),
+    });
+    let engine = Arc::new(FailOnceLashlangRetirementEngine {
+        store: Arc::clone(&module_store),
+        retire_failures: std::sync::atomic::AtomicUsize::new(usize::from(
+            failing_store == "module",
+        )),
+    });
+    let engines = lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_core::ProcessEngineRegistration::accepting(
+            engine as Arc<dyn lash_core::ProcessEngine>,
+        ),
+    );
+    let scope =
+        lash_core::ExecutionScope::runtime_operation(format!("scope-retirement-{failing_store}"));
+    let owner = lash_core::ArtifactOwner::execution(scope.clone());
+    let env_spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    );
+    let env_ref = env_spec.stable_ref().expect("stable environment ref");
+    let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
+    env_store
+        .publish_process_execution_env(&owner, &env_ref, &env_bytes)
+        .await
+        .expect("publish execution-owned environment");
+    let module = lashlang::ModuleArtifact::from_program(
+        lashlang::parse("process cleanup(value: str) -> str { finish value }")
+            .expect("parse cleanup module"),
+    )
+    .expect("build cleanup module");
+    module_store
+        .publish_module_artifact(&owner, &module)
+        .await
+        .expect("publish execution-owned module");
+
+    let host: Arc<dyn lash_core::EffectHost> = Arc::new(
+        SqliteEffectHost::open(&effect_path)
+            .await
+            .expect("open effect host"),
+    );
+    host.retire_effect_journal(
+        lash_core::EffectJournalRetirement::for_scope(&scope)
+            .expect("runtime-operation retirement"),
+    )
+    .await
+    .expect("commit authoritative journal retirement");
+    let late_commit = host
+        .scoped(scope.clone())
+        .expect("retired scope still binds for a typed refusal")
+        .controller()
+        .execute_effect(
+            lash_core::RuntimeEffectEnvelope::new(
+                lash_core::RuntimeEffectInvocation::new(
+                    lash_core::EffectAddress::new(scope.clone(), "late-effect-replay")
+                        .expect("valid late-effect address"),
+                    lash_core::RuntimeAttribution::none(),
+                    "late-effect",
+                ),
+                lash_core::RuntimeEffectCommand::Sleep {
+                    spec: lash_core::SleepSpec::For { duration_ms: 0 },
+                },
+            ),
+            lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(lash_core::RuntimeEffectOutcome::Sleep)
+            }),
+        )
+        .await
+        .expect_err("the authoritative lifecycle decision rejects a late runtime commit");
+    assert_eq!(
+        late_commit.code,
+        lash_core::RuntimeErrorCode::EffectScopeRetired
+    );
+    drop(host);
+
+    let reopened: Arc<dyn lash_core::EffectHost> = Arc::new(
+        SqliteEffectHost::open(&effect_path)
+            .await
+            .expect("reopen effect host after authoritative retirement"),
+    );
+    let first_factory = SqliteSessionStoreFactory::new(dir.path().join("sessions-first"));
+    lash_core::SessionStoreFactory::bind_effect_host(&first_factory, &reopened);
+    lash_core::SessionStoreFactory::bind_artifact_stores(
+        &first_factory,
+        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        engines.clone(),
+    );
+    first_factory
+        .resume_artifact_owner_retirements()
+        .await
+        .expect_err("the selected artifact store fails after journal retirement");
+    assert_eq!(
+        reopened
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("pending evidence after partial cleanup"),
+        vec![scope.clone()],
+        "partial cross-store cleanup must not acknowledge lifecycle evidence"
+    );
+    drop(reopened);
+
+    let recovered: Arc<dyn lash_core::EffectHost> = Arc::new(
+        SqliteEffectHost::open(&effect_path)
+            .await
+            .expect("reopen effect host for cleanup retry"),
+    );
+    let retry_factory = SqliteSessionStoreFactory::new(dir.path().join("sessions-retry"));
+    lash_core::SessionStoreFactory::bind_effect_host(&retry_factory, &recovered);
+    lash_core::SessionStoreFactory::bind_artifact_stores(
+        &retry_factory,
+        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        engines,
+    );
+    retry_factory
+        .resume_artifact_owner_retirements()
+        .await
+        .expect("retry every configured artifact store and acknowledge");
+    assert!(
+        recovered
+            .pending_artifact_owner_retirements()
+            .await
+            .expect("read completed cleanup evidence")
+            .is_empty()
+    );
+    assert!(
+        env_store
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read retired environment")
+            .is_none()
+    );
+    assert!(
+        module_store
+            .get_module_artifact(&module.module_ref)
+            .await
+            .expect("read retired module")
+            .is_none()
+    );
+    assert!(
+        env_store
+            .publish_process_execution_env(&owner, &env_ref, &env_bytes)
+            .await
+            .is_err()
+    );
+    assert!(
+        module_store
+            .publish_module_artifact(&owner, &module)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn scope_retirement_retries_each_artifact_store_after_reopen() {
+    scope_retirement_recovery_case("environment").await;
+    scope_retirement_recovery_case("module").await;
+}
 
 #[test]
 fn public_session_schema_version_tracks_the_internal_schema_version() {
@@ -810,7 +1090,10 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     .expect("link module");
 
     store
-        .put_module_artifact(&linked.artifact)
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("sqlite-store-test"),
+            &linked.artifact,
+        )
         .await
         .expect("put artifact");
     let restored = store
@@ -823,6 +1106,45 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     assert_eq!(
         restored.process_ref("scan"),
         linked.artifact.process_ref("scan")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_handle() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("artifacts.db");
+    let releasing = Store::open(&path).await.expect("open releasing store");
+    let cached = Store::open(&path).await.expect("open caching store");
+    let module = lashlang::ModuleArtifact::from_program(
+        lashlang::parse("process cache_probe(root: str) -> str { finish root }")
+            .expect("parse module"),
+    )
+    .expect("build module artifact");
+    let owner = lash_core::ArtifactOwner::host("cross-handle-cache-owner");
+
+    releasing
+        .publish_module_artifact(&owner, &module)
+        .await
+        .expect("publish module through first handle");
+    assert!(
+        cached
+            .get_module_artifact(&module.module_ref)
+            .await
+            .expect("prime second handle cache")
+            .is_some()
+    );
+    releasing
+        .release_module_artifact(&owner, &module.module_ref)
+        .await
+        .expect("release final owner through first handle");
+
+    assert!(
+        cached
+            .get_module_artifact(&module.module_ref)
+            .await
+            .expect("read after cross-handle reclamation")
+            .is_none(),
+        "a handle-local cache must not resurrect durably reclaimed bytes"
     );
 }
 

@@ -525,16 +525,17 @@ async fn seed_reserved_trigger_delivery(
 }
 
 fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscriptionDraft {
+    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
     crate::TriggerSubscriptionDraft::for_process(
         "recovery-test",
-        crate::ProcessExecutionEnvRef::new("process-env:test"),
+        process_env_ref,
         "ui.button.pressed",
         source_key,
         ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({ "target": "reconcile" }),
         },
-        crate::ProcessIdentity::new("test-engine"),
+        crate::ProcessIdentity::new("testing-fixture"),
     )
     .with_payload_schema(crate::LashSchema::any())
 }
@@ -1289,8 +1290,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("boundary-recovery-test"),
         &env_spec,
     )
     .await
@@ -1420,8 +1422,9 @@ async fn snapshot_recovery_fixture(
         })),
     );
     let policy = test_session_policy();
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("snapshot-recovery-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
     )
     .await
