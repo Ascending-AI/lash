@@ -18,7 +18,10 @@ remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
 lash <name>`.
 
 Use `kiln build` for the warm shared-cache compilation path and `kiln test` for
-the generated cacheable test partition:
+the generated cacheable test partition. Implementer loops do not run Postgres,
+S3, or E2E (`kiln test --service`, store recipes, Restate workers): CI owns
+those, and local live gates fight over ports (`KILN_GATE_ID`) and the
+single-box database.
 
 ```sh
 . ./env.sh
@@ -42,8 +45,12 @@ scripts/hermetic-build.sh analyze
 # Compile the complete Cargo --workspace --all-targets shape.
 kiln build
 
-# Run the generated cacheable test suite (87 test binaries).
+# Run the generated cacheable test suite (PR Bazel partition).
 kiln test
+
+# Path-plan like CI. Docs-only skips compile; workbench-only does not
+# compile lash-core or Postgres. Never starts Postgres, S3, or E2E.
+scripts/dev-test.sh
 
 # Lint the `--workspace --all-targets` shape (170 clippy actions).
 kiln build //:workspace_clippy
@@ -253,17 +260,17 @@ output:
 
 | Event | PG 14 (compatibility) | PG 16 (primary) | PG 18 (compatibility) |
 | --- | --- | --- | --- |
-| `pull_request` | not scheduled | runs | not scheduled |
-| `merge_group` | runs | runs | runs |
-| `push` to `main` | runs | runs | runs |
+| `pull_request` (rust) | schema diffs only | runs | schema diffs only |
+| `merge_group` (rust) | schema diffs only | runs | schema diffs only |
+| `push` to `main` | skipped (queue already witnessed the SHA) | skipped | skipped |
 | `workflow_dispatch` | runs | runs | runs |
 
 The compatibility lanes only compare the live catalog artifact and a focused
-version-stamp gate, so deferring them off the pull-request critical path costs
-no trunk protection: the merge queue runs the full matrix before anything
-lands, and so does every push to `main`. The lane is removed from the matrix
-rather than kept with its steps skipped -- a leg that ran no tests would be a
-hollow green.
+version-stamp gate. They run when the diff touches `lash-postgres-store` or
+`lash-sqlite-store`, or on the full-profile dispatch. Weekly confidence
+backends remain the compatibility witness for unrelated landings. The lane is
+removed from the matrix rather than kept with its steps skipped -- a leg that
+ran no tests would be a hollow green.
 
 Three jobs stay entirely Cargo-owned, and not for want of trying:
 
@@ -286,11 +293,14 @@ is recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`
 and keeps its Cargo recipe.
 
 The main CI workflow makes this a single authoritative partition. Trusted
-same-repository pull requests, merge-queue groups, `main` pushes, and manual CI
-dispatches run `//:workspace_tests` with the authenticated shared cache. On the
-same events the ordinary nextest job reads the generated
-`tools/bazel/cargo_owned_nextest_filter.txt`, so its `profile.ci` run executes
-only ordinary cases from the 22 Cargo-owned binaries. The `Lint` job builds
+same-repository pull requests and merge-queue groups run `//:workspace_tests`
+with the authenticated shared cache. `main` pushes skip that core board (the
+queue already witnessed the SHA) and keep breadth jobs. On rust PRs the
+ordinary nextest job reads the generated
+`tools/bazel/cargo_owned_nextest_filter.txt` (service-gated, trybuild, and
+workbench binaries excluded so they are not compiled just to self-skip).
+Workbench unit tests run only when `examples/agent-workbench/**` changed.
+The `Lint` job builds
 `//:workspace_clippy` in place of the workspace `cargo clippy`, and the
 `Check workspace` job builds `//:workspace_compile` in place of
 `cargo check --workspace --all-targets`, with
@@ -304,8 +314,7 @@ members that are not `default-members`; it is generated from the same
 unification is identical, and the only Cargo target outside it,
 `slack-clone-live-e2e`, is one `cargo check --workspace --all-targets` skips for
 the same required-feature reason. Formatting, the Python and shell gates,
-actionlint, the versioned-surface bump check and the trunk-only perf smoke are
-cheap and stay exactly as they were. The remaining trybuild, heavy, service,
+actionlint and the versioned-surface bump check stay as they were. The remaining trybuild, heavy, service,
 feature, fuzz, packaging, and release jobs keep their own Cargo commands and
 schedules. `CI conclusion` requires the Bazel job to succeed on every trusted
 event.

@@ -4,6 +4,10 @@
 
 Accepted.
 
+Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) makes this the only RLM
+dialect. A gap ruling here no longer has a second surface to be weighed against;
+it is the whole authoring contract. References to "Lashlang" name the IR and VM.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves

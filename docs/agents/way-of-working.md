@@ -105,7 +105,9 @@ When an opt-in battery is warranted, it may consult `python3 scripts/gate_scope.
 
 ### Iterating: change-scoped fast tests
 
-`scripts/fast-test.sh` is an optional broader iteration aid. It runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity). Use it when reverse-dependency coverage adds value beyond the focused regression, including when re-proving the blast radius of a review finding.
+`scripts/dev-test.sh` is the implementer-loop default. It classifies the diff with `scripts/ci_plan.py` the same way CI does, then runs only the matching local families (docs-only skips compile; workbench-only runs the workbench nextest filter; rust runs `kiln test`). It refuses live Postgres/S3 URLs: those jobs belong to CI and fight over ports (`KILN_GATE_ID`) on this box.
+
+`scripts/fast-test.sh` is an optional broader iteration aid. It runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity), with live store URLs unset. Use it when reverse-dependency coverage adds value beyond the focused regression, including when re-proving the blast radius of a review finding.
 
 It is fail-closed by construction: a manifest, `Cargo.lock`, the toolchain pin, `.cargo/`, `.config/`, `scripts/`, `.github/`, or any file it cannot attribute to exactly one workspace crate widens the run back to the full workspace suite and says so, and a filterset that selects zero tests exits nonzero instead of reporting a pass. Changes to a high-fan-out crate such as `lash-core` can also select most or all of the suite through `rdeps()`; that breadth is a property of this optional tool, not a blanket local requirement.
 

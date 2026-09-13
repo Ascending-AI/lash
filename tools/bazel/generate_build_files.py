@@ -146,6 +146,12 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
+    if package_name == "lash-regress" and target_name == "unicodesets":
+        tags.append("pr-deferred")
+        reasons.append(
+            "RGI Unicode suites are too slow for the PR Bazel partition; they"
+            " run on lash-regress diffs and on trunk"
+        )
     reason = "; ".join(reasons) if reasons else None
     return sorted(set(tags)), reason
 
@@ -559,7 +565,12 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         "WORKSPACE_BAZEL_TEST_TARGETS": sorted(
             target["label"]
             for target in executable_tests
-            if "manual" not in target["tags"]
+            if "manual" not in target["tags"] and "pr-deferred" not in target["tags"]
+        ),
+        "WORKSPACE_DEFERRED_TEST_TARGETS": sorted(
+            target["label"]
+            for target in executable_tests
+            if "pr-deferred" in target["tags"]
         ),
         "WORKSPACE_CARGO_TEST_TARGETS": sorted(
             target["label"] for target in executable_tests if "manual" in target["tags"]
@@ -572,16 +583,37 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     for name, values in groups.items():
         bzl.append(f"{name} = {string_list(values, indent=4)}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
-    cargo_nextest_terms = sorted(
+    def cargo_owned_terms(*exclude_tags: str) -> list[str]:
+        excluded = set(exclude_tags)
+        return sorted(
+            nextest_filter_term(package["package"], target)
+            for package in inventory
+            for target in package["targets"]
+            if target.get("label") is not None
+            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+            and "manual" in target["tags"]
+            and not excluded.intersection(target["tags"])
+        )
+
+    cargo_nextest_terms = cargo_owned_terms(
+        "cargo-service-gate",
+        "cargo-trybuild",
+        "cargo-frontend-assets",
+    )
+    outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
+        " + ".join(cargo_nextest_terms) + "\n"
+    )
+    workbench_terms = sorted(
         nextest_filter_term(package["package"], target)
         for package in inventory
+        if package["package"] == "agent-workbench"
         for target in package["targets"]
         if target.get("label") is not None
         and target["kind"] in ("bin-unit-test", "test", "unit-test")
         and "manual" in target["tags"]
     )
-    outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
-        " + ".join(cargo_nextest_terms) + "\n"
+    outputs[ROOT / "tools/bazel/workbench_nextest_filter.txt"] = (
+        " + ".join(workbench_terms) + "\n" if workbench_terms else "none()\n"
     )
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new

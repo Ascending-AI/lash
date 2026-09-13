@@ -36,6 +36,7 @@ cd "$fork"
 . ./env.sh
 kiln build
 kiln test
+scripts/dev-test.sh   # path-plan like CI; never starts Postgres/S3/E2E
 ```
 
 Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
@@ -54,7 +55,8 @@ portable default-feature run.
 
 | Command | Coverage |
 | --- | --- |
-| `kiln test` | 87 deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `kiln test` | Deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `scripts/dev-test.sh` | Classifies the diff like CI and runs only those local families. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
 The Cargo-owned set comprises PostgreSQL and S3 stores; Restate and
@@ -72,12 +74,13 @@ Keep local validation proportional to the change:
 
 - Run cheap formatting and static checks relevant to the files you changed.
 - For behavior changes, run the narrowest regression that proves the changed
-  behavior. `scripts/fast-test.sh` is an optional broader iteration aid when
-  reverse-dependency coverage is useful; high-fan-out crates can still select a
-  large part of the workspace.
+  behavior. `scripts/dev-test.sh` path-plans like CI. `scripts/fast-test.sh` is
+  an optional broader iteration aid when reverse-dependency coverage is useful;
+  high-fan-out crates can still select a large part of the workspace. Neither
+  starts Postgres, S3, or E2E.
 - Add a targeted live recipe only for a named durability or behavior risk that
   the current CI plan does not exercise. Merely touching `lash-core` or
-  `lash-restate` does not require running both durable geometries locally.
+  `lash-restate` does not require running both durable geometries locally. Implementer loops never run those live gates.
 
 For Rust compilation, target analysis, and focused unit or integration tests,
 use the checkout-independent Bazel workflow in
