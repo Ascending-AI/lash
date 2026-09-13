@@ -1,7 +1,42 @@
 use super::*;
 use restate_sdk::serde::Json;
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledCancelCommandIdentity {
+    process_ref: lash_core::ProcessRef,
+    origin: lash_core::CancelOrigin,
+    requester: String,
+    attribution: Option<lash_core::RuntimeReplayAttribution>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledCancelAdmission {
+    version: u32,
+    identity: JournaledCancelCommandIdentity,
+    result: Result<Box<ProcessRecord>, PluginError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledParentEndCommandIdentity {
+    process_id: lash_core::ProcessId,
+    tool_intent_identity: lash_core::ToolIntentIdentity,
+    policy: lash_core::ProcessParentEndPolicy,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JournaledParentEndCancelPayload {
+    version: u32,
+    identity: JournaledParentEndCommandIdentity,
+    result: Result<JournaledParentEndCancelDecision, PluginError>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum JournaledParentEndCancelDecision {
     Issued { record: Box<ProcessRecord> },
@@ -21,6 +56,59 @@ fn process_command_journal_error(
         RuntimeErrorCode::RestateEffectController,
         format!("Restate process {operation} journaling failed: {error}"),
     )
+}
+
+fn encode_process_command_journal_payload<T: serde::Serialize>(
+    operation: &str,
+    payload: T,
+) -> Result<serde_json::Value, PluginError> {
+    serde_json::to_value(payload).map_err(|error| {
+        PluginError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::RecordEncodingFailed,
+            format!("failed to encode Restate process {operation} journal payload: {error}"),
+        ))
+    })
+}
+
+fn decode_process_command_journal_payload<T: serde::de::DeserializeOwned>(
+    operation: &str,
+    value: serde_json::Value,
+) -> Result<T, RuntimeEffectControllerError> {
+    serde_json::from_value(value).map_err(|error| {
+        RuntimeEffectControllerError::new(
+            RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+            format!("incompatible Restate process {operation} journal payload: {error}"),
+        )
+    })
+}
+
+fn validate_process_command_journal_payload_version(
+    operation: &str,
+    version: u32,
+) -> Result<(), RuntimeEffectControllerError> {
+    if version == PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
+        format!(
+            "incompatible Restate process {operation} journal payload version {version}; expected {PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION}"
+        ),
+    ))
+}
+
+fn validate_process_command_journal_identity<T: PartialEq>(
+    operation: &str,
+    recorded: &T,
+    current: &T,
+) -> Result<(), RuntimeEffectControllerError> {
+    if recorded == current {
+        return Ok(());
+    }
+    Err(RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+        format!("Restate process {operation} journal identity differs from the current command"),
+    ))
 }
 
 pub(super) async fn execute_restate_process_command<'ctx, C>(
@@ -249,20 +337,56 @@ where
             requester,
             attribution,
         } => {
+            let command_identity = JournaledCancelCommandIdentity {
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            };
             let admission_registry = Arc::clone(&registry);
-            let Json(admission) = context
+            let admitted_identity = command_identity.clone();
+            let admission_process_ref = command_identity.process_ref.clone();
+            let admission_requester = command_identity.requester.clone();
+            let admission_attribution = command_identity.attribution.clone();
+            let Json(admission_value) = context
                 .run_json_send(
                     process_command_journal_name(invocation, "process-cancel-admission"),
                     None,
                     async move {
-                        admission_registry
-                            .request_process_cancel(&process_ref, origin, requester, attribution)
+                        let result = admission_registry
+                            .request_process_cancel(
+                                &admission_process_ref,
+                                origin,
+                                admission_requester,
+                                admission_attribution,
+                            )
                             .await
+                            .map(Box::new);
+                        encode_process_command_journal_payload(
+                            "cancel admission",
+                            JournaledCancelAdmission {
+                                version: PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+                                identity: admitted_identity,
+                                result,
+                            },
+                        )
                     },
                 )
                 .await
                 .map_err(|error| process_command_journal_error("cancel admission", error))?;
-            let record = admission?;
+            let admission_value = admission_value?;
+            let admission: JournaledCancelAdmission =
+                decode_process_command_journal_payload("cancel admission", admission_value)?;
+            validate_process_command_journal_payload_version(
+                "cancel admission",
+                admission.version,
+            )?;
+            validate_process_command_journal_identity(
+                "cancel admission",
+                &admission.identity,
+                &command_identity,
+            )?;
+            let record = *admission.result?;
             context
                 .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
                 .await
@@ -284,6 +408,11 @@ where
             process_id,
             policy,
         } => {
+            let command_identity = JournaledParentEndCommandIdentity {
+                process_id: process_id.clone(),
+                tool_intent_identity: identity.clone(),
+                policy,
+            };
             let outcome = match policy {
                 lash_core::ProcessParentEndPolicy::Abandon => {
                     lash_core::ToolIntentParentEndOutcome::Abandoned {
@@ -293,8 +422,9 @@ where
                 }
                 lash_core::ProcessParentEndPolicy::Cancel => {
                     let decision_registry = Arc::clone(&registry);
-                    let decision_process_id = process_id.clone();
-                    let decision_identity = identity.clone();
+                    let admitted_identity = command_identity.clone();
+                    let decision_process_id = admitted_identity.process_id.clone();
+                    let decision_identity = admitted_identity.tool_intent_identity.clone();
                     let decision = context
                         .run_json_send(
                             process_command_journal_name(
@@ -349,31 +479,55 @@ where
                                     })
                                 }
                                 .await;
-                                result
+                                encode_process_command_journal_payload(
+                                    "parent-end decision",
+                                    JournaledParentEndCancelPayload {
+                                        version: PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+                                        identity: admitted_identity,
+                                        result,
+                                    },
+                                )
                             },
                         )
                         .await
                         .map_err(|error| {
                             process_command_journal_error("parent-end decision", error)
+                        })
+                        .and_then(|Json(value)| value.map_err(Into::into))
+                        .and_then(|value| {
+                            decode_process_command_journal_payload::<
+                                JournaledParentEndCancelPayload,
+                            >("parent-end decision", value)
+                        })
+                        .and_then(|payload| {
+                            validate_process_command_journal_payload_version(
+                                "parent-end decision",
+                                payload.version,
+                            )?;
+                            validate_process_command_journal_identity(
+                                "parent-end decision",
+                                &payload.identity,
+                                &command_identity,
+                            )?;
+                            payload.result.map_err(Into::into)
                         });
                     let result: Result<(), RuntimeEffectControllerError> = match decision {
-                        Ok(Json(Ok(JournaledParentEndCancelDecision::Issued { record })))
-                        | Ok(Json(Ok(JournaledParentEndCancelDecision::AlreadyStanding {
-                            record,
-                        }))) => match RestateProcessCancelRequest::from_record(&record) {
-                            Ok(request) => context
-                                .request_process_workflow_cancel(request)
-                                .await
-                                .map_err(|err| {
-                                    RuntimeEffectControllerError::new(
-                                        RuntimeErrorCode::RestateProcessCancel,
-                                        format!("Restate process cancellation failed: {err}"),
-                                    )
-                                }),
-                            Err(error) => Err(error.into()),
-                        },
-                        Ok(Json(Ok(JournaledParentEndCancelDecision::Terminal))) => Ok(()),
-                        Ok(Json(Err(error))) => Err(error.into()),
+                        Ok(JournaledParentEndCancelDecision::Issued { record })
+                        | Ok(JournaledParentEndCancelDecision::AlreadyStanding { record }) => {
+                            match RestateProcessCancelRequest::from_record(&record) {
+                                Ok(request) => context
+                                    .request_process_workflow_cancel(request)
+                                    .await
+                                    .map_err(|err| {
+                                        RuntimeEffectControllerError::new(
+                                            RuntimeErrorCode::RestateProcessCancel,
+                                            format!("Restate process cancellation failed: {err}"),
+                                        )
+                                    }),
+                                Err(error) => Err(error.into()),
+                            }
+                        }
+                        Ok(JournaledParentEndCancelDecision::Terminal) => Ok(()),
                         Err(error) => Err(error),
                     };
                     match result {

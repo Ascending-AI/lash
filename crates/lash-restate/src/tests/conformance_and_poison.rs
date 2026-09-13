@@ -884,7 +884,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             parent_end_decision_bytes.as_slice(),
-            br##"{"Err":{"type":"process_unknown","message":{"process_id":"fig1767-proc"}}}"##,
+            br##"{"Ok":{"identity":{"policy":"cancel","process_id":"fig1767-proc","tool_intent_identity":{"execution_scope_id":"scope","intent_index":0,"replay_key":"key","session_id":"fig1767","tool_call_id":"call"}},"result":{"Err":{"message":{"process_id":"fig1767-proc"},"type":"process_unknown"}},"version":1}}"##,
             "parent-end cancellation decision byte sequence mismatch"
         );
         assert_eq!(

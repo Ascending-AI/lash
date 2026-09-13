@@ -178,6 +178,12 @@ pub enum RuntimeErrorCode {
     RestateJournaledEffectPoisoned,
     RestateProcessAwait,
     RestateProcessCancel,
+    /// A Restate DirectProcess redrive addressed an existing journal entry
+    /// with a different canonical process-command identity.
+    RestateProcessJournalIdentityDrift,
+    /// A Restate DirectProcess journal entry has an unsupported version or a
+    /// shape this build cannot decode exactly.
+    RestateProcessJournalPayloadIncompatible,
     RestateProcessIngressSubmit,
     /// The ingress target names a service no deployment has bound. A
     /// deployment fact, not a busy engine: retrying cannot make an unbound
@@ -502,6 +508,10 @@ impl RuntimeErrorCode {
             }
             Self::RestateProcessAwait => "restate_process_await",
             Self::RestateProcessCancel => "restate_process_cancel",
+            Self::RestateProcessJournalIdentityDrift => "restate_process_journal_identity_drift",
+            Self::RestateProcessJournalPayloadIncompatible => {
+                "restate_process_journal_payload_incompatible"
+            }
             Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
             Self::RestateServiceUnregistered => "restate_service_unregistered",
             Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
@@ -612,6 +622,7 @@ impl RuntimeErrorCode {
             self,
             Self::SqliteEffectReplayHashConflict
                 | Self::PostgresEffectReplayHashConflict
+                | Self::RestateProcessJournalIdentityDrift
                 | Self::WorkerReplacementAbort
                 | Self::ToolIntentReplayKeyFormatCutover
         )
@@ -722,6 +733,8 @@ impl RuntimeErrorCode {
                 | Self::RestateEffectHostRequiresHandlerScope
                 | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
+                | Self::RestateProcessJournalIdentityDrift
+                | Self::RestateProcessJournalPayloadIncompatible
                 | Self::RestateServiceUnregistered
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
@@ -891,6 +904,10 @@ impl RuntimeErrorCode {
             "restate_journaled_effect_poisoned" => Self::RestateJournaledEffectPoisoned,
             "restate_process_await" => Self::RestateProcessAwait,
             "restate_process_cancel" => Self::RestateProcessCancel,
+            "restate_process_journal_identity_drift" => Self::RestateProcessJournalIdentityDrift,
+            "restate_process_journal_payload_incompatible" => {
+                Self::RestateProcessJournalPayloadIncompatible
+            }
             "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
             "restate_service_unregistered" => Self::RestateServiceUnregistered,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
@@ -1136,6 +1153,7 @@ mod tests {
             "postgres_effect_replay_hash_conflict",
             "worker_replacement_abort",
             "tool_intent_replay_key_format_cutover",
+            "restate_process_journal_identity_drift",
         ] {
             let typed = RuntimeErrorCode::from_wire_code(code);
             assert!(typed.is_replay_mismatch(), "{code}");
@@ -1291,6 +1309,8 @@ mod tests {
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
             | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
+            | RuntimeErrorCode::RestateProcessJournalIdentityDrift
+            | RuntimeErrorCode::RestateProcessJournalPayloadIncompatible
             | RuntimeErrorCode::RestateServiceUnregistered
             | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
             | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
@@ -1470,6 +1490,8 @@ mod tests {
             RuntimeErrorCode::RestateJournaledEffectPoisoned,
             RuntimeErrorCode::RestateProcessAwait,
             RuntimeErrorCode::RestateProcessCancel,
+            RuntimeErrorCode::RestateProcessJournalIdentityDrift,
+            RuntimeErrorCode::RestateProcessJournalPayloadIncompatible,
             RuntimeErrorCode::RestateProcessIngressSubmit,
             RuntimeErrorCode::RestateServiceUnregistered,
             RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
