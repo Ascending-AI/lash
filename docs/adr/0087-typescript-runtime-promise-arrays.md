@@ -1,6 +1,6 @@
 # 0087: TypeScript aggregates evaluate runtime arrays
 
-Status: Accepted
+Status: Superseded by [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) (FIG-2990, 2026-09-13)
 
 ## Context
 
@@ -23,3 +23,13 @@ Nested Lashlang comprehensions in tuples, lists, records, or another comprehensi
 ## Consequences
 
 Array shape is determined at runtime rather than by syntax. The host still receives one resource-operation batch for the tool leaves, and all of them settle before TypeScript reports the first-settled rejection; process leaves are awaited only after that batch succeeded. Existing continuation blobs require their original format and compiled program; this version does not reinterpret them.
+
+## Superseded (2026-09-13, FIG-2990)
+
+[ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) makes `processes.await` a Durable Wait on the work-driver seam and
+the VM keeps one handle kind, so a mixed aggregate is one resource-operation
+batch settling on one recorded order. The two-phase tool-then-process rule
+above, the process-leaf settlement walk, and the execution-nonce-stamped
+second handle encoding are deleted; the runtime-array evaluation rule and the
+journaled-order selection rule survive in that ADR. Every law asserted here
+has a replacement asserted under the single batch order.

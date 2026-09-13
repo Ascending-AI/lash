@@ -4,6 +4,17 @@
 
 Accepted.
 
+Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) removes `defineProcess`, `start`,
+`wake`, `registerTrigger` and the `signals` block from this dialect. Durable
+work is a `Process` value, process controls are leaf tools, and an inline
+async arrow in argument position lifts when the expected catalogue type says
+`Process`, so static extractability of a top-level definition object is
+replaced by an engine-resolvable definition reference. The aggregate rule in
+"Promise aggregates settle on journaled order" loses its process/tool phase
+split: one batch, one recorded settlement order. `waitSignal`, `sleep` and
+cell-only `finish` are unchanged, as is the `return`/`throw`/`finally`
+contract for a process body.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
