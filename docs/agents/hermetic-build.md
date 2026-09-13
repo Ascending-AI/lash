@@ -252,6 +252,34 @@ jobs and dispatches on `BAZEL_TRUSTED`. Two properties hold on the Bazel path:
   Cargo's one-binary-at-a-time execution, which the suites that share one
   database and one bucket depend on.
 
+### Running them locally: `kiln test --service`
+
+`kiln test --service <pg14|pg16|pg18|s3|all>` runs those same suites on this
+box. It starts the CI image on a free ephemeral port, waits for readiness,
+runs `scripts/ci/store-tests.sh` for each suite the matching CI job runs, in
+the same order and with the same environment variable names, and removes the
+container on success, failure and Ctrl-C alike. It is the same script, not a
+second copy of the test selection: `tools/kiln/services.json` names only the
+image, the readiness probe, the environment and the suite list, and
+`scripts/test_kiln_service_manifest.py` fails if it drifts from `ci.yml`.
+
+Locally the run takes the trusted path, so the binaries are shared-cache hits
+and pool actions exactly as `kiln build`'s are; only the `TestRunner` spawn is
+pinned local (`--strategy=TestRunner=local`), because the container publishes
+its port on this host's loopback and a test action on a pool worker would
+reach nothing. Test results are never cached, on either side. Outside GitHub
+Actions `store-tests.sh` defaults `BAZEL_SHARED_CACHE_FLAGS` to that
+configuration; inside CI both shared-cache variables stay required, so a job
+that lost its credentials fails instead of quietly missing the cache.
+
+Every run closes by printing the service-shaped cases it did *not* cover and
+the exact recipe for each, so a green `kiln test --service all` is never
+mistaken for full service coverage. Those are the three Cargo-owned jobs
+below, the `slack-clone` `e2e` feature, and the process-operations E2E driver,
+which stands up its own MinIO. No `justfile` recipe was converted or removed:
+the store suites had none, and the `*-soak` recipes are separate opt-in
+property runs that keep their Cargo commands.
+
 Untrusted events receive no cache credentials, so every step runs exactly the
 Cargo command it ran before this cutover, including the Rust toolchain, mold,
 nextest and Swatinem cache steps, which are conditioned on the same trust
