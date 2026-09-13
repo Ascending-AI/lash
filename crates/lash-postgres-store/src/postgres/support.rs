@@ -859,40 +859,45 @@ pub(crate) async fn commit_attachment_refs_tx(
     let ids = attachment_ids
         .iter()
         .collect::<std::collections::BTreeSet<_>>();
-    for id in ids {
+    // Validation pass: a digest is adoptable iff some manifest row anywhere
+    // records a completed upload and no physical delete is in flight for it.
+    // Nothing is written until every digest in the batch has passed.
+    let mut evidence = std::collections::BTreeMap::new();
+    for id in &ids {
         crate::attachments::lock_attachment_fence_tx(tx, id.as_str()).await?;
-        let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
-            "SELECT phase, write_token FROM lash_attachment_condemnations
-             WHERE attachment_id = $1",
+        let deleting = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM lash_attachment_condemnations
+                WHERE attachment_id = $1 AND phase = 'deleting'
+             )",
         )
         .bind(id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        match condemnation
-            .as_ref()
-            .map(|(phase, token)| (phase.as_str(), token.is_some()))
-        {
-            Some(("deleting", _)) => {
-                return Err(StoreError::Backend(format!(
-                    "cannot adopt attachment `{id}` while physical deletion is in flight"
-                )));
-            }
-            Some(("reclaimed", _)) => {
-                return Err(StoreError::AttachmentBytesReclaimed { digest: id.clone() });
-            }
-            Some(("condemned", true)) => {
-                return Err(StoreError::Backend(format!(
-                    "cannot adopt attachment `{id}` while its bytes are being restored"
-                )));
-            }
-            None | Some(("condemned", false)) => {}
-            Some((phase, _)) => {
-                return Err(StoreError::Backend(format!(
-                    "attachment `{id}` has unknown condemnation phase `{phase}`"
-                )));
-            }
+        if deleting {
+            return Err(StoreError::UnknownAttachment {
+                digest: (*id).clone(),
+            });
         }
+        let written_at_ms = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MIN(written_at_ms) FROM lash_attachment_manifest
+             WHERE attachment_id = $1 AND written_at_ms IS NOT NULL",
+        )
+        .bind(id.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let Some(written_at_ms) = written_at_ms else {
+            return Err(StoreError::UnknownAttachment {
+                digest: (*id).clone(),
+            });
+        };
+        evidence.insert((*id).clone(), written_at_ms);
+    }
+    for id in ids {
+        // The fresh committed root supersedes an unarmed, unclaimed
+        // condemnation. A restoring writer's claim is left for that writer.
         sqlx::query(
             "DELETE FROM lash_attachment_condemnations
              WHERE attachment_id = $1 AND phase = 'condemned' AND write_token IS NULL",
@@ -901,17 +906,21 @@ pub(crate) async fn commit_attachment_refs_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
+        // Copy the evidence onto the adopter's row so it outlives the uploader's
+        // intent being forgotten.
         sqlx::query(
             "INSERT INTO lash_attachment_manifest
-             (attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms)
-             VALUES ($2, $3, $4, $1, $1)
+             (attachment_id, session_id, canonical_uri, intent_at_ms, written_at_ms, committed_at_ms)
+             VALUES ($2, $3, $4, $1, $5, $1)
              ON CONFLICT (session_id, attachment_id) DO UPDATE
-             SET committed_at_ms = COALESCE(lash_attachment_manifest.committed_at_ms, EXCLUDED.committed_at_ms)",
+             SET committed_at_ms = COALESCE(lash_attachment_manifest.committed_at_ms, EXCLUDED.committed_at_ms),
+                 written_at_ms = COALESCE(lash_attachment_manifest.written_at_ms, EXCLUDED.written_at_ms)",
         )
         .bind(now_epoch_ms as i64)
         .bind(id.as_str())
         .bind(session_id.as_str())
         .bind(format!("lash-attachment://blake3/{id}"))
+        .bind(evidence.get(id).copied())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

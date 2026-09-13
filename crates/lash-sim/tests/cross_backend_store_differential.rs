@@ -26,8 +26,8 @@ use lash_core::runtime::{
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy,
-    EffectAddress, ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce,
+    AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, EffectAddress,
+    ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseClaimNonce,
     LeaseOwnerIdentity, PendingTurnInputDraft, PluginNamespaceState, PluginState, ProtocolEvent,
     QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit, RuntimeSessionState,
     RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta, SessionNodePayload,
@@ -40,6 +40,8 @@ use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/attachment_seeding.rs"]
+mod attachment_seeding;
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
 #[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
@@ -810,6 +812,7 @@ type AttachmentRow = (
     String,
     i64,
     Option<i64>,
+    Option<i64>,
     Option<String>,
     Option<String>,
     Option<i64>,
@@ -864,6 +867,7 @@ fn attachment_manifest_observation(
         attachment_id: entry.attachment_id,
         canonical_uri: entry.canonical_uri,
         intent_at_epoch_ms: entry.intent_at_epoch_ms,
+        written: entry.written_at_epoch_ms.is_some(),
         committed: entry.committed_at_epoch_ms.is_some(),
         owner_kind: entry.owner_kind,
         owner_id: entry.owner_id,
@@ -1035,8 +1039,8 @@ async fn read_sqlite_durable_state(
     let attachment_manifest = {
         let mut statement = connection
             .prepare(
-                "SELECT attachment_id, canonical_uri, intent_at_ms, committed_at_ms,
-                        owner_kind, owner_id, owner_incarnation
+                "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
+                        committed_at_ms, owner_kind, owner_id, owner_incarnation
                  FROM attachment_manifest
                  WHERE session_id = ?1
                  ORDER BY attachment_id ASC",
@@ -1049,9 +1053,10 @@ async fn read_sqlite_durable_state(
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<i64>>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
                 ))
             })
             .expect("read SQLite attachment manifest")
@@ -1063,6 +1068,7 @@ async fn read_sqlite_durable_state(
                     attachment_id,
                     canonical_uri,
                     intent_at_epoch_ms,
+                    written_at_epoch_ms,
                     committed_at_epoch_ms,
                     owner_kind,
                     owner_id,
@@ -1071,6 +1077,7 @@ async fn read_sqlite_durable_state(
                     attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
                     canonical_uri,
                     intent_at_epoch_ms: intent_at_epoch_ms as u64,
+                    written: written_at_epoch_ms.is_some(),
                     committed: committed_at_epoch_ms.is_some(),
                     owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
                     owner_id,
@@ -1478,41 +1485,10 @@ impl BackendRunner {
                 }
             }
             StoreOperation::RecordAttachmentIntent => {
-                let operation = lash_core::store::OperationId::turn(
+                attachment_seeding::seed_differential_attachment_rows(
+                    self.store().as_ref(),
                     &self.session_id,
-                    "attachment-adoption",
-                    "differential",
-                )
-                .storage_key()?;
-                self.store().record_intent(AttachmentIntent {
-                    attachment_id: differential_attachment_id(),
-                    session_id: self.session_id.clone(),
-                    canonical_uri: "lash-attachment://blake3/differential-attachment".to_string(),
-                    intent_at_epoch_ms: 1_000,
-                    owner_kind: Some(AttachmentOwnerKind::Turn),
-                    owner_id: Some(operation),
-                    owner_incarnation: None,
-                })?;
-                // A second row under a process owner: the owner identity is
-                // `(process_id, incarnation)`, so the differential must show
-                // both backends persisting and reading back the incarnation,
-                // not just the turn shape that leaves the column NULL. This
-                // fixture wires no process registry, so the row stays an
-                // immortal root on every backend.
-                self.store().record_intent(AttachmentIntent {
-                    attachment_id: differential_process_attachment_id(),
-                    session_id: self.session_id.clone(),
-                    canonical_uri: "lash-attachment://blake3/differential-process-attachment"
-                        .to_string(),
-                    intent_at_epoch_ms: 1_000,
-                    owner_kind: Some(AttachmentOwnerKind::Process),
-                    owner_id: Some(DIFFERENTIAL_PROCESS_OWNER_ID.to_string()),
-                    owner_incarnation: Some(
-                        lash_core::ProcessIncarnation::from_registration_sequence(
-                            DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
-                        ),
-                    ),
-                })?;
+                )?;
                 Ok(None)
             }
             StoreOperation::PinLeaf => {

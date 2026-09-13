@@ -808,8 +808,8 @@ pub async fn process_prune_deletes_owned_session_stores(
             .create_store(&request)
             .await
             .expect("create process-owned session store");
-        crate::AttachmentManifest::record_intent(
-            store.as_ref(),
+        crate::conformance::helpers::record_completed_attachment_write(
+            &store,
             crate::AttachmentIntent {
                 attachment_id: crate::AttachmentId::parse(format!(
                     "process-owned-session-intent-{index}"
@@ -822,8 +822,7 @@ pub async fn process_prune_deletes_owned_session_stores(
                 owner_id: Some(PROCESS_ID.to_string()),
                 owner_incarnation: Some(process.incarnation),
             },
-        )
-        .expect("record process-owned attachment intent");
+        );
         requests.push(request);
     }
 
@@ -1393,7 +1392,7 @@ async fn session_store_factory_rejects_writes_after_delete(
         "queued work",
     );
     assert_deleted_write(
-        crate::AttachmentManifest::record_intent(
+        crate::AttachmentManifest::begin_attachment_write(
             stale.as_ref(),
             crate::AttachmentIntent {
                 attachment_id: crate::AttachmentId::parse("write-after-delete-attachment")
@@ -2373,8 +2372,8 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
         return;
     }
     assert_eq!(report.fence, crate::AttachmentGcFence::Fenced);
-    // The digest is `Reclaimed`: the next writer clears that fact and is
-    // granted immediately.
+    // A completed delete retires the condemnation row outright, so the next
+    // writer is granted immediately.
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
             &*store,
@@ -2436,22 +2435,18 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
         crate::AttachmentWriteFence::Granted(_)
     ));
 
-    assert!(matches!(
-        crate::AttachmentManifest::begin_attachment_write(
-            &*store,
-            crate::AttachmentIntent {
-                attachment_id: committed_id.clone(),
-                session_id: request.session_id.clone(),
-                canonical_uri: format!("lash-attachment://blake3/{committed_id}"),
-                intent_at_epoch_ms: 1_000,
-                owner_kind: None,
-                owner_id: None,
-                owner_incarnation: None,
-            },
-        )
-        .expect("record committed intent"),
-        crate::AttachmentWriteFence::Granted(_)
-    ));
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        crate::AttachmentIntent {
+            attachment_id: committed_id.clone(),
+            session_id: request.session_id.clone(),
+            canonical_uri: format!("lash-attachment://blake3/{committed_id}"),
+            intent_at_epoch_ms: 1_000,
+            owner_kind: None,
+            owner_id: None,
+            owner_incarnation: None,
+        },
+    );
     // Commit the ref for committed_id.
     crate::AttachmentManifest::commit_refs(
         &*store,

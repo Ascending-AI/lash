@@ -301,6 +301,13 @@ CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     session_id TEXT NOT NULL,
     canonical_uri TEXT NOT NULL,
     intent_at_ms BIGINT NOT NULL,
+    -- Identity of the write attempt that currently owns this row, minted by
+    -- begin_attachment_write. Completion and abort are matched on it. NULL on a
+    -- row created by adoption, which owns no write attempt.
+    write_id TEXT,
+    -- Upload evidence: set when the owning attempt reported a successful backend
+    -- put. Adoption of a digest requires some row to carry it.
+    written_at_ms BIGINT,
     committed_at_ms BIGINT,
     owner_kind TEXT CHECK (owner_kind IN ('turn', 'process')),
     owner_id TEXT,
@@ -313,16 +320,20 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_uncommitted
     WHERE committed_at_ms IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_owner
     ON lash_attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
+-- Adoption asks one question of the whole table: does any row for this digest
+-- carry upload evidence?
+CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_written
+    ON lash_attachment_manifest(attachment_id, written_at_ms);
 
 -- Attachment GC fence state, one row per condemned digest. Deliberately
 -- timestampless: the protocol is CAS transitions only, never an expiry.
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
+    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting')),
     write_token TEXT,
     write_session_id TEXT,
     CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
-    CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
+    CHECK (write_token IS NULL OR phase = 'condemned')
 );
 
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
@@ -666,7 +677,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 91)
+VALUES ('lash-postgres-store', 92)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

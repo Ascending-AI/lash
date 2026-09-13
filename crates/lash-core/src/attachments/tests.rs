@@ -7,7 +7,10 @@ struct RecordingManifest {
 }
 
 impl AttachmentManifest for RecordingManifest {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {
+    fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<crate::AttachmentWriteFence, crate::StoreError> {
         let key = (intent.session_id.clone(), intent.attachment_id.clone());
         self.entries
             .lock_recover()
@@ -17,11 +20,36 @@ impl AttachmentManifest for RecordingManifest {
                 session_id: intent.session_id,
                 canonical_uri: intent.canonical_uri,
                 intent_at_epoch_ms: intent.intent_at_epoch_ms,
+                written_at_epoch_ms: None,
                 committed_at_epoch_ms: None,
                 owner_kind: intent.owner_kind,
                 owner_id: intent.owner_id,
                 owner_incarnation: intent.owner_incarnation,
             });
+        Ok(crate::AttachmentWriteFence::Granted(
+            crate::AttachmentWritePermit::new(crate::AttachmentWriteToken::new()),
+        ))
+    }
+
+    fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        _permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        let key = (intent.session_id.clone(), intent.attachment_id.clone());
+        if let Some(entry) = self.entries.lock_recover().get_mut(&key) {
+            entry.written_at_epoch_ms.get_or_insert(1);
+        }
+        Ok(())
+    }
+
+    fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        _permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        let key = (intent.session_id.clone(), intent.attachment_id.clone());
+        self.entries.lock_recover().remove(&key);
         Ok(())
     }
 
@@ -147,7 +175,7 @@ async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
     let manifest = Arc::new(RecordingManifest::default());
     let id = content_id(b"aged-targeted-probe-root");
     manifest
-        .record_intent(AttachmentIntent {
+        .begin_attachment_write(AttachmentIntent {
             attachment_id: id.clone(),
             session_id: SessionId::from("targeted-probe"),
             canonical_uri: attachment_uri(&id),
@@ -284,11 +312,11 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         AttachmentRootSet::recover_abandoned_attachment_write(self.factory, id).await
     }
 
-    async fn reclaim_attachment_condemnation(
+    async fn retire_attachment_condemnation(
         &self,
         id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        AttachmentRootSet::reclaim_attachment_condemnation(self.factory, id).await
+        AttachmentRootSet::retire_attachment_condemnation(self.factory, id).await
     }
 }
 
@@ -1253,10 +1281,6 @@ struct SignalingManifest {
 }
 
 impl AttachmentManifest for SignalingManifest {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {
-        self.inner.record_intent(intent)
-    }
-
     fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
@@ -1375,10 +1399,10 @@ async fn same_content_put_inside_the_delete_window_survives() {
 
 /// CONTENTION after arming and before final `HEAD`. Arming must precede the
 /// absence observation, so a writer arriving in this window parks until the
-/// sweep records `Reclaimed`, then claims that fact, restores the bytes, and
-/// clears only its own token.
+/// sweep retires the condemnation, then restores the bytes under a fresh
+/// write of its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn writer_after_delete_arming_restores_the_reclaimed_digest() {
+async fn writer_after_delete_arming_restores_the_deleted_digest() {
     let fixture = fenced_fixture(&SessionId::from("condemned-window-writer")).await;
     let bytes = vec![2, 7, 1, 8];
     let id = content_id(&bytes);
@@ -1627,7 +1651,15 @@ fn persistence_manifest_adapter_forwards_root_tracking() {
         owner_id: None,
         owner_incarnation: None,
     };
-    adapter.record_intent(intent).expect("record intent");
+    let crate::AttachmentWriteFence::Granted(permit) = adapter
+        .begin_attachment_write(intent.clone())
+        .expect("begin attachment write")
+    else {
+        panic!("expected a granted write fence");
+    };
+    adapter
+        .complete_attachment_write(&intent, permit)
+        .expect("complete attachment write");
     assert!(
         adapter
             .list_all_refs()

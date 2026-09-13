@@ -40,6 +40,7 @@ pub struct InMemorySessionStoreFactory {
     pub(super) attachment_condemnations: super::SharedAttachmentCondemnations,
     pub(super) attachment_manifest: super::SharedAttachmentManifest,
     pub(super) retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
+    pub(super) attachment_write_ids: super::SharedAttachmentWriteIds,
     #[cfg(any(test, feature = "testing"))]
     fail_next_session_blob_delete: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -71,6 +72,7 @@ impl InMemorySessionStoreFactory {
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
             attachment_manifest: Arc::new(Mutex::new(HashMap::new())),
             retired_turn_cancel_scopes: Arc::new(Mutex::new(HashSet::new())),
+            attachment_write_ids: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(any(test, feature = "testing"))]
             fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
@@ -168,6 +170,7 @@ impl InMemorySessionStoreFactory {
                     Arc::clone(&self.attachment_condemnations),
                     Arc::clone(&self.attachment_manifest),
                     Arc::clone(&self.retired_turn_cancel_scopes),
+                    Arc::clone(&self.attachment_write_ids),
                 ));
                 *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
@@ -729,6 +732,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.attachment_condemnations),
             Arc::clone(&self.attachment_manifest),
             Arc::clone(&self.retired_turn_cancel_scopes),
+            Arc::clone(&self.attachment_write_ids),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
         *store.session_graph.lock_recover() = resident_graph.clone();
@@ -852,10 +856,6 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
                     super::AttachmentCondemnationPhase::Deleting => {
                         (crate::AttachmentCondemnationPhase::Deleting, None)
                     }
-                    super::AttachmentCondemnationPhase::Reclaimed { write_claim } => (
-                        crate::AttachmentCondemnationPhase::Reclaimed,
-                        write_claim.as_ref(),
-                    ),
                 };
                 crate::AttachmentCondemnationRecord {
                     digest: digest.clone(),
@@ -920,6 +920,16 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             id.clone(),
             super::AttachmentCondemnationPhase::Condemned { write_claim: None },
         );
+        // The digest is proven unrooted, so every manifest row for it is stale
+        // evidence of an upload whose bytes are about to be deleted. Clearing
+        // them under this same mutation is what makes the negative tombstone
+        // unnecessary: adoption then finds no evidence and refuses.
+        self.attachment_manifest
+            .lock_recover()
+            .retain(|(_, attachment_id), _| attachment_id != id);
+        self.attachment_write_ids
+            .lock_recover()
+            .retain(|(_, attachment_id), _| attachment_id != id);
         Ok(crate::AttachmentCondemnation::Condemned)
     }
 
@@ -936,7 +946,6 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             // matching the SQL backends' `WHERE phase = 'condemned'`.
             None
             | Some(super::AttachmentCondemnationPhase::Deleting)
-            | Some(super::AttachmentCondemnationPhase::Reclaimed { .. })
             | Some(super::AttachmentCondemnationPhase::Condemned {
                 write_claim: Some(_),
             }) => Ok(crate::AttachmentDeleteArming::Revoked),
@@ -978,30 +987,24 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
                 claim.session_id,
                 super::AttachmentCondemnationPhase::Condemned { write_claim: None },
             ),
-            Some(super::AttachmentCondemnationPhase::Reclaimed {
-                write_claim: Some(claim),
-            }) => (
-                claim.session_id,
-                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
-            ),
             _ => return Ok(()),
         };
         let key = (session_id, id.clone());
         let mut manifest = self.attachment_manifest.lock_recover();
         let committed = match manifest.get(&key) {
-            Some(entry) if entry.committed_at_epoch_ms.is_none() => {
+            Some(entry)
+                if entry.written_at_epoch_ms.is_none() && entry.committed_at_epoch_ms.is_none() =>
+            {
                 manifest.remove(&key);
+                self.attachment_write_ids.lock_recover().remove(&key);
                 false
             }
-            Some(_) => true,
+            Some(entry) => entry.committed_at_epoch_ms.is_some(),
             None => false,
         };
-        if committed
-            && matches!(
-                &recovered,
-                super::AttachmentCondemnationPhase::Condemned { .. }
-            )
-        {
+        if committed {
+            // The abandoned attempt's intent became a committed root: that
+            // newer root supersedes the unarmed condemnation.
             condemnations.remove(id);
         } else {
             condemnations.insert(id.clone(), recovered);
@@ -1009,7 +1012,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
         Ok(())
     }
 
-    async fn reclaim_attachment_condemnation(
+    async fn retire_attachment_condemnation(
         &self,
         id: &crate::AttachmentId,
     ) -> Result<(), crate::store::StoreError> {
@@ -1019,10 +1022,7 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             condemnations.get(id),
             Some(super::AttachmentCondemnationPhase::Deleting)
         ) {
-            condemnations.insert(
-                id.clone(),
-                super::AttachmentCondemnationPhase::Reclaimed { write_claim: None },
-            );
+            condemnations.remove(id);
         }
         Ok(())
     }

@@ -1014,10 +1014,15 @@ fn dropping_connected_pool_kills_misbehaving_stdio_child_and_logs() {
 
     drop(pool);
 
-    assert_eq!(
-        runtime.block_on(exited_process_state(pid)),
-        Some('Z'),
-        "stdio child PID {pid} must be killed (zombie), not still running"
+    // Either terminal state proves the kill: `Some('Z')` is the killed child
+    // before anything reaped it, `None` the same child after the runtime's
+    // reaper won the race. Pinning the zombie specifically pins reaping
+    // *timing*, which the drop path does not promise, and that is the whole
+    // of this assertion's historical flakiness.
+    let state = runtime.block_on(exited_process_state(pid));
+    assert!(
+        matches!(state, None | Some('Z')),
+        "stdio child PID {pid} must be killed, not still running; observed state {state:?}"
     );
     let trace = String::from_utf8(traces.0.lock_recover().clone()).unwrap();
     assert!(

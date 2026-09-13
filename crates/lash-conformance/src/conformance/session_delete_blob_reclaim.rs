@@ -515,8 +515,9 @@ async fn attachment_prefix_retention(
         )
         .await
         .unwrap();
-    store
-        .record_intent(crate::AttachmentIntent {
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        crate::AttachmentIntent {
             attachment_id: orphan.id.clone(),
             session_id: request.session_id.clone(),
             canonical_uri: format!("lash-attachment://blake3/{}", orphan.id),
@@ -524,8 +525,8 @@ async fn attachment_prefix_retention(
             owner_kind: Some(crate::AttachmentOwnerKind::Turn),
             owner_id: Some("orphan-turn".into()),
             owner_incarnation: None,
-        })
-        .unwrap();
+        },
+    );
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.policy.clone())

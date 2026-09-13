@@ -10,8 +10,9 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
-    /// The caller holds the factory write transaction. Check the whole batch
-    /// before mutating it, so an armed delete leaves no partially adopted roots.
+    /// The caller holds the factory write transaction. Validate the whole batch
+    /// for upload evidence before mutating anything, so a batch containing one
+    /// unknown digest adopts none of it.
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
         session_id: &SessionId,
@@ -19,42 +20,57 @@ impl InMemorySessionStore {
         committed_at_epoch_ms: u64,
     ) -> Result<(), crate::StoreError> {
         let mut condemnations = self.attachment_condemnations.lock_recover();
-        for id in attachment_ids {
-            match condemnations.get(id) {
-                Some(super::AttachmentCondemnationPhase::Deleting) => {
-                    return Err(crate::StoreError::Backend(format!(
-                        "cannot adopt attachment `{id}` while physical deletion is in flight"
-                    )));
-                }
-                Some(super::AttachmentCondemnationPhase::Reclaimed { .. }) => {
-                    return Err(crate::StoreError::AttachmentBytesReclaimed { digest: id.clone() });
-                }
-                None
-                | Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None }) => {}
-                Some(super::AttachmentCondemnationPhase::Condemned {
-                    write_claim: Some(_),
-                }) => {
-                    return Err(crate::StoreError::Backend(format!(
-                        "cannot adopt attachment `{id}` while its bytes are being restored"
-                    )));
-                }
-            }
-        }
         let mut manifest = self.attachment_manifest.lock_recover();
+        // Validation pass: a digest is adoptable iff some row anywhere records a
+        // completed upload and no physical delete is in flight for it.
+        let mut evidence = std::collections::BTreeMap::new();
         for id in attachment_ids {
-            condemnations.remove(id);
-            manifest
+            if matches!(
+                condemnations.get(id),
+                Some(super::AttachmentCondemnationPhase::Deleting)
+            ) {
+                return Err(crate::StoreError::UnknownAttachment { digest: id.clone() });
+            }
+            let written_at = manifest
+                .values()
+                .filter(|entry| &entry.attachment_id == id)
+                .filter_map(|entry| entry.written_at_epoch_ms)
+                .min();
+            let Some(written_at) = written_at else {
+                return Err(crate::StoreError::UnknownAttachment { digest: id.clone() });
+            };
+            evidence.insert(id.clone(), written_at);
+        }
+        for id in attachment_ids {
+            let written_at_epoch_ms = evidence.get(id).copied();
+            // The fresh committed root supersedes an unarmed, unclaimed
+            // condemnation. A restoring writer's claim is left alone; its own
+            // completion or abort settles it.
+            if matches!(
+                condemnations.get(id),
+                Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None })
+            ) {
+                condemnations.remove(id);
+            }
+            let entry = manifest
                 .entry((session_id.clone(), id.clone()))
                 .or_insert_with(|| crate::AttachmentManifestEntry {
                     attachment_id: id.clone(),
                     session_id: SessionId::from(session_id.to_string()),
                     canonical_uri: format!("lash-attachment://blake3/{id}"),
                     intent_at_epoch_ms: committed_at_epoch_ms,
+                    written_at_epoch_ms: None,
                     committed_at_epoch_ms: None,
                     owner_kind: None,
                     owner_id: None,
                     owner_incarnation: None,
-                })
+                });
+            // Copy the evidence onto the adopter's row so it outlives the
+            // uploader's intent being forgotten.
+            if entry.written_at_epoch_ms.is_none() {
+                entry.written_at_epoch_ms = written_at_epoch_ms;
+            }
+            entry
                 .committed_at_epoch_ms
                 .get_or_insert(committed_at_epoch_ms);
         }
@@ -79,39 +95,52 @@ impl InMemorySessionStore {
         }
     }
 
-    /// Insert or refresh one manifest intent row. The caller holds the store's
-    /// write transaction.
+    /// Insert or refresh one manifest intent row under a fresh attempt
+    /// identity. The caller holds the store's write transaction.
+    ///
+    /// The new attempt has proven nothing, so it carries no upload stamp; any
+    /// stamp or commitment already on the row is evidence a previous attempt
+    /// earned and is preserved.
     fn record_intent_in_transaction(
         &self,
         intent: crate::AttachmentIntent,
+        write_id: crate::AttachmentWriteToken,
     ) -> Result<(), crate::store::StoreError> {
         self.ensure_session_not_deleted(&intent.session_id)?;
         let key = (intent.session_id.clone(), intent.attachment_id.clone());
         let mut manifest = self.attachment_manifest.lock_recover();
         match manifest.get_mut(&key) {
             Some(existing) => {
-                // Re-recording refreshes the timestamp and durable owner as one
-                // manifest mutation. GC later composes age with owner death.
+                // Re-recording refreshes the timestamp, durable owner and
+                // attempt identity as one manifest mutation. GC later composes
+                // age with owner death.
                 existing.canonical_uri = intent.canonical_uri;
                 existing.intent_at_epoch_ms = intent.intent_at_epoch_ms;
                 existing.owner_kind = intent.owner_kind;
                 existing.owner_id = intent.owner_id;
                 existing.owner_incarnation = intent.owner_incarnation;
+                self.attachment_write_ids
+                    .lock_recover()
+                    .insert(key, write_id);
             }
             None => {
                 manifest.insert(
-                    key,
+                    key.clone(),
                     crate::AttachmentManifestEntry {
                         attachment_id: intent.attachment_id,
                         session_id: intent.session_id,
                         canonical_uri: intent.canonical_uri,
                         intent_at_epoch_ms: intent.intent_at_epoch_ms,
+                        written_at_epoch_ms: None,
                         committed_at_epoch_ms: None,
                         owner_kind: intent.owner_kind,
                         owner_id: intent.owner_id,
                         owner_incarnation: intent.owner_incarnation,
                     },
                 );
+                self.attachment_write_ids
+                    .lock_recover()
+                    .insert(key, write_id);
             }
         }
         Ok(())
@@ -128,53 +157,9 @@ impl InMemorySessionStore {
 }
 
 impl crate::AttachmentManifest for InMemorySessionStore {
-    fn record_intent(
-        &self,
-        intent: crate::AttachmentIntent,
-    ) -> Result<(), crate::store::StoreError> {
-        let _transaction = self.write_transaction.lock_recover();
-        {
-            let condemnations = self.attachment_condemnations.lock_recover();
-            match condemnations.get(&intent.attachment_id) {
-                Some(super::AttachmentCondemnationPhase::Deleting) => {
-                    return Err(crate::StoreError::Backend(format!(
-                        "cannot record attachment `{}` while physical deletion is in flight",
-                        intent.attachment_id
-                    )));
-                }
-                Some(super::AttachmentCondemnationPhase::Reclaimed { write_claim: None }) => {
-                    return Err(crate::StoreError::AttachmentBytesReclaimed {
-                        digest: intent.attachment_id,
-                    });
-                }
-                Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None }) => {
-                    return Err(crate::StoreError::Backend(format!(
-                        "cannot record attachment `{}` through the unfenced manifest path while it is condemned; use begin_attachment_write",
-                        intent.attachment_id
-                    )));
-                }
-                Some(
-                    super::AttachmentCondemnationPhase::Condemned {
-                        write_claim: Some(_),
-                    }
-                    | super::AttachmentCondemnationPhase::Reclaimed {
-                        write_claim: Some(_),
-                    },
-                ) => {
-                    return Err(crate::StoreError::Backend(format!(
-                        "cannot record attachment `{}` while its bytes are being restored",
-                        intent.attachment_id
-                    )));
-                }
-                None => {}
-            }
-        }
-        self.record_intent_in_transaction(intent)
-    }
-
     /// The writer half of the GC fence. The factory-global condemnation state
     /// and the manifest row are mutated under the store's one transaction lock —
-    /// the same boundary the sweeper's condemn CAS takes — so revoke-and-record
+    /// the same boundary the sweeper's condemn CAS takes — so claim-and-record
     /// is atomic against it.
     fn begin_attachment_write(
         &self,
@@ -182,55 +167,38 @@ impl crate::AttachmentManifest for InMemorySessionStore {
     ) -> Result<crate::AttachmentWriteFence, crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&intent.session_id)?;
-        let permit = {
+        let write_id = crate::AttachmentWriteToken::new();
+        {
             let mut condemnations = self.attachment_condemnations.lock_recover();
             match condemnations.get(&intent.attachment_id).cloned() {
                 // The delete is already in flight: record nothing, so the bytes
                 // this writer is about to put cannot be swallowed by it.
-                Some(super::AttachmentCondemnationPhase::Deleting) => {
+                Some(super::AttachmentCondemnationPhase::Deleting)
+                | Some(super::AttachmentCondemnationPhase::Condemned {
+                    write_claim: Some(_),
+                }) => {
                     return Ok(crate::AttachmentWriteFence::ReclamationInFlight);
                 }
-                Some(
-                    super::AttachmentCondemnationPhase::Condemned {
-                        write_claim: Some(_),
-                    }
-                    | super::AttachmentCondemnationPhase::Reclaimed {
-                        write_claim: Some(_),
-                    },
-                ) => return Ok(crate::AttachmentWriteFence::ReclamationInFlight),
-                // Own the prior phase until the backend put settles. Keeping
-                // the phase present means adoption cannot outrun restoration.
+                // Own the condemnation until the backend put settles. Keeping
+                // the phase present means no sweep can arm the delete.
                 Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None }) => {
-                    let token = crate::AttachmentWriteToken::new();
                     condemnations.insert(
                         intent.attachment_id.clone(),
                         super::AttachmentCondemnationPhase::Condemned {
                             write_claim: Some(super::AttachmentWriteClaim {
-                                token,
+                                write_id,
                                 session_id: intent.session_id.clone(),
                             }),
                         },
                     );
-                    crate::AttachmentWritePermit::restoring(token)
                 }
-                Some(super::AttachmentCondemnationPhase::Reclaimed { write_claim: None }) => {
-                    let token = crate::AttachmentWriteToken::new();
-                    condemnations.insert(
-                        intent.attachment_id.clone(),
-                        super::AttachmentCondemnationPhase::Reclaimed {
-                            write_claim: Some(super::AttachmentWriteClaim {
-                                token,
-                                session_id: intent.session_id.clone(),
-                            }),
-                        },
-                    );
-                    crate::AttachmentWritePermit::restoring(token)
-                }
-                None => crate::AttachmentWritePermit::ordinary(),
+                None => {}
             }
-        };
-        self.record_intent_in_transaction(intent)?;
-        Ok(crate::AttachmentWriteFence::Granted(permit))
+        }
+        self.record_intent_in_transaction(intent, write_id)?;
+        Ok(crate::AttachmentWriteFence::Granted(
+            crate::AttachmentWritePermit::new(write_id),
+        ))
     }
 
     fn complete_attachment_write(
@@ -238,21 +206,31 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent: &crate::AttachmentIntent,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::store::StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
+        let write_id = permit.write_id();
         let _transaction = self.write_transaction.lock_recover();
+        let key = (intent.session_id.clone(), intent.attachment_id.clone());
+        if self.attachment_write_ids.lock_recover().get(&key) != Some(&write_id) {
+            return Err(crate::StoreError::StaleWritePermit {
+                digest: intent.attachment_id.clone(),
+            });
+        }
+        let written_at_epoch_ms = self.clock.timestamp_ms();
+        {
+            let mut manifest = self.attachment_manifest.lock_recover();
+            let Some(entry) = manifest.get_mut(&key) else {
+                return Err(crate::StoreError::StaleWritePermit {
+                    digest: intent.attachment_id.clone(),
+                });
+            };
+            // The first proven upload is the evidence; a repeat put keeps it.
+            entry.written_at_epoch_ms.get_or_insert(written_at_epoch_ms);
+        }
         let mut condemnations = self.attachment_condemnations.lock_recover();
         if matches!(
             condemnations.get(&intent.attachment_id),
-            Some(
-                super::AttachmentCondemnationPhase::Condemned {
-                    write_claim: Some(current),
-                }
-                    | super::AttachmentCondemnationPhase::Reclaimed {
-                    write_claim: Some(current),
-                    }
-            ) if current.token == token
+            Some(super::AttachmentCondemnationPhase::Condemned {
+                write_claim: Some(claim),
+            }) if claim.write_id == write_id
         ) {
             condemnations.remove(&intent.attachment_id);
         }
@@ -264,44 +242,43 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         intent: &crate::AttachmentIntent,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::store::StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
+        let write_id = permit.write_id();
         let _transaction = self.write_transaction.lock_recover();
+        let key = (intent.session_id.clone(), intent.attachment_id.clone());
+        // A superseded attempt owns nothing: it must not delete a newer
+        // attempt's row, nor release a claim it no longer holds.
+        if self.attachment_write_ids.lock_recover().get(&key) != Some(&write_id) {
+            return Ok(());
+        }
         let mut condemnations = self.attachment_condemnations.lock_recover();
-        let restored = match condemnations.get(&intent.attachment_id).cloned() {
-            Some(super::AttachmentCondemnationPhase::Condemned {
-                write_claim: Some(current),
-            }) if current.token == token => {
-                Some(super::AttachmentCondemnationPhase::Condemned { write_claim: None })
-            }
-            Some(super::AttachmentCondemnationPhase::Reclaimed {
-                write_claim: Some(current),
-            }) if current.token == token => {
-                Some(super::AttachmentCondemnationPhase::Reclaimed { write_claim: None })
-            }
-            _ => None,
-        };
-        if let Some(restored) = restored {
-            let key = (intent.session_id.clone(), intent.attachment_id.clone());
-            let mut manifest = self.attachment_manifest.lock_recover();
-            let committed = match manifest.get(&key) {
-                Some(entry) if entry.committed_at_epoch_ms.is_none() => {
-                    manifest.remove(&key);
-                    false
-                }
-                Some(_) => true,
-                None => false,
-            };
-            if committed
-                && matches!(
-                    &restored,
-                    super::AttachmentCondemnationPhase::Condemned { .. }
-                )
+        let mut manifest = self.attachment_manifest.lock_recover();
+        // Only this attempt's unstamped, uncommitted row goes.
+        let committed = match manifest.get(&key) {
+            Some(entry)
+                if entry.written_at_epoch_ms.is_none() && entry.committed_at_epoch_ms.is_none() =>
             {
+                manifest.remove(&key);
+                self.attachment_write_ids.lock_recover().remove(&key);
+                false
+            }
+            Some(entry) => entry.committed_at_epoch_ms.is_some(),
+            None => false,
+        };
+        if matches!(
+            condemnations.get(&intent.attachment_id),
+            Some(super::AttachmentCondemnationPhase::Condemned {
+                write_claim: Some(claim),
+            }) if claim.write_id == write_id
+        ) {
+            if committed {
+                // The same intent became a committed root while the claim was
+                // held: that newer root supersedes the unarmed condemnation.
                 condemnations.remove(&intent.attachment_id);
             } else {
-                condemnations.insert(intent.attachment_id.clone(), restored);
+                condemnations.insert(
+                    intent.attachment_id.clone(),
+                    super::AttachmentCondemnationPhase::Condemned { write_claim: None },
+                );
             }
         }
         Ok(())
@@ -477,7 +454,21 @@ mod attachment_reconciliation_tests {
         }
     }
 
-    // Blocker 2 (in-memory): a `record_intent` that refreshes an aged intent's
+    /// One completed write: acquire the fence, then stamp upload evidence —
+    /// the only way a manifest row is created.
+    fn put(store: &InMemorySessionStore, intent: crate::AttachmentIntent) {
+        let fence = store
+            .begin_attachment_write(intent.clone())
+            .expect("begin attachment write");
+        let crate::AttachmentWriteFence::Granted(permit) = fence else {
+            panic!("expected a granted write fence");
+        };
+        store
+            .complete_attachment_write(&intent, permit)
+            .expect("complete attachment write");
+    }
+
+    // Blocker 2 (in-memory): a fresh write that refreshes an aged intent's
     // timestamp past the reconciliation cutoff must survive reconciliation — the
     // age check and the removal happen under one lock, so the refreshed timestamp
     // is what the conditional delete sees. Without a refresh the aged intent is
@@ -488,17 +479,11 @@ mod attachment_reconciliation_tests {
         let cutoff = 200;
 
         // Refreshed case: recorded old, then re-recorded (refreshed) young.
-        store
-            .record_intent(intent_at("s", "kept", 100))
-            .expect("record aged intent");
-        store
-            .record_intent(intent_at("s", "kept", 300))
-            .expect("refresh intent past cutoff");
+        put(&store, intent_at("s", "kept", 100));
+        put(&store, intent_at("s", "kept", 300));
 
         // Stale case: recorded old and never refreshed.
-        store
-            .record_intent(intent_at("s", "collected", 100))
-            .expect("record stale intent");
+        put(&store, intent_at("s", "collected", 100));
 
         store
             .forget_aged_uncommitted_intents(cutoff)
@@ -532,13 +517,11 @@ mod attachment_reconciliation_tests {
         let committed = crate::AttachmentId::parse("committed").expect("valid attachment id");
         let orphan = crate::AttachmentId::parse("orphan").expect("valid attachment id");
 
-        store
-            .record_intent(intent_at("s", "committed", 100))
-            .unwrap();
+        put(&store, intent_at("s", "committed", 100));
         store
             .commit_refs(&SessionId::from("s"), std::slice::from_ref(&committed))
             .unwrap();
-        store.record_intent(intent_at("s", "orphan", 100)).unwrap();
+        put(&store, intent_at("s", "orphan", 100));
 
         assert!(store.has_live_ref_for_id(&committed, cutoff).unwrap());
         assert!(

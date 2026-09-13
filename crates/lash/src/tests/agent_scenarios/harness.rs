@@ -34,6 +34,11 @@ pub(super) struct AgentScenario {
     pub(super) install_process_composition: bool,
     pub(super) max_turns: Option<usize>,
     pub(super) precompleted_process: Option<(ProcessId, lash_core::ProcessAwaitOutput)>,
+    /// Digests whose bytes a scenario pretends were already uploaded by some
+    /// other writer (a child process, a peer session). Adoption is gated on
+    /// recorded upload evidence, so the scenario must record it rather than
+    /// conjure a reference to bytes no store ever accepted.
+    pub(super) seeded_attachment_writes: Vec<lash_core::AttachmentId>,
     pub(super) expected_contracts: AgentScenarioExpectations,
 }
 
@@ -51,6 +56,7 @@ impl AgentScenario {
             install_process_composition: false,
             max_turns: None,
             precompleted_process: None,
+            seeded_attachment_writes: Vec::new(),
             expected_contracts: AgentScenarioExpectations::default(),
         }
     }
@@ -105,6 +111,14 @@ impl AgentScenario {
         output: lash_core::ProcessAwaitOutput,
     ) -> Self {
         self.precompleted_process = Some((process_id.into(), output));
+        self
+    }
+
+    pub(super) fn seeded_attachment_write(
+        mut self,
+        attachment_id: lash_core::AttachmentId,
+    ) -> Self {
+        self.seeded_attachment_writes.push(attachment_id);
         self
     }
 
@@ -258,16 +272,17 @@ impl AgentScenarioSetup {
         let factory = rlm_factory().with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         );
+        let store_factory: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
+            lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
+                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                checkpoint_writes.clone(),
+            ),
+        );
         let mut builder =
             explicit_ephemeral_facets(LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory))
                 .provider(provider)
                 .model(mock_model_spec())
-                .store_factory(Arc::new(
-                    lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
-                        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                        checkpoint_writes.clone(),
-                    ),
-                ))
+                .store_factory(Arc::clone(&store_factory))
                 .process_registry(Arc::clone(&process_registry) as Arc<dyn ProcessRegistry>);
         if let Some(tools) = self.tool_provider {
             builder = builder.tools(tools);
@@ -295,6 +310,7 @@ impl AgentScenarioSetup {
         }
         Ok(AgentScenarioRuntime {
             core: builder.build(crate::testing::runtime_lease_owner())?,
+            store_factory,
             graph_store,
             process_registry,
             prompt_captures,
@@ -305,6 +321,7 @@ impl AgentScenarioSetup {
 
 struct AgentScenarioRuntime {
     core: LashCore,
+    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
     process_registry: Arc<TestLocalProcessRegistry>,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
@@ -342,6 +359,46 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .max_turns(case.max_turns)
         .build()?;
     let session = runtime.core.session(&case.session_id).open().await?;
+    if !case.seeded_attachment_writes.is_empty() {
+        // Stand in for the writer that really uploaded these bytes. The
+        // evidence a store keeps is per digest, not per session, so a
+        // dedicated seeding session records it exactly as a peer writer would.
+        let seed_session_id = SessionId::from(format!("{}-attachment-seed", case.session_id));
+        let seed_store = lash_core::SessionStoreFactory::create_store(
+            runtime.store_factory.as_ref(),
+            &lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: seed_session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            },
+        )
+        .await?;
+        for attachment_id in &case.seeded_attachment_writes {
+            let intent = lash_core::AttachmentIntent {
+                attachment_id: attachment_id.clone(),
+                session_id: seed_session_id.clone(),
+                canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+                intent_at_epoch_ms: 1,
+                owner_kind: None,
+                owner_id: None,
+                owner_incarnation: None,
+            };
+            let lash_core::AttachmentWriteFence::Granted(permit) =
+                lash_core::AttachmentManifest::begin_attachment_write(
+                    seed_store.as_ref(),
+                    intent.clone(),
+                )?
+            else {
+                panic!("a seeded attachment write must be granted");
+            };
+            lash_core::AttachmentManifest::complete_attachment_write(
+                seed_store.as_ref(),
+                &intent,
+                permit,
+            )?;
+        }
+    }
     if let Some((process_id, output)) = case.precompleted_process.clone() {
         runtime
             .process_registry

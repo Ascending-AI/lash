@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 70;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 71;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -349,9 +349,10 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         ),
         (crate::PREVIOUS_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 67, 68),
         (crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS, 68, 69),
+        (crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 69, 70),
         (
-            crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            69,
+            crate::IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            70,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -406,19 +407,26 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
     let attachment_id =
         AttachmentId::parse("durable-read-attachment").expect("valid attachment id");
+    let attachment_intent = AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: SessionId::from(SESSION_ID.to_string()),
+        canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment".to_string(),
+        intent_at_epoch_ms: 100,
+        owner_kind: None,
+        owner_id: None,
+        owner_incarnation: None,
+    };
+    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
+        .runtime
+        .begin_attachment_write(attachment_intent.clone())
+        .expect("begin fixture attachment write")
+    else {
+        panic!("the fixture digest must grant its writer");
+    };
     handles
         .runtime
-        .record_intent(AttachmentIntent {
-            attachment_id: attachment_id.clone(),
-            session_id: SessionId::from(SESSION_ID.to_string()),
-            canonical_uri: "session:durable-read-fixture:sha256:durable-read-attachment"
-                .to_string(),
-            intent_at_epoch_ms: 100,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
-        })
-        .expect("record fixture attachment intent");
+        .complete_attachment_write(&attachment_intent, attachment_permit)
+        .expect("stamp fixture attachment upload");
 
     let mut loaded = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
         .await

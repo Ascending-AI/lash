@@ -458,16 +458,23 @@ async fn measure_store_hardening_backend_turn(
     let attachment_id =
         lash_core::AttachmentId::parse(format!("hardening-attachment-{session_id}-{turn_index}"))
             .expect("valid attachment id");
+    let attachment_intent = AttachmentIntent {
+        attachment_id: attachment_id.clone(),
+        session_id: SessionId::from(session_id.to_string()),
+        canonical_uri: format!("sha256:{attachment_id}"),
+        intent_at_epoch_ms: turn_index as u64 + 1,
+        owner_kind: Some(AttachmentOwnerKind::Turn),
+        owner_id: Some(format!("hardening-turn-{turn_index}")),
+        owner_incarnation: None,
+    };
     let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
-        Ok(store.record_intent(AttachmentIntent {
-            attachment_id: attachment_id.clone(),
-            session_id: SessionId::from(session_id.to_string()),
-            canonical_uri: format!("sha256:{attachment_id}"),
-            intent_at_epoch_ms: turn_index as u64 + 1,
-            owner_kind: Some(AttachmentOwnerKind::Turn),
-            owner_id: Some(format!("hardening-turn-{turn_index}")),
-            owner_incarnation: None,
-        })?)
+        let lash_core::AttachmentWriteFence::Granted(permit) =
+            store.begin_attachment_write(attachment_intent.clone())?
+        else {
+            anyhow::bail!("hardening attachment write was fenced off");
+        };
+        store.complete_attachment_write(&attachment_intent, permit)?;
+        Ok(())
     })?;
     phases.insert(phase.0, phase.1);
 

@@ -365,11 +365,18 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_input_order
 CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_claim
     ON pending_turn_inputs(session_id, claim_id, claim_token);
 
+-- `write_id` is the identity of the write attempt that currently owns a row,
+-- minted by `begin_attachment_write`; completion and abort are matched on it,
+-- and it is NULL on a row created by adoption, which owns no write attempt.
+-- `written_at_ms` is the upload evidence: set when the owning attempt reported
+-- a successful backend put. Adoption of a digest requires some row to carry it.
 CREATE TABLE IF NOT EXISTS attachment_manifest (
     attachment_id    TEXT NOT NULL,
     session_id       TEXT NOT NULL,
     canonical_uri    TEXT NOT NULL,
     intent_at_ms     INTEGER NOT NULL,
+    write_id         TEXT,
+    written_at_ms    INTEGER,
     committed_at_ms  INTEGER,
     owner_kind       TEXT CHECK (owner_kind IN ('turn', 'process')),
     owner_id         TEXT,
@@ -383,11 +390,11 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
 -- `lash_core::AttachmentCondemnation`), never an expiry.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed')),
+    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting')),
     write_token   TEXT,
     write_session_id TEXT,
     CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
-    CHECK (write_token IS NULL OR phase IN ('condemned', 'reclaimed'))
+    CHECK (write_token IS NULL OR phase = 'condemned')
 );
 
 CREATE TABLE IF NOT EXISTS artifact_refs (
@@ -421,6 +428,10 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
     ON attachment_manifest(committed_at_ms)
     WHERE committed_at_ms IS NULL;
+-- Adoption asks one question of the whole table: does any row for this digest
+-- carry upload evidence?
+CREATE INDEX IF NOT EXISTS idx_attachment_manifest_written
+    ON attachment_manifest(attachment_id, written_at_ms);
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
     ON attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
@@ -627,10 +638,13 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// Version 59 qualifies process-owned attachment intents with the registry-minted
 /// incarnation. Version-58 catalogs are rejected so a bare process id is never
 /// reinterpreted as the current incarnation with the same reusable name.
-/// Version 60 adds intent revisions, Native cancellation authority, exact
-/// closure authorizations, and retired-scope fencing. Component-59 catalogs
-/// cannot recover these facts and must be recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 60;
+/// Bumped to 61 for FIG-2795: attachment adoption requires upload evidence.
+/// `attachment_manifest` gains `write_id` and `written_at_ms`, and the
+/// `attachment_condemnations` phase vocabulary drops `reclaimed` — a pre-61
+/// database can hold rows in a phase this schema forbids and manifest rows with
+/// no upload evidence for bytes that are present, so it is rejected at open and
+/// recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 61;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

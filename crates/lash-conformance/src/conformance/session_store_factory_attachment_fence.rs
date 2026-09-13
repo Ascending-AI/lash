@@ -3,9 +3,12 @@ use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 /// The attachment GC fence is a durable, clockless CAS state machine over one
-/// digest: `Free -> Condemned -> Deleting -> Reclaimed`, with
-/// `Condemned -> Free` whenever a writer takes the digest back and
-/// `Deleting -> Free` only when a host abandons or recovers a failed delete.
+/// digest: `Free -> Condemned -> Deleting`, with `Condemned -> Free` whenever a
+/// writer takes the digest back, `Deleting -> Free` when a host abandons or
+/// recovers a failed delete, and `Deleting -> (no row)` when the physical
+/// delete completes. There is no terminal byte-absence phase: a completed
+/// delete retires the row and clears the digest's manifest evidence, and
+/// adoption is gated on that evidence rather than on a tombstone.
 ///
 /// Every transition is exercised here rather than in per-backend tests, so a
 /// divergence between the in-memory, SQLite, and PostgreSQL implementations of
@@ -149,8 +152,10 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "a released digest must grant the next writer immediately"
     );
 
-    // A successful-delete outcome instead preserves `Reclaimed`. Adoption is
-    // refused until a fresh write atomically clears the byte-absence fact.
+    // A completed delete retires the condemnation row outright. The fence is
+    // back at `Free`, but the digest is no longer adoptable: condemnation
+    // cleared its manifest evidence under the same fence, so only a fresh
+    // completed write can make it adoptable again.
     crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
         .expect("forget the ref before the successful-delete path");
     assert_eq!(
@@ -161,26 +166,48 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         arm().await.expect("arm before successful delete"),
         crate::AttachmentDeleteArming::Armed
     );
-    crate::AttachmentRootSet::reclaim_attachment_condemnation(&*factory, &attachment_id)
+    crate::AttachmentRootSet::retire_attachment_condemnation(&*factory, &attachment_id)
         .await
         .expect("record successful delete");
+    assert!(
+        crate::AttachmentRootSet::list_condemnations(&*factory)
+            .await
+            .expect("list condemnations after a completed delete")
+            .iter()
+            .all(|record| record.digest != attachment_id),
+        "a completed delete retires the condemnation row"
+    );
     crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
         .await
-        .expect("release reclaimed digest is idempotent");
+        .expect("release a retired digest is idempotent");
     let adoption_error = crate::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
         std::slice::from_ref(&attachment_id),
     )
-    .expect_err("adoption must refuse a reclaimed digest");
+    .expect_err("adoption must refuse a digest with no upload evidence");
     assert!(matches!(
         adoption_error,
-        crate::StoreError::AttachmentBytesReclaimed { ref digest }
+        crate::StoreError::UnknownAttachment { ref digest }
             if digest == &attachment_id
     ));
-    assert!(matches!(
-        crate::AttachmentManifest::begin_attachment_write(&*store, intent())
-            .expect("fresh write clears a reclaimed digest"),
-        crate::AttachmentWriteFence::Granted(_)
-    ));
+    let restored_intent = intent();
+    let crate::AttachmentWriteFence::Granted(restored_permit) =
+        crate::AttachmentManifest::begin_attachment_write(&*store, restored_intent.clone())
+            .expect("a retired digest grants the next writer")
+    else {
+        panic!("a retired digest must not park a writer");
+    };
+    crate::AttachmentManifest::complete_attachment_write(
+        &*store,
+        &restored_intent,
+        restored_permit,
+    )
+    .expect("stamp the restoring upload");
+    crate::AttachmentManifest::commit_refs(
+        &*store,
+        &request.session_id,
+        std::slice::from_ref(&attachment_id),
+    )
+    .expect("a fresh completed write restores adoptability");
 }

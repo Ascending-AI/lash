@@ -184,8 +184,8 @@ pub(crate) async fn list_attachment_condemnations(
 }
 
 /// Clear an abandoned restoring writer under explicit host quiescence.
-/// Preserve `Reclaimed`; retire `Condemned` only when its associated intent
-/// became committed, otherwise preserve it after removing that intent.
+/// Retire `Condemned` only when its associated intent became committed,
+/// otherwise preserve it after removing that unstamped intent.
 pub(crate) async fn recover_abandoned_attachment_write(
     pool: &PgPool,
     attachment_id: &str,
@@ -196,7 +196,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
         "SELECT write_token, write_session_id
          FROM lash_attachment_condemnations
          WHERE attachment_id = $1
-           AND phase IN ('condemned', 'reclaimed')
+           AND phase = 'condemned'
            AND write_token IS NOT NULL",
     )
     .bind(attachment_id)
@@ -207,7 +207,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
         sqlx::query(
             "DELETE FROM lash_attachment_manifest
              WHERE attachment_id = $1 AND session_id = $2
-               AND committed_at_ms IS NULL",
+               AND written_at_ms IS NULL AND committed_at_ms IS NULL",
         )
         .bind(attachment_id)
         .bind(&session_id)
@@ -248,94 +248,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
 }
 
 impl AttachmentManifest for PostgresSessionStore {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
-        let pool = self.pool.clone();
-        block_on_detached(async move {
-            let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-            crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
-                .await?;
-            lock_attachment_fence_tx(&mut tx, intent.attachment_id.as_str()).await?;
-            let condemnation = sqlx::query_as::<_, (String, Option<String>)>(
-                "SELECT phase, write_token FROM lash_attachment_condemnations
-                 WHERE attachment_id = $1",
-            )
-            .bind(intent.attachment_id.as_str())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            match condemnation
-                .as_ref()
-                .map(|(phase, token)| (phase.as_str(), token.is_some()))
-            {
-                Some(("deleting", _)) => {
-                    return Err(StoreError::Backend(format!(
-                        "cannot record attachment `{}` while physical deletion is in flight",
-                        intent.attachment_id
-                    )));
-                }
-                Some(("reclaimed", false)) => {
-                    return Err(StoreError::AttachmentBytesReclaimed {
-                        digest: intent.attachment_id,
-                    });
-                }
-                Some(("condemned", false)) => {
-                    return Err(StoreError::Backend(format!(
-                        "cannot record attachment `{}` through the unfenced manifest path while it is condemned; use begin_attachment_write",
-                        intent.attachment_id
-                    )));
-                }
-                Some(("condemned" | "reclaimed", true)) => {
-                    return Err(StoreError::Backend(format!(
-                        "cannot record attachment `{}` while its bytes are being restored",
-                        intent.attachment_id
-                    )));
-                }
-                None => {}
-                Some((phase, _)) => {
-                    return Err(StoreError::Backend(format!(
-                        "attachment `{}` has unknown condemnation phase `{phase}`",
-                        intent.attachment_id
-                    )));
-                }
-            }
-            // Re-recording refreshes the timestamp and durable owner together.
-            // The GC statement later composes this age with owner-death proof.
-            sqlx::query(
-                "INSERT INTO lash_attachment_manifest (
-                    attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                    owner_kind, owner_id, owner_incarnation
-                 )
-                 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
-                 ON CONFLICT (session_id, attachment_id) DO UPDATE SET
-                    canonical_uri = EXCLUDED.canonical_uri,
-                    intent_at_ms = EXCLUDED.intent_at_ms,
-                    owner_kind = EXCLUDED.owner_kind,
-                    owner_id = EXCLUDED.owner_id,
-                    owner_incarnation = EXCLUDED.owner_incarnation",
-            )
-            .bind(intent.attachment_id.as_str())
-            .bind(intent.session_id.as_str())
-            .bind(intent.canonical_uri)
-            .bind(intent.intent_at_epoch_ms as i64)
-            .bind(intent.owner_kind.map(AttachmentOwnerKind::as_str))
-            .bind(intent.owner_id)
-            .bind(
-                intent
-                    .owner_incarnation
-                    .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
-                    .transpose()
-                    .map_err(|_| {
-                        StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
-                    })?,
-            )
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-            tx.commit().await.map_err(store_sqlx_error)
-        })
-    }
-
-    /// The writer half of the GC fence: the condemnation read, the revoke, and
+    /// The writer half of the GC fence: the condemnation read, the claim, and
     /// the intent upsert are one transaction, so a sweeper's condemn CAS either
     /// runs before all of it or fails against the intent it wrote.
     fn begin_attachment_write(
@@ -344,6 +257,7 @@ impl AttachmentManifest for PostgresSessionStore {
     ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
         let pool = self.pool.clone();
         block_on_detached(async move {
+            let write_id = lash_core::AttachmentWriteToken::new();
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
                 .await?;
@@ -364,29 +278,28 @@ impl AttachmentManifest for PostgresSessionStore {
                     tokio::time::sleep(std::time::Duration::from_millis(window_ms)).await;
                 }
             }
-            let permit = match condemnation
+            match condemnation
                 .as_ref()
                 .map(|(phase, token)| (phase.as_str(), token.is_some()))
             {
                 // The physical delete is already in flight: record nothing, so
                 // these bytes cannot land inside it.
-                Some(("deleting", _)) | Some(("condemned" | "reclaimed", true)) => {
+                Some(("deleting", _)) | Some(("condemned", true)) => {
                     tx.commit().await.map_err(store_sqlx_error)?;
                     return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                 }
-                // Keep the prior phase present and own it with an opaque token
-                // until the backend put settles.
-                Some(("condemned" | "reclaimed", false)) => {
-                    let token = lash_core::AttachmentWriteToken::new();
+                // Keep the condemnation present and own it with this attempt's
+                // identity until the backend put settles.
+                Some(("condemned", false)) => {
                     let claimed = sqlx::query(
                         "UPDATE lash_attachment_condemnations
                          SET write_token = $2, write_session_id = $3
                          WHERE attachment_id = $1
-                           AND phase IN ('condemned', 'reclaimed')
+                           AND phase = 'condemned'
                            AND write_token IS NULL",
                     )
                     .bind(intent.attachment_id.as_str())
-                    .bind(token.as_hex())
+                    .bind(write_id.as_hex())
                     .bind(intent.session_id.as_str())
                     .execute(&mut *tx)
                     .await
@@ -396,25 +309,28 @@ impl AttachmentManifest for PostgresSessionStore {
                         tx.commit().await.map_err(store_sqlx_error)?;
                         return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
                     }
-                    lash_core::AttachmentWritePermit::restoring(token)
                 }
-                None => lash_core::AttachmentWritePermit::ordinary(),
+                None => {}
                 Some((phase, _)) => {
                     return Err(StoreError::Backend(format!(
                         "attachment `{}` has unknown condemnation phase `{phase}`",
                         intent.attachment_id
                     )));
                 }
-            };
+            }
+            // A fresh attempt has proven nothing, so it takes the row with no
+            // upload stamp. Evidence and commitment already on the row were
+            // earned by earlier attempts and are kept.
             sqlx::query(
                 "INSERT INTO lash_attachment_manifest (
-                    attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                    owner_kind, owner_id, owner_incarnation
+                    attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
+                    written_at_ms, committed_at_ms, owner_kind, owner_id, owner_incarnation
                  )
-                 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
+                 VALUES ($1, $2, $3, $4, $8, NULL, NULL, $5, $6, $7)
                  ON CONFLICT (session_id, attachment_id) DO UPDATE SET
                     canonical_uri = EXCLUDED.canonical_uri,
                     intent_at_ms = EXCLUDED.intent_at_ms,
+                    write_id = EXCLUDED.write_id,
                     owner_kind = EXCLUDED.owner_kind,
                     owner_id = EXCLUDED.owner_id,
                     owner_incarnation = EXCLUDED.owner_incarnation",
@@ -434,11 +350,14 @@ impl AttachmentManifest for PostgresSessionStore {
                         StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
                     })?,
             )
+            .bind(write_id.as_hex())
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)?;
-            Ok(lash_core::AttachmentWriteFence::Granted(permit))
+            Ok(lash_core::AttachmentWriteFence::Granted(
+                lash_core::AttachmentWritePermit::new(write_id),
+            ))
         })
     }
 
@@ -447,20 +366,41 @@ impl AttachmentManifest for PostgresSessionStore {
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
         let pool = self.pool.clone();
+        let digest = intent.attachment_id.clone();
         let attachment_id = intent.attachment_id.to_string();
+        let session_id = intent.session_id.clone();
+        let write_id = permit.write_id().as_hex();
+        let written_at_ms = clamp_epoch_ms(self.clock.timestamp_ms());
         block_on_detached(async move {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
+            // Id-matched: only the row this attempt still owns is stamped, and
+            // the first proven upload is kept.
+            let stamped = sqlx::query(
+                "UPDATE lash_attachment_manifest
+                 SET written_at_ms = COALESCE(written_at_ms, $4)
+                 WHERE attachment_id = $1 AND session_id = $2 AND write_id = $3",
+            )
+            .bind(&attachment_id)
+            .bind(session_id.as_str())
+            .bind(&write_id)
+            .bind(written_at_ms)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+            if stamped == 0 {
+                return Err(StoreError::StaleWritePermit { digest });
+            }
+            // The bytes exist now, so this attempt's claim on the condemnation
+            // is released with the condemnation itself.
             sqlx::query(
                 "DELETE FROM lash_attachment_condemnations
                  WHERE attachment_id = $1 AND write_token = $2",
             )
             .bind(&attachment_id)
-            .bind(token.as_hex())
+            .bind(&write_id)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -473,67 +413,54 @@ impl AttachmentManifest for PostgresSessionStore {
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        let Some(token) = permit.rollback_token() else {
-            return Ok(());
-        };
         let pool = self.pool.clone();
         let attachment_id = intent.attachment_id.to_string();
         let session_id = intent.session_id.clone();
+        let write_id = permit.write_id().as_hex();
         block_on_detached(async move {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
-            let token = token.as_hex();
-            let owns_phase = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                    SELECT 1 FROM lash_attachment_condemnations
-                    WHERE attachment_id = $1 AND write_token = $2
-                 )",
+            // Only this attempt's own unstamped, uncommitted row. A superseded
+            // permit matches nothing and deletes nothing.
+            sqlx::query(
+                "DELETE FROM lash_attachment_manifest
+                 WHERE attachment_id = $1 AND session_id = $2 AND write_id = $3
+                   AND written_at_ms IS NULL AND committed_at_ms IS NULL",
             )
             .bind(&attachment_id)
-            .bind(&token)
-            .fetch_one(&mut *tx)
+            .bind(session_id.as_str())
+            .bind(&write_id)
+            .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-            if owns_phase {
+            let condemned_superseded = sqlx::query(
+                "DELETE FROM lash_attachment_condemnations
+                 WHERE attachment_id = $1 AND write_token = $2
+                   AND phase = 'condemned'
+                   AND EXISTS (
+                       SELECT 1 FROM lash_attachment_manifest
+                        WHERE attachment_id = $1 AND session_id = $3
+                          AND committed_at_ms IS NOT NULL
+                   )",
+            )
+            .bind(&attachment_id)
+            .bind(&write_id)
+            .bind(session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+            if condemned_superseded == 0 {
                 sqlx::query(
-                    "DELETE FROM lash_attachment_manifest
-                     WHERE attachment_id = $1 AND session_id = $2
-                       AND committed_at_ms IS NULL",
+                    "UPDATE lash_attachment_condemnations
+                     SET write_token = NULL, write_session_id = NULL
+                     WHERE attachment_id = $1 AND write_token = $2",
                 )
                 .bind(&attachment_id)
-                .bind(session_id.as_str())
+                .bind(&write_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-                let condemned_superseded = sqlx::query(
-                    "DELETE FROM lash_attachment_condemnations
-                     WHERE attachment_id = $1 AND write_token = $2
-                       AND phase = 'condemned'
-                       AND EXISTS (
-                           SELECT 1 FROM lash_attachment_manifest
-                            WHERE attachment_id = $1 AND session_id = $3
-                              AND committed_at_ms IS NOT NULL
-                       )",
-                )
-                .bind(&attachment_id)
-                .bind(&token)
-                .bind(session_id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected();
-                if condemned_superseded == 0 {
-                    sqlx::query(
-                        "UPDATE lash_attachment_condemnations
-                         SET write_token = NULL, write_session_id = NULL
-                         WHERE attachment_id = $1 AND write_token = $2",
-                    )
-                    .bind(&attachment_id)
-                    .bind(&token)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
-                }
             }
             tx.commit().await.map_err(store_sqlx_error)
         })
@@ -565,7 +492,7 @@ impl AttachmentManifest for PostgresSessionStore {
         block_on_detached(async move {
             let rows = sqlx::query(
                 "SELECT attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
-                        owner_kind, owner_id, owner_incarnation
+                        owner_kind, owner_id, owner_incarnation, written_at_ms
                  FROM lash_attachment_manifest
                  WHERE committed_at_ms IS NULL AND intent_at_ms <= $1
                  ORDER BY attachment_id ASC",
@@ -601,6 +528,10 @@ impl AttachmentManifest for PostgresSessionStore {
                             "intent_at_ms",
                             row.get(3),
                         )?,
+                        written_at_epoch_ms: row
+                            .get::<Option<i64>, _>(8)
+                            .map(|value| u64_from_sql("AttachmentManifest", "written_at_ms", value))
+                            .transpose()?,
                         committed_at_epoch_ms: row
                             .get::<Option<i64>, _>(4)
                             .map(|value| {

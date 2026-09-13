@@ -772,8 +772,21 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
             crate::CommitBudgetLimit::Unbounded,
         ),
     );
-    commit.committed_attachment_ids =
-        vec![AttachmentId::parse("all-families-attachment").expect("valid attachment id")];
+    let attachment_id =
+        AttachmentId::parse("all-families-attachment").expect("valid attachment id");
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        crate::AttachmentIntent {
+            attachment_id: attachment_id.clone(),
+            session_id: SessionId::from("root"),
+            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
+            intent_at_epoch_ms: 1,
+            owner_kind: None,
+            owner_id: None,
+            owner_incarnation: None,
+        },
+    );
+    commit.committed_attachment_ids = vec![attachment_id];
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "root",
         DeliveryPolicy::AfterCurrentTurnCommit,

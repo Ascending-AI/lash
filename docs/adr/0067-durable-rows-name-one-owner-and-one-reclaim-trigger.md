@@ -305,11 +305,14 @@ starting new work.** Adoption comes first, and it verifies blob state through
 the same witness the sweep uses everywhere else — "the backend says the blob is
 gone" and "the backend errored" are different answers, and only the first
 completes the delete. Release is limited to abandoned `Condemned` or `Deleting`
-work. A completed delete's `Reclaimed` row is the durable fact that its bytes are
-absent; release leaves that phase in place. A fresh put claims it with an opaque
-token while recording the new write intent, restores the bytes, and clears the
-phase only after success; failure releases its token and preserves `Reclaimed`.
-FIG-1510's stuck-forever state becomes unreachable, with no timer anywhere.
+work. A completed delete retires its condemnation row outright (FIG-2795): the
+same fenced condemnation already deleted every manifest row for the digest, so
+the durable fact that the bytes are absent is the absence of upload evidence
+rather than a phase that has to be kept. A fresh put claims a surviving
+`Condemned` row with an opaque token while recording the new write intent,
+restores the bytes, and clears the phase only after success; failure releases
+its token. FIG-1510's stuck-forever state becomes unreachable, with no timer
+anywhere.
 
 The generation pin is the **sweep pass's own generation**, not a session-lease
 token: a factory sweeper holds no session-execution lease, so it cannot pin the
@@ -329,8 +332,9 @@ clearing a condemnation left by a sweeper that died mid-delete *host policy*,
 with the host calling `release_attachment_condemnation` after deciding the
 sweeper is gone. Here that recovery becomes automatic and structural: the next
 sweep adopts it, under a generation that proves the predecessor dead. The host
-lever remains scoped to `Condemned` and `Deleting`; it cannot erase a `Reclaimed`
-byte-absence fact, and lash still expires nothing on a clock.
+lever remains scoped to abandoned `Condemned` and `Deleting` rows; it cannot
+manufacture upload evidence for a digest whose bytes are gone, and lash still
+expires nothing on a clock.
 
 Effect-group VO state severs the same way. The effect-group row owns the group
 VO's state. Group retirement issues the idempotent VO purge inline — the owner

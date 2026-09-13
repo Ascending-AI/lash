@@ -8,9 +8,10 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
     let committed_out_of_band = AttachmentId::parse("manual-commit").expect("valid attachment id");
     let orphan = AttachmentId::parse("orphan").expect("valid attachment id");
     for id in [&committed_by_runtime, &committed_out_of_band, &orphan] {
-        store
-            .record_intent(attachment_intent(id.as_str()))
-            .expect("record attachment intent");
+        crate::conformance::helpers::record_completed_attachment_write(
+            &store,
+            attachment_intent(id.as_str()),
+        );
     }
 
     let mut uncommitted = store
@@ -61,8 +62,9 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
 ) {
     let attachment = AttachmentId::parse("same-content").expect("valid attachment id");
     for session_id in ["committed-owner", "orphan-owner"] {
-        store
-            .record_intent(AttachmentIntent {
+        crate::conformance::helpers::record_completed_attachment_write(
+            &store,
+            AttachmentIntent {
                 attachment_id: attachment.clone(),
                 session_id: SessionId::from(session_id.to_string()),
                 canonical_uri: format!("session:{session_id}:sha256:{attachment}"),
@@ -70,8 +72,8 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
                 owner_kind: None,
                 owner_id: None,
                 owner_incarnation: None,
-            })
-            .expect("record independent owner intent");
+            },
+        );
     }
     store
         .commit_refs(
@@ -93,8 +95,9 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
     store
         .forget(&SessionId::from("orphan-owner"), &attachment)
         .expect("forget only orphan owner");
-    store
-        .record_intent(AttachmentIntent {
+    crate::conformance::helpers::record_completed_attachment_write(
+        &store,
+        AttachmentIntent {
             attachment_id: attachment.clone(),
             session_id: SessionId::from("committed-owner"),
             canonical_uri: format!("session:committed-owner:sha256:{attachment}"),
@@ -102,8 +105,8 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
             owner_kind: None,
             owner_id: None,
             owner_incarnation: None,
-        })
-        .expect("repeat committed owner intent");
+        },
+    );
     assert!(
         !store
             .list_uncommitted(200)

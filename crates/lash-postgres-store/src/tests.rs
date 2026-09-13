@@ -1326,19 +1326,27 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     )
     .await
     .expect("put shared backend blob");
-    lash_core::AttachmentManifest::record_intent(
+    let live_intent = lash_core::AttachmentIntent {
+        attachment_id: attachment.id.clone(),
+        session_id: request.session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
+        intent_at_epoch_ms: 1,
+        owner_kind: None,
+        owner_id: None,
+        owner_incarnation: None,
+    };
+    let lash_core::AttachmentWriteFence::Granted(live_permit) =
+        lash_core::AttachmentManifest::begin_attachment_write(&*live_store, live_intent.clone())
+            .expect("begin live attachment write")
+    else {
+        panic!("a free digest must grant its writer");
+    };
+    lash_core::AttachmentManifest::complete_attachment_write(
         &*live_store,
-        lash_core::AttachmentIntent {
-            attachment_id: attachment.id.clone(),
-            session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
-            intent_at_epoch_ms: 1,
-            owner_kind: None,
-            owner_id: None,
-            owner_incarnation: None,
-        },
+        &live_intent,
+        live_permit,
     )
-    .expect("record live attachment intent");
+    .expect("stamp live attachment upload");
     lash_core::AttachmentManifest::commit_refs(
         &*live_store,
         &request.session_id,

@@ -541,12 +541,12 @@ fn attachment_condemnation_phases_match_the_persisted_vocabulary() {
         (
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
-            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))",
+            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))",
         ),
         (
             "Postgres",
             POSTGRES_SCHEMA_SOURCE,
-            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting', 'reclaimed'))",
+            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))",
         ),
     ] {
         assert!(

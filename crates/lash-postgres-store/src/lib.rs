@@ -339,9 +339,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 90 qualifies process-owned attachment intents with the registry-minted
 // incarnation. Component-89 stores are rejected so a bare process id is never
 // reinterpreted as the current incarnation with the same reusable name.
-// Version 91 adds durable cancellation intent revisions and closure authority.
-// Component-90 stores are rejected and recreated.
-const SCHEMA_VERSION: i32 = 91;
+// Version 92 requires positive upload evidence for attachment adoption: manifest
+// rows gain write_id and written_at_ms, and the condemnation phase vocabulary
+// drops 'reclaimed'. Older components hold rows in a phase this schema forbids
+// and manifest rows carrying no evidence for bytes that are present, so they are
+// rejected and recreated rather than adopted without proof.
+const SCHEMA_VERSION: i32 = 92;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

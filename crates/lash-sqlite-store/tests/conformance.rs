@@ -72,8 +72,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
 lash_conformance::abandoned_attachment_recovery_tests!({
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
-    (dir, move |reclaimed: bool| {
-        let root = root.join(if reclaimed { "reclaimed" } else { "condemned" });
+    (dir, move || {
+        let root = root.join("condemned");
         let reopen_root = root.clone();
         async move {
             (

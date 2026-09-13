@@ -29,10 +29,6 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().admit_session_state(lease).await
     }
 
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
-        self.inner().record_intent(intent)
-    }
-
     fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
@@ -565,10 +561,6 @@ impl<T> AttachmentManifest for T
 where
     T: RuntimePersistenceDecorator + ?Sized,
 {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::record_intent(self, intent)
-    }
-
     fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,

@@ -129,7 +129,7 @@ pub enum AttachmentStoreError {
         source: Box<StoreError>,
     },
     #[error(
-        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a successful delete leaves a reclaimed fact that the retry clears before re-putting the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
+        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a completed delete retires the condemnation and the retry then re-puts the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
@@ -140,7 +140,7 @@ pub enum AttachmentStoreError {
 impl AttachmentStoreError {
     /// Whether retrying the identical operation may succeed. A transient
     /// backend failure is retryable, and so is a write refused by an in-flight
-    /// reclamation: the retry clears the reclaimed fact and re-puts the bytes.
+    /// reclamation: the retry re-puts the bytes once the delete settles.
     /// A contract violation or a terminal backend failure retries to the same
     /// refusal.
     pub fn is_retryable(&self) -> bool {
@@ -266,9 +266,9 @@ pub trait AttachmentStore: Send + Sync {
     /// explicitly (`Ok(self.list().await?.into_iter().find(|blob| &blob.id ==
     /// id))`).
     ///
-    /// Under a fenced root authority, `Ok(None)` transitions the already armed
-    /// digest to `Reclaimed`, preserving the byte-absence witness without
-    /// issuing a delete; `Err` releases the arm and lands in
+    /// Under a fenced root authority, `Ok(None)` retires the already armed
+    /// digest's condemnation without issuing a delete, exactly as a completed
+    /// delete would; `Err` releases the arm and lands in
     /// [`AttachmentReclamationReport::failed_ids`]. Under an unfenced authority
     /// both answers skip deletion, while only `Err` is reported. A backend that
     /// cannot answer should therefore return an error rather than `None`.
@@ -369,20 +369,20 @@ pub trait AttachmentRootSet: Send + Sync {
     ///    intent while this method reports `Fenced`. There is no fence without
     ///    it.
     /// 2. [`AttachmentManifest::complete_attachment_write`] and
-    ///    [`AttachmentManifest::abort_attachment_write`] — settle only the
-    ///    restoring write token returned by the writer half.
+    ///    [`AttachmentManifest::abort_attachment_write`] — fenced and matched on
+    ///    the attempt identity the writer half minted.
     /// 3. [`Self::condemn_attachment`] — `Free -> Condemned`, conditional on the
-    ///    root predicate.
+    ///    root predicate, clearing every manifest row for the digest.
     /// 4. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`, conditional
     ///    on the condemnation still being held.
-    /// 5. [`Self::reclaim_attachment_condemnation`] — `Deleting -> Reclaimed`
+    /// 5. [`Self::retire_attachment_condemnation`] — delete the condemnation row
     ///    after the physical delete succeeds.
-    /// 6. [`Self::release_attachment_condemnation`] — an un-tokened abandoned
+    /// 6. [`Self::release_attachment_condemnation`] — an unclaimed abandoned
     ///    `Condemned` or `Deleting` sweep transition back to `Free`.
     /// 7. [`Self::recover_abandoned_attachment_write`] — a host-authorized,
-    ///    quiescent recovery that clears one restoring writer's token and intent
-    ///    while preserving `Reclaimed`, or `Condemned` unless the associated
-    ///    intent became a committed root while the token was held.
+    ///    quiescent recovery that clears one restoring writer's claim and
+    ///    intent, retiring `Condemned` only when the associated intent became a
+    ///    committed root while the claim was held.
     /// 8. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
@@ -397,6 +397,13 @@ pub trait AttachmentRootSet: Send + Sync {
 
     /// `Free -> Condemned` for one digest, conditional on there being no live
     /// root — the GC half of the fence.
+    ///
+    /// The same mutation clears every manifest row for the digest. A digest with
+    /// no live root is one whose remaining rows are aged, owner-dead intents;
+    /// leaving them behind would leave upload evidence for bytes this sweep is
+    /// about to delete. Clearing them is what removes the need for a durable
+    /// byte-absence tombstone: adoption is gated on positive evidence, and after
+    /// condemnation there is none.
     ///
     /// This MUST be one conditional mutation in the same durable store as the
     /// manifest: the root predicate (the same one
@@ -456,9 +463,9 @@ pub trait AttachmentRootSet: Send + Sync {
     /// The sweep calls this on every path where it abandons a digest it had
     /// condemned, including a failed physical delete. It conditionally removes
     /// only an un-tokened `Condemned` or `Deleting` row. A stale sweep therefore
-    /// cannot revoke an active restoring writer, and `Reclaimed` is never
-    /// released. Hosts use the same operation after establishing that a sweeper
-    /// died before completing the physical delete.
+    /// cannot revoke an active restoring writer. Hosts use the same operation
+    /// after establishing that a sweeper died before completing the physical
+    /// delete.
     async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
         let _ = id;
         Ok(())
@@ -468,17 +475,18 @@ pub trait AttachmentRootSet: Send + Sync {
     ///
     /// This is an explicit host-policy lever under ADR 0014, separate from
     /// [`Self::release_attachment_condemnation`] so ordinary sweep cleanup cannot
-    /// clear a live writer's token. Before calling it, the host MUST establish
+    /// clear a live writer's claim. Before calling it, the host MUST establish
     /// that no restoring writer for this digest is running. The operation clears
-    /// the token and precisely associated uncommitted manifest intent in one
-    /// mutation. It preserves `Reclaimed`, because that is durable byte-absence
-    /// evidence. It preserves `Condemned` unless the associated intent became a
-    /// committed root while the token was held; that newer root supersedes the
+    /// the claim and the precisely associated unstamped, uncommitted manifest
+    /// intent in one mutation; an intent already carrying upload evidence is
+    /// left alone. It preserves `Condemned` unless the associated intent became
+    /// a committed root while the claim was held; that newer root supersedes the
     /// old unarmed condemnation, which returns to `Free` before an older sweep
     /// can arm it. A fresh [`AttachmentManifest::begin_attachment_write`] can
-    /// claim a retained phase and re-put the bytes; stale completion or abort
-    /// from the recovered attempt is a no-op. There is no TTL and no elapsed-time
-    /// authority.
+    /// claim a retained phase and re-put the bytes; a stale completion from the
+    /// recovered attempt fails with
+    /// [`StoreError::StaleWritePermit`](crate::StoreError::StaleWritePermit) and
+    /// a stale abort is a no-op. There is no TTL and no elapsed-time authority.
     ///
     /// Fenced authorities must override this method in the same durable store as
     /// the writer half. The default fails loudly so a host never mistakes an
@@ -493,17 +501,18 @@ pub trait AttachmentRootSet: Send + Sync {
         })
     }
 
-    /// Record that an armed physical delete succeeded: `Deleting -> Reclaimed`.
+    /// Record that an armed physical delete succeeded: the condemnation row is
+    /// deleted and the digest returns to `Free`.
     ///
-    /// Unlike [`Self::release_attachment_condemnation`], this preserves the
-    /// byte-absence fact so stored-reference adoption cannot create a root for
-    /// bytes that are gone. A later
-    /// [`AttachmentManifest::begin_attachment_write`] claims `Reclaimed` with a
-    /// unique token in the same mutation that records the fresh write intent;
-    /// [`AttachmentManifest::complete_attachment_write`] clears it only after
-    /// bytes exist, while abort preserves it. Unfenced authorities never create
-    /// a condemnation, so the default is a no-op.
-    async fn reclaim_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
+    /// No byte-absence fact is retained, and none is needed: the condemnation
+    /// already cleared every manifest row for the digest, so adoption finds no
+    /// upload evidence and refuses with
+    /// [`StoreError::UnknownAttachment`](crate::StoreError::UnknownAttachment)
+    /// until someone actually puts the bytes again. A retained tombstone would
+    /// name no owner and no reclaim trigger, and a digest that never returned
+    /// would keep its row forever. Unfenced authorities never create a
+    /// condemnation, so the default is a no-op.
+    async fn retire_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
         let _ = id;
         Ok(())
     }
@@ -684,13 +693,13 @@ pub struct AttachmentReclamationPolicy {
 ///    Whoever loses the CAS yields; nobody waits.
 /// 3. **Only an armed digest is deleted.** The physical backend delete is issued
 ///    exclusively for a digest [`AttachmentRootSet::arm_attachment_delete`]
-///    moved to `Deleting`. A successful delete transitions to `Reclaimed`; an
+///    moved to `Deleting`. A successful delete retires the condemnation row
+///    outright, and condemnation has already cleared every manifest row for the
+///    digest, so the bytes are unadoptable until somebody puts them again; an
 ///    abandoned or failed delete releases back to `Free`. A writer that arrives
-///    while the delete is in flight records nothing and retries; after success
-///    it claims `Reclaimed`, re-puts the content, and clears only its matching
-///    token after the bytes exist. A failed put preserves `Reclaimed`; it
-///    preserves `Condemned` unless its intent became a committed root while
-///    the token was held, in which case that root returns it to `Free`.
+///    while the delete is in flight records nothing and retries. A failed put
+///    preserves `Condemned` unless its intent became a committed root while the
+///    claim was held, in which case that root returns it to `Free`.
 ///    That is why no SQL/blob-store atomicity is needed: the authority's state
 ///    machine, not the backend, decides whether bytes may die.
 /// 4. **Skip on contention.** A digest another sweeper has already condemned is
@@ -887,7 +896,7 @@ where
             }
             // Arm before the final HEAD. Once `Deleting` is recorded, a writer
             // cannot revoke the condemnation between observing absent bytes and
-            // preserving that observation as `Reclaimed`.
+            // retiring the condemnation row.
             match root_set.arm_attachment_delete(&blob.id).await {
                 Ok(AttachmentDeleteArming::Armed) => {}
                 // This sweep no longer owns the transition. It must not release
@@ -924,12 +933,12 @@ where
                 }
             }
             // Already gone (a lifecycle expiry or concurrent delete). A fenced
-            // sweep owns `Deleting`, so preserve this direct evidence as the
-            // same `Reclaimed` fact a successful physical delete records.
+            // sweep owns `Deleting`, so settle it exactly as a completed
+            // physical delete does: retire the condemnation row.
             Ok(None) => {
                 if condemned
                     && root_set
-                        .reclaim_attachment_condemnation(&blob.id)
+                        .retire_attachment_condemnation(&blob.id)
                         .await
                         .is_err()
                 {
@@ -1022,7 +1031,7 @@ where
                 // restoring the bytes.
                 if condemned
                     && root_set
-                        .reclaim_attachment_condemnation(&blob.id)
+                        .retire_attachment_condemnation(&blob.id)
                         .await
                         .is_err()
                 {
@@ -1518,7 +1527,28 @@ impl SessionAttachmentStore {
 pub struct NoopAttachmentManifest;
 
 impl AttachmentManifest for NoopAttachmentManifest {
-    fn record_intent(&self, _intent: AttachmentIntent) -> Result<(), StoreError> {
+    fn begin_attachment_write(
+        &self,
+        _intent: AttachmentIntent,
+    ) -> Result<AttachmentWriteFence, StoreError> {
+        Ok(AttachmentWriteFence::Granted(AttachmentWritePermit::new(
+            crate::AttachmentWriteToken::new(),
+        )))
+    }
+
+    fn complete_attachment_write(
+        &self,
+        _intent: &AttachmentIntent,
+        _permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn abort_attachment_write(
+        &self,
+        _intent: &AttachmentIntent,
+        _permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -1565,10 +1595,6 @@ fn now_epoch_ms() -> u64 {
 pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimePersistence>);
 
 impl AttachmentManifest for PersistenceManifestAdapter {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), crate::StoreError> {
-        AttachmentManifest::record_intent(&*self.0, intent)
-    }
-
     fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,

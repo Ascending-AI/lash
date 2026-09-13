@@ -145,8 +145,10 @@ pub(super) struct AttachmentManifestObservation {
     pub(super) attachment_id: AttachmentId,
     pub(super) canonical_uri: String,
     pub(super) intent_at_epoch_ms: u64,
-    // Commit time is store-authoritative (database time in PostgreSQL, injected
-    // host time locally). The logical lifecycle fact is compared explicitly.
+    // Commit and upload times are store-authoritative (database time in
+    // PostgreSQL, injected host time locally). The logical lifecycle facts are
+    // compared explicitly.
+    pub(super) written: bool,
     pub(super) committed: bool,
     pub(super) owner_kind: Option<AttachmentOwnerKind>,
     pub(super) owner_id: Option<String>,
