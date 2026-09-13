@@ -957,6 +957,46 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn request_process_cancel(
+        &self,
+        process_ref: &ProcessRef,
+        origin: lash_core::CancelOrigin,
+        requester: String,
+        attribution: Option<lash_core::RuntimeReplayAttribution>,
+    ) -> Result<ProcessRecord, lash_core::PluginError> {
+        let process_ref = process_ref.clone();
+        let now = self.clock.timestamp_ms();
+        let request = lash_core::CancelRequest::new(origin, requester, now);
+        let wake_delivery_config = self.wake_delivery_config;
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_ref_conn(tx, &process_ref)?;
+                    match lash_core::runtime::prepare_process_transition(
+                        &record,
+                        ProcessTransition::RequestCancel(request),
+                    )? {
+                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Append(mut append) => {
+                            if let Some(replay) = append.replay.as_mut() {
+                                replay.attribution = attribution;
+                            }
+                            Self::append_event_conn(
+                                tx,
+                                &mut record,
+                                *append,
+                                now,
+                                wake_delivery_config,
+                            )?;
+                        }
+                    }
+                    Ok(record)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn request_process_abandon(
         &self,
         process_id: &ProcessId,

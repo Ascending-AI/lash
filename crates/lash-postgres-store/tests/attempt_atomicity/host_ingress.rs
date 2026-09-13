@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{ProcessEventLog as _, ProcessRegistrar as _};
+use lash_core::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -125,22 +125,47 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     );
 
     let cancel_key = ingress.key("pg-host-ingress-cancel", 1);
-    let cancel_intent = |reason: &str| {
+    let cancel_identity = cancel_key.identity().clone();
+    let other_process_id = ProcessId::from(format!("pg-tool-intent-ingress-alternate-{suffix}"));
+    let alternate = registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                &other_process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            ),
+            std::slice::from_ref(&session_id),
+        )
+        .await
+        .expect("register a valid conflicting cancel target");
+    assert_ne!(alternate.id, process_id);
+    assert!(!alternate.is_terminal());
+    assert!(alternate.cancel_request.is_none());
+    let cancel_intent = |target: &ProcessId| {
         lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
             session_id: session_id.clone(),
-            process_id: process_id.clone(),
-            reason: Some(reason.to_string()),
+            process_id: target.clone(),
         })
     };
-    let first_cancel = ingress
-        .submit(cancel_key.clone(), cancel_intent("first reason"))
-        .await;
+    let first_intent = cancel_intent(&process_id);
+    let conflicting_intent = cancel_intent(&other_process_id);
+    assert_ne!(
+        serde_json::to_value(&first_intent).unwrap(),
+        serde_json::to_value(&conflicting_intent).unwrap(),
+        "the same admission key is challenged by a different canonical input"
+    );
+    let first_cancel = ingress.submit(cancel_key.clone(), first_intent).await;
     let duplicate_cancel = ingress
-        .submit(cancel_key.clone(), cancel_intent("first reason"))
+        .submit(cancel_key.clone(), cancel_intent(&process_id))
         .await;
-    let conflicting_cancel = ingress
-        .submit(cancel_key, cancel_intent("conflicting reason"))
-        .await;
+    let conflicting_cancel = ingress.submit(cancel_key, conflicting_intent).await;
     let lash::tools::ToolIntentIngressOutcome::Admitted {
         outcome: first_cancel_outcome,
         replayed: false,
@@ -173,7 +198,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     };
     assert!(
         message.contains("postgres_effect_replay_hash_conflict")
-            && message.contains("command.command.reason"),
+            && message.contains("command.command.process_ref.process_id"),
         "the refusal must identify the canonical command conflict: {message}"
     );
     let cancel_events = registry
@@ -184,9 +209,21 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .filter(|event| event.event_type == "process.cancel_requested")
         .collect::<Vec<_>>();
     assert_eq!(cancel_events.len(), 1);
+    let standing: lash_core::CancelRequest =
+        serde_json::from_value(cancel_events[0].payload.clone()).expect("typed cancel fact");
+    assert_eq!(standing.origin, lash_core::CancelOrigin::ModelRequested);
     assert_eq!(
-        cancel_events[0].payload["reason"],
-        serde_json::json!("first reason"),
-        "the first admitted cancel payload remains authoritative"
+        standing.requester, cancel_identity.replay_key,
+        "the first admitted causal requester remains authoritative"
+    );
+    assert!(
+        registry
+            .get_process(&other_process_id)
+            .await
+            .expect("read alternate target")
+            .expect("retained alternate target")
+            .cancel_request
+            .is_none(),
+        "a canonical conflict never reaches the alternate target"
     );
 }

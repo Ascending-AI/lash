@@ -547,7 +547,6 @@ impl crate::ToolProvider for RuntimeScenarioIntentProvider {
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                     session_id: SessionId::from(session_id),
                     process_id: ProcessId::from("runtime-scenario-intent-target"),
-                    reason: Some("runtime scenario complete".to_string()),
                 }),
             ]),
         )

@@ -726,7 +726,6 @@ impl SurfaceRunner {
                             action.identity.clone(),
                             action.parent_end.process_id.clone(),
                             action.parent_end.policy,
-                            "differential parent ended".to_string(),
                             lash_core::ProcessOpScope::new(controller.clone())
                                 .with_parent_invocation(Some(parent)),
                         )

@@ -557,7 +557,7 @@ pub(super) struct RecordingContext {
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
-    pub(super) cancelled: Mutex<Vec<(String, Option<String>)>>,
+    pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
     pub(super) resolved_events: Mutex<Vec<RestateDurableWaitResolveRequest>>,
     pub(super) scope_effect_begins: AtomicUsize,
     pub(super) scope_group_records: AtomicUsize,
@@ -812,10 +812,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         let endpoint = self.endpoint.clone();
-        let process_id = request.process_id.clone();
-        self.cancelled
-            .lock_recover()
-            .push((request.process_id.to_string(), request.reason.clone()));
+        let process_id = request.process_ref.process_id.clone();
+        self.cancelled.lock_recover().push(request.clone());
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
                 invoke_process_workflow_endpoint(&endpoint, "cancel", &process_id, &request, false)

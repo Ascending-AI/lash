@@ -3,8 +3,9 @@
 use lash_sansio::ProcessId;
 mod event_replay;
 use event_replay::{
-    canonical_process_event_payload_replay, long_cancellation_reason_replay_is_backend_safe,
+    canonical_process_event_payload_replay, long_cancellation_requester_replay_is_backend_safe,
 };
+mod cancellation;
 mod lifecycle;
 mod status_filters;
 use status_filters::list_filters_match_extracted_and_json_fields;
@@ -68,6 +69,12 @@ where
     drop((first, second));
     lifecycle::registration_contract(make()).await;
     lifecycle::empty_tool_call_identifiers_leave_no_row(make()).await;
+    let cancellation_registry = make();
+    Box::pin(cancellation::contract(
+        Arc::clone(&cancellation_registry),
+        cancellation_registry,
+    ))
+    .await;
     super::hostile_input::process_namespace(make()).await;
     process_registry_conformance(make()).await;
 }
@@ -79,6 +86,12 @@ where
 {
     lifecycle::registration_contract(make().open).await;
     lifecycle::empty_tool_call_identifiers_leave_no_row(make().open).await;
+    let cancellation_handles = make();
+    Box::pin(cancellation::contract(
+        cancellation_handles.open,
+        cancellation_handles.reopen,
+    ))
+    .await;
     super::hostile_input::process_namespace(make().open).await;
     let handles = make();
     assert_fresh_instances(
@@ -459,7 +472,7 @@ async fn process_registry_conformance(registry: Arc<dyn crate::ConformanceProces
     observer_events_are_auditable_and_transfer_is_atomic(Arc::clone(&registry)).await;
     generic_append_rejects_reserved_edge_audit_events(Arc::clone(&registry)).await;
     canonical_process_event_payload_replay(Arc::clone(&registry)).await;
-    long_cancellation_reason_replay_is_backend_safe(Arc::clone(&registry)).await;
+    long_cancellation_requester_replay_is_backend_safe(Arc::clone(&registry)).await;
     wake_subscription_is_indexed_and_retargetable(Arc::clone(&registry)).await;
     lifecycle_status_and_outcome_fold(Arc::clone(&registry)).await;
     producer_terminal_status_must_match_materialized_outcome(Arc::clone(&registry)).await;
@@ -2127,7 +2140,8 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         crate::NativeRuntimeEffectController::request_process_cancel(
             Arc::clone(&registry),
             &process_id,
-            Some("cancel after prune".to_string()),
+            crate::CancelOrigin::OperatorRequested,
+            "test:cancel-after-prune".to_string(),
             None,
         )
         .await,

@@ -123,11 +123,16 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     },
                 })
             }
-            crate::ProcessCommand::Cancel { process_ref, .. } => {
+            crate::ProcessCommand::Cancel {
+                process_ref,
+                origin,
+                requester,
+                ..
+            } => {
                 self.commands
                     .lock_recover()
                     .push(RecordedProcessCommand::Cancel);
-                let record = crate::ProcessRecord::from_registration(
+                let mut record = crate::ProcessRecord::from_registration(
                     crate::ProcessRegistration::new(
                         process_ref.process_id,
                         crate::ProcessInput::External {
@@ -142,6 +147,8 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     ),
                     crate::ProcessIncarnation::from_registration_sequence(1),
                 );
+                record.cancel_request =
+                    Some(Box::new(crate::CancelRequest::new(origin, requester, 1)));
                 Ok(crate::RuntimeEffectOutcome::Process {
                     result: crate::ProcessEffectOutcome::Cancel {
                         record: Box::new(record),
@@ -216,7 +223,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         match self
@@ -226,7 +232,6 @@ impl crate::ProcessService for EffectBackedProcessService {
                     identity,
                     process_id,
                     policy,
-                    reason,
                 },
             )
             .await?
@@ -306,8 +311,9 @@ impl crate::ProcessService for EffectBackedProcessService {
                         process_id,
                         crate::ProcessIncarnation::from_registration_sequence(1),
                     ),
-                    reason: Some("turn cancelled while awaiting process".to_string()),
-                    replay: None,
+                    origin: crate::CancelOrigin::OperatorRequested,
+                    requester: "test:fig790-cancel".to_string(),
+                    attribution: None,
                 },
             )
             .await?
@@ -319,12 +325,29 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        session_id: &SessionId,
+        _session_id: &SessionId,
         process_id: &ProcessId,
-        _reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.cancel(session_id, process_id, scope).await
+        match self
+            .execute(
+                scope,
+                crate::ProcessCommand::Cancel {
+                    process_ref: crate::ProcessRef::new(
+                        process_id,
+                        crate::ProcessIncarnation::from_registration_sequence(1),
+                    ),
+                    origin: crate::CancelOrigin::ModelRequested,
+                    requester: identity.replay_key.clone(),
+                    attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+                },
+            )
+            .await?
+        {
+            crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
+            _ => unreachable!("cancel command returns cancel outcome"),
+        }
     }
 
     async fn signal_possessed(

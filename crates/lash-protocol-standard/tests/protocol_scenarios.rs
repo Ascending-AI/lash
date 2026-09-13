@@ -840,7 +840,6 @@ impl lash_core::ToolProvider for StandardIntentProvider {
                 lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
                     session_id: lash_core::SessionId::from(session_id),
                     process_id: lash_core::ProcessId::from("standard-intent-target"),
-                    reason: Some("standard scenario complete".to_string()),
                 }),
             ]),
         )

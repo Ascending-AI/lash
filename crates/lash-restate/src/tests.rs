@@ -918,11 +918,12 @@ impl HttpTransport for Fig779DurableCancelTransport {
     ) -> Result<HttpResponse, LlmTransportError> {
         let cancellation_is_durable = self
             .registry
-            .events_after(&self.process_id, 0)
+            .get_process(&self.process_id)
             .await
             .map_err(|error| LlmTransportError::new(error.to_string()))?
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested");
+            .ok_or_else(|| LlmTransportError::new("cancellation target is missing"))?
+            .cancel_request
+            .is_some();
         if !cancellation_is_durable {
             return std::future::pending().await;
         }

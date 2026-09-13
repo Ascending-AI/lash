@@ -414,8 +414,9 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
                 runtime_invocation(RuntimeEffectKind::Process, "background-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
                     process_ref: lash_core::ProcessRef::from_record(&record),
-                    reason: Some("user requested".to_string()),
-                    replay: None,
+                    origin: lash_core::CancelOrigin::OperatorRequested,
+                    requester: "actor:cancel-test".to_string(),
+                    attribution: None,
                 }),
             ),
             registry_local_executor(registry),
@@ -430,12 +431,18 @@ pub(super) async fn restate_controller_cancel_requests_call_workflow_cancel() {
     };
 
     assert!(!record.is_terminal());
+    let request = record
+        .cancel_request
+        .as_deref()
+        .expect("folded cancellation");
+    assert_eq!(request.origin, lash_core::CancelOrigin::OperatorRequested);
+    assert_eq!(request.requester, "actor:cancel-test");
     assert_eq!(
         context.cancelled.lock_recover().as_slice(),
-        &[(
-            "task-cancel".to_string(),
-            Some("user requested".to_string())
-        )]
+        &[RestateProcessCancelRequest {
+            process_ref: lash_core::ProcessRef::from_record(&record),
+            request: request.clone(),
+        }]
     );
 }
 
@@ -856,8 +863,15 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         .append_event(
             &ProcessId::from("prompt-cancel"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("prompt-cancel"),
-                Some("stop promptly".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("prompt-cancel"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:running_process_cancel_uses_native_signal_without_poll_delay",
+                    11,
+                ),
             ),
         )
         .await
@@ -926,8 +940,15 @@ pub(super) async fn cancellation_cleanup_failure_does_not_write_a_false_terminal
         .append_event(
             &ProcessId::from("cancel-cleanup-failure"),
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("cancel-cleanup-failure"),
-                Some("exercise cleanup failure".to_string()),
+                &registry
+                    .resolve_process_ref(&ProcessId::from("cancel-cleanup-failure"))
+                    .await
+                    .expect("retained cancellation target"),
+                &lash_core::CancelRequest::new(
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "actor:fixture:cancellation_cleanup_failure_does_not_write_a_false_terminal",
+                    11,
+                ),
             ),
         )
         .await
@@ -1000,10 +1021,8 @@ pub(super) async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on
     registry
         .append_event(
             &ProcessId::from("non-session-cancel-failure"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("non-session-cancel-failure"),
-                Some("preserve prior non-session behavior".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("non-session-cancel-failure")).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:non_session_cancel_preserves_the_prior_cancelled_terminal_on_runner_failure", 11)),
         )
         .await
         .expect("append cancel request");
@@ -1279,10 +1298,8 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
     registry
         .append_event(
             &ProcessId::from("transient-cancel-read"),
-            lash_core::ProcessEventAppendRequest::cancel_requested(
-                &ProcessId::from("transient-cancel-read"),
-                Some("retry the durable read".to_string()),
-            ),
+            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from("transient-cancel-read")).await.expect("retained cancellation target"),
+&lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:transient_cancel_registry_read_error_cannot_fall_through_to_success", 11)),
         )
         .await
         .expect("append cancel request");

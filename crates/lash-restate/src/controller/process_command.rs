@@ -93,7 +93,7 @@ where
         }
         ProcessCommand::Await { process_ref } => {
             registry.get_process_ref(&process_ref).await?;
-            let process_id = process_ref.process_id;
+            let process_id = process_ref.process_id.clone();
             // Replay-determinism class inventory: PR #166 removed the process
             // start gate. FIG-788 always redrives the process runner, retains
             // ordinal handovers until terminal delivery resolves, and schedules
@@ -163,11 +163,23 @@ where
                         ));
                     };
                     turn_cancellation.cancellation.cancel();
+                    let record = registry
+                        .request_process_cancel(
+                            &process_ref,
+                            lash_core::CancelOrigin::TurnStopped,
+                            serde_json::to_string(&turn_cancellation.scope).map_err(|error| {
+                                PluginError::Runtime(RuntimeError::new(
+                                    RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                ))
+                            })?,
+                            None,
+                        )
+                        .await?;
                     context
-                        .request_process_workflow_cancel(RestateProcessCancelRequest {
-                            process_id: process_id.clone(),
-                            reason: Some("turn cancelled while awaiting process".to_string()),
-                        })
+                        .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(
+                            &record,
+                        )?)
                         .await
                         .map_err(|err| {
                             PluginError::Runtime(RuntimeError::new(
@@ -210,30 +222,15 @@ where
         }
         ProcessCommand::Cancel {
             process_ref,
-            reason,
-            replay,
+            origin,
+            requester,
+            attribution,
         } => {
             let record = registry
-                .get_process_ref(&process_ref)
-                .await?
-                .ok_or_else(|| {
-                    lash_core::runtime::registry_transitions::unknown_process(
-                        &process_ref.process_id,
-                    )
-                })?;
-            let mut request = lash_core::ProcessEventAppendRequest::cancel_requested(
-                &process_ref.process_id,
-                reason.clone(),
-            );
-            if let Some(replay) = replay {
-                request = request.with_optional_replay(Some(replay));
-            }
-            registry.append_event_ref(&process_ref, request).await?;
+                .request_process_cancel(&process_ref, origin, requester, attribution)
+                .await?;
             context
-                .request_process_workflow_cancel(RestateProcessCancelRequest {
-                    process_id: process_ref.process_id,
-                    reason,
-                })
+                .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
                 .await
                 .map_err(|err| {
                     PluginError::Runtime(RuntimeError::new(
@@ -252,7 +249,6 @@ where
             identity,
             process_id,
             policy,
-            reason,
         } => {
             let outcome = match policy {
                 lash_core::ProcessParentEndPolicy::Abandon => {
@@ -263,23 +259,40 @@ where
                 }
                 lash_core::ProcessParentEndPolicy::Cancel => {
                     let result: Result<(), lash_core::PluginError> = async {
-                        registry.get_process(&process_id).await?.ok_or_else(|| {
-                            lash_core::runtime::registry_transitions::unknown_process(&process_id)
-                        })?;
-                        registry
-                            .append_event(
-                                &process_id,
-                                lash_core::ProcessEventAppendRequest::cancel_requested(
-                                    &process_id,
-                                    Some(reason.clone()),
-                                ),
+                        let process_ref = registry.resolve_process_ref(&process_id).await?;
+                        let record =
+                            registry
+                                .get_process_ref(&process_ref)
+                                .await?
+                                .ok_or_else(|| {
+                                    lash_core::runtime::registry_transitions::unknown_process(
+                                        &process_id,
+                                    )
+                                })?;
+                        if record.is_terminal() || record.cancel_request.is_some() {
+                            return Ok(());
+                        }
+                        let requester =
+                            serde_json::to_string(&record.lifecycle.parent).map_err(|error| {
+                                PluginError::Runtime(RuntimeError::new(
+                                    RuntimeErrorCode::RecordEncodingFailed,
+                                    error.to_string(),
+                                ))
+                            })?;
+                        let record = registry
+                            .request_process_cancel(
+                                &process_ref,
+                                lash_core::CancelOrigin::ParentEnded,
+                                requester,
+                                Some(lash_core::RuntimeReplayAttribution::ToolIntent(
+                                    identity.clone(),
+                                )),
                             )
                             .await?;
                         context
-                            .request_process_workflow_cancel(RestateProcessCancelRequest {
-                                process_id: process_id.clone(),
-                                reason: Some(reason),
-                            })
+                            .request_process_workflow_cancel(
+                                RestateProcessCancelRequest::from_record(&record)?,
+                            )
                             .await
                             .map_err(|err| {
                                 PluginError::Runtime(RuntimeError::new(

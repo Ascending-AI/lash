@@ -145,7 +145,8 @@ pub use usage_activity::*;
 // selections, and genuine-user-segment boundaries. Exact-match negotiation
 // refuses peers that cannot preserve the retention contract.
 // Window 61: FIG-2960 requires an explicit lifecycle policy on process starts and records.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 61;
+// Window 62: FIG-2961 adds typed cancellation requests and cancellation origins.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 62;
 
 /// One versioned remote-protocol message.
 ///

@@ -2,11 +2,11 @@ use super::*;
 use lash_sansio::ProcessId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessCancelRequest {
     pub process_id: ProcessId,
     pub incarnation: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub requester: String,
 }
 
 impl RemoteProcessCancelRequest {
@@ -17,15 +17,14 @@ impl RemoteProcessCancelRequest {
             incarnation: self.incarnation,
         }
         .validate("RemoteProcessCancelRequest")?;
-        if let Some(reason) = &self.reason {
-            require_non_empty("RemoteProcessCancelRequest", "reason", reason)?;
-        }
+        require_non_empty("RemoteProcessCancelRequest", "requester", &self.requester)?;
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessCancelReceipt {
+    pub origin: lash_sansio::CancelOrigin,
     pub process_id: ProcessId,
     pub incarnation: u64,
     pub status: RemoteProcessStatus,

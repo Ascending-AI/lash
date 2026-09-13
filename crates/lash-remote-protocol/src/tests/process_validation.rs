@@ -47,6 +47,7 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
     mismatched.outcome = Some(RemoteProcessAwaitOutput::Settled {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                origin: None,
                 message: "cancelled".to_string(),
                 source: RemoteProcessToolFailureSource::Cancellation,
                 raw: None,

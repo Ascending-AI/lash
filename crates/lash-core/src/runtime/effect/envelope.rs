@@ -622,20 +622,21 @@ pub enum ProcessCommand {
     },
     Cancel {
         process_ref: crate::ProcessRef,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        replay: Option<crate::RuntimeReplay>,
+        attribution: Option<crate::RuntimeReplayAttribution>,
     },
     CancelRefused {
         process_id: ProcessId,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
         refusal: crate::PluginError,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
     },
     Signal {
         process_ref: crate::ProcessRef,
@@ -679,20 +680,21 @@ enum ProcessCommandDecode {
     },
     Cancel {
         process_ref: crate::ProcessRef,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
         #[serde(default)]
-        replay: Option<crate::RuntimeReplay>,
+        attribution: Option<crate::RuntimeReplayAttribution>,
     },
     CancelRefused {
         process_id: ProcessId,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
         refusal: crate::PluginError,
     },
     ParentEnd {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
     },
     Signal {
         process_ref: crate::ProcessRef,
@@ -760,32 +762,34 @@ impl<'de> Deserialize<'de> for ProcessCommand {
             ProcessCommandDecode::Await { process_ref } => Self::Await { process_ref },
             ProcessCommandDecode::Cancel {
                 process_ref,
-                reason,
-                replay,
+                origin,
+                requester,
+                attribution,
             } => Self::Cancel {
                 process_ref,
-                reason,
-                replay,
+                origin,
+                requester,
+                attribution,
             },
             ProcessCommandDecode::CancelRefused {
                 process_id,
-                reason,
+                origin,
+                requester,
                 refusal,
             } => Self::CancelRefused {
                 process_id,
-                reason,
+                origin,
+                requester,
                 refusal,
             },
             ProcessCommandDecode::ParentEnd {
                 identity,
                 process_id,
                 policy,
-                reason,
             } => Self::ParentEnd {
                 identity,
                 process_id,
                 policy,
-                reason,
             },
             ProcessCommandDecode::Signal {
                 process_ref,

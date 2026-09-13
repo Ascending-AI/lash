@@ -1,10 +1,11 @@
 use crate::SessionId;
+use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    ProcessId, ProcessIncarnation, ProcessObserverBy, ProcessStatus, RecoveryContract,
+    ProcessId, ProcessIncarnation, ProcessObserverBy, ProcessRef, ProcessStatus, RecoveryContract,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -362,6 +363,7 @@ impl<'de> Deserialize<'de> for ProcessAwaitOutput {
                     .transpose()
                 {
                     Ok(raw) => crate::ToolCallOutput::cancelled(crate::ToolCancellation {
+                        origin: None,
                         message,
                         source: crate::ToolFailureSource::UnknownLegacy,
                         raw,
@@ -386,6 +388,20 @@ impl<'de> Deserialize<'de> for ProcessAwaitOutput {
 }
 
 impl ProcessAwaitOutput {
+    /// Stamps a cancelled result with the standing process request's origin.
+    /// Other outcomes and cancellation payloads with no standing request retain
+    /// their original representation. Registries apply this before completion
+    /// replay comparison and event identity construction.
+    pub fn with_cancel_origin(mut self, origin: Option<crate::CancelOrigin>) -> Self {
+        if let Some(origin) = origin
+            && let Self::Settled { output } = &mut self
+            && let crate::ToolCallOutcome::Cancelled(cancellation) = &mut output.outcome
+        {
+            cancellation.origin = Some(origin);
+        }
+        self
+    }
+
     /// Projects only terminal process outcomes to their durable status for store implementors,
     /// returning `None` for non-terminal or deferred output.
     pub fn terminal_status(&self) -> Option<ProcessStatus> {
@@ -563,16 +579,11 @@ impl ProcessEventAppendRequest {
         self
     }
 
-    /// Builds a cancellation-request event with a fixed-size, versioned replay
-    /// address. Repeating the same reason is idempotent; a distinct reason
-    /// retains the pre-cutover behavior of naming a distinct request without
-    /// copying unbounded caller text into an indexed store key.
-    pub fn cancel_requested(process_id: &ProcessId, reason: Option<String>) -> Self {
-        let replay_key = cancellation_replay_key(process_id, reason.as_deref());
-        let payload = serde_json::json!({
-            "reason": reason,
-        });
-        Self::new("process.cancel_requested", payload).with_replay_key(replay_key)
+    /// Build a cancellation event keyed by process lifetime, origin, and requester.
+    /// Retrying with a fresh clock retains the first accepted cancellation fact.
+    pub fn cancel_requested(process_ref: &ProcessRef, request: &CancelRequest) -> Self {
+        Self::new("process.cancel_requested", serde_json::json!(request))
+            .with_replay_key(cancellation_replay_key(process_ref, request))
     }
 
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
@@ -695,28 +706,34 @@ impl ProcessEventAppendRequest {
     }
 }
 
-const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 1;
+const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 2;
 
-/// Permanent tag registry for cancellation replay addresses.
-///
-/// Reason presence uses the universal option tags 0/1. The present arm frames
-/// the complete UTF-8 reason; the rendered key hashes that exhaustive preimage
-/// to a backend-safe fixed size.
-fn cancellation_replay_preimage(process_id: &ProcessId, reason: Option<&str>) -> Vec<u8> {
+/// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,
+/// OperatorRequested=2, ModelRequested=3, StartFailed=4. Clock readings are
+/// excluded: origin and requester identify the request on this incarnation.
+fn cancellation_replay_preimage(process_ref: &ProcessRef, request: &CancelRequest) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.process-cancellation-request",
         PROCESS_CANCELLATION_FAMILY_VERSION,
     );
-    identity.string(process_id);
-    identity.optional(reason, |identity, reason| identity.string(reason));
+    identity.string(&process_ref.process_id);
+    identity.u64(process_ref.incarnation.registration_sequence());
+    identity.tag(match request.origin {
+        CancelOrigin::TurnStopped => 0,
+        CancelOrigin::ParentEnded => 1,
+        CancelOrigin::OperatorRequested => 2,
+        CancelOrigin::ModelRequested => 3,
+        CancelOrigin::StartFailed => 4,
+    });
+    identity.string(&request.requester);
     identity.finish()
 }
 
-fn cancellation_replay_key(process_id: &ProcessId, reason: Option<&str>) -> String {
+fn cancellation_replay_key(process_ref: &ProcessRef, request: &CancelRequest) -> String {
     crate::stable_identity::rendered_hash(
         "process-cancellation",
         PROCESS_CANCELLATION_FAMILY_VERSION,
-        &cancellation_replay_preimage(process_id, reason),
+        &cancellation_replay_preimage(process_ref, request),
     )
 }
 
@@ -748,22 +765,56 @@ fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bo
     authority.principal.is_none() && authority.elevation.is_none()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProcessEventKind {
+    FirstStarted,
+    Waiting,
+    Resumed,
+    ExternalRefSet,
+    AbandonRequested,
+    CancelRequested,
+    CallerDeparted,
+    ObserverAdded,
+    ObserverRemoved,
+    SubscriptionRetargeted,
+    Custom,
+}
+
+impl ProcessEventKind {
+    pub(super) fn from_event_type(name: &str) -> Self {
+        match name {
+            "process.first_started" => Self::FirstStarted,
+            "process.waiting" => Self::Waiting,
+            "process.resumed" => Self::Resumed,
+            "process.external_ref_set" => Self::ExternalRefSet,
+            "process.abandon_requested" => Self::AbandonRequested,
+            "process.cancel_requested" => Self::CancelRequested,
+            "process.caller_departed" => Self::CallerDeparted,
+            "process.observer_added" => Self::ObserverAdded,
+            "process.observer_removed" => Self::ObserverRemoved,
+            "process.subscription_retargeted" => Self::SubscriptionRetargeted,
+            _ => Self::Custom,
+        }
+    }
+}
+
 pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
-    match name {
-        "process.first_started"
-        | "process.waiting"
-        | "process.resumed"
-        | "process.external_ref_set"
-        | "process.abandon_requested"
-        | "process.caller_departed"
-        | "process.observer_added"
-        | "process.observer_removed"
-        | "process.subscription_retargeted" => Some(ProcessEventType {
+    match ProcessEventKind::from_event_type(name) {
+        ProcessEventKind::Custom => None,
+        ProcessEventKind::FirstStarted
+        | ProcessEventKind::Waiting
+        | ProcessEventKind::Resumed
+        | ProcessEventKind::ExternalRefSet
+        | ProcessEventKind::AbandonRequested
+        | ProcessEventKind::CancelRequested
+        | ProcessEventKind::CallerDeparted
+        | ProcessEventKind::ObserverAdded
+        | ProcessEventKind::ObserverRemoved
+        | ProcessEventKind::SubscriptionRetargeted => Some(ProcessEventType {
             name: name.to_string(),
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }),
-        _ => None,
     }
 }
 
@@ -772,26 +823,21 @@ pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
 }
 
 pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
-    let mut event_types = vec![ProcessEventType {
-        name: "process.cancel_requested".to_string(),
-        payload_schema: crate::LashSchema::any(),
-        semantics: ProcessEventSemanticsSpec::default(),
-    }];
-    event_types.extend(
-        [
-            "process.first_started",
-            "process.waiting",
-            "process.resumed",
-            "process.external_ref_set",
-            "process.abandon_requested",
-            "process.caller_departed",
-            "process.observer_added",
-            "process.observer_removed",
-            "process.subscription_retargeted",
-        ]
-        .into_iter()
-        .filter_map(runtime_lifecycle_event_type),
-    );
+    let mut event_types: Vec<_> = [
+        "process.cancel_requested",
+        "process.first_started",
+        "process.waiting",
+        "process.resumed",
+        "process.external_ref_set",
+        "process.abandon_requested",
+        "process.caller_departed",
+        "process.observer_added",
+        "process.observer_removed",
+        "process.subscription_retargeted",
+    ]
+    .into_iter()
+    .filter_map(runtime_lifecycle_event_type)
+    .collect();
     event_types.extend([
         terminal_event_type("process.completed", ProcessStatus::Completed),
         terminal_event_type("process.failed", ProcessStatus::Failed),
@@ -825,8 +871,12 @@ mod cancellation_identity_tests {
 
     #[test]
     fn cancellation_replay_identity_has_pinned_bounded_grammar() {
-        let reason = "λ".repeat(3_200);
-        let key = cancellation_replay_key(&ProcessId::from("process\0id"), Some(&reason));
+        let process_ref = ProcessRef::new(
+            "process\0id",
+            ProcessIncarnation::from_registration_sequence(1),
+        );
+        let request = CancelRequest::new(CancelOrigin::OperatorRequested, "λ".repeat(3_200), 10);
+        let key = cancellation_replay_key(&process_ref, &request);
         assert_eq!(
             key.len(),
             95,
@@ -834,20 +884,28 @@ mod cancellation_identity_tests {
         );
         assert_eq!(
             key,
-            "process-cancellation:v1:blake3:77db45e3a150a0d172e3d62585d286d98911baec6f414a627ec260b317cde22a"
+            "process-cancellation:v2:blake3:8c20e92daee0b9dcc19707479719f071c47906266c5e843aeaacc7004a840b17"
         );
+        let empty = CancelRequest::new(CancelOrigin::OperatorRequested, "", 10);
         assert_eq!(
-            hex(&cancellation_replay_preimage(
-                &ProcessId::from("process\0id"),
-                None
-            )),
-            "6c6173682d737461626c652d6964656e74697479020100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f6365737300696400"
+            hex(&cancellation_replay_preimage(&process_ref, &empty)),
+            "6c6173682d737461626c652d6964656e74697479020200000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f636573730069640000000000000001020000000000000000"
         );
-        assert_ne!(
-            cancellation_replay_key(&ProcessId::from("process\0id"), None),
-            cancellation_replay_key(&ProcessId::from("process\0id"), Some("")),
-            "None and Some(empty) occupy different permanent option arms"
+        let retry = CancelRequest {
+            requested_at_ms: 99,
+            ..request.clone()
+        };
+        assert_eq!(key, cancellation_replay_key(&process_ref, &retry));
+        let other_origin = CancelRequest {
+            origin: CancelOrigin::ModelRequested,
+            ..request.clone()
+        };
+        assert_ne!(key, cancellation_replay_key(&process_ref, &other_origin));
+        let other_incarnation = ProcessRef::new(
+            "process\0id",
+            ProcessIncarnation::from_registration_sequence(2),
         );
+        assert_ne!(key, cancellation_replay_key(&other_incarnation, &request));
     }
 
     #[test]

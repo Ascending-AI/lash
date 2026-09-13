@@ -106,7 +106,9 @@ impl ProcessLocalExecution {
                             NativeRuntimeEffectController::request_process_cancel_ref(
                                 Arc::clone(&registry),
                                 &process_ref,
-                                Some("turn cancelled while awaiting process".to_string()),
+                                crate::CancelOrigin::TurnStopped,
+                                serde_json::to_string(&turn_cancellation.scope)
+                                    .expect("execution scopes contain only serializable identities"),
                                 None,
                             )
                             .await?;
@@ -122,14 +124,16 @@ impl ProcessLocalExecution {
             }
             ProcessCommand::Cancel {
                 process_ref,
-                reason,
-                replay,
+                origin,
+                requester,
+                attribution,
             } => {
                 let record = NativeRuntimeEffectController::request_process_cancel_ref(
                     registry,
                     &process_ref,
-                    reason,
-                    replay,
+                    origin,
+                    requester,
+                    attribution,
                 )
                 .await?;
                 Ok(ProcessEffectOutcome::Cancel {
@@ -143,7 +147,6 @@ impl ProcessLocalExecution {
                 identity,
                 process_id,
                 policy,
-                reason,
             } => {
                 let outcome = match policy {
                     crate::ProcessParentEndPolicy::Abandon => {
@@ -153,14 +156,34 @@ impl ProcessLocalExecution {
                         }
                     }
                     crate::ProcessParentEndPolicy::Cancel => {
-                        match NativeRuntimeEffectController::request_process_cancel(
-                            registry,
-                            &process_id,
-                            Some(reason),
-                            None,
-                        )
-                        .await
-                        {
+                        let cancel = async {
+                            let process_ref = registry.resolve_process_ref(&process_id).await?;
+                            let record =
+                                registry
+                                    .get_process_ref(&process_ref)
+                                    .await?
+                                    .ok_or_else(|| {
+                                        crate::PluginError::Session(format!(
+                                            "unknown process `{process_id}`"
+                                        ))
+                                    })?;
+                            if record.is_terminal() || record.cancel_request.is_some() {
+                                return Ok(record);
+                            }
+                            let requester = serde_json::to_string(&record.lifecycle.parent)
+                                .expect("parent scopes contain only serializable identities");
+                            NativeRuntimeEffectController::request_process_cancel_ref(
+                                registry,
+                                &process_ref,
+                                crate::CancelOrigin::ParentEnded,
+                                requester,
+                                Some(crate::RuntimeReplayAttribution::ToolIntent(
+                                    identity.clone(),
+                                )),
+                            )
+                            .await
+                        };
+                        match cancel.await {
                             Ok(_) => crate::ToolIntentParentEndOutcome::Cancelled {
                                 identity,
                                 process_id,

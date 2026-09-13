@@ -1114,19 +1114,23 @@ impl EffectBackedProcessService {
     async fn cancel_command(
         &self,
         process_id: &ProcessId,
-        reason: Option<String>,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessCommand, crate::PluginError> {
         match self.registry.resolve_process_ref(process_id).await {
             Ok(process_ref) => Ok(crate::ProcessCommand::Cancel {
                 process_ref,
-                reason,
-                replay: None,
+                origin,
+                requester,
+                attribution,
             }),
             Err(refusal @ crate::PluginError::ProcessUnknown { .. })
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
                 Ok(crate::ProcessCommand::CancelRefused {
                     process_id: ProcessId::from(process_id.to_string()),
-                    reason,
+                    origin,
+                    requester,
                     refusal,
                 })
             }
@@ -1342,7 +1346,13 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let command = self
-            .cancel_command(process_id, Some("requested by tool".to_string()))
+            .cancel_command(
+                process_id,
+                crate::CancelOrigin::OperatorRequested,
+                serde_json::to_string(scope.effect_controller.scoped().execution_scope())
+                    .expect("serializable effect scope"),
+                None,
+            )
             .await?;
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
@@ -1355,10 +1365,17 @@ impl crate::ProcessService for EffectBackedProcessService {
         &self,
         _session_id: &SessionId,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = self.cancel_command(process_id, reason).await?;
+        let command = self
+            .cancel_command(
+                process_id,
+                crate::CancelOrigin::ModelRequested,
+                identity.replay_key.clone(),
+                Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
+            )
+            .await?;
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
             crate::ProcessEffectOutcome::CancelRefused { refusal } => Err(refusal),
@@ -1372,7 +1389,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         identity: crate::ToolIntentIdentity,
         process_id: ProcessId,
         policy: crate::ProcessParentEndPolicy,
-        reason: String,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
         match self
@@ -1382,7 +1398,6 @@ impl crate::ProcessService for EffectBackedProcessService {
                     identity,
                     process_id,
                     policy,
-                    reason,
                 },
             )
             .await?
@@ -1738,7 +1753,6 @@ impl crate::ProcessService for MockSessionManager {
         _identity: crate::ToolIntentIdentity,
         _process_id: ProcessId,
         _policy: crate::ProcessParentEndPolicy,
-        _reason: String,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, PluginError> {
         Err(PluginError::Session(
@@ -1852,7 +1866,9 @@ impl crate::ProcessService for MockSessionManager {
         crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
-            Some("requested by test".to_string()),
+            crate::CancelOrigin::OperatorRequested,
+            serde_json::to_string(_scope.effect_controller.scoped().execution_scope())
+                .expect("serializable effect scope"),
             None,
         )
         .await
@@ -1862,14 +1878,15 @@ impl crate::ProcessService for MockSessionManager {
         &self,
         _session_id: &SessionId,
         process_id: &ProcessId,
-        reason: Option<String>,
+        identity: crate::ToolIntentIdentity,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
-            reason,
-            None,
+            crate::CancelOrigin::ModelRequested,
+            identity.replay_key.clone(),
+            Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
         )
         .await
     }

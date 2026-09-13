@@ -834,7 +834,6 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
                 },
                 process_id: ProcessId::from("fig1767-proc"),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
-                reason: "fig1767-test".to_string(),
             }),
         },
     );
@@ -881,7 +880,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             process_record_bytes,
-            br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c45eb273a964f6348942738e134cbbadeca1a952b6b1cea0c668592347ea2d81"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
+            br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\"}}}","hash":"a5dc0aa07d15348d4931a296d8ea95daa3aad6d2c0cc8d5f886e75fcf40d2232"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -979,7 +978,6 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
                 },
                 process_id: ProcessId::from("fig1767-proc"),
                 policy: lash_core::ProcessParentEndPolicy::Cancel,
-                reason: "fig1767-test".to_string(),
             }),
         },
     );

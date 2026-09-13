@@ -205,15 +205,16 @@ impl From<RemoteProcessCancelRequest> for lash_core::ProcessCommand {
         let RemoteProcessCancelRequest {
             process_id,
             incarnation,
-            reason,
+            requester,
         } = value;
         Self::Cancel {
             process_ref: lash_core::ProcessRef::new(
                 process_id,
                 lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             ),
-            reason,
-            replay: None,
+            requester,
+            origin: lash_core::CancelOrigin::OperatorRequested,
+            attribution: None,
         }
     }
 }
@@ -224,11 +225,13 @@ impl From<lash_core::ProcessCancelReceipt> for RemoteProcessCancelReceipt {
             process_id,
             incarnation,
             status,
+            origin,
         } = value;
         Self {
             process_id,
             incarnation: incarnation.registration_sequence(),
             status: status.into(),
+            origin,
             record: None,
         }
     }
@@ -243,12 +246,14 @@ impl TryFrom<RemoteProcessCancelReceipt> for lash_core::ProcessCancelReceipt {
             process_id,
             incarnation,
             status,
+            origin,
             record: _,
         } = value;
         Ok(Self {
             process_id,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             status: status.into(),
+            origin,
         })
     }
 }
