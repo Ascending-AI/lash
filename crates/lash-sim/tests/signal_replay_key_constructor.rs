@@ -71,7 +71,8 @@ fn mints_signal_key(line: &str) -> bool {
     normalised.contains("process:{") && normalised.contains(":signal.")
 }
 
-fn scan_file(path: &Path, relative: &str, failures: &mut Vec<String>) {
+fn scan_file(path: &Path, relative: &str, failures: &mut Vec<String>, scanned: &mut usize) {
+    *scanned += 1;
     let source = std::fs::read_to_string(path).expect("read scanned source");
     for (number, line) in source.lines().enumerate() {
         if is_comment(line) || !mints_signal_key(line) {
@@ -81,7 +82,7 @@ fn scan_file(path: &Path, relative: &str, failures: &mut Vec<String>) {
     }
 }
 
-fn scan_dir(root: &Path, workspace: &Path, failures: &mut Vec<String>) {
+fn scan_dir(root: &Path, workspace: &Path, failures: &mut Vec<String>, scanned: &mut usize) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
@@ -95,7 +96,7 @@ fn scan_dir(root: &Path, workspace: &Path, failures: &mut Vec<String>) {
             continue;
         }
         if path.is_dir() {
-            scan_dir(&path, workspace, failures);
+            scan_dir(&path, workspace, failures, scanned);
             continue;
         }
         if path.extension().and_then(|e| e.to_str()) != Some("rs") {
@@ -109,22 +110,41 @@ fn scan_dir(root: &Path, workspace: &Path, failures: &mut Vec<String>) {
         if is_test_path(&relative) || EXEMPT_FILES.contains(&relative.as_str()) {
             continue;
         }
-        scan_file(&path, &relative, failures);
+        scan_file(&path, &relative, failures, scanned);
     }
 }
 
-fn scan_workspace() -> Vec<String> {
+/// Scanned-file count alongside the failures, so an empty walk — a sandbox
+/// missing the sources, a moved root — is a failure rather than a green run
+/// that proved nothing.
+fn scan_workspace() -> (Vec<String>, usize) {
     let workspace = workspace_root();
     let mut failures = Vec::new();
+    let mut scanned = 0;
     for root in SCANNED_ROOTS {
-        scan_dir(&workspace.join(root), &workspace, &mut failures);
+        scan_dir(
+            &workspace.join(root),
+            &workspace,
+            &mut failures,
+            &mut scanned,
+        );
     }
-    failures
+    (failures, scanned)
 }
+
+/// Floor on the number of first-party Rust sources the scan must reach. The
+/// workspace held well over a thousand when this landed; the floor only has to
+/// be high enough that a sandbox serving a fraction of the tree cannot pass.
+const MINIMUM_SCANNED_FILES: usize = 600;
 
 #[test]
 fn the_signal_replay_key_format_appears_once() {
-    let failures = scan_workspace();
+    let (failures, scanned) = scan_workspace();
+    assert!(
+        scanned >= MINIMUM_SCANNED_FILES,
+        "the scan reached only {scanned} sources; it must see the whole tree, \
+         or a green run means nothing"
+    );
     assert!(
         failures.is_empty(),
         "the process signal replay key must be built by \

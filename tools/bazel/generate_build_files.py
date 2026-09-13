@@ -436,6 +436,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "//crates/lash-postgres-store:package_files",
                 "//crates/lash-sqlite-store:package_files",
             ])
+        if (
+            package["name"] == "lash-sim"
+            and target["name"] == "signal_replay_key_constructor"
+        ):
+            # The gate scans every first-party Rust source, runbooks and
+            # examples included, so under Bazel it needs them all in the sandbox
+            # or it would pass by seeing nothing.
+            extra_compile_data.append("//:workspace_rust_sources")
         macro = (
             "lash_rust_binary"
             if kind in ("bin", "example", "bench")
