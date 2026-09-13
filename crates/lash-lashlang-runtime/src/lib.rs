@@ -789,7 +789,7 @@ impl LashlangProcessInput {
             kind: LASHLANG_ENGINE_KIND.to_string(),
             label: Some(self.process_name.clone()),
             definition: Some(lash_remote_protocol::RemoteProcessDefinitionIdentity {
-                value: self.definition(),
+                value: self.definition_identity().to_process_value(),
             }),
         }
     }
@@ -828,13 +828,19 @@ impl LashlangProcessInput {
         serde_json::from_value(payload)
     }
 
-    pub fn definition(&self) -> serde_json::Value {
-        serde_json::json!({
-            "module_ref": self.module_ref,
-            "process_ref": self.process_ref,
-            "host_requirements_ref": self.host_requirements_ref,
-            "process_name": self.process_name,
-        })
+    /// Projects the immutable definition this input names.
+    ///
+    /// Everything that persists or compares a Lashlang definition goes through
+    /// [`lashlang::ProcessDefinitionIdentity::to_process_value`] from here, so
+    /// the stored `ProcessIdentity.definition` is byte-identical to the value a
+    /// cell holds for the same process.
+    pub fn definition_identity(&self) -> lashlang::ProcessDefinitionIdentity {
+        lashlang::ProcessDefinitionIdentity::new(
+            self.module_ref.clone(),
+            self.host_requirements_ref.clone(),
+            self.process_ref.clone(),
+            self.process_name.clone(),
+        )
     }
 }
 
@@ -1148,7 +1154,7 @@ pub fn resolve_lashlang_module_operation(
 fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::ProcessIdentity {
     lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND)
         .with_label(Some(input.process_name.clone()))
-        .with_definition(Some(input.definition()))
+        .with_definition(Some(input.definition_identity().to_process_value()))
 }
 
 #[derive(Clone)]

@@ -333,7 +333,7 @@ fn lashlang_process_input_for_definition(
 fn lashlang_process_definition_for_identity(
     definition: &lashlang::ProcessDefinitionIdentity,
 ) -> Value {
-    lashlang_process_input_for_definition(definition).definition()
+    definition.to_process_value()
 }
 
 fn lashlang_process_identity_for_definition(

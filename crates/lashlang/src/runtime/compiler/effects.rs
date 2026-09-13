@@ -436,31 +436,13 @@ impl Compiler {
             self.emit_push_value(Value::Null);
             return;
         };
-        let mut record = record_with_capacity(5);
-        record.insert(LASH_PROCESS_VALUE_KEY.to_string(), Value::Bool(true));
-        record.insert(
-            LASH_PROCESS_NAME_KEY.to_string(),
-            Value::String(process.into()),
+        let literal = process_ref_literal(
+            &module_context.module_ref,
+            &module_context.host_requirements_ref,
+            process_ref,
+            process,
         );
-        record.insert(
-            LASH_MODULE_REF_KEY.to_string(),
-            Value::String(module_context.module_ref.to_string().into()),
-        );
-        let mut process_ref_record = record_with_capacity(2);
-        process_ref_record.insert(
-            "component".to_string(),
-            Value::String(process_ref.component.to_string().into()),
-        );
-        process_ref_record.insert("pos".to_string(), Value::Number(process_ref.pos as f64));
-        record.insert(
-            LASH_PROCESS_REF_KEY.to_string(),
-            Value::Record(Arc::new(process_ref_record)),
-        );
-        record.insert(
-            LASH_HOST_REQUIREMENTS_REF_KEY.to_string(),
-            Value::String(module_context.host_requirements_ref.to_string().into()),
-        );
-        self.emit_push_value(Value::Record(Arc::new(record)));
+        self.emit_push_value(literal);
     }
 
     fn compile_receiver_call_expr(
@@ -823,5 +805,113 @@ fn aggregate_await_leaf_count(expr: &Expr) -> Option<usize> {
         }),
         expr if is_pure_expr(expr) => Some(0),
         _ => None,
+    }
+}
+
+/// Builds the VM literal a process reference evaluates to.
+///
+/// This is the cell-side half of the one definition codec: converted to JSON it
+/// must equal
+/// [`ProcessDefinitionIdentity::to_process_value`](crate::ProcessDefinitionIdentity::to_process_value)
+/// for the same four fields, because a started process stores that value as its
+/// `ProcessIdentity.definition` and `processes.list({ definition: p })` compares
+/// the two by equality. The unit test below pins that equality; the literal is
+/// built by hand only to keep the compiled record's key order stable.
+pub(crate) fn process_ref_literal(
+    module_ref: &crate::ModuleRef,
+    host_requirements_ref: &crate::HostRequirementsRef,
+    process_ref: &crate::ProcessRef,
+    process_name: &str,
+) -> Value {
+    let mut record = record_with_capacity(5);
+    record.insert(LASH_PROCESS_VALUE_KEY.to_string(), Value::Bool(true));
+    record.insert(
+        LASH_PROCESS_NAME_KEY.to_string(),
+        Value::String(process_name.into()),
+    );
+    record.insert(
+        LASH_MODULE_REF_KEY.to_string(),
+        Value::String(module_ref.to_string().into()),
+    );
+    let mut process_ref_record = record_with_capacity(2);
+    process_ref_record.insert(
+        "component".to_string(),
+        Value::String(process_ref.component.to_string().into()),
+    );
+    process_ref_record.insert("pos".to_string(), Value::Number(process_ref.pos as f64));
+    record.insert(
+        LASH_PROCESS_REF_KEY.to_string(),
+        Value::Record(Arc::new(process_ref_record)),
+    );
+    record.insert(
+        LASH_HOST_REQUIREMENTS_REF_KEY.to_string(),
+        Value::String(host_requirements_ref.to_string().into()),
+    );
+    Value::Record(Arc::new(record))
+}
+
+#[cfg(test)]
+mod process_ref_literal_tests {
+    use super::process_ref_literal;
+    use crate::{
+        ContentHash, HostRequirementsRef, ModuleRef, ProcessDefinitionIdentity, ProcessRef,
+    };
+
+    fn fixture() -> (ModuleRef, HostRequirementsRef, ProcessRef, &'static str) {
+        (
+            ModuleRef::new(&ContentHash::new("module-source")),
+            HostRequirementsRef::new(&ContentHash::new("host-requirements")),
+            ProcessRef::new(ContentHash::new("component-source"), 3),
+            "on_button",
+        )
+    }
+
+    #[test]
+    fn compiled_process_literal_encodes_exactly_what_the_codec_encodes() {
+        let (module_ref, host_requirements_ref, process_ref, process_name) = fixture();
+        let literal = process_ref_literal(
+            &module_ref,
+            &host_requirements_ref,
+            &process_ref,
+            process_name,
+        );
+        let identity = ProcessDefinitionIdentity::new(
+            module_ref,
+            host_requirements_ref,
+            process_ref,
+            process_name,
+        );
+
+        assert_eq!(
+            serde_json::to_value(&literal).expect("compiled process literal serializes"),
+            identity.to_process_value(),
+            "the VM literal and the definition codec must produce one encoding"
+        );
+    }
+
+    #[test]
+    fn compiled_process_literal_round_trips_through_the_codec() {
+        let (module_ref, host_requirements_ref, process_ref, process_name) = fixture();
+        let literal = process_ref_literal(
+            &module_ref,
+            &host_requirements_ref,
+            &process_ref,
+            process_name,
+        );
+        let encoded = serde_json::to_value(&literal).expect("compiled process literal serializes");
+
+        let decoded = ProcessDefinitionIdentity::from_process_value(&encoded)
+            .expect("the VM literal decodes through the definition codec");
+
+        assert_eq!(
+            decoded,
+            ProcessDefinitionIdentity::new(
+                module_ref,
+                host_requirements_ref,
+                process_ref,
+                process_name,
+            )
+        );
+        assert_eq!(decoded.to_process_value(), encoded);
     }
 }

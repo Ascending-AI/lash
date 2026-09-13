@@ -142,9 +142,12 @@ pub fn process_list_tool_definition() -> ToolDefinition {
                     ],
                     "description": "Any-of lifecycle status set. Absence selects running runs; `any` includes every status."
                 },
+                // Deliberately untyped: the value is whatever definition
+                // encoding the engine that started the run stores, and a
+                // Lashlang cell passes the process itself (`on_button`), whose
+                // `Process<...>` type is not assignable to a record.
                 "definition": {
-                    "type": "object",
-                    "description": "A process definition value, for example `on_button`."
+                    "description": "A process definition value, for example `on_button`: pass the process itself and rows started from it match."
                 }
             },
             "additionalProperties": false
@@ -368,7 +371,9 @@ mod tests {
             rendered.contains("status?: any | record{in: list[enum["),
             "{rendered}"
         );
-        assert!(rendered.contains("definition?: record"), "{rendered}");
+        // A Lashlang cell passes the process itself, whose `Process<...>` type
+        // is not assignable to a record, so the filter parameter is untyped.
+        assert!(rendered.contains("definition?: any"), "{rendered}");
         assert!(!rendered.contains("history"), "{rendered}");
         assert!(!rendered.contains("terminal:"), "{rendered}");
     }
