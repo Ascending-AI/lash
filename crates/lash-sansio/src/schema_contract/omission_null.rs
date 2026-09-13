@@ -84,6 +84,17 @@ fn canonical_null_acceptance_inner(
         return acceptance;
     }
 
+    if let Some(all_of) = object.get("allOf").and_then(Value::as_array) {
+        if all_of.len() != 1
+            || object
+                .keys()
+                .any(|key| key != "allOf" && !is_schema_annotation(key))
+        {
+            return NullAcceptance::Unknown;
+        }
+        return canonical_null_acceptance_inner(&all_of[0], root, active_refs);
+    }
+
     let Some(any_of) = object.get("anyOf").and_then(Value::as_array) else {
         return NullAcceptance::Unknown;
     };
@@ -278,19 +289,70 @@ fn contains_introduced_mapping(
     {
         return true;
     }
-    let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
+    let Some(object) = schema.as_object() else {
         return false;
     };
-    let Some((target, target_path)) = resolve_local_schema_ref(root, reference) else {
-        return false;
-    };
-    if active_refs.contains(&target_path) {
-        return false;
+
+    if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+        let Some((target, target_path)) = resolve_local_schema_ref(root, reference) else {
+            return false;
+        };
+        if active_refs.contains(&target_path) {
+            return false;
+        }
+        active_refs.push(target_path.clone());
+        let mapped =
+            contains_introduced_mapping(root, target, &target_path, introduced, active_refs);
+        active_refs.pop();
+        return mapped;
     }
-    active_refs.push(target_path.clone());
-    let mapped = contains_introduced_mapping(root, target, &target_path, introduced, active_refs);
-    active_refs.pop();
-    mapped
+
+    if object
+        .get("properties")
+        .and_then(Value::as_object)
+        .is_some_and(|properties| {
+            properties.iter().any(|(name, property)| {
+                contains_introduced_mapping(
+                    root,
+                    property,
+                    &schema_path.child("properties").child(name),
+                    introduced,
+                    active_refs,
+                )
+            })
+        })
+    {
+        return true;
+    }
+
+    if object.get("items").is_some_and(|items| {
+        contains_introduced_mapping(
+            root,
+            items,
+            &schema_path.child("items"),
+            introduced,
+            active_refs,
+        )
+    }) {
+        return true;
+    }
+
+    ["anyOf", "allOf"].iter().any(|keyword| {
+        object
+            .get(*keyword)
+            .and_then(Value::as_array)
+            .is_some_and(|branches| {
+                branches.iter().enumerate().any(|(index, branch)| {
+                    contains_introduced_mapping(
+                        root,
+                        branch,
+                        &schema_path.child(keyword).index(index),
+                        introduced,
+                        active_refs,
+                    )
+                })
+            })
+    })
 }
 
 pub(super) fn resolve_local_schema_ref<'a>(

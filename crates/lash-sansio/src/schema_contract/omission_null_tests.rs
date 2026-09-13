@@ -176,3 +176,73 @@ fn strict_projection_leaves_ref_backed_ambiguous_union_descendants_unmapped() {
         diagnostic.contains("multi-branch anyOf") && diagnostic.contains("omission-null")
     }));
 }
+
+#[test]
+fn strict_projection_leaves_nested_ref_union_ambiguity_unmapped() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "choice": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": { "v": { "$ref": "#/$defs/A" } },
+                        "required": ["v"],
+                        "additionalProperties": false
+                    },
+                    {
+                        "type": "object",
+                        "properties": { "v": { "$ref": "#/$defs/B" } },
+                        "required": ["v"],
+                        "additionalProperties": false
+                    }
+                ]
+            }
+        },
+        "required": ["choice"],
+        "$defs": {
+            "A": {
+                "type": "object",
+                "properties": { "n": { "type": "integer" } },
+                "additionalProperties": false
+            },
+            "B": {
+                "type": "object",
+                "properties": { "n": { "type": ["integer", "null"] } },
+                "required": ["n"],
+                "additionalProperties": false
+            }
+        }
+    });
+
+    let projected = project_strict_tool_parameters(&schema).unwrap();
+
+    assert!(projected.omission_null_paths.is_empty());
+    assert!(projected.diagnostics.iter().any(|diagnostic| {
+        diagnostic.contains("multi-branch anyOf") && diagnostic.contains("omission-null")
+    }));
+}
+
+#[test]
+fn strict_projection_records_single_branch_all_of_omission_null_path() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "limit": {
+                "allOf": [{ "type": "integer" }],
+                "default": 37
+            }
+        }
+    });
+
+    let projected = project_strict_tool_parameters(&schema).unwrap();
+
+    assert_eq!(
+        projected
+            .omission_null_paths
+            .iter()
+            .map(|path| path.segments())
+            .collect::<Vec<_>>(),
+        vec![[OmissionNullPathSegment::Property("limit".to_string())].as_slice()]
+    );
+}

@@ -843,3 +843,94 @@ fn strict_decoder_leaves_override_and_ref_backed_ambiguous_union_nulls_untouched
         arguments
     );
 }
+
+#[test]
+fn strict_decoder_preserves_nested_ref_union_omission_null() {
+    let mut req = request(Vec::new());
+    req.tools = Arc::new(vec![LlmToolSpec {
+        name: "nested_union_probe".to_string(),
+        description: "nested union".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "choice": {
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": { "v": { "$ref": "#/$defs/A" } },
+                            "required": ["v"],
+                            "additionalProperties": false
+                        },
+                        {
+                            "type": "object",
+                            "properties": { "v": { "$ref": "#/$defs/B" } },
+                            "required": ["v"],
+                            "additionalProperties": false
+                        }
+                    ]
+                }
+            },
+            "required": ["choice"],
+            "$defs": {
+                "A": {
+                    "type": "object",
+                    "properties": { "n": { "type": "integer" } },
+                    "additionalProperties": false
+                },
+                "B": {
+                    "type": "object",
+                    "properties": { "n": { "type": ["integer", "null"] } },
+                    "required": ["n"],
+                    "additionalProperties": false
+                }
+            }
+        })
+        .into(),
+        output_schema: json!({}).into(),
+    }]);
+    let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+        "test",
+        &req,
+        true,
+        &lash_sansio::ProviderSchemaCapabilities::openai(true),
+    )
+    .unwrap();
+    let arguments = r#"{"choice":{"v":{"n":null}}}"#;
+
+    assert_eq!(
+        decoder.decode("nested_union_probe", arguments.to_string()),
+        arguments
+    );
+}
+
+#[test]
+fn strict_decoder_strips_single_branch_all_of_omission_null() {
+    let mut req = request(Vec::new());
+    req.tools = Arc::new(vec![LlmToolSpec {
+        name: "all_of_probe".to_string(),
+        description: "single-branch allOf".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "allOf": [{ "type": "integer" }],
+                    "default": 37
+                }
+            }
+        })
+        .into(),
+        output_schema: json!({}).into(),
+    }]);
+    let decoder = crate::responses_shared::ToolArgumentDecoder::for_request(
+        "test",
+        &req,
+        true,
+        &lash_sansio::ProviderSchemaCapabilities::openai(true),
+    )
+    .unwrap();
+
+    assert_eq!(
+        decoder.decode("all_of_probe", r#"{"limit":null}"#.to_string()),
+        "{}"
+    );
+}
