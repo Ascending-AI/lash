@@ -72,7 +72,7 @@
 //! owns exact-address promises and durable deadline timers for every
 //! [`ExecutionScope`](lash_core::ExecutionScope); the second indexes
 //! session-owned waits so cancellation and deletion can resolve them durably.
-//! Await-event identity epoch 7 uses the v2 wait-index namespace and marker;
+//! Await-event identity epoch 6 uses the v2 wait-index namespace and marker;
 //! requests and indexed wait values carry the `AwaitEventKey` preimage so each
 //! handler derives scope, classification, and workflow address locally.
 //! Before upgrading, drain and recreate both Restate services' state. Every

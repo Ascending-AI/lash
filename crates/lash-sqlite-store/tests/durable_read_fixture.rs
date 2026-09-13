@@ -15,6 +15,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-11f6b0eb/sqlite-expected.json",
+];
+const PREVIOUS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/sqlite-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
@@ -123,7 +126,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 61"),
+        message.contains("supports schema version 58"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -148,7 +151,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 61"),
+        message.contains("supports schema version 58"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(

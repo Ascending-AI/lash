@@ -19,12 +19,12 @@
 //! from ingress-side `RestateEffectHostController::await_event_key`, which is not
 //! executing inside a Restate journal and still refuses revoked sessions eagerly.
 //!
-//! Identity epoch 7 is a hard cutover: every externally minted wait request
+//! Identity epoch 6 is a hard cutover: every externally minted wait request
 //! and indexed state value carries the full authority-bound [`AwaitEventKey`]
 //! preimage, and handlers derive scope, classification, and workflow address
 //! locally. Deployments must drain and recreate both durable-wait services
 //! before upgrading; there is no tolerant decoder, address migration, or
-//! overlap window for pre-epoch-7 state.
+//! overlap window for pre-epoch-6 state.
 
 use lash_sansio::SessionId;
 use std::time::Duration;
@@ -130,7 +130,7 @@ const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// decoder rejects the version-1 field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
-pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 7;
+pub(crate) const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
 const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";

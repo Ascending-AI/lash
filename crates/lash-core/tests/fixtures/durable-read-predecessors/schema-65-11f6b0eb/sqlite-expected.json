@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 66,
+  "fixture_schema_version": 65,
   "head_revision": 4,
   "node_ids_in_read_order": [
     "frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940",
@@ -468,7 +468,7 @@
       "append_request_identity": {
         "kind": "semantic_boundary",
         "operation": "record-config",
-        "identity_encoding_version": 3,
+        "identity_encoding_version": 2,
         "request_identity_hash": "49dd99643b07683557b72ca3d614183793aea1e1389876ede6728cbd312dbc97"
       }
     },
@@ -477,7 +477,7 @@
     "adopted_intent_rows": 0,
     "committed_attachment_ids": []
   },
-  "queue_batch_id": "qwb:ef3744a04c94fb45e8b79895843cd983d065b8ed4f70c75105a65e8454265d38",
+  "queue_batch_id": "qwb:01ede6bbeac553baf9980011b4682e4e9b87467b388cbd6e36b662b45d08d7ab",
   "pending_input_id": "durable-read-pending-input",
   "process_env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
   "await_event_key": {

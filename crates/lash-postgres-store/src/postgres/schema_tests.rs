@@ -1,17 +1,25 @@
 use super::*;
 
-const RETAINED_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION - 1;
+// Historical test declarations are frozen independently of the active catalog.
+const RETAINED_MIGRATION_ENDPOINT: i32 = 87;
 
 #[test]
 fn current_destructive_cutover_has_no_migration_arm() {
     assert!(
         SCHEMA_MIGRATIONS
             .iter()
-            .all(|migration| migration.to != SCHEMA_VERSION),
-        "component 78 must reject every pre-cutover schema rather than migrate it"
+            .filter(|migration| migration.to == SCHEMA_VERSION)
+            .all(SchemaMigration::is_recreate_boundary),
+        "the current component must reject every pre-cutover schema rather than migrate it"
     );
 
-    let predecessor = SCHEMA_MIGRATIONS
+    let immediate = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|migration| migration.from == 87 && migration.to == 88)
+        .expect("the immediate predecessor must have an explicit refusal row");
+    assert!(immediate.is_recreate_boundary());
+
+    let predecessor = HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 68 && migration.to == RETAINED_MIGRATION_ENDPOINT)
         .expect("the historical component 68 refusal boundary must remain declared");
@@ -20,7 +28,7 @@ fn current_destructive_cutover_has_no_migration_arm() {
         "component 68 must not migrate into the retained predecessor"
     );
 
-    let declared = SCHEMA_MIGRATIONS
+    let declared = HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 64 && migration.to == RETAINED_MIGRATION_ENDPOINT)
         .expect("the historical component 64 creation-only migration must remain declared");
@@ -38,7 +46,7 @@ fn current_destructive_cutover_has_no_migration_arm() {
 
 #[test]
 fn component_63_remains_a_recreate_boundary_at_the_blake3_cutover() {
-    let declared = SCHEMA_MIGRATIONS
+    let declared = HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 63)
         .expect("component 63 must remain visible to the refusal gate");
@@ -51,7 +59,7 @@ fn component_63_remains_a_recreate_boundary_at_the_blake3_cutover() {
 
 #[test]
 fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
-    let declared = SCHEMA_MIGRATIONS
+    let declared = HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 61)
         .expect("component 61 must remain visible to the refusal gate");
@@ -74,7 +82,7 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
 /// The declared component-53 migration into the retained predecessor, which
 /// every case below perturbs.
 fn migration() -> &'static SchemaMigration {
-    SCHEMA_MIGRATIONS
+    HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 53)
         .expect("the component-53 migration is declared")

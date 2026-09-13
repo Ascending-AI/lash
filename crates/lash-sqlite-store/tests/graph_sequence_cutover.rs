@@ -1,6 +1,6 @@
 use lash_sqlite_store::{SESSION_SCHEMA_VERSION, Store};
 
-const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 60;
+const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 57;
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
@@ -68,7 +68,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
         .to_string();
     assert_eq!(
         error,
-        "Error(\"Unsupported lash durable core schema: this binary supports schema version 61, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
+        "Error(\"Unsupported lash durable core schema: this binary supports schema version 58, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
     );
     let connection = rusqlite::Connection::open(&path).expect("inspect refused SQLite catalog");
     assert_eq!(

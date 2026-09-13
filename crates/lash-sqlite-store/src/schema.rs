@@ -599,19 +599,11 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// re-puts and explicit host recovery can restore it exactly.
 /// Version 56 requires pending-input claim identity and token to be either both
 /// NULL or both populated; version 55 catalogs are recreated.
-/// Version 57 composes that contract with the monotonic turn-cancel intent
-/// revision used by cancellation publication CAS. Component-56 stores are
-/// rejected rather than admitting either half of the composed schema.
-/// Version 58 adds the cancellation-only await-event authority used by Native
-/// sessions without importing the unrelated effect journal.
-/// Version 59 persists the selected authority binding and exact pending closure
-/// authorization so lease takeover cannot forget or replace promise work.
-/// Version 60 persists retired physical scopes so cancellation authorization
-/// and Process-journal retirement remain serialized across owner restarts.
-/// Version 61 composes that cancellation lineage with the truthful admitted
-/// effect identity carried by the other component-57 parent. Both parent
-/// shapes are rejected rather than interpreting either incomplete contract.
-pub(crate) const SCHEMA_VERSION: i32 = 61;
+/// Version 57 combines truthful admitted effect identities with all-or-none
+/// pending-input claims. Version 58 adds intent revisions, Native cancellation
+/// authority, exact closure authorizations, and retired-scope fencing. A
+/// component-57 catalog cannot recover these facts and must be recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 58;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

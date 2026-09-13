@@ -1865,17 +1865,17 @@ pub(super) fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_st
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 7"));
+    assert!(wrong_epoch.contains("incompatible with epoch 6"));
     assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 
 #[test]
-pub(super) fn durable_wait_identity_epoch_seven_rejects_epoch_six_state() {
+pub(super) fn durable_wait_identity_epoch_six_rejects_epoch_five_state() {
     let error =
-        validate_durable_wait_index_epoch(Some(6), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-6 durable-wait state must not open under epoch 7");
-    assert!(error.contains("identity epoch 6 is incompatible with epoch 7"));
+        validate_durable_wait_index_epoch(Some(5), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
+            .expect_err("epoch-5 durable-wait state must not open under epoch 6");
+    assert!(error.contains("identity epoch 5 is incompatible with epoch 6"));
     assert!(error.contains("drain and recreate"));
 }
 

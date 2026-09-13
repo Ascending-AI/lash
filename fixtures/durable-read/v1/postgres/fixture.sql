@@ -661,6 +661,28 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
 
 
 --
+-- Name: lash_turn_cancel_closure_authorizations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_authorizations (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    authorization_json text NOT NULL
+);
+
+
+--
+-- Name: lash_turn_cancel_closure_participants; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_closure_participants (
+    scope_id text NOT NULL,
+    participant_id text NOT NULL,
+    scope_json text NOT NULL
+);
+
+
+--
 -- Name: lash_turn_cancel_requests; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -672,8 +694,31 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     reason text,
     disposition text DEFAULT 'defer'::text NOT NULL,
     mode text DEFAULT 'immediate'::text NOT NULL,
+    intent_revision bigint NOT NULL,
     affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL
+    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
+    CONSTRAINT lash_turn_cancel_requests_intent_revision_check CHECK ((intent_revision >= 1))
+);
+
+
+--
+-- Name: lash_turn_cancel_retired_scopes; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_retired_scopes (
+    scope_id text NOT NULL
+);
+
+
+--
+-- Name: lash_turn_cancellation_bindings; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
+    session_id text NOT NULL,
+    binding_id text NOT NULL,
+    admitted_scope_json text,
+    CONSTRAINT lash_turn_cancellation_bindings_binding_id_check CHECK ((length(binding_id) > 0))
 );
 
 
@@ -962,7 +1007,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_effect_replay VALUES ('{"vers
 
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"append-session-nodes","scope":{"operation_id":"session:durable-read-fixture:boundary:durable-read-current-append","type":"runtime_operation"}}', 'ce1700b88f99c1e84b4303662c0ae606af2a498a8b28e997094defe1e3c79ac4', '{"head_revision":1,"checkpoint_ref":"48faabc10df92256d6479af3c5141bce32890dc2eecad5f8cda265cb2e687972","manifest":{"schema_version":3,"turn_state":{"turn_index":0,"token_usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0},"protocol_turn_options":{"schema_version":1,"payload":{}}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[{"node_id":"frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","timestamp":"2023-11-14T22:13:20+00:00"}]}', 1700000000000, 'ff5ba53866337825fa36fdbf24c5935f8f98eca4b5d0578290d12bf09dad93a9', 2, 1);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', '0b6a69cc3aa392de3d95f3d1b51c741f0b26ffb27352c7869bb658144530a855', '{"head_revision":2,"checkpoint_ref":"b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7","manifest":{"schema_version":3,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[],"committed_usage_delta_identities":[{"operation_storage_key":"{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}","entry_ordinal":0,"payload_encoding_version":4,"payload_hash":"0885a585f704e9086220f97cad28cd83905497f1ad2484f2fd1d1895945e5dba"}]}', 1700000000000, NULL, NULL, NULL);
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"record-config","scope":{"operation_id":"session:durable-read-fixture:boundary:protocol-materialization","type":"runtime_operation"}}', 'b8adf3ebe8f3d5ea6c657e9996453688fc2f83d31664fe9d4c025d23dcf02bea', '{"head_revision":3,"checkpoint_ref":"b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7","manifest":{"schema_version":3,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, '49dd99643b07683557b72ca3d614183793aea1e1389876ede6728cbd312dbc97', NULL, 2);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"record-config","scope":{"operation_id":"session:durable-read-fixture:boundary:protocol-materialization","type":"runtime_operation"}}', 'b8adf3ebe8f3d5ea6c657e9996453688fc2f83d31664fe9d4c025d23dcf02bea', '{"head_revision":3,"checkpoint_ref":"b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7","manifest":{"schema_version":3,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, '49dd99643b07683557b72ca3d614183793aea1e1389876ede6728cbd312dbc97', NULL, 3);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', '0404e9e2e17893e67b3162d1c4916cf979ff2fe1f80c64ec2f6bf7872a06b206', '{"head_revision":4,"checkpoint_ref":"b249f3a0536cbc5dba96c56913085e94e6bef2f5a3e3332ea6c6f01a0ca169a7","manifest":{"schema_version":3,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL);
 
 
@@ -970,7 +1015,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 87);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 88);
 
 
 --
@@ -1041,7 +1086,31 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigge
 
 
 --
+-- Data for Name: lash_turn_cancel_closure_authorizations; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancel_closure_participants; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_turn_cancel_requests; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancel_retired_scopes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancellation_bindings; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1473,11 +1542,43 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 
 --
+-- Name: lash_turn_cancel_closure_authorizations lash_turn_cancel_closure_authorizations_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_authorizations
+    ADD CONSTRAINT lash_turn_cancel_closure_authorizations_pkey PRIMARY KEY (session_id, turn_id);
+
+
+--
+-- Name: lash_turn_cancel_closure_participants lash_turn_cancel_closure_participants_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_closure_participants
+    ADD CONSTRAINT lash_turn_cancel_closure_participants_pkey PRIMARY KEY (scope_id, participant_id);
+
+
+--
 -- Name: lash_turn_cancel_requests lash_turn_cancel_requests_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_requests
     ADD CONSTRAINT lash_turn_cancel_requests_pkey PRIMARY KEY (session_id, turn_id);
+
+
+--
+-- Name: lash_turn_cancel_retired_scopes lash_turn_cancel_retired_scopes_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_retired_scopes
+    ADD CONSTRAINT lash_turn_cancel_retired_scopes_pkey PRIMARY KEY (scope_id);
+
+
+--
+-- Name: lash_turn_cancellation_bindings lash_turn_cancellation_bindings_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancellation_bindings
+    ADD CONSTRAINT lash_turn_cancellation_bindings_pkey PRIMARY KEY (session_id);
 
 
 --
