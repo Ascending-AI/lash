@@ -946,8 +946,9 @@ impl RuntimeBoundaryHarness {
                 .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
-        let env_ref = lash_core::runtime::persist_process_execution_env(
+        let env_ref = lash_core::runtime::publish_process_execution_env(
             runtime_host.durability.process_env_store.as_ref(),
+            &lash_core::ArtifactOwner::host("sim-lifecycle"),
             &lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::PluginOptions::default(),
                 policy.clone(),

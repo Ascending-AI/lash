@@ -1339,17 +1339,37 @@ macro_rules! attachment_store_reopenable_tests {
 #[macro_export]
 macro_rules! process_execution_env_store_tests {
     ($fixture:block) => {
-        $crate::process_execution_env_store_tests!(@catalogue $fixture; [
-            (process_execution_env_store, "process-execution-env-store"),
-        ]);
+        $crate::process_execution_env_store_tests!(@catalogue $fixture;
+            probe [
+                (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
+            ]
+            store [
+                (process_environment_namespace, "process-env-hostile-reference"),
+                (process_env_owner_lifecycle, "process-env-owner-lifecycle"),
+                (failed_registration_reclaims_process_env, "process-env-failed-registration"),
+                (process_env_transfer_and_fence, "process-env-transfer"),
+                (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
+            ]
+        );
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@catalogue $fixture:block;
+        probe [$(( $probe_law:ident, $probe_label:literal )),* $(,)?]
+        store [$(( $store_law:ident, $store_label:literal )),* $(,)?]
+    ) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
+            async fn $probe_law() {
                 let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
+                let _ = $probe_label;
+                $crate::registration_macro_support::$probe_law(&make).await;
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $store_law() {
+                let (_fixture_guard, make) = $fixture;
+                let _ = $store_label;
+                $crate::registration_macro_support::$store_law(make()).await;
             }
         )*
     };
@@ -1360,7 +1380,23 @@ macro_rules! process_execution_env_store_tests {
 macro_rules! artifact_store_reopenable_tests {
     ($fixture:block) => {
         $crate::artifact_store_reopenable_tests!(@catalogue $fixture; [
-            (artifact_store_reopenable, "artifact-store-reopenable"),
+            (lashlang_artifact_store_fresh_instances, "lashlang-artifact-fresh-instances"),
+            (lashlang_artifact_store_reports_durable, "lashlang-artifact-durability"),
+            (lashlang_artifact_owner_lifecycle, "lashlang-artifact-owner-lifecycle"),
+            (lashlang_failed_registration_reclaims_staging_owner, "lashlang-artifact-failed-registration"),
+            (lashlang_artifact_transfer_is_idempotent, "lashlang-artifact-transfer"),
+            (lashlang_artifact_retirement_fences_late_publication, "lashlang-artifact-retirement-fence"),
+            (lashlang_slow_writer_is_fenced_after_retirement, "lashlang-artifact-slow-writer"),
+            (lashlang_hostile_module_references_are_rejected, "lashlang-artifact-hostile-reference"),
+            (lashlang_artifact_survives_reopen, "lashlang-artifact-reopen"),
+            (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
+            (process_environment_namespace, "process-env-hostile-reference"),
+            (process_env_owner_lifecycle, "process-env-owner-lifecycle"),
+            (failed_registration_reclaims_process_env, "process-env-failed-registration"),
+            (process_env_transfer_and_fence, "process-env-transfer"),
+            (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
+            (process_env_survives_reopen, "process-env-reopen"),
+            (artifact_store_cross_namespace_isolation, "artifact-store-cross-namespace"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

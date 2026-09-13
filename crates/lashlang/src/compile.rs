@@ -2,15 +2,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ArtifactStoreError, HostRequirementsRef, LashlangArtifactStore, LashlangHostEnvironment,
-    LinkError, LinkedModule, ModuleArtifact, ModuleIntrospection, ModuleIntrospectionError,
-    ModuleRef, ParseError, Span, format_link_diagnostic, format_parse_diagnostic, parse,
+    HostRequirementsRef, LashlangHostEnvironment, LinkError, LinkedModule, ModuleArtifact,
+    ModuleIntrospection, ModuleIntrospectionError, ModuleRef, ParseError, Span,
+    format_link_diagnostic, format_parse_diagnostic, parse,
 };
 
 pub struct ModuleCompileRequest<'a> {
     pub source: &'a str,
     pub environment: &'a LashlangHostEnvironment,
-    pub artifact_store: Option<&'a dyn LashlangArtifactStore>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -21,7 +20,7 @@ pub struct ModuleCompileOutput {
     pub introspection: ModuleIntrospection,
 }
 
-/// Parse, link, inspect, and optionally persist a Lashlang module.
+/// Parse, link, and inspect a Lashlang module without performing I/O.
 ///
 /// `parse` and `LinkedModule::link` remain public for tooling and low-level
 /// tests. Host integrations should prefer this facade so diagnostics,
@@ -30,7 +29,7 @@ pub struct ModuleCompileOutput {
     clippy::result_large_err,
     reason = "boxing ModuleCompileError would change this public serialized error API"
 )]
-pub async fn compile_module(
+pub fn compile_module(
     request: ModuleCompileRequest<'_>,
 ) -> Result<ModuleCompileOutput, ModuleCompileError> {
     let program =
@@ -41,12 +40,6 @@ pub async fn compile_module(
         .artifact
         .introspect()
         .map_err(ModuleCompileError::introspection)?;
-    if let Some(store) = request.artifact_store {
-        store
-            .put_module_artifact(&linked.artifact)
-            .await
-            .map_err(ModuleCompileError::persist)?;
-    }
     Ok(ModuleCompileOutput {
         module_ref: linked.module_ref,
         host_requirements_ref: linked.host_requirements_ref,
@@ -60,7 +53,6 @@ pub async fn compile_module(
 pub enum ModuleCompileStage {
     Parse,
     Link,
-    Persist,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,8 +79,6 @@ pub enum ModuleCompileError {
     Parse(ModuleCompileDiagnostic),
     #[error("{0}")]
     Link(ModuleCompileDiagnostic),
-    #[error("{0}")]
-    Persist(ModuleCompileDiagnostic),
 }
 
 impl ModuleCompileError {
@@ -136,23 +126,9 @@ impl ModuleCompileError {
         })
     }
 
-    fn persist(err: ArtifactStoreError) -> Self {
-        Self::Persist(ModuleCompileDiagnostic {
-            stage: ModuleCompileStage::Persist,
-            message: err.to_string(),
-            offset: None,
-            span: None,
-            line: None,
-            column: None,
-            diagnostic: Some(err.to_string()),
-        })
-    }
-
     pub fn diagnostic(&self) -> &ModuleCompileDiagnostic {
         match self {
-            Self::Parse(diagnostic) | Self::Link(diagnostic) | Self::Persist(diagnostic) => {
-                diagnostic
-            }
+            Self::Parse(diagnostic) | Self::Link(diagnostic) => diagnostic,
         }
     }
 }
@@ -184,8 +160,8 @@ fn source_location(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::*;
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_module_facade_returns_artifact_and_introspection() {
+    #[test]
+    fn compile_module_facade_returns_artifact_and_introspection() {
         let environment = LashlangHostEnvironment::new(
             Default::default(),
             crate::LashlangAbilities::default()
@@ -195,9 +171,7 @@ mod tests {
         let output = compile_module(ModuleCompileRequest {
             source: "process echo(value: str) { finish value }",
             environment: &environment,
-            artifact_store: None,
         })
-        .await
         .expect("module should compile");
 
         assert_eq!(output.introspection.exported_processes.len(), 1);
@@ -210,15 +184,13 @@ mod tests {
         assert_eq!(output.module_ref, output.artifact.module_ref);
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_module_facade_reports_parse_errors() {
+    #[test]
+    fn compile_module_facade_reports_parse_errors() {
         let environment = LashlangHostEnvironment::default();
         let err = compile_module(ModuleCompileRequest {
             source: "if true",
             environment: &environment,
-            artifact_store: None,
         })
-        .await
         .expect_err("parse should fail");
 
         let ModuleCompileError::Parse(diagnostic) = err else {
@@ -234,15 +206,13 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_module_facade_reports_link_errors() {
+    #[test]
+    fn compile_module_facade_reports_link_errors() {
         let environment = LashlangHostEnvironment::default();
         let err = compile_module(ModuleCompileRequest {
             source: "process echo(value: str) { finish value }",
             environment: &environment,
-            artifact_store: None,
         })
-        .await
         .expect_err("link should fail");
 
         let ModuleCompileError::Link(diagnostic) = err else {
@@ -253,65 +223,8 @@ mod tests {
         assert!(diagnostic.message.contains("processes"));
     }
 
-    struct FailingStore;
-
-    #[async_trait::async_trait]
-    impl LashlangArtifactStore for FailingStore {
-        async fn put_module_artifact(
-            &self,
-            _artifact: &ModuleArtifact,
-        ) -> Result<(), ArtifactStoreError> {
-            Err(ArtifactStoreError::Backend("disk full".to_string()))
-        }
-
-        async fn get_module_artifact(
-            &self,
-            _module_ref: &ModuleRef,
-        ) -> Result<Option<std::sync::Arc<ModuleArtifact>>, ArtifactStoreError> {
-            Ok(None)
-        }
-
-        async fn put_artifact_bytes(
-            &self,
-            _artifact_ref: &str,
-            _descriptor: &str,
-            _bytes: &[u8],
-        ) -> Result<(), ArtifactStoreError> {
-            Ok(())
-        }
-
-        async fn get_artifact_bytes(
-            &self,
-            _artifact_ref: &str,
-        ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-            Ok(None)
-        }
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_module_facade_reports_persistence_errors() {
-        let environment = LashlangHostEnvironment::new(
-            Default::default(),
-            crate::LashlangAbilities::default().with_processes(),
-        );
-        let store = FailingStore;
-        let err = compile_module(ModuleCompileRequest {
-            source: "process echo(value: str) { finish value }",
-            environment: &environment,
-            artifact_store: Some(&store),
-        })
-        .await
-        .expect_err("persist should fail");
-
-        let ModuleCompileError::Persist(diagnostic) = err else {
-            panic!("expected persist error");
-        };
-        assert_eq!(diagnostic.stage, ModuleCompileStage::Persist);
-        assert!(diagnostic.message.contains("disk full"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn compile_module_facade_reports_rich_introspection() {
+    #[test]
+    fn compile_module_facade_reports_rich_introspection() {
         let mut resources = crate::LashlangHostCatalog::new();
         resources
             .add_module_operation(
@@ -370,9 +283,7 @@ source = ui.button({})
 finish source
 "#,
             environment: &environment,
-            artifact_store: None,
         })
-        .await
         .expect("module should compile");
 
         let process = output

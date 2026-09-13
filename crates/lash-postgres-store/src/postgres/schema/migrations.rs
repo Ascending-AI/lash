@@ -1,14 +1,15 @@
-//! Active schema admission catalog. Every row targets the current component.
-//! Historical declarations live in the test-only historical_migrations module.
+//! Active schema admission catalog. Historical declarations live in the
+//! test-only `historical_migrations` module.
 
 use super::*;
 
-/// Component 88 has no durable cancellation authority and must be recreated.
+/// The current cancellation-authority cutover is refusal-only: no predecessor
+/// shape can be upgraded by inventing durable cancellation facts.
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
-    // The immediate predecessor is explicitly refusal-only.
+    // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
-        from: 88,
-        to: 89,
+        from: 89,
+        to: 90,
         source_missing_tables: &[
             "lash_turn_cancellation_bindings",
             "lash_turn_cancel_closure_authorizations",
@@ -23,8 +24,6 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_turn_cancel_retired_scopes",
             "lash_turn_cancel_closure_participants",
         ],
-        // Old rows lack cancellation authority; this is an explicit recreation
-        // boundary, not a migration that invents authority for existing work.
         statements: &[],
     },
 ];

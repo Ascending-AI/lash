@@ -711,6 +711,22 @@ macro_rules! delegate_process_retention {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
         impl $crate::runtime::process::registry_concerns::ProcessRetention for $wrapper {
+            async fn pending_process_artifact_cleanup(
+                &self,
+            ) -> Result<Vec<$crate::ProcessArtifactCleanup>, $crate::PluginError> {
+                self.$inner.pending_process_artifact_cleanup().await
+            }
+
+            async fn complete_process_artifact_cleanup(
+                &self,
+                process_id: &$crate::ProcessId,
+                incarnation: $crate::ProcessIncarnation,
+            ) -> Result<$crate::ProcessArtifactCleanupAck, $crate::PluginError> {
+                self.$inner
+                    .complete_process_artifact_cleanup(process_id, incarnation)
+                    .await
+            }
+
             async fn compact_process_tombstones(
                 &self,
                 cutoff_epoch_ms: u64,

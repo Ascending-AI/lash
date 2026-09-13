@@ -13,6 +13,9 @@ use process_fixtures::*;
 #[path = "core_conversions_tests/cancellation.rs"]
 mod cancellation;
 
+#[path = "core_conversions_tests/observation_projection.rs"]
+mod observation_projection;
+
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
 #[test]

@@ -396,6 +396,25 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
     PRIMARY KEY (namespace, artifact_ref)
 );
 
+-- Exact owner edges for immutable artifacts. The edge is the liveness fact;
+-- no maintained count or last-operation field exists on shared bytes.
+CREATE TABLE IF NOT EXISTS artifact_owners (
+    namespace    TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    owner_kind   TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_id     TEXT NOT NULL,
+    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+);
+
+-- Execution-owner retirement is a permanent publication fence. Host and
+-- process releases are ordinary exact-edge severance and never enter here.
+CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
+    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_id   TEXT NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
     ON attachment_manifest(session_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
@@ -432,6 +451,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
     session_id      TEXT PRIMARY KEY,
     revoked_at_ms   INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
+    ON artifact_owners(owner_kind, owner_id);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -597,13 +618,15 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 /// Version 55 keeps that phase present under an opaque write token associated
 /// with its manifest session until a restoring backend put succeeds, so failed
 /// re-puts and explicit host recovery can restore it exactly.
-/// Version 56 requires pending-input claim identity and token to be either both
-/// NULL or both populated; version 55 catalogs are recreated.
-/// Version 57 combines truthful admitted effect identities with all-or-none
-/// pending-input claims. Version 58 adds intent revisions, Native cancellation
-/// authority, exact closure authorizations, and retired-scope fencing. A
-/// component-57 catalog cannot recover these facts and must be recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 58;
+/// Version 56 persists full effect addresses in session causal metadata.
+/// Version 57 also requires pending-input claim identity and token to be either
+/// both NULL or both populated; both version-56 parent catalogs are recreated.
+/// Version 58 adds exact owner edges and permanent execution-owner publication
+/// fences. Version-57 catalogs are rejected and recreated.
+/// Version 59 adds intent revisions, Native cancellation authority, exact
+/// closure authorizations, and retired-scope fencing. Component-58 catalogs
+/// cannot recover these facts and must be recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 59;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -684,7 +707,8 @@ CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
 -- identity, the same key the bound effect journal's rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
@@ -780,6 +804,14 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
+
+CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
+    process_id       TEXT NOT NULL,
+    incarnation      INTEGER NOT NULL,
+    cleanup_json     TEXT NOT NULL,
+    PRIMARY KEY (process_id, incarnation),
+    FOREIGN KEY (process_id, incarnation) REFERENCES process_tombstones(process_id, incarnation) ON DELETE RESTRICT
+);
 
 CREATE TABLE IF NOT EXISTS process_leases (
     process_id       TEXT PRIMARY KEY,
@@ -879,7 +911,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Earlier process registries are rejected rather than inventing a policy.
 /// Version 35 replaces prose cancellation events with a typed, record-folded fact.
 /// Earlier registries are rejected so an accepted cancellation is never lost.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 35;
+/// Version 36 makes Process Prune retain exact artifact-release evidence until
+/// every configured artifact store acknowledges owner severance. Version-35
+/// registries are rejected rather than inventing cleanup acknowledgements.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 36;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1054,7 +1089,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 -- Keyed by the scope's journal identity, the same key its effect rows carry.
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL
+    retired_at_ms   INTEGER NOT NULL,
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
 );
 
 -- Durable catalogs that may hold an authorized cancellation closure under a
@@ -1124,10 +1160,12 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 // whose authority admitted the effect.
 // Version 19 rejects the retired trigger-list envelope shape. Older journals
 // are recreated rather than replayed across this encoding cutover.
-// Version 20 adds owner-side cancellation-closure participants. This makes
+// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
+// Pre-20 effect databases are rejected rather than migrated.
+// Version 21 adds owner-side cancellation-closure participants. This makes
 // scope retirement serialize with authorization held in separate session
-// catalogs; pre-20 effect databases are rejected and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
+// catalogs; pre-21 effect databases are rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 21;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

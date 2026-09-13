@@ -5,6 +5,15 @@ use super::*;
 
 pub(super) const HISTORICAL_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
+        from: 87,
+        to: 88,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+    SchemaMigration {
         from: 86,
         to: 87,
         source_missing_tables: &[],

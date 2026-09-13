@@ -599,28 +599,39 @@ finish result
 #[test]
 fn async_completion_success_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-success", || async {
-        async_completion_reopen_and_redrive(lash::Resolution::Ok(json!({"status": "applied"})))
-            .await;
+        Box::pin(async_completion_reopen_and_redrive(lash::Resolution::Ok(
+            json!({"status": "applied"}),
+        )))
+        .await;
     });
 }
 
 #[test]
 fn async_completion_failure_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-failure", || async {
-        async_completion_reopen_and_redrive(approvals::denial_resolution()).await;
+        Box::pin(async_completion_reopen_and_redrive(
+            approvals::denial_resolution(),
+        ))
+        .await;
     });
 }
 
 #[test]
 fn async_completion_timeout_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-timeout", || async {
-        async_completion_reopen_and_redrive(lash::Resolution::Timeout).await;
+        Box::pin(async_completion_reopen_and_redrive(
+            lash::Resolution::Timeout,
+        ))
+        .await;
     });
 }
 
 #[test]
 fn async_completion_cancel_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-cancel", || async {
-        async_completion_reopen_and_redrive(lash::Resolution::Cancelled).await;
+        Box::pin(async_completion_reopen_and_redrive(
+            lash::Resolution::Cancelled,
+        ))
+        .await;
     });
 }

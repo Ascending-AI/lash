@@ -23,6 +23,8 @@ lash_conformance::attachment_adoption_tests!({
 });
 
 use std::future::Future;
+#[path = "conformance/artifact_races.rs"]
+mod artifact_races;
 #[path = "conformance/attachment_catalog.rs"]
 mod attachment_catalog;
 #[path = "conformance/attachment_owner_kind.rs"]

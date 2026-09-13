@@ -60,15 +60,16 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // owner-liveness removal, 50 the checked durable frame key, and 51 the
     // semantic-boundary receipt identity, 52 mediated plugin state, 53 the
     // persisted usage disposition, 54 preserves reclaimed attachment bytes,
-    // 55 preserves the phase across restoring writes, 56 pairs pending-input
-    // claim ids with their tokens. Main's component 57 adds full admitted
-    // effect addresses; component 58 adds durable cancellation authority,
-    // exact closure authorization, retired scopes, and the intent ABA fence.
+    // 55 preserves the phase across restoring writes, 56 persists full effect
+    // addresses, 57 pairs pending-input claim ids with their tokens, and 58
+    // retains exact process artifact-cleanup evidence until acknowledgement.
+    // Component 59 adds durable cancellation authority, exact closure
+    // authorization, retired scopes, and the intent ABA fence.
     // All are reject-and-recreate
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
-    assert_eq!(expected, 58, "the pinned durable-core target changed");
+    assert_eq!(expected, 59, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 
@@ -392,7 +393,7 @@ mod walk {
         .expect("link the frozen source IR with a complete process signature")
         .artifact;
         store
-            .put_module_artifact(&artifact)
+            .publish_module_artifact(&lash_core::ArtifactOwner::host("preflight-test"), &artifact)
             .await
             .expect("persist module artifact");
         drop(store);

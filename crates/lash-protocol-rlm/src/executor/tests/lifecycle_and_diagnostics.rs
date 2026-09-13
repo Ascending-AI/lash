@@ -14,9 +14,50 @@ struct FailingArtifactStore;
 
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for FailingArtifactStore {
-    async fn put_module_artifact(
+    async fn publish_module_artifact(
         &self,
+        _owner: &lash_core::ArtifactOwner,
         _artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(lashlang::ArtifactStoreError::Backend(
+            "injected artifact store failure".to_string(),
+        ))
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(lashlang::ArtifactStoreError::Backend(
+            "injected artifact store failure".to_string(),
+        ))
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        _from: &lash_core::ArtifactOwner,
+        _to: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(lashlang::ArtifactStoreError::Backend(
+            "injected artifact store failure".to_string(),
+        ))
+    }
+
+    async fn release_module_artifact(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
+        _module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        Err(lashlang::ArtifactStoreError::Backend(
+            "injected artifact store failure".to_string(),
+        ))
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        _owner: &lash_core::ArtifactOwner,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         Err(lashlang::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
@@ -27,22 +68,6 @@ impl lashlang::LashlangArtifactStore for FailingArtifactStore {
         &self,
         _module_ref: &lashlang::ModuleRef,
     ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        Ok(None)
-    }
-
-    async fn put_artifact_bytes(
-        &self,
-        _artifact_ref: &str,
-        _descriptor: &str,
-        _bytes: &[u8],
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Ok(())
-    }
-
-    async fn get_artifact_bytes(
-        &self,
-        _artifact_ref: &str,
-    ) -> Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
         Ok(None)
     }
 }

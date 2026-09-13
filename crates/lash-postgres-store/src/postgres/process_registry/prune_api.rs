@@ -74,6 +74,47 @@ pub(super) async fn prunable_terminal_processes(
     .await
 }
 
+pub(super) async fn complete_process_artifact_cleanup(
+    registry: &PostgresProcessRegistry,
+    process_id: &ProcessId,
+    incarnation: lash_core::ProcessIncarnation,
+) -> Result<lash_core::ProcessArtifactCleanupAck, PluginError> {
+    let (removed, current_incarnation): (bool, Option<i64>) = sqlx::query_as(
+        "WITH deleted AS (
+             DELETE FROM lash_process_artifact_cleanup
+             WHERE process_id = $1 AND incarnation = $2
+             RETURNING 1
+         )
+         SELECT EXISTS(SELECT 1 FROM deleted),
+                (SELECT incarnation FROM lash_processes WHERE process_id = $1)",
+    )
+    .bind(process_id.as_str())
+    .bind(incarnation.registration_sequence() as i64)
+    .fetch_one(&registry.pool)
+    .await
+    .map_err(plugin_sqlx_error)?;
+    let process_ref = lash_core::ProcessRef::new(process_id.clone(), incarnation);
+    Ok(match current_incarnation {
+        Some(found) => {
+            let found = lash_core::ProcessIncarnation::from_registration_sequence(
+                plugin_u64_from_sql("ProcessRecord", "incarnation", found)?,
+            );
+            if found != incarnation {
+                lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+                    expected: process_ref,
+                    found: lash_core::ProcessRef::new(process_id.clone(), found),
+                }
+            } else if removed {
+                lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+            } else {
+                lash_core::ProcessArtifactCleanupAck::Unknown { process_ref }
+            }
+        }
+        None if removed => lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref },
+        None => lash_core::ProcessArtifactCleanupAck::Unknown { process_ref },
+    })
+}
+
 pub(super) async fn prune_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
@@ -99,6 +140,7 @@ pub(super) async fn prune_terminal_processes(
             pruned_processes: 0,
             pruned_events: 0,
             pruned_trigger_deliveries: 0,
+            artifact_cleanup_acknowledgements: Vec::new(),
         });
     }
 

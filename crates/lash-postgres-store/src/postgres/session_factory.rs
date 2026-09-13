@@ -1,5 +1,7 @@
 use crate::*;
 
+#[path = "session_factory/artifact_retirement.rs"]
+mod artifact_retirement;
 #[path = "session_factory/store.rs"]
 mod store;
 
@@ -30,15 +32,35 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .turn_control_authority_owner()
             == lash_core::TurnControlAuthorityOwner::EffectHost)
             .then(|| Arc::clone(effect_host));
+        *self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
+    }
+
+    fn bind_artifact_stores(
+        &self,
+        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        process_engines: lash_core::ProcessEngineRegistry,
+    ) {
+        *self
+            .artifact_stores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some((process_env_store, process_engines));
     }
 
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core::store::RetentionBound,
     ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
-        crate::evidence_retention::reclaim(self, bound)
+        let report = crate::evidence_retention::reclaim(self, bound)
             .await
-            .map_err(|failure| *failure)
+            .map_err(|failure| *failure)?;
+        if let Err(error) = self.resume_artifact_owner_retirements().await {
+            return Err(lash_core::MaintenanceFailure::failed(error, report));
+        }
+        Ok(report)
     }
 
     async fn create_store(

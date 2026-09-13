@@ -13,10 +13,10 @@ fn current_destructive_cutover_has_no_migration_arm() {
         "the current component must reject every pre-cutover schema rather than migrate it"
     );
 
-    let immediate = SCHEMA_MIGRATIONS
+    let immediate = HISTORICAL_MIGRATIONS
         .iter()
         .find(|migration| migration.from == 87 && migration.to == 88)
-        .expect("the immediate predecessor must have an explicit refusal row");
+        .expect("the prior component's immediate predecessor refusal must remain declared");
     assert!(immediate.is_recreate_boundary());
 
     let predecessor = HISTORICAL_MIGRATIONS

@@ -150,8 +150,9 @@ pub use usage_activity::*;
 // Window 62: FIG-2961 adds typed cancellation requests and cancellation origins.
 // Window 63: FIG-2886 removes the duplicate session spelling from trigger-subscription filters.
 // Window 64: FIG-2860 carries typed coherence state for process work-item observations.
-// Window 65: FIG-2875 carries durable turn-cancellation control envelopes.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 65;
+// Window 65: FIG-2866 redacts agent-frame seed bodies from tool-call observation controls.
+// Window 66: FIG-2875 carries durable turn-cancellation control envelopes.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 66;
 
 /// One versioned remote-protocol message.
 ///

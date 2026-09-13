@@ -1,6 +1,7 @@
 use super::*;
 
 mod helpers;
+use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};
 pub(super) use helpers::{runtime_invocation, test_turn_cancel_wait_request};
 
 #[test]
@@ -311,46 +312,6 @@ pub(super) fn test_turn_cancel_wake_outcome<T>(
     }
 }
 
-/// What the test gate race does after a wake lands while the guarded wait is
-/// still pending. Mirrors the deployed `race_turn_cancel_gate` flow: a deferred
-/// stop re-registers on the escalation key and keeps waiting; anything else
-/// unwinds.
-pub(super) enum TestTurnCancelWakeStep {
-    Continue(TestTurnCancelRegistration),
-    Unwind(RestateTurnCancelWake),
-}
-
-pub(super) fn test_turn_cancel_wake_step(
-    gate: &TestTurnCancelGate,
-    turn_cancel_key: &AwaitEventKey,
-    escalated: bool,
-    wake: RestateTurnCancelWake,
-) -> Result<TestTurnCancelWakeStep, TerminalError> {
-    if escalated || wake != RestateTurnCancelWake::TurnCancelDeferred {
-        return Ok(TestTurnCancelWakeStep::Unwind(wake));
-    }
-    let escalation_key = match crate::durable_wait::restate_authority_id_for_key(turn_cancel_key) {
-        Some(authority) => crate::durable_wait::restate_await_event_key_for_authority(
-            &authority,
-            &turn_cancel_key.scope,
-            AwaitEventWaitIdentity::TurnCancelEscalation,
-        ),
-        None => restate_await_event_key(
-            &turn_cancel_key.scope,
-            AwaitEventWaitIdentity::TurnCancelEscalation,
-        ),
-    }
-    .map_err(TerminalError::from_error)?;
-    match gate.register(escalation_key)? {
-        TestTurnCancelRegistrationVerdict::Registered(registration) => {
-            Ok(TestTurnCancelWakeStep::Continue(registration))
-        }
-        TestTurnCancelRegistrationVerdict::Revoked => Ok(TestTurnCancelWakeStep::Unwind(
-            RestateTurnCancelWake::SessionRevoked,
-        )),
-    }
-}
-
 pub(super) fn test_sleep_or_turn_cancel<'run, 'ctx, C>(
     context: &'run C,
     gate: &'run TestTurnCancelGate,
@@ -565,6 +526,7 @@ pub(super) struct RecordingContext {
     pub(super) sleeps: Mutex<Vec<u64>>,
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
+    fail_process_workflow_starts: AtomicUsize,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
@@ -594,6 +556,11 @@ impl lash_trace::TraceSink for RecordingTraceSink {
 }
 
 impl RecordingContext {
+    pub(super) fn fail_next_process_workflow_start(&self) {
+        self.fail_process_workflow_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
     pub(super) async fn wait_for_await_event_registration(
         &self,
         session_id: &SessionId,
@@ -817,6 +784,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             .lock_recover()
             .push(execution_context.clone());
         Box::pin(async move {
+            if self
+                .fail_process_workflow_starts
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(TerminalError::new(
+                    "injected process workflow start failure",
+                ));
+            }
             if let Some(endpoint) = endpoint {
                 let complete_runs =
                     matches!(registration.input.as_ref(), ProcessInput::ToolCall { .. });

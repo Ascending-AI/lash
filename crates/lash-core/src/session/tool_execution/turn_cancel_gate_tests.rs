@@ -197,14 +197,13 @@ async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
         .build()
         .into_runtime();
 
-    let reply = context
-        .call_tool_by_id(
-            "scalar-retry-call".to_string(),
-            definition.manifest.id,
-            serde_json::json!({}),
-            0,
-        )
-        .await;
+    let reply = Box::pin(context.call_tool_by_id(
+        "scalar-retry-call".to_string(),
+        definition.manifest.id,
+        serde_json::json!({}),
+        0,
+    ))
+    .await;
     assert!(
         reply
             .record

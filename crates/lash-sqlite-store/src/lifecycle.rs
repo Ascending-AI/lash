@@ -195,6 +195,8 @@ impl Store {
             clock,
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(feature = "lashlang")]
+            artifact_publication_pause: Mutex::new(None),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached,
@@ -217,6 +219,8 @@ impl Store {
             clock: Arc::new(lash_core::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(feature = "lashlang")]
+            artifact_publication_pause: Mutex::new(None),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached: false,
@@ -319,6 +323,8 @@ impl Store {
             clock,
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
+            #[cfg(feature = "lashlang")]
+            artifact_publication_pause: Mutex::new(None),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             process_registry_attached: false,

@@ -820,6 +820,28 @@ pub trait ProcessLeases: Send + Sync {
 /// Physical reclamation of terminal processes and their tombstones.
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
+    /// Durable exact release inputs left by Process Prune.
+    async fn pending_process_artifact_cleanup(
+        &self,
+    ) -> Result<Vec<super::model::ProcessArtifactCleanup>, PluginError> {
+        Ok(Vec::new())
+    }
+
+    /// Acknowledge that all configured artifact stores applied one cleanup.
+    ///
+    /// Implementations remove the exact cleanup record and report whether the
+    /// reusable process id now names a successor incarnation. A stale successor
+    /// is an expected typed outcome, never silent success.
+    async fn complete_process_artifact_cleanup(
+        &self,
+        process_id: &ProcessId,
+        incarnation: super::model::ProcessIncarnation,
+    ) -> Result<super::model::ProcessArtifactCleanupAck, PluginError> {
+        Ok(super::model::ProcessArtifactCleanupAck::Unknown {
+            process_ref: super::model::ProcessRef::new(process_id.clone(), incarnation),
+        })
+    }
+
     /// Delete payload-free tombstones older than `cutoff_epoch_ms` without
     /// outrunning a trusted projection or orphaning outstanding trigger
     /// deliveries. `NoProjector` permits free compaction; `UpTo(cursor)` retains

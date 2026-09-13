@@ -497,6 +497,45 @@ pub trait ProcessEngine: Send + Sync {
         context: ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
     ) -> Result<ProcessRunOutcome, ProcessInfraError>;
+
+    /// Protect artifacts named by a start payload under its replayable staging
+    /// owner before process registration.
+    async fn protect_start_artifacts(
+        &self,
+        _owner: &crate::ArtifactOwner,
+        _payload: &serde_json::Value,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    /// Atomically transfer start-time artifact protection to the registered
+    /// process owner. Implementations must make replay idempotent.
+    async fn transfer_start_artifacts(
+        &self,
+        _from: &crate::ArtifactOwner,
+        _to: &crate::ArtifactOwner,
+        _payload: &serde_json::Value,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    /// Release artifacts named by a payload for one exact owner.
+    async fn release_artifacts(
+        &self,
+        _owner: &crate::ArtifactOwner,
+        _payload: &serde_json::Value,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    /// Permanently retire an execution owner and reclaim its untransferred
+    /// artifacts.
+    async fn retire_artifact_owner(
+        &self,
+        _owner: &crate::ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
 }
 
 /// Pure admission policy for immutable, recorded engine-start inputs.
@@ -590,6 +629,53 @@ impl ProcessEngineRegistry {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
         }
+    }
+
+    /// Retire an execution artifact owner across every installed engine.
+    pub async fn retire_artifact_owner(
+        &self,
+        owner: &crate::ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        for engine in self.engines.values() {
+            engine.retire_artifact_owner(owner).await?;
+        }
+        Ok(())
+    }
+
+    /// Release engine artifacts retained by one pruned process record.
+    pub async fn release_process_artifacts(
+        &self,
+        record: &crate::ProcessRecord,
+    ) -> Result<(), crate::PluginError> {
+        let crate::ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
+            return Ok(());
+        };
+        self.require(kind)?
+            .release_artifacts(
+                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(record)),
+                payload,
+            )
+            .await
+    }
+
+    /// Release engine artifacts from the durable evidence Process Prune left
+    /// after deleting the full process row.
+    pub async fn release_pruned_process_artifacts(
+        &self,
+        cleanup: &crate::ProcessArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        let crate::ProcessInput::Engine { kind, payload } = &*cleanup.input else {
+            return Ok(());
+        };
+        self.require(kind)?
+            .release_artifacts(
+                &crate::ArtifactOwner::process(crate::ProcessRef::new(
+                    cleanup.process_id.clone(),
+                    cleanup.incarnation,
+                )),
+                payload,
+            )
+            .await
     }
 
     /// Register an engine, rejecting a duplicate

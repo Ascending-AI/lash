@@ -58,7 +58,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 88;
+const MIGRATION_FLOOR_VERSION: i32 = 89;
 /// Cancellation authority tables absent from component 88.
 const POST_FLOOR_TABLES: [&str; 4] = [
     "lash_turn_cancellation_bindings",
@@ -458,7 +458,8 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
     );
     let env_ref = spec.stable_ref().context("stable process env ref")?;
     env_store
-        .put_process_execution_env(
+        .publish_process_execution_env(
+            &lash_core::ArtifactOwner::host(format!("version-bump:{tag}")),
             &env_ref,
             &spec.to_store_bytes().context("encode process env spec")?,
         )
