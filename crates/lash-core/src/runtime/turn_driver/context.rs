@@ -102,6 +102,9 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map(|context| {
                 context
                     .with_turn_cancel_scope(self.turn_cancel_scope())
+                    .with_engine_child_max_attempts(
+                        self.host.core.control.engine_child_max_attempts,
+                    )
                     .with_turn_phase_probe(self.turn_phase_probe.clone())
             })
     }

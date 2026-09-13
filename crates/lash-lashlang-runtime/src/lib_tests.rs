@@ -1,5 +1,12 @@
 use super::*;
 
+/// Attempt bound the bridge tests stamp onto prepared child starts. Production
+/// reads it from the host config once per segment; these tests only need a
+/// stable non-zero value so the fingerprint stays comparable across cases.
+fn test_child_max_attempts() -> std::num::NonZeroU32 {
+    std::num::NonZeroU32::new(5).expect("test attempt bound is non-zero")
+}
+
 /// Test-only read seam for malformed-artifact rejection. Production stores
 /// correctly refuse malformed publications, so the runtime oracle must inject
 /// corruption at the read boundary it is responsible for validating.
@@ -668,6 +675,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("first start prepares");
@@ -681,6 +689,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("replayed start prepares");
@@ -694,6 +703,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("sibling start prepares");
@@ -761,6 +771,7 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
                 lash_core::OnParentEnd::Abandon,
             ),
             lash_core::RecoveryContract::Rerunnable,
+            test_child_max_attempts(),
         )
         .await
         .expect_err("the real prepare entry point must reject immutable mismatches");
@@ -816,6 +827,7 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("the real prepare entry point explicitly omits both live-host fixtures");
@@ -976,6 +988,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("matching immutable signature passes");
@@ -996,6 +1009,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect_err("different outer parameter name must fail before registration");
@@ -1034,6 +1048,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
                 lash_core::OnParentEnd::Abandon,
             ),
             lash_core::RecoveryContract::Rerunnable,
+            test_child_max_attempts(),
         )
         .await
         .expect_err(description);
@@ -1063,6 +1078,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect_err("identity with a different process ref must fail");
@@ -1101,6 +1117,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect_err("forged signature with unchanged refs must fail before registration");
@@ -1164,6 +1181,7 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect_err("forged receiving artifact must fail before registration");
@@ -1217,6 +1235,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
             lash_core::OnParentEnd::Abandon,
         ),
         lash_core::RecoveryContract::Rerunnable,
+        test_child_max_attempts(),
     )
     .await
     .expect("later string union arm accepts the value");
@@ -1371,4 +1390,69 @@ fn test_process_start(
         process_name: "scan".to_string(),
         args,
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint_hashes_it() {
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default().with_processes(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: r#"process scan(root: str) -> str { finish root }"#,
+        environment: &environment,
+    })
+    .expect("module compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
+    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let site = test_start_site("child_process:scan", 1);
+
+    let prepare = |bound: u32| {
+        let artifact_store = Arc::clone(&artifact_store);
+        let start = test_process_start(&output, site.clone(), ".");
+        async move {
+            prepare_lashlang_process_start(
+                artifact_store,
+                "parent:bounded",
+                start,
+                lash_core::ProcessOriginator::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+                lash_core::RecoveryContract::Rerunnable,
+                std::num::NonZeroU32::new(bound).expect("non-zero test bound"),
+            )
+            .await
+            .expect("bounded start prepares")
+        }
+    };
+
+    let bounded = prepare(5).await;
+    assert_eq!(
+        bounded.request.max_attempts,
+        Some(5),
+        "the resolved host bound rides the start request"
+    );
+    assert_eq!(
+        bounded.request.disposition,
+        lash_core::RecoveryContract::Rerunnable,
+        "bounding a child does not change its recovery contract"
+    );
+
+    // The bound is registration identity (`lifecycle_and_resolved_attempts_are
+    // _registration_identity` in lash-core), so a differing bound is a
+    // different registration for an otherwise identical start site. That is
+    // why a resumed segment re-registers with the value it recorded rather
+    // than with a changed host default.
+    let rebounded = prepare(9).await;
+    assert_eq!(rebounded.request.max_attempts, Some(9));
+    assert_eq!(
+        bounded.request.id, rebounded.request.id,
+        "the start site alone derives the child id; only the recorded bound differs"
+    );
 }

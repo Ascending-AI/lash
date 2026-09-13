@@ -1155,7 +1155,9 @@ mod tests {
                     ))
                     .await
                     .expect("a same-frame restore with a snapshot succeeds");
-                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
+                // Compared before any further cell runs: executing a cell pins
+                // this execution's child attempt bound into the root, which is
+                // a write the restore itself must not make.
                 assert_eq!(
                     state
                         .hydrated_execution_state()
@@ -1165,6 +1167,7 @@ mod tests {
                     committed,
                     "the restored execution is exactly the view's snapshot"
                 );
+                assert_eq!(live_baton(&state).await, serde_json::json!("committed"));
             });
     }
 }

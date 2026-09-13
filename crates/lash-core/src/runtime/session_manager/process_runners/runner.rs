@@ -181,6 +181,9 @@ impl RuntimeSessionServices {
                 crate::TurnContext::default(),
             )
             .with_execution_env_spec(current_execution_env_spec(&services.current))
+            .with_engine_child_max_attempts(
+                services.current.host.core.control.engine_child_max_attempts,
+            )
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
             .with_process_execution(&registration_for_runtime, event_context)
             .with_cancellation_token(cancellation_for_runtime.clone())

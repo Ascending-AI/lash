@@ -749,6 +749,20 @@ pub fn code_execution_context() -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new().build().into_runtime()
 }
 
+/// Restate a context's engine child attempt bound, the way a runtime wires it
+/// from [`RuntimeControlConfig::engine_child_max_attempts`](crate::RuntimeControlConfig).
+///
+/// Tests that drive a child to its attempt ceiling need a smaller bound than
+/// the host default; production has no reason to set it per execution, so the
+/// setter itself stays crate-private.
+#[cfg(any(test, feature = "testing"))]
+pub fn with_engine_child_max_attempts(
+    context: crate::RuntimeExecutionContext<'_>,
+    max_attempts: std::num::NonZeroU32,
+) -> crate::RuntimeExecutionContext<'_> {
+    context.with_engine_child_max_attempts(max_attempts)
+}
+
 /// Build an empty code-execution context for a specific durable process.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]

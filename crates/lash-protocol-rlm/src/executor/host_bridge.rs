@@ -38,6 +38,9 @@ pub(super) struct HostBridge<'run> {
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
+    /// Attempt bound stamped onto children this execution starts, pinned in the
+    /// durable execution state before the cell ran.
+    child_max_attempts: std::num::NonZeroU32,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -47,6 +50,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
+    pub child_max_attempts: std::num::NonZeroU32,
 }
 
 type HostAbilityFuture<'a> =
@@ -66,6 +70,7 @@ impl<'run> HostBridge<'run> {
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
             artifact_store: config.artifact_store,
+            child_max_attempts: config.child_max_attempts,
         }
     }
 
@@ -579,6 +584,7 @@ impl HostBridge<'_> {
                     lash_core::OnParentEnd::Abandon,
                 ),
                 lash_core::RecoveryContract::Rerunnable,
+                self.child_max_attempts,
             )
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?

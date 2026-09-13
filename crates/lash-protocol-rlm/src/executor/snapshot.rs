@@ -7,6 +7,10 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v20 pins the attempt bound this execution stamps onto the children its code
+// starts. An older reader would drop the pin and let a redrive re-resolve the
+// host default, which re-registers an existing child with a different
+// fingerprint, so the boundary is a version rather than an optional field.
 // v19 adds a dedicated durable deferred-trigger definition record. Older
 // readers cannot preserve its provider route or distinguish it from tool
 // authority, so this is an explicit drain-or-recreate boundary.
@@ -34,7 +38,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 19;
+pub const RLM_SNAPSHOT_VERSION: u32 = 20;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

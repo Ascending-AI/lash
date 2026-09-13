@@ -868,6 +868,7 @@ pub async fn prepare_lashlang_process_start(
     originator: lash_core::ProcessOriginator,
     lifecycle: lash_core::ProcessLifecyclePolicy,
     disposition: lash_core::RecoveryContract,
+    max_attempts: std::num::NonZeroU32,
 ) -> Result<PreparedLashlangProcessStart, LashlangRuntimeError> {
     let display_name = Some(start.process_name.clone());
     let artifact = artifact_store
@@ -966,6 +967,7 @@ pub async fn prepare_lashlang_process_start(
         originator,
         lifecycle,
     )
+    .with_max_attempts(Some(max_attempts.get()))
     .with_identity(identity)
     .with_extra_event_types(
         lashlang_process_event_types()
