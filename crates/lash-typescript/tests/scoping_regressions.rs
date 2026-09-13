@@ -370,7 +370,7 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
     assert!(contains_runtime_await(&program.main));
 }
 
-fn process_handle_main(binding_kind: &str, terminal: &str) -> Vec<u8> {
+fn process_handle_program(binding_kind: &str, terminal: &str) -> lashlang::Program {
     let source = format!(
         r#"
         const worker = defineProcess({{ name: "worker", signals: {{}}, run: async () => 1 }});
@@ -378,7 +378,11 @@ fn process_handle_main(binding_kind: &str, terminal: &str) -> Vec<u8> {
         {terminal}
         "#
     );
-    let program = lash_typescript::parse(&source).expect("process handle should lower");
+    lash_typescript::parse(&source).expect("process handle should lower")
+}
+
+fn process_handle_main(binding_kind: &str, terminal: &str) -> Vec<u8> {
+    let program = process_handle_program(binding_kind, terminal);
     serde_json::to_vec(&program.main).expect("lowered expression should serialize")
 }
 
@@ -395,8 +399,27 @@ fn contains_runtime_await(expr: &lashlang::Expr) -> bool {
         || expr.children().any(contains_runtime_await)
 }
 
+fn contains_typed_process_await(expr: &lashlang::Expr) -> bool {
+    matches!(
+        expr,
+        lashlang::Expr::ResultUnwrap(value)
+            if matches!(value.as_ref(), lashlang::Expr::Await(_))
+    ) || expr.children().any(contains_typed_process_await)
+}
+
 #[test]
 fn let_process_handle_direct_await_matches_const_lowering() {
+    for binding_kind in ["const", "let"] {
+        let program = process_handle_program(binding_kind, "finish(await handle);");
+        assert!(
+            !contains_runtime_await(&program.main),
+            "{binding_kind} direct await must not use runtime classification"
+        );
+        assert!(
+            contains_typed_process_await(&program.main),
+            "{binding_kind} direct await must use the typed process-handle shape"
+        );
+    }
     assert_let_handle_matches_const("finish(await handle);");
 }
 
@@ -420,6 +443,54 @@ fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
     "#;
     let program = lash_typescript::parse(source).expect("reassigned handle should lower");
     assert!(contains_runtime_await(&program.main));
+}
+
+#[test]
+fn reassigned_let_process_handle_inside_loop_never_gets_the_typed_role() {
+    let source = r#"
+        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const ts = [1, 2];
+        let handle = start(worker);
+        for (const t of ts) {
+            await handle;
+            handle = t;
+        }
+        finish(1);
+    "#;
+    let program = lash_typescript::parse(source).expect("loop reassignment should lower");
+    assert!(contains_runtime_await(&program.main));
+    assert!(!contains_typed_process_await(&program.main));
+}
+
+#[test]
+fn compound_and_update_back_edges_also_block_the_typed_role() {
+    for mutation in ["handle += t;", "handle++;"] {
+        let source = format!(
+            r#"
+            const worker = defineProcess({{ name: "worker", signals: {{}}, run: async () => 1 }});
+            const ts = [1, 2];
+            let handle = start(worker);
+            for (const t of ts) {{
+                await handle;
+                {mutation}
+            }}
+            finish(1);
+            "#
+        );
+        let program = lash_typescript::parse(&source).expect("loop mutation should lower");
+        assert!(contains_runtime_await(&program.main), "{mutation}");
+        assert!(!contains_typed_process_await(&program.main), "{mutation}");
+    }
+}
+
+#[test]
+fn assignment_preserves_the_exotic_iterable_role_through_its_rhs() {
+    assert_eq!(
+        finished(
+            "const t = new Set([2]); let s = new Set([1]); const seen = []; const f = (value: number) => seen.push(value); s = s.union(t); s.forEach(f); finish(seen.join(','));"
+        ),
+        Value::String("1,2".into())
+    );
 }
 
 #[test]

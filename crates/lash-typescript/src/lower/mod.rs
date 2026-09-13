@@ -94,6 +94,7 @@ pub(crate) fn lower_with_context(
 ) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
+        root_assigned_identifiers: assigned_identifiers_in_statements(&program.statements),
         module_authority_roots: module_authority_roots.clone(),
         ..Lowerer::default()
     };
@@ -144,6 +145,7 @@ pub(crate) fn lower_with_context(
 struct FunctionContext {
     id: usize,
     captures: BTreeSet<String>,
+    assigned_identifiers: BTreeSet<String>,
 }
 
 /// A hoisted function declaration awaiting a place in the emission order.
@@ -175,6 +177,7 @@ struct Lowerer {
     /// it. Depth is what "top level" means to `defineProcess`, so it has to
     /// count from the program's root rather than from zero.
     root_scope_depth: usize,
+    root_assigned_identifiers: BTreeSet<String>,
     scopes: Vec<Scope>,
     functions: Vec<FunctionContext>,
     next_binding: usize,
@@ -199,6 +202,13 @@ impl Lowerer {
             .iter()
             .rev()
             .any(|scope| scope.bindings.contains_key(name))
+    }
+
+    fn current_owner_assigns(&self, name: &str) -> bool {
+        self.functions.last().map_or_else(
+            || self.root_assigned_identifiers.contains(name),
+            |function| function.assigned_identifiers.contains(name),
+        )
     }
 
     fn lower_statements(
@@ -473,8 +483,23 @@ impl Lowerer {
         Ok(())
     }
 
-    fn clear_role(&mut self, name: &str) -> Result<(), Diagnostic> {
-        self.set_role(name, BindingRole::Plain)
+    fn clear_process_handle_role(&mut self, name: &str) -> Result<(), Diagnostic> {
+        let binding = self
+            .scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.bindings.get_mut(name))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::UnknownBinding,
+                    format!("unknown binding `{name}`"),
+                    None,
+                )
+            })?;
+        if binding.role == BindingRole::ProcessHandle {
+            binding.role = BindingRole::Plain;
+        }
+        Ok(())
     }
 
     fn binding(&self, name: &str) -> Result<&Binding, Diagnostic> {
@@ -638,7 +663,8 @@ impl Lowerer {
                             .unwrap_or(LashExpr::Undefined)
                     };
                     if let Some(name) = process_name
-                        && matches!(*kind, VarKind::Const | VarKind::Let)
+                        && (*kind == VarKind::Const
+                            || (*kind == VarKind::Let && !self.current_owner_assigns(name)))
                         && matches!(&value, LashExpr::StartProcess(_))
                     {
                         self.set_role(name, BindingRole::ProcessHandle)?;
@@ -917,8 +943,13 @@ impl Lowerer {
     ) -> Result<LashExpr, Diagnostic> {
         self.next_function += 1;
         let id = self.next_function;
+        let assigned_identifiers = match &function.body {
+            FunctionBody::Block(statements) => assigned_identifiers_in_statements(statements),
+            FunctionBody::Expression(_) => BTreeSet::new(),
+        };
         self.functions.push(FunctionContext {
             id,
+            assigned_identifiers,
             ..FunctionContext::default()
         });
         self.scopes.push(Scope::default());
@@ -1371,7 +1402,6 @@ impl Lowerer {
                         None,
                     ));
                 }
-                self.clear_role(name)?;
                 Ok(AssignTarget::variable(binding.internal.into()))
             }
             TsAssignTarget::Member { object, property } => {

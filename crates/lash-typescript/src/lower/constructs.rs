@@ -740,13 +740,17 @@ impl Lowerer {
         op: AssignOp,
         value: &Expr,
     ) -> Result<LashExpr, Diagnostic> {
-        if matches!(op, AssignOp::Assign) && matches!(target, TsAssignTarget::Ident(_)) {
+        if matches!(op, AssignOp::Assign)
+            && let TsAssignTarget::Ident(name) = target
+        {
             let target = self.lower_assign_target(target)?;
             let result = LashExpr::Variable(target.root.clone());
+            let value = self.lower_expr(value)?;
+            self.clear_process_handle_role(name)?;
             return Ok(LashExpr::Block(vec![
                 LashExpr::Assign {
                     target,
-                    expr: Box::new(self.lower_expr(value)?),
+                    expr: Box::new(value),
                 },
                 result,
             ]));
@@ -793,6 +797,10 @@ impl Lowerer {
             output.push(Self::variable(&result));
             return Ok(LashExpr::Block(output));
         }
+        let assigned_name = match target {
+            TsAssignTarget::Ident(name) => Some(name.as_str()),
+            _ => None,
+        };
         let (mut output, old, target) = self.reference(target)?;
         let result = self.temporary("assignment_result");
         match op {
@@ -840,6 +848,9 @@ impl Lowerer {
                 });
             }
         }
+        if let Some(name) = assigned_name {
+            self.clear_process_handle_role(name)?;
+        }
         Ok(LashExpr::Block(output))
     }
 
@@ -849,7 +860,14 @@ impl Lowerer {
         delta: f64,
         prefix: bool,
     ) -> Result<LashExpr, Diagnostic> {
+        let assigned_name = match target {
+            TsAssignTarget::Ident(name) => Some(name.as_str()),
+            _ => None,
+        };
         let (mut output, old, target) = self.reference(target)?;
+        if let Some(name) = assigned_name {
+            self.clear_process_handle_role(name)?;
+        }
         let old_number = self.temporary("update_old");
         let new_number = self.temporary("update_new");
         output.push(Self::temp_assignment(
