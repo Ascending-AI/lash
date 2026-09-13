@@ -1032,7 +1032,7 @@ mod tests {
         internal_executed: Arc<AtomicUsize>,
     }
 
-    fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
+    pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             format!("tool:{name}"),
             name,
@@ -1096,7 +1096,7 @@ mod tests {
     type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
 
     #[derive(Clone, Default)]
-    struct CountingEffectController {
+    pub(super) struct CountingEffectController {
         frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
     }
 
@@ -1500,3 +1500,6 @@ mod tests {
 
 #[cfg(test)]
 mod discovery_tests;
+
+#[cfg(test)]
+mod provider_part_persistence_tests;
