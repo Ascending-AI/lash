@@ -1,8 +1,8 @@
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
-    LashlangSegmentStateError, SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
-    process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
-    validate_lashlang_program_hash,
+    LashlangSegmentState, LashlangSegmentStateError, SEGMENT_BOUNDARY_DECLINED_TOTAL,
+    decode_lashlang_segment_state, process_lashlang_execution_result, process_trace_session_id,
+    record_segment_boundary_decline, validate_lashlang_program_hash,
 };
 
 #[test]
@@ -41,6 +41,58 @@ use std::sync::atomic::Ordering;
 
 const UNVERSIONED_SEGMENT_STATE: &[u8] =
     include_bytes!("../fixtures/lashlang_segment_state_unversioned.json");
+const VM_V10_SEGMENT_STATE: &[u8] =
+    include_bytes!("../fixtures/lashlang_segment_state_vm_v10.json");
+
+struct SegmentFixtureHost;
+
+impl lashlang::ExecutionHost for SegmentFixtureHost {
+    async fn perform(
+        &self,
+        _op: lashlang::AbilityOp,
+    ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        Err(lashlang::ExecutionHostError::new(
+            "the segment fixture does not execute effects",
+        ))
+    }
+}
+
+#[test]
+#[ignore = "run only with the predecessor writer at ccab40166"]
+fn capture_vm_v10_segment_state_from_predecessor_writer() {
+    assert_eq!(
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        10,
+        "capture this fixture only from predecessor writer commit ccab40166"
+    );
+    let program = lashlang::compile("finish null").expect("compile fixture program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm =
+        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct fixture VM");
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: vm.suspend().expect("capture fixture VM continuation"),
+        sleep_sequence: 3,
+        event_sequence: 5,
+        signal_send_sequence: 7,
+        signal_wait_ordinals: [("ready".to_string(), 11)].into(),
+        parent_end_actions: Vec::new(),
+        started_process_ids: Vec::new(),
+    };
+    let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
+    wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
+    wire["vm"]["active_execution_elapsed"] = serde_json::json!({"nanos": 0, "secs": 0});
+    let mut bytes = serde_json::to_vec(&wire).expect("serialize v10 predecessor");
+    bytes.push(b'\n');
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/fixtures/lashlang_segment_state_vm_v10.json"),
+        bytes,
+    )
+    .expect("write v10 predecessor fixture");
+}
 
 #[test]
 fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
@@ -61,6 +113,32 @@ fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
     let message = error.to_string();
     assert!(message.contains("drain in-flight sessions on the old build"));
     assert!(message.contains("recreate development/test stores"));
+}
+
+#[test]
+fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
+    assert!(
+        VM_V10_SEGMENT_STATE
+            .windows(b"projected_slots".len())
+            .any(|window| window == b"projected_slots"),
+        "the predecessor fixture must preserve the retired key"
+    );
+    let Err(LashlangSegmentStateError::FormatMismatch { details }) =
+        decode_lashlang_segment_state(VM_V10_SEGMENT_STATE)
+    else {
+        panic!("the v10 VM continuation must be refused by the v11 decoder");
+    };
+    assert!(
+        details.contains("version 10"),
+        "unexpected refusal: {details}"
+    );
+    assert!(
+        details.contains(&format!(
+            "version {}",
+            lashlang::VM_CONTINUATION_FORMAT_VERSION
+        )),
+        "the refusal must name the current VM continuation version: {details}"
+    );
 }
 
 #[test]

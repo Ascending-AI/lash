@@ -69,19 +69,7 @@ impl<'a> ContinuationValidator<'a> {
     }
 
     fn validate_slots(&self) -> Result<(), ContinuationError> {
-        for (index, (value, projected)) in self
-            .continuation
-            .slots
-            .iter()
-            .zip(&self.continuation.projected_slots)
-            .enumerate()
-        {
-            if *projected {
-                return Err(ContinuationError::UnserializableValue {
-                    location: format!("slot {index}"),
-                    variant: "Projected",
-                });
-            }
+        for (index, value) in self.continuation.slots.iter().enumerate() {
             validate_optional_value(value.as_ref(), &format!("slot {index}"))?;
             if let Some(value) = value.as_ref() {
                 validate_heap_reference(self.heap, value)?;
@@ -237,12 +225,6 @@ impl<'a> ContinuationValidator<'a> {
 
     fn validate_frames(&self) -> Result<(), ContinuationError> {
         for (depth, frame) in self.continuation.frame_stack.iter().enumerate() {
-            if frame.slots.len() != frame.projected_slots.len() {
-                return Err(ContinuationError::SlotCountMismatch {
-                    expected: frame.slots.len(),
-                    actual: frame.projected_slots.len(),
-                });
-            }
             if frame.operand_stack_base > self.continuation.operand_stack.len() {
                 return Err(ContinuationError::UnserializableValue {
                     location: format!("frame {depth} operand stack base"),
@@ -475,12 +457,6 @@ pub(super) fn validate_continuation(
         return Err(ContinuationError::FormatVersionMismatch {
             expected: VM_CONTINUATION_FORMAT_VERSION,
             found: continuation.format_version,
-        });
-    }
-    if continuation.slots.len() != continuation.projected_slots.len() {
-        return Err(ContinuationError::SlotCountMismatch {
-            expected: continuation.slots.len(),
-            actual: continuation.projected_slots.len(),
         });
     }
     if continuation.active_function.is_none() && !continuation.frame_stack.is_empty() {
