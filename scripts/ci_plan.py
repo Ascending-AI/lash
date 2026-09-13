@@ -70,6 +70,25 @@ TRUNK_ONLY_JOBS = {
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
+# The PostgreSQL matrix, per event. PG16 is the sole primary lane and runs on
+# every event. The PG14 and PG18 compatibility lanes bracket the supported
+# range and only compare the live catalog artifact, so they are deferred off
+# the pull-request critical path: the merge queue runs all three before
+# anything lands, and so does every push to main. Nothing reaches trunk
+# without compatibility evidence.
+POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
+POSTGRES_COMPATIBILITY_LEGS = [
+    {"postgres": "14", "role": "compatibility"},
+    {"postgres": "18", "role": "compatibility"},
+]
+
+
+def postgres_matrix(event_name: str) -> list[dict[str, str]]:
+    if event_name == "pull_request":
+        return [POSTGRES_PRIMARY_LEG]
+    legs = [POSTGRES_COMPATIBILITY_LEGS[0], POSTGRES_PRIMARY_LEG, POSTGRES_COMPATIBILITY_LEGS[1]]
+    return legs
+
 UNGATED_JOBS = {
     "worker-artifacts",
     "plan",
@@ -403,6 +422,9 @@ def main() -> int:
     runtime_parser.add_argument("--image-os", required=True)
     runtime_parser.add_argument("--image-version", required=True)
 
+    matrix_parser = subparsers.add_parser("postgres-matrix")
+    matrix_parser.add_argument("--event", required=True)
+
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
 
@@ -430,6 +452,10 @@ def main() -> int:
             print(f"Invalid Bazel runtime identity: {error}", file=sys.stderr)
             return 1
         _write_outputs({"bazel_runtime": identity})
+        return 0
+
+    if args.command == "postgres-matrix":
+        _write_outputs({"postgres_matrix": json.dumps(postgres_matrix(args.event))})
         return 0
 
     try:

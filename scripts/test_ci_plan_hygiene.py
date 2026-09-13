@@ -159,6 +159,114 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("github-pat", result.stdout + result.stderr)
 
+    def checkout_script(self, job):
+        """The named job's real checkout code, from `git fetch` onward."""
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        section = workflow.split(f"  {job}:\n", 1)[1]
+        script = section.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        return script[script.index("git fetch"):]
+
+    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the secret-scan job")
+    def test_merges_of_main_do_not_leak_main_secrets(self):
+        # A branch that merged main in earlier reaches main through a second
+        # chain rooted far down it. `--deepen` extends every boundary, so that
+        # chain exposes main commits the base's own boundary never covers, and
+        # a merge base existing does not mean the shared ancestry is connected.
+        # The numbers matter: the deepen loop starts at 50, so the planted main
+        # commit sits more than 50 below main's tip and less than 50 below the
+        # commit the branch merged earlier.
+        token = "ghp_" + "Cd4eFg7iJk0lMn3oPq6rSt9uVw2xYz5aBc8D"
+        (self.repo / "main-secret.txt").write_text(f'github_token = "{token}"\n')
+        build = """
+        set -euo pipefail
+        git branch -M main
+        for i in $(seq 1 59); do git commit -q --allow-empty -m "main ${i}"; done
+        git add main-secret.txt
+        git commit -qm "main 60 (plants a credential on main)"
+        for i in $(seq 61 65); do git commit -q --allow-empty -m "main ${i}"; done
+        git rev-parse HEAD > .early-main
+        for i in $(seq 66 120); do git commit -q --allow-empty -m "main ${i}"; done
+        git checkout -q -b pr "$(cat .base)"
+        echo one > pr-one.txt; git add pr-one.txt; git commit -qm "pr 1"
+        git merge -q --no-ff -m "Merge main into pr (early)" "$(cat .early-main)"
+        echo two > pr-two.txt; git add pr-two.txt; git commit -qm "pr 2"
+        git merge -q --no-ff -m "Merge main into pr (tip)" main
+        """
+        (self.repo / ".base").write_text(self.base)
+        subprocess.run(["bash", "-c", build], cwd=self.repo, check=True, capture_output=True)
+        pr_head = self.git("rev-parse", "pr").stdout.strip()
+        main_tip = self.git("rev-parse", "main").stdout.strip()
+        main_secret = self.git("rev-parse", "main~60").stdout.strip()
+        self.assertEqual(
+            "main 60 (plants a credential on main)",
+            self.git("show", "-s", "--format=%s", main_secret).stdout.strip(),
+        )
+
+        def fresh(name):
+            clone = Path(self.temp.name) / name
+            clone.mkdir()
+            def git(*args, check=True):
+                return subprocess.run(["git", *args], cwd=clone, text=True,
+                                      capture_output=True, check=check)
+            git("init", "-q", ".")
+            git("config", "gc.auto", "0")
+            git("remote", "add", "origin", self.repo.as_uri())
+            return clone, git
+
+        def scan(clone, base):
+            return subprocess.run(
+                [GITLEAKS, "git", f"--log-opts={base}..HEAD", "--redact", "--verbose"],
+                cwd=clone, text=True, capture_output=True,
+            )
+
+        # Precondition: the truncated graph really does expose main's commit.
+        # This is what the gate did before the range-contains-merges unshallow,
+        # and it must fail, or the rest of this test proves nothing.
+        shallow, git = fresh("shallow")
+        git("fetch", "--no-tags", "--prune", "--depth=1", "origin", pr_head)
+        git("checkout", "--detach", "--force", pr_head)
+        git("fetch", "--no-tags", "--depth=1", "origin", main_tip)
+        git("fetch", "--no-tags", "--deepen=50", "origin", pr_head, main_tip)
+        self.assertEqual(main_tip, git("merge-base", main_tip, "HEAD").stdout.strip())
+        self.assertIn(main_secret,
+                      git("rev-list", f"{main_tip}..HEAD").stdout.split())
+        leaked = scan(shallow, main_tip)
+        self.assertEqual(1, leaked.returncode, leaked.stdout + leaked.stderr)
+        self.assertIn("github-pat", leaked.stdout + leaked.stderr)
+
+        for job in ("diff-hygiene", "secret-scan"):
+            with self.subTest(job=job):
+                clone, git = fresh(f"fixed-{job}")
+                result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c", self.checkout_script(job)],
+                    cwd=clone,
+                    env={**os.environ, "BASE_SHA": main_tip, "GITHUB_SHA": pr_head,
+                         "SCAN_HEAD_SHA": pr_head},
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                # Merges in the range force a complete graph, so main's own
+                # commits are excluded again.
+                self.assertEqual(pr_head, git("rev-parse", "HEAD").stdout.strip())
+                base = git("merge-base", main_tip, "HEAD").stdout.strip()
+                self.assertEqual(main_tip, base)
+                clean = scan(clone, base)
+                self.assertEqual(0, clean.returncode, clean.stdout + clean.stderr)
+                self.assertNotIn(main_secret, git("rev-list", f"{base}..HEAD").stdout.split())
+                self.assertEqual("false",
+                                 git("rev-parse", "--is-shallow-repository").stdout.strip())
+
+                # A credential the branch itself adds is still reported.
+                own = "ghp_" + "Ef5gHi8jKl1mNo4pQr7sTu0vWx3yZa6bCd9E"
+                (clone / "branch-secret.txt").write_text(f'github_token = "{own}"\n')
+                git("add", "branch-secret.txt")
+                git("-c", "user.name=gate", "-c", "user.email=gate@example.invalid",
+                    "commit", "-qm", "pr 3 (plants a credential on the branch)")
+                planted = scan(clone, base)
+                self.assertEqual(1, planted.returncode, planted.stdout + planted.stderr)
+                self.assertIn("github-pat", planted.stdout + planted.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

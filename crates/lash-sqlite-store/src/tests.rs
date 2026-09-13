@@ -761,6 +761,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         )
         .expect("record intent");
@@ -834,6 +835,7 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         },
     )
     .expect("record live attachment intent");

@@ -3,8 +3,11 @@
 
 use super::*;
 
-/// The current cancellation-authority cutover is refusal-only: no predecessor
-/// shape can be upgraded by inventing durable cancellation facts.
+/// The current cutovers are refusal-only: no predecessor shape can be upgraded
+/// by inventing the registry-minted incarnation that qualifies a process
+/// attachment owner (component 90), and none can be upgraded by inventing
+/// durable cancellation facts (component 91). Component 90 is therefore
+/// retained as the refusal-only endpoint and no row targets component 91.
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {

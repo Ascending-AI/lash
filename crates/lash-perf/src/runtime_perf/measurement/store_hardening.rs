@@ -466,6 +466,7 @@ async fn measure_store_hardening_backend_turn(
             intent_at_epoch_ms: turn_index as u64 + 1,
             owner_kind: Some(AttachmentOwnerKind::Turn),
             owner_id: Some(format!("hardening-turn-{turn_index}")),
+            owner_incarnation: None,
         })?)
     })?;
     phases.insert(phase.0, phase.1);

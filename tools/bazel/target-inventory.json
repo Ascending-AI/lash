@@ -24,10 +24,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-conformance:lash-conformance__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -53,7 +50,7 @@
         },
         {
           "cargo": "lash_core",
-          "cargo_only": "shares a unit-test binary with nested-Cargo fault-matrix tests",
+          "cargo_only": "shares a unit-test binary with the fault-matrix tests, which execute scripts/confidence-gate.sh against a fake Cargo on PATH",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
           "tags": [
@@ -64,10 +61,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-core:lash-core__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "integration_boundary",
@@ -119,10 +113,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-http-transport:lash-http-transport__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -150,10 +141,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -183,10 +171,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-llm-tools:lash-llm-tools__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -216,10 +201,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-llm-transport:lash-llm-transport__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "property",
@@ -254,10 +236,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-perf:lash-perf__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "lash-perf",
@@ -299,10 +278,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -332,10 +308,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -359,10 +332,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -386,10 +356,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -416,7 +383,7 @@
         },
         {
           "cargo": "lash_postgres_store",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "tags": [
@@ -427,14 +394,11 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "postgres-await-event-helper",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "example",
           "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
           "tags": [
@@ -444,7 +408,7 @@
         },
         {
           "cargo": "integration",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
           "tags": [
@@ -454,7 +418,7 @@
         },
         {
           "cargo": "conformance",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "tags": [
@@ -464,7 +428,7 @@
         },
         {
           "cargo": "durable_read_fixture",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "tags": [
@@ -474,7 +438,7 @@
         },
         {
           "cargo": "preflight_durable_walk",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "tags": [
@@ -484,7 +448,7 @@
         },
         {
           "cargo": "preflight_schema_status",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "tags": [
@@ -494,7 +458,7 @@
         },
         {
           "cargo": "schema_drift",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
           "tags": [
@@ -504,7 +468,7 @@
         },
         {
           "cargo": "schema_constraints",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
@@ -527,6 +491,7 @@
       ],
       "targets": [
         {
+          "clippy_exempt": "cargo_build_script exposes no CrateInfo for the clippy aspect",
           "kind": "custom-build",
           "label": "//crates/lash-protocol-rlm:build_script"
         },
@@ -544,10 +509,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "protocol_drivers",
@@ -583,10 +545,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-protocol-standard:lash-protocol-standard__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "embedded_builder",
@@ -634,10 +593,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-provider-anthropic:lash-provider-anthropic__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "charge_safety",
@@ -673,10 +629,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-provider-auth:lash-provider-auth__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -706,10 +659,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-provider-google:lash-provider-google__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "charge_safety",
@@ -751,10 +701,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-provider-openai:lash-provider-openai__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "codex_websocket_runtime",
@@ -796,10 +743,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-regress:lash-regress__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "integration",
@@ -847,10 +791,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-remote-protocol:lash-remote-protocol__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -867,21 +808,14 @@
         },
         {
           "cargo": "lash_restate",
-          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash-restate:lash-restate__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "kind": "doc-test",
           "label": "//crates/lash-restate:lash-restate__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -905,10 +839,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-rlm-types:lash-rlm-types__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -929,7 +860,7 @@
         },
         {
           "cargo": "lash_s3_store",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-s3-store:lash-s3-store__unit_test",
           "tags": [
@@ -940,10 +871,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-s3-store:lash-s3-store__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -973,10 +901,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-sansio:lash-sansio__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -993,7 +918,7 @@
         },
         {
           "cargo": "lash_sim",
-          "cargo_only": "shares a unit-test binary with specially scheduled heavy simulation tests",
+          "cargo_only": "shares a unit-test binary with the specially scheduled heavy simulation tests, a repository-root docs/gate walk from CARGO_MANIFEST_DIR, and a search-mode case whose determinism depends on the Cargo runner's scheduling",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
           "tags": [
@@ -1004,10 +929,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-sim:lash-sim__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "lash-sim",
@@ -1023,7 +945,7 @@
         },
         {
           "cargo": "cross_backend_active_turn_divergence",
-          "cargo_only": "requires explicitly scheduled durable backend services",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
           "tags": [
@@ -1033,7 +955,7 @@
         },
         {
           "cargo": "cross_backend_store_differential",
-          "cargo_only": "requires explicitly scheduled durable backend services",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
           "tags": [
@@ -1097,10 +1019,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-sqlite-store:lash-sqlite-store__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "sqlite-await-event-helper",
@@ -1154,10 +1073,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-subagents:lash-subagents__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -1187,10 +1103,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-tool-support:lash-tool-support__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
@@ -1219,10 +1132,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-trace:lash-trace__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "schema",
@@ -1256,10 +1166,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lash-typescript:lash-typescript__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "integration",
@@ -1295,21 +1202,14 @@
         },
         {
           "cargo": "lash",
-          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash:lash__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "kind": "doc-test",
           "label": "//crates/lash:lash__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "embed_plugins",
@@ -1395,10 +1295,7 @@
         {
           "kind": "doc-test",
           "label": "//crates/lashlang:lashlang__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "function_perf",
@@ -1532,10 +1429,7 @@
         {
           "kind": "doc-test",
           "label": "//examples/slack-clone:slack-clone__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "slack-clone-bot",
@@ -1646,10 +1540,7 @@
         {
           "kind": "doc-test",
           "label": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "workflow-graph-roundtrip",
@@ -1715,10 +1606,7 @@
         {
           "kind": "doc-test",
           "label": "//runbooks/restate-postgres-workers:restate-postgres-workers__doc_test",
-          "tags": [
-            "cargo-authoritative-doctest",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "lash-e2e-await-event-helper",

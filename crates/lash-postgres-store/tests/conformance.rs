@@ -1155,7 +1155,8 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     reset(&storage).await;
     sqlx::query(
         "ALTER TABLE lash_attachment_manifest
-         DROP CONSTRAINT lash_attachment_manifest_owner_kind_check",
+         DROP CONSTRAINT IF EXISTS lash_attachment_manifest_owner_kind_check,
+         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
     )
     .execute(storage.pool())
     .await
@@ -1181,7 +1182,15 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     sqlx::query(
         "ALTER TABLE lash_attachment_manifest
          ADD CONSTRAINT lash_attachment_manifest_owner_kind_check
-         CHECK (owner_kind IN ('turn', 'process'))",
+             CHECK (owner_kind IN ('turn', 'process')),
+         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+             CHECK (
+                 (owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
+                 OR (owner_kind = 'turn' AND owner_id IS NOT NULL
+                     AND owner_incarnation IS NULL)
+                 OR (owner_kind = 'process' AND owner_id IS NOT NULL
+                     AND owner_incarnation IS NOT NULL)
+             )",
     )
     .execute(storage.pool())
     .await
@@ -1197,6 +1206,66 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
             } if message == "unknown attachment owner kind `unknown`"
         ),
         "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_bare_process_attachment_owner_refuses_with_canonical_typed_error_when_configured()
+{
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres bare process attachment-owner regression: database URL is not set"
+        );
+        return;
+    };
+    reset(&storage).await;
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         DROP CONSTRAINT ck_lash_attachment_manifest_owner_identity",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("drop owner-identity CHECK for predecessor injection");
+    sqlx::query(
+        "INSERT INTO lash_attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms,
+          committed_at_ms, owner_kind, owner_id, owner_incarnation)
+         VALUES ('bare-process-owner', 'bare-process-attachment-owner',
+                 'lash-attachment://bare-process', 0, NULL, 'process', 'process-1', NULL)",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("insert bare process owner");
+
+    let store = storage.session_store("bare-process-attachment-owner");
+    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0);
+
+    sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'bare-process-owner'")
+        .execute(storage.pool())
+        .await
+        .expect("remove bare process-owner row");
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK (
+             (owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
+             OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL)
+             OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)
+         )",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("restore owner-identity CHECK");
+
+    let error = result.expect_err("bare Postgres process attachment owner must refuse");
+    assert!(
+        matches!(
+            error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "AttachmentManifest owner",
+                ref message,
+            } if message == "process attachment owner `process-1` has no incarnation; bare process-owner identities are unsupported"
+        ),
+        "Postgres must return the canonical bare-process-owner refusal, got {error:?}"
     );
 }
 
@@ -1248,6 +1317,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
             intent_at_epoch_ms: NOW_MS.saturating_sub(1),
             owner_kind: Some(lash_core::AttachmentOwnerKind::Turn),
             owner_id: Some(TURN_ID.to_string()),
+            owner_incarnation: None,
         })
         .expect("record turn-owned intent");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");

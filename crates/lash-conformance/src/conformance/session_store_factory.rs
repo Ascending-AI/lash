@@ -777,7 +777,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     registry: Arc<dyn crate::ProcessRegistry>,
 ) {
     const PROCESS_ID: &str = "process-prune-owned-session-stores";
-    registry
+    let process = registry
         .register_process(crate::ProcessRegistration::new(
             PROCESS_ID,
             crate::ProcessInput::External {
@@ -820,6 +820,7 @@ pub async fn process_prune_deletes_owned_session_stores(
                 intent_at_epoch_ms: 1,
                 owner_kind: Some(crate::AttachmentOwnerKind::Process),
                 owner_id: Some(PROCESS_ID.to_string()),
+                owner_incarnation: Some(process.incarnation),
             },
         )
         .expect("record process-owned attachment intent");
@@ -1402,6 +1403,7 @@ async fn session_store_factory_rejects_writes_after_delete(
                 intent_at_epoch_ms: 1,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         ),
         &request.session_id,
@@ -2383,6 +2385,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
                 intent_at_epoch_ms: 1,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         )
         .expect("write after a completed sweep"),
@@ -2426,6 +2429,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         )
         .expect("record aged_uncommitted intent"),
@@ -2442,6 +2446,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         )
         .expect("record committed intent"),
@@ -2465,6 +2470,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
                 owner_id: None,
+                owner_incarnation: None,
             },
         )
         .expect("record cond_target intent"),

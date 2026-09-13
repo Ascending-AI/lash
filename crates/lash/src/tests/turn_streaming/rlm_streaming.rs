@@ -837,6 +837,7 @@ finish "done""#,
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
     ));
     assert!(result.execution.had_tool_calls);
+    assert!(result.execution.had_code_execution);
     assert_eq!(result.tool_calls.len(), 1);
     assert_eq!(result.tool_calls[0].tool, "app_lookup");
     assert_eq!(result.tool_calls[0].args, serde_json::json!({}));
@@ -1016,6 +1017,7 @@ finish "recovered""#,
         ));
         assert_eq!(result.final_value(), Some(&serde_json::json!("recovered")));
         assert!(result.execution.had_tool_calls);
+        assert!(result.execution.had_code_execution);
         assert_eq!(result.tool_calls.len(), 1);
         assert_eq!(result.tool_calls[0].tool, "app_lookup");
         assert!(!result.tool_calls[0].output.is_success());

@@ -247,3 +247,31 @@ pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRun
         }
     }
 }
+
+/// Pin a leaf, fork at it, then unpin: the node anchor must move with the fork.
+/// Declared here beside the other fork shapes so the parent file stays inside
+/// the test file-size budget.
+pub(super) fn pin_fork_unpin() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::PinForkUnpin,
+        operations: vec![
+            StoreOperation::Commit {
+                label: "commit_forkable_leaf",
+                expected_head_revision: 0,
+                graph: append(
+                    vec![NodeSpec::new("active-frame", None, "forkable")],
+                    Some("active-frame"),
+                ),
+                turn_commit: Some(TurnCommitSpec {
+                    turn_id: "forkable-leaf",
+                }),
+                checkpoint: CheckpointSpec::Empty,
+                usage: false,
+                adopt_attachment: false,
+            },
+            StoreOperation::PinLeaf,
+            StoreOperation::ForkAtLeaf,
+            StoreOperation::UnpinLeaf,
+        ],
+    }
+}

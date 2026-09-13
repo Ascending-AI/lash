@@ -9,7 +9,8 @@ import yaml
 import ci_plan
 
 
-CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+ROOT = Path(__file__).resolve().parents[1]
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 AGGREGATOR_ALLOWLIST = {"plan", "ci-conclusion"}
 
 
@@ -393,25 +394,56 @@ class PostgresMatrixTests(unittest.TestCase):
         "Test cross-backend store differential",
     }
 
-    def test_matrix_has_fixed_explicit_primary_and_compatibility_roles(self) -> None:
+    def test_matrix_comes_from_the_plan_and_brackets_the_supported_range(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         self.assertEqual(
-            [
-                {"postgres": "14", "role": "compatibility"},
-                {"postgres": "16", "role": "primary"},
-                {"postgres": "18", "role": "compatibility"},
-            ],
+            "${{ fromJSON(needs.plan.outputs.postgres_matrix) }}",
             jobs["postgres-store"]["strategy"]["matrix"]["include"],
         )
+        self.assertEqual(
+            "${{ steps.postgres-matrix.outputs.postgres_matrix }}",
+            jobs["plan"]["outputs"]["postgres_matrix"],
+        )
+        step = next(
+            candidate
+            for candidate in jobs["plan"]["steps"]
+            if candidate.get("id") == "postgres-matrix"
+        )
+        self.assertIn("scripts/ci_plan.py postgres-matrix", step["run"])
+
+    def test_compatibility_lanes_are_deferred_off_the_pull_request_path(self) -> None:
+        """PG16 runs everywhere; PG14/PG18 run wherever a change can reach trunk."""
+        self.assertEqual(
+            [{"postgres": "16", "role": "primary"}],
+            ci_plan.postgres_matrix("pull_request"),
+        )
+        for event in ("merge_group", "push", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    [
+                        {"postgres": "14", "role": "compatibility"},
+                        {"postgres": "16", "role": "primary"},
+                        {"postgres": "18", "role": "compatibility"},
+                    ],
+                    ci_plan.postgres_matrix(event),
+                )
 
     def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
         for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+            roles = {leg["role"] for leg in ci_plan.postgres_matrix(event)}
             with self.subTest(event=event, role="compatibility"):
-                self.assertEqual(
-                    self.COMPATIBILITY,
-                    selected_postgres_test_steps(event, "compatibility"),
-                )
+                if event == "pull_request":
+                    # The lane does not exist on a pull request at all; a leg
+                    # that ran no tests would be a hollow green.
+                    self.assertNotIn("compatibility", roles)
+                else:
+                    self.assertIn("compatibility", roles)
+                    self.assertEqual(
+                        self.COMPATIBILITY,
+                        selected_postgres_test_steps(event, "compatibility"),
+                    )
             with self.subTest(event=event, role="primary"):
+                self.assertIn("primary", roles)
                 expected = (
                     self.PRIMARY_PR
                     if event in ci_plan.DEFERRED_EVENTS
@@ -420,20 +452,44 @@ class PostgresMatrixTests(unittest.TestCase):
                 self.assertEqual(expected, selected_postgres_test_steps(event, "primary"))
 
     def test_commands_pin_live_catalog_version_and_runtime_identity_oracle(self) -> None:
+        """The named oracles must survive the Bazel/Cargo dispatch, on both paths.
+
+        The steps delegate to scripts/ci/store-tests.sh, so the pin follows the
+        test names into that script's branch for the suite each step selects,
+        and each name must appear on the Bazel side and the Cargo side.
+        """
         job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "postgres-store"
         ]
         steps = {step["name"]: step for step in job["steps"]}
-        compatibility = steps["Test PostgreSQL catalog compatibility"]["run"]
-        self.assertIn("committed_shape_artifact_matches_the_ddl_artifact", compatibility)
-        self.assertIn(
-            "a_mismatched_version_stamp_is_reported_without_a_column_diff",
-            compatibility,
-        )
-        self.assertIn(
-            "agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres",
-            steps["Test runtime Postgres agent scenarios"]["run"],
-        )
+        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+
+        def suite_body(step_name: str) -> tuple[str, str]:
+            run = steps[step_name]["run"]
+            self.assertIn("scripts/ci/store-tests.sh", run)
+            suite = run.split()[-1]
+            body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
+            bazel, cargo = body.split("\n    else\n", 1)
+            return bazel, cargo
+
+        for oracle, step_name in (
+            (
+                "committed_shape_artifact_matches_the_ddl_artifact",
+                "Test PostgreSQL catalog compatibility",
+            ),
+            (
+                "a_mismatched_version_stamp_is_reported_without_a_column_diff",
+                "Test PostgreSQL catalog compatibility",
+            ),
+            (
+                "agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres",
+                "Test runtime Postgres agent scenarios",
+            ),
+        ):
+            with self.subTest(oracle=oracle):
+                bazel, cargo = suite_body(step_name)
+                self.assertIn(oracle, bazel)
+                self.assertIn(oracle, cargo)
 
     def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
         for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):

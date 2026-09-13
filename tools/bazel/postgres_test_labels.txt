@@ -1,0 +1,8 @@
+//crates/lash-postgres-store:conformance__test
+//crates/lash-postgres-store:durable_read_fixture__test
+//crates/lash-postgres-store:integration__test
+//crates/lash-postgres-store:lash-postgres-store__unit_test
+//crates/lash-postgres-store:preflight_durable_walk__test
+//crates/lash-postgres-store:preflight_schema_status__test
+//crates/lash-postgres-store:schema_constraints__test
+//crates/lash-postgres-store:schema_drift__test

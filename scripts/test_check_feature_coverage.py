@@ -2,8 +2,8 @@
 """Test the feature coverage gate.
 
 When ``KILN_REAL_CARGO`` is set, fixture workspaces resolve Cargo to that real
-binary so their single-crate checks do not enter the host's heavy-slot queue.
-CI does not set the variable, so its Cargo resolution is unchanged.
+binary so their single-crate checks bypass the Kiln wrapper's managed cgroup
+scope. CI does not set the variable, so its Cargo resolution is unchanged.
 """
 
 from __future__ import annotations

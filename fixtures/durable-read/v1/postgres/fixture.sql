@@ -79,7 +79,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     committed_at_ms bigint,
     owner_kind text,
     owner_id text,
-    CONSTRAINT lash_attachment_manifest_check CHECK (((owner_kind IS NULL) = (owner_id IS NULL))),
+    owner_incarnation bigint,
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL)))),
     CONSTRAINT lash_attachment_manifest_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])))
 );
 
@@ -865,7 +866,7 @@ INSERT INTO lash_durable_read_fixture.lash_artifact_owners VALUES ('process_exec
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL, NULL);
 
 
 --
@@ -1704,7 +1705,7 @@ CREATE INDEX idx_lash_artifact_owners_owner ON lash_durable_read_fixture.lash_ar
 -- Name: idx_lash_attachment_manifest_owner; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, committed_at_ms);
+CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
 
 
 --
