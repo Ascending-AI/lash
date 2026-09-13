@@ -829,6 +829,7 @@ pub struct CodeOutputRecord {
 pub struct TurnExecutionMetrics {
     #[serde(default)]
     pub had_tool_calls: bool,
+    /// True when the turn emitted at least one code-block completion.
     #[serde(default)]
     pub had_code_execution: bool,
     /// Wall-clock turn start as epoch milliseconds, read from the runtime
