@@ -53,8 +53,8 @@ kiln test \
 ```
 
 These build and test commands select the host shared executor by default.
-`--shared` on the lower-level script makes that choice explicit. It uses REAPI
-instance `orb` at `grpc://127.0.0.1:45191`, requires the declared NativeLink
+`scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses REAPI
+instance `kiln` at `grpc://127.0.0.1:45191`, requires the declared NativeLink
 runtime identity, and fails when the executor is unavailable. NativeLink
 executes trusted builds directly on the host. Hermeticity here describes pinned
 tools and declared inputs, not an OS security boundary. `--local` executes
@@ -85,11 +85,12 @@ declared repository-relative source, patch, data, runfiles, build environment,
 and rule inputs, so two Kiln forks can reuse the same results. Successful test
 results are cacheable (`--cache_test_results=yes`) and an input change produces
 a different test action key. Failed tests are never reused as successes. The
-executor has eight action slots. Each action declares one CPU and 2 GiB by
-default, Bazel queues at most eight jobs, repository loading uses four threads,
+executor tracks up to eight actions. Each action declares four CPUs and 4 GiB by
+default; its 16-CPU scheduling capacity admits up to four such actions at once.
+Bazel queues at most eight jobs, repository loading uses four threads,
 and each checkout's Bazel server has a 4 GiB heap ceiling. The Bazel server
 remains in the caller's cgroup; remote compilation runs inside the executor's
-`orb-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
+`kiln-heavy.slice` budget. Keeping a Bazel server alive preserves its analysis
 cache.
 
 The Kiln golden is maintained outside agent forks. Its refresh prewarms the
@@ -177,7 +178,7 @@ GitHub-hosted actions execute locally, not in the shared executor's pinned
 runtime image. Their remote-cache platform property is therefore derived from
 GitHub's `runner.os`, `runner.arch`, `ImageOS`, and `ImageVersion` values. This
 gives each concrete GitHub runner image a deterministic action identity
-distinct from `orb_executor_runtime`; the cache service and instance remain
+distinct from `kiln_executor_runtime`; the cache service and instance remain
 shared, but actions cannot cross the runtime boundary under the same key.
 
 The Bazel default is the development compilation graph. Timing comparisons

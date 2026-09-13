@@ -277,13 +277,14 @@ class BazelTestContractTests(unittest.TestCase):
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
         self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", bazel_command)
+        self.assertIn("--remote_instance_name=kiln", bazel_command)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
         self.assertIn(
             "--remote_default_exec_properties=github_runner_runtime=${{ "
             "steps.bazel-runtime.outputs.bazel_runtime }}",
             bazel_command,
         )
-        self.assertNotIn("orb_executor_runtime", bazel_command)
+        self.assertNotIn("kiln_executor_runtime", bazel_command)
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
         jobs = workflow()["jobs"]

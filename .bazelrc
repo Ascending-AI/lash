@@ -1,5 +1,5 @@
 # Keep repository and action caches off the space-constrained workspace
-# filesystem. These caches are safe to share across independent Orb forks.
+# filesystem. These caches are safe to share across independent Kiln forks.
 startup --output_user_root=/home/sam/.cache/lash-bazel/user-root
 startup --host_jvm_args=-Xmx4g
 common --repository_cache=/home/sam/.cache/lash-bazel/repository
@@ -11,8 +11,8 @@ common --lockfile_mode=error
 # separately from this repository; an unavailable endpoint fails closed.
 build:shared --remote_executor=grpc://127.0.0.1:45191
 build:shared --remote_cache=grpc://127.0.0.1:45191
-build:shared --remote_instance_name=orb
-build:shared --remote_default_exec_properties=orb_executor_runtime=orb-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
+build:shared --remote_instance_name=kiln
+build:shared --remote_default_exec_properties=kiln_executor_runtime=kiln-runtime-sha256-47495b3de590444ce9c8605d2b1e6da0f41077ff6c5ff44ae141343d951f4390
 # Rust compile and link actions are large and mostly single-invocation: on
 # one core the workspace test binaries take 20-30 minutes each and sit on the
 # serial tail of the graph. Four cores per action lets rustc parallelise
