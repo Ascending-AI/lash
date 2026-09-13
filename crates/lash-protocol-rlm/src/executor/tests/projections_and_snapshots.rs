@@ -1117,6 +1117,29 @@ pub(super) fn flow_to_json_value_preserves_projection_ref_without_materializing(
 }
 
 #[test]
+pub(super) fn flow_to_json_value_materializes_an_invalid_projection_ref() {
+    block_on(async {
+        let host = Arc::new(SnapshotProjectedToolText::default());
+        let projected = ProjectedValue::custom_with_projection_ref(
+            "doc",
+            host.clone(),
+            serde_json::Value::Null,
+        );
+        let value = flow_to_json_value(&FlowValue::Projected(projected)).await;
+        assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            value,
+            serde_json::json!({
+                PROJECTED_JSON_TAG: {
+                    "kind": "materialized",
+                    "value": "materialized tool text",
+                }
+            })
+        );
+    });
+}
+
+#[test]
 pub(super) fn image_json_round_trip_preserves_mime_and_image_type() {
     block_on(async {
         let image = lashlang::ImageValue::new(
