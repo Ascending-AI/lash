@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+(FIG-3016, 2026-09-13). See "What 0096 kept" at the end of this ADR.
 
 ## Context
 
@@ -131,3 +132,29 @@ This is a format cutover, not a display rename: existing environments must be
 recreated, local loading refuses old or mismatched references, and the remote
 reference decoder accepts only v5. All other journal/effect identity strings
 and this ADR's language carve-outs remain as defined above.
+
+## What 0096 kept
+
+[ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md) retires the Lashlang
+surface, so there is no second dialect for a fragment to be written in by
+mistake. The defect this ADR closes cannot recur.
+
+**Dead.** `DialectPromptVocabulary` and the words it owned (language name, cell
+tag, cell noun, print call and statement, finish form, continue-as forms,
+`tool_call_path`). The two-dialect prompt walker and its cross-dialect
+assertion. The registered-but-inactive cell recognition rule, which existed
+because two tag sets could collide. The `{{…}}` tool-prose token mechanism and
+`dialect::TOOL_PROSE_TOKENS`, together with the registration check that refused
+prose naming *any* registered dialect — with one dialect that check would refuse
+the only correct spelling. Tool prose may name TypeScript. FIG-3021 owns the
+mechanics.
+
+**Alive.** Substrate identifiers are not model-visible: modules under the
+reserved `__` namespace are hidden from the host-environment section rather
+than renamed, because renaming moves durable identity. `lashlang_step`,
+`process:lashlang:v2:…` and `lashlang:effect:…` keep their spellings for the
+same reason; under 0096 they name the IR and VM, which is what they always
+described, so they are no longer foreign words in the prompt and the carve-out
+register that tracked them as debt is retired. The trace record's `language`
+field and the Lashlang-named event, JSONL file and graph API are unchanged. A
+host that assembles its own prompt copy still owns the same rule for it.
