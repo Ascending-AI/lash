@@ -61,12 +61,14 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             for scenario in SELF_CONTAINED_OPERATOR_RUNBOOKS
         }
 
-    def test_every_existing_runbook_has_both_dialect_rows(self) -> None:
+    def test_every_existing_runbook_has_exactly_one_typescript_row(self) -> None:
+        # Discovery plus the row shape in one test: a runbook directory that
+        # nobody classified is as invisible as a scenario that quietly emits a
+        # second paid row under a language the tree no longer has.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
         ordinary = set(config["scenarios"])
-        actual = {(row["scenario"], row["dialect"]) for row in rows}
         excluded = (
             set(config["typescript_only"])
             | set(config["deterministic_only"])
@@ -78,9 +80,24 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             if path.parent.name not in excluded
         }
         self.assertEqual(discovered, ordinary)
+        self.assertEqual(config["language"], "typescript")
         for scenario in ordinary:
-            self.assertIn((scenario, "lashlang"), actual)
-            self.assertIn((scenario, "typescript"), actual)
+            self.assertEqual(
+                [row["label"] for row in rows if row["scenario"] == scenario],
+                ["typescript"],
+                f"`{scenario}` must emit exactly one row, labelled typescript",
+            )
+
+    def test_no_row_carries_a_retired_language_id(self) -> None:
+        # ADR 0096 leaves one language id. A row labelled with the retired
+        # surface would claim a session pin no host can serve, and the artifact
+        # directory it names would be evidence of nothing.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        labels = {row["label"] for row in MATRIX.rows(config)}
+        self.assertEqual(labels, {"typescript", "standard"})
+        self.assertNotIn("dialects", config)
+        self.assertNotIn("lashlang", MATRIX.MATRIX.read_text())
 
     def test_the_matrix_lists_no_scenario_twice(self) -> None:
         # A scenario in two groups is invisible to a per-group check while the
@@ -102,36 +119,40 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         duplicates = sorted({name for name in listed if listed.count(name) > 1})
         self.assertEqual(duplicates, [], f"the matrix classifies {duplicates} twice")
         rows = MATRIX.rows(config)
-        keys = [(row["scenario"], row["dialect"]) for row in rows]
+        keys = [(row["scenario"], row["label"]) for row in rows]
         repeated = sorted({key for key in keys if keys.count(key) > 1})
         self.assertEqual(repeated, [], f"the matrix emits {repeated} more than once")
 
-    def test_no_rlm_session_scenarios_get_one_dialect_neutral_row(self) -> None:
-        # A scenario that opens no RLM session has no dialect to pin. A second
-        # row would buy an identical judged run and label it with a language the
-        # session never had.
+    def test_no_rlm_session_scenarios_get_one_mode_labelled_row(self) -> None:
+        # A scenario that opens no RLM session has no language to pin, so its
+        # row is labelled with the mode. Labelling it `typescript` would claim a
+        # session pin the evidence cannot show.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
         for scenario in config["no_rlm_session_only"]:
             emitted = [row for row in rows if row["scenario"] == scenario]
             self.assertEqual(
-                [row["dialect"] for row in emitted],
+                [row["label"] for row in emitted],
                 ["standard"],
-                f"`{scenario}` must emit exactly one dialect-neutral row",
+                f"`{scenario}` must emit exactly one mode-labelled row",
             )
             self.assertNotIn(scenario, config["scenarios"])
 
-    def test_scripted_live_model_scenarios_declare_both_dialects(self) -> None:
+    def test_scripted_live_model_scenarios_name_their_runner_and_no_language(
+        self,
+    ) -> None:
+        # These rows are owned by a shell oracle, not by the judged shard, so
+        # the runner is the only thing the matrix can be trusted on. A
+        # per-entry language list would be a second source of truth for a
+        # choice ADR 0096 removed.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
+        emitted = {row["scenario"] for row in MATRIX.rows(config)}
         for scenario, entry in config["scripted_live_model"].items():
-            self.assertEqual(
-                entry["dialects"],
-                config["dialects"],
-                f"`{scenario}` must carry both scripted dialect rows",
-            )
             self.assertEqual(entry["runner"], "just rlm-smoke-e2e")
+            self.assertNotIn("dialects", entry)
+            self.assertNotIn(scenario, emitted)
 
     def test_the_row_total_is_the_stated_arithmetic(self) -> None:
         # The count is cited in the report, the runbook rules and the shard
@@ -140,12 +161,12 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         expected = (
-            len(config["scenarios"]) * len(config["dialects"])
+            len(config["scenarios"])
             + len(config["typescript_only"])
             + len(config["no_rlm_session_only"])
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 67)
+        self.assertEqual(expected, 36)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -204,15 +225,15 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                     "sharding must be lossless and non-overlapping",
                 )
                 self.assertEqual(
-                    [(row["scenario"], row["dialect"]) for row in expected],
+                    [(row["scenario"], row["label"]) for row in expected],
                     sorted(
                         (
-                            (row["scenario"], row["dialect"])
+                            (row["scenario"], row["label"])
                             for shard in shards
                             for row in shard
                         ),
                         key=lambda key: [
-                            (row["scenario"], row["dialect"]) for row in expected
+                            (row["scenario"], row["label"]) for row in expected
                         ].index(key),
                     ),
                     "every row must appear in exactly one shard",

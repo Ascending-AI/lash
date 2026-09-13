@@ -1,10 +1,12 @@
-schema_version = 2
+schema_version = 3
 judge_model_floor = "gpt-5.6-sol"
-artifact_layout = "<run-root>/<scenario>/<dialect>"
+artifact_layout = "<run-root>/<scenario>/<label>"
 
-# Every ordinary judged runbook is dialect-independent at the scenario level
-# and therefore runs in both first-class RLM dialects.
-dialects = ["lashlang", "typescript"]
+# ADR 0096: TypeScript is the only RLM authoring language. There is one
+# language id, spelled out, and a judged RLM scenario is therefore one row, not
+# a parity pair. `language` is the id every RLM row carries; the no-RLM rows
+# below carry `standard`, which is a mode rather than a language.
+language = "typescript"
 
 # Execution tiers. A judged row's execution model is a claim about what the row
 # is testing, not a uniform quality floor: the old blanket `gpt-5.6-sol`
@@ -31,8 +33,8 @@ deterministic = ["scripted-provider"]
 economy = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]
 frontier = ["openai/gpt-5.6-sol"]
 
-# Ordinary RLM scenarios: one judged row per dialect. Order is the shard order,
-# so a reordering moves rows between shards.
+# Ordinary RLM scenarios: one judged row each, pinned to `language`. Order is
+# the shard order, so a reordering moves rows between shards.
 [scenarios]
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 agent-service-branching = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
@@ -66,35 +68,37 @@ workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 workbench-usage-ledger = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 1 calls a provider" }
 workbench-weather-dialects = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
-# These exercise TypeScript-only host-language surface with no honest Lashlang
-# twin. The runbook keeps them together because the final phase composes all
-# three into the required durable restart turn.
+# These exercise host-language surface that only reaches the model through the
+# TypeScript authoring path rather than through a scenario mechanism. They are
+# listed apart from `scenarios` because the runbook keeps all three together:
+# its final phase composes them into the required durable restart turn.
 [typescript_only]
 typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
-# Scenarios that open no RLM session have no dialect to pin. Running them twice
-# would buy two identical judged runs and two identical bills, and the second
-# row's `dialect` label would be a claim about a session that does not exist.
-# They get one dialect-neutral row each, emitted with `dialect = "standard"` —
-# the mode, not a language — which is also their artifact directory. This is a
-# behavioral predicate: a standard-mode host is one example, not the definition.
+# Scenarios that open no RLM session have no language to pin at all. They get
+# one row each, emitted with the label `standard` — the mode, not a language —
+# which is also their artifact directory. This is a behavioral predicate: a
+# standard-mode host is one example, not the definition. The distinction
+# survives the retirement of the second dialect: `typescript` on a row is a
+# claim that a session was opened and pinned, and these rows cannot make it.
 [no_rlm_session_only]
 request-abandon = { tier = "deterministic", model = "scripted-provider" }
 workbench-valid-empty-completion = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
-# Live-model scripted harnesses with deterministic shell oracles. These rows
-# obey dialect parity but are not emitted to the judged-browser shard: the
-# named runner owns the model turn and the oracle owns the verdict.
+# Live-model scripted harnesses with deterministic shell oracles. They open an
+# RLM session, so they run at `language`, but they are not emitted to the
+# judged-browser shard: the named runner owns the model turn and the oracle
+# owns the verdict.
 [scripted_live_model]
-rlm-smoke-file-edit-bugfix = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
-rlm-smoke-missing-helper-file = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
-rlm-smoke-config-contract-edit = { dialects = ["lashlang", "typescript"], tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+rlm-smoke-file-edit-bugfix = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+rlm-smoke-missing-helper-file = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
+rlm-smoke-config-contract-edit = { tier = "economy", model = "deepseek/deepseek-v4-flash", runner = "just rlm-smoke-e2e" }
 
 # Deterministic, hermetic harnesses that CI executes rather than judges. They
-# make no model call, so they have no dialect to pin and no judged row to pair;
-# listing them here keeps discovery honest without inventing paid twin runs.
+# make no model call and emit no judged row; listing them here keeps discovery
+# honest without inventing paid runs.
 [deterministic_only]
 agent-service-effect-group-retirement = { tier = "deterministic", model = "scripted-provider" }
 agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider" }
