@@ -47,9 +47,9 @@ directory. Freshness was never only about telling two dialects apart: a carried-
 serves a previous row's processes, leases and trace offsets, which is mislabeled evidence
 whatever the row is pinned to.
 
-The row's artifact label is `label` on the emitted row, and it names what the evidence has
-to show. `typescript` is a claim that the row opened an RLM session and that session was
-pinned. A scenario that **opens no RLM session** can make no such claim; those sit in
+Each emitted row carries a `label`, which is both its artifact directory and a claim its
+evidence has to support. `typescript` says the row opened an RLM session and pinned it. A
+scenario that **opens no RLM session** can make no such claim; those sit in
 `no_rlm_session_only` and emit one row each labelled `standard` — the mode, not a
 language. A standard-mode host using `LashCore::standard_builder` is one example; the
 predicate is whether the scenario opens an RLM session, and the claim is checkable in its
