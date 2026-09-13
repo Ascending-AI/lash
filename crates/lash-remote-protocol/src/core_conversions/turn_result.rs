@@ -158,7 +158,7 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
             lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
                 frame_key, task, ..
             } => {
-                // Frame seeds are deliberately omitted from this lean result projection.
+                // Frame-switch seed bodies stay local; remote projections carry only safe metadata.
                 Self::AgentFrameSwitch {
                     frame_key: frame_key.as_str().to_string(),
                     task,
@@ -383,7 +383,7 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
 
 impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
     fn from(value: lash_core::ToolCallOutput) -> Self {
-        // `control` is a local turn-control signal and never crosses the wire.
+        // Frame-switch seed bodies stay local; remote projections carry only safe metadata.
         let lash_core::ToolCallOutput {
             outcome,
             control: _,
