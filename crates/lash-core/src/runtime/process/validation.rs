@@ -1114,7 +1114,27 @@ pub(super) fn validate_process_registration(
         )));
     }
     match registration.input.as_ref() {
-        super::model::ProcessInput::ToolCall { .. } | super::model::ProcessInput::Engine { .. } => {
+        super::model::ProcessInput::ToolCall { call } => {
+            if call.call_id.trim().is_empty() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` tool call must carry a call id",
+                    registration.id
+                )));
+            }
+            if call.tool_name.trim().is_empty() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` tool call must carry a tool name",
+                    registration.id
+                )));
+            }
+            if registration.env_ref.is_none() {
+                return Err(PluginError::Session(format!(
+                    "process `{}` requires a captured execution env",
+                    registration.id
+                )));
+            }
+        }
+        super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
                 return Err(PluginError::Session(format!(
                     "process `{}` requires a captured execution env",
