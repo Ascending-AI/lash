@@ -409,39 +409,44 @@ fn exact_core_defaults_are_excluded_but_core_named_overrides_conflict() {
 
 #[test]
 fn tool_call_registration_refuses_empty_call_id_or_tool_name() {
-    let empty_call_id = registration_for_input(ProcessInput::ToolCall {
-        call: crate::PreparedToolCall::from_parts(
-            "  ",
-            crate::ToolId::new("tool-id"),
+    for (call_id, tool_name, expected) in [
+        (
+            "",
             "tool",
-            serde_json::json!({}),
-            None,
-            serde_json::Value::Null,
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a call id",
         ),
-    });
-    assert!(
-        validate_process_registration(&empty_call_id)
-            .expect_err("empty call id must be refused")
-            .to_string()
-            .contains("tool call must carry a call id")
-    );
-
-    let empty_tool_name = registration_for_input(ProcessInput::ToolCall {
-        call: crate::PreparedToolCall::from_parts(
+        (
+            "  ",
+            "tool",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a call id",
+        ),
+        (
             "call",
-            crate::ToolId::new("tool-id"),
-            "\t",
-            serde_json::json!({}),
-            None,
-            serde_json::Value::Null,
+            "",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a tool name",
         ),
-    });
-    assert!(
-        validate_process_registration(&empty_tool_name)
-            .expect_err("empty tool name must be refused")
-            .to_string()
-            .contains("tool call must carry a tool name")
-    );
+        (
+            "call",
+            "\t",
+            "process `lookup-id-is-not-in-the-fingerprint` tool call must carry a tool name",
+        ),
+    ] {
+        let registration = registration_for_input(ProcessInput::ToolCall {
+            call: crate::PreparedToolCall::from_parts(
+                call_id,
+                crate::ToolId::new("tool-id"),
+                tool_name,
+                serde_json::json!({}),
+                None,
+                serde_json::Value::Null,
+            ),
+        });
+        match validate_process_registration(&registration) {
+            Err(crate::PluginError::Session(message)) => assert_eq!(message, expected),
+            Err(other) => panic!("expected session refusal `{expected}`, got {other:?}"),
+            Ok(()) => panic!("expected session refusal `{expected}`, got success"),
+        }
+    }
 }
 
 #[test]
