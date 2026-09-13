@@ -219,13 +219,16 @@ pub mod store_backend_support {
 
     /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
     pub fn terminal_turn_input_states_sql() -> String {
-        state_sql_literal_list(
-            &crate::TurnInputState::ALL
-                .iter()
-                .copied()
-                .filter(|state| state.is_terminal())
-                .collect::<Vec<_>>(),
-        )
+        let terminal_states = crate::TurnInputState::ALL
+            .iter()
+            .copied()
+            .filter(|state| state.is_terminal())
+            .collect::<Vec<_>>();
+        if terminal_states.is_empty() {
+            // Admit no state rather than interpolating the invalid SQL `IN ()`.
+            return "FALSE".to_string();
+        }
+        state_sql_literal_list(&terminal_states)
     }
 
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
