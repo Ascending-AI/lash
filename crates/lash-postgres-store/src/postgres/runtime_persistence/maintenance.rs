@@ -37,17 +37,17 @@ impl PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
-        let removed_pending_turn_input_tombstone_count = sqlx::query(
+        let terminal_states = lash_core::store_backend_support::terminal_turn_input_states_sql();
+        let delete_pending_turn_inputs = format!(
             "DELETE FROM lash_pending_turn_inputs
-             WHERE session_id = $1 AND state IN ($2, $3)",
-        )
-        .bind(self.session_id.as_str())
-        .bind(lash_core::TurnInputState::Cancelled.as_str())
-        .bind(lash_core::TurnInputState::Completed.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .rows_affected();
+             WHERE session_id = $1 AND state IN ({terminal_states})"
+        );
+        let removed_pending_turn_input_tombstone_count = sqlx::query(&delete_pending_turn_inputs)
+            .bind(self.session_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
         sqlx::query("DELETE FROM lash_turn_cancel_requests WHERE session_id = $1")
             .bind(self.session_id.as_str())
             .execute(&mut *tx)

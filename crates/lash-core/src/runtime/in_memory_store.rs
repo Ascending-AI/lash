@@ -90,13 +90,7 @@ fn turn_input_settlement_matches(
         && completed.input_ids.contains(&entry.input.input_id)
         && match completed.claim.as_ref() {
             Some(claim) => entry.claim.owned_by(&claim.claim_id, &claim.lease_token),
-            None => {
-                entry.claim.id().is_none()
-                    && !matches!(
-                        entry.input.state,
-                        crate::TurnInputState::Completed | crate::TurnInputState::Cancelled
-                    )
-            }
+            None => entry.claim.id().is_none() && !entry.input.state.is_terminal(),
         }
 }
 
