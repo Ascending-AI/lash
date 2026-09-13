@@ -40,6 +40,8 @@ mod session_globals;
 mod structural_contract;
 #[path = "test262_conformance.rs"]
 mod test262_conformance;
+#[path = "trigger_inputs.rs"]
+mod trigger_inputs;
 #[path = "url_runtime.rs"]
 mod url_runtime;
 #[path = "url_wpt.rs"]

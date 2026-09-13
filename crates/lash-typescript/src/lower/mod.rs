@@ -27,10 +27,15 @@ mod constructs;
 mod graph;
 mod json_replacer;
 mod regex;
+mod triggers;
 use binding::*;
 use constructs::*;
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
+use triggers::{
+    is_trigger_registration_operation, names_the_retired_trigger_event,
+    retired_trigger_event_diagnostic,
+};
 
 pub(crate) fn accepts_instance_method(method: &str) -> bool {
     stdlib::is_instance_stdlib_method(method)
@@ -1517,15 +1522,10 @@ impl Lowerer {
                 None,
             ));
         }
-        if let MemberProperty::Field(field) = property
-            && let Some(mut path) = module_path(object)
-            && path.first().is_some_and(|root| root == "trigger")
-            && !self.has_binding("trigger")
-        {
-            path.push(field.clone());
-            return Ok(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
-                path.into_iter().map(Into::into).collect(),
-            )));
+        // The retired global, named and refused rather than left to reject as
+        // an unknown binding, which said nothing about where the event went.
+        if names_the_retired_trigger_event(object, property) && !self.has_binding("trigger") {
+            return Err(retired_trigger_event_diagnostic());
         }
         let target = Box::new(self.lower_expr(object)?);
         Ok(match property {

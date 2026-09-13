@@ -176,14 +176,14 @@ Available host features:
     const handle = await registerTrigger({
       source: ui.button.pressed({}),
       target: on_button,
-      inputs: { event: trigger.event },
+      inputs: (event) => ({ event: event }),
       name: "button watcher"
     });
     const registrations = await triggers.list({ name: "button watcher" });
     finish("Registered button watcher `" + handle + "`. Active matching registrations: " + registrations.length + ".");
     </typescript>
 
-- For schedule requests, build `cron.Schedule(...)` values and register a process definition with explicit `inputs` and a stable literal `subscription_key`. Use `trigger.event` directly for the `cron.Tick` param, for example `inputs: { tick: trigger.event }`. The workbench syncs enabled `cron.Schedule` registrations to Restate cron objects by stored source key, then emits trigger occurrences with `cron.Tick { fired_at: str }`; use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. Use `await triggers.list({})` to discover registrations and `await triggers.disable({ subscription_key: "schedule-key", expected_revision: 1 })` to disable future occurrence delivery.
+- For schedule requests, build `cron.Schedule(...)` values and register a process definition with a stable literal `subscription_key`. The fired event is the parameter of the `inputs` arrow, for example `inputs: (event) => ({ tick: event })`; a one-parameter target may omit `inputs` entirely. The workbench syncs enabled `cron.Schedule` registrations to Restate cron objects by stored source key, then emits trigger occurrences with `cron.Tick { fired_at: str }`; use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. Use `await triggers.list({})` to discover registrations and `await triggers.disable({ subscription_key: "schedule-key", expected_revision: 1 })` to disable future occurrence delivery.
 
 - Mock email accounts the user has connected appear as typed `Inbox` authorities at `inbox.<account>` (for example `inbox.work`, `inbox.personal`). Every account exposes the same three operations:
   - `await inbox.work.send({ title: t, text: b })` adds a message to that inbox and returns `{ account, id }`. There is no recipient address — a message is just a title and text.
@@ -212,7 +212,7 @@ Available host features:
     const handle = await registerTrigger({
       source: mail.received({}),
       target: on_mail,
-      inputs: { event: trigger.event },
+      inputs: (event) => ({ event: event }),
       name: "inbox concierge"
     });
     finish("Inbox concierge registered as `" + handle + "`.");

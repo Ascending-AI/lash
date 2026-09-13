@@ -1,0 +1,453 @@
+{
+  "artifact": {
+    "canonical_ir": {
+      "declarations": [
+        {
+          "Process": {
+            "body": {
+              "Try": {
+                "body": {
+                  "Finish": {
+                    "Call": {
+                      "args": [
+                        {
+                          "Variable": "tick"
+                        },
+                        {
+                          "Variable": "label"
+                        }
+                      ],
+                      "function": {
+                        "Function": {
+                          "body": {
+                            "Block": [
+                              {
+                                "Block": [
+                                  {
+                                    "Return": {
+                                      "Bool": true
+                                    }
+                                  },
+                                  "Undefined"
+                                ]
+                              }
+                            ]
+                          },
+                          "params": [
+                            "tick",
+                            "label"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "catch": {
+                  "binding": "__typescript_process_error",
+                  "body": {
+                    "Fail": {
+                      "Variable": "__typescript_process_error"
+                    }
+                  }
+                }
+              }
+            },
+            "name": "remember",
+            "params": [
+              {
+                "name": "tick",
+                "ty": "Any"
+              },
+              {
+                "name": "label",
+                "ty": "Any"
+              }
+            ],
+            "return_ty": "Null"
+          }
+        }
+      ],
+      "main": {
+        "Block": [
+          {
+            "Assign": {
+              "expr": {
+                "ProcessRef": {
+                  "process": "remember"
+                }
+              },
+              "target": {
+                "root": "remember"
+              }
+            }
+          },
+          {
+            "Assign": {
+              "expr": {
+                "HostDescriptorConstructor": {
+                  "input": {
+                    "Record": [
+                      [
+                        "expr",
+                        {
+                          "String": "0 8 * * *"
+                        }
+                      ],
+                      [
+                        "tz",
+                        {
+                          "String": "UTC"
+                        }
+                      ]
+                    ]
+                  },
+                  "type_name": "timer.Schedule"
+                }
+              },
+              "target": {
+                "root": "source"
+              }
+            }
+          },
+          {
+            "Assign": {
+              "expr": {
+                "Await": {
+                  "ResultUnwrap": {
+                    "ReceiverCall": {
+                      "args": [
+                        {
+                          "Record": [
+                            [
+                              "source",
+                              {
+                                "Variable": "source"
+                              }
+                            ],
+                            [
+                              "target",
+                              {
+                                "Variable": "remember"
+                              }
+                            ],
+                            [
+                              "inputs",
+                              {
+                                "Record": [
+                                  [
+                                    "tick",
+                                    {
+                                      "Record": [
+                                        [
+                                          "$lash.trigger.event",
+                                          {
+                                            "Bool": true
+                                          }
+                                        ]
+                                      ]
+                                    }
+                                  ],
+                                  [
+                                    "label",
+                                    {
+                                      "String": "daily"
+                                    }
+                                  ]
+                                ]
+                              }
+                            ],
+                            [
+                              "name",
+                              {
+                                "String": "remembered"
+                              }
+                            ],
+                            [
+                              "subscription_key",
+                              {
+                                "String": "remembered-key"
+                              }
+                            ]
+                          ]
+                        }
+                      ],
+                      "operation": "register",
+                      "receiver": {
+                        "ResourceRef": {
+                          "alias": "triggers",
+                          "path": [
+                            "triggers"
+                          ],
+                          "resource_type": "Triggers"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "target": {
+                "root": "handle"
+              }
+            }
+          },
+          {
+            "Finish": {
+              "Variable": "handle"
+            }
+          }
+        ]
+      }
+    },
+    "compilation_dialect": "typescript",
+    "exports": {
+      "processes": {
+        "remember": {
+          "component": "d3074a0ae8326d4b269c555bae6e7a68000bc57a529663f69aaea7446a25bd62",
+          "pos": 0
+        }
+      }
+    },
+    "host_requirements": {
+      "abilities": {
+        "process_signals": false,
+        "processes": true,
+        "sleep": false,
+        "triggers": false
+      },
+      "language_features": {
+        "label_annotations": false
+      },
+      "resources": {
+        "module_instances": {
+          "triggers": {
+            "alias": "triggers",
+            "operations": {
+              "register": {
+                "host_operation": "triggers.register"
+              }
+            },
+            "path": [
+              "triggers"
+            ],
+            "resource_type": "Triggers"
+          }
+        },
+        "named_data_types": {
+          "timer.Tick": {
+            "name": "timer.Tick",
+            "ty": {
+              "Object": [
+                {
+                  "name": "fired_at",
+                  "optional": false,
+                  "ty": "Str"
+                }
+              ]
+            }
+          }
+        },
+        "resource_types": {
+          "Triggers": {
+            "operations": {
+              "register": {
+                "input_ty": {
+                  "Object": [
+                    {
+                      "name": "source",
+                      "optional": false,
+                      "ty": "Dict"
+                    },
+                    {
+                      "name": "target",
+                      "optional": false,
+                      "ty": {
+                        "Process": {
+                          "kind": "unknown"
+                        }
+                      }
+                    },
+                    {
+                      "name": "inputs",
+                      "optional": false,
+                      "ty": "Dict"
+                    },
+                    {
+                      "name": "name",
+                      "optional": true,
+                      "ty": "Str"
+                    },
+                    {
+                      "name": "subscription_key",
+                      "optional": true,
+                      "ty": "Str"
+                    }
+                  ]
+                },
+                "output_ty": {
+                  "TriggerHandle": "Any"
+                }
+              }
+            }
+          }
+        },
+        "trigger_sources": {
+          "timer.Schedule": {
+            "event_type": {
+              "name": "timer.Tick",
+              "ty": {
+                "Object": [
+                  {
+                    "name": "fired_at",
+                    "optional": false,
+                    "ty": "Str"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "value_constructors": {
+          "timer.Schedule": {
+            "input_ty": {
+              "Object": [
+                {
+                  "name": "expr",
+                  "optional": false,
+                  "ty": "Str"
+                },
+                {
+                  "name": "tz",
+                  "optional": true,
+                  "ty": "Str"
+                }
+              ]
+            },
+            "output_ty": {
+              "Ref": "timer.Schedule"
+            },
+            "path": [
+              "timer",
+              "Schedule"
+            ],
+            "type_name": "timer.Schedule"
+          }
+        }
+      }
+    },
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:821581274001f7b50ef53b37f51150267a8f8ab095d6fb8a73cb15f392ba687e",
+    "module_ref": "lashlang:v2:blake3:bbf2f60c0225f72d4feef56abd53e38ab9d3f1f81c901e3b2a5596e8b6d3ff2f"
+  },
+  "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 }, dialect: Typescript }",
+  "exports": {
+    "processes": {
+      "remember": {
+        "component": "d3074a0ae8326d4b269c555bae6e7a68000bc57a529663f69aaea7446a25bd62",
+        "pos": 0
+      }
+    }
+  },
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:821581274001f7b50ef53b37f51150267a8f8ab095d6fb8a73cb15f392ba687e",
+  "module_ref": "lashlang:v2:blake3:bbf2f60c0225f72d4feef56abd53e38ab9d3f1f81c901e3b2a5596e8b6d3ff2f",
+  "process_definition_identity": {
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:821581274001f7b50ef53b37f51150267a8f8ab095d6fb8a73cb15f392ba687e",
+    "module_ref": "lashlang:v2:blake3:bbf2f60c0225f72d4feef56abd53e38ab9d3f1f81c901e3b2a5596e8b6d3ff2f",
+    "process_name": "remember",
+    "process_ref": {
+      "component": "d3074a0ae8326d4b269c555bae6e7a68000bc57a529663f69aaea7446a25bd62",
+      "pos": 0
+    }
+  },
+  "registration_draft": {
+    "env_ref": "process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738",
+    "event_types": [
+      {
+        "name": "process.yield",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {}
+      },
+      {
+        "name": "process.wake",
+        "payload_schema": {
+          "schema": {}
+        },
+        "semantics": {
+          "wake": {
+            "input": {
+              "pointer": "/text"
+            }
+          }
+        }
+      }
+    ],
+    "input_template": {
+      "label": {
+        "type": "fixed",
+        "value": "daily"
+      },
+      "tick": {
+        "type": "event"
+      }
+    },
+    "name": "remembered",
+    "payload_schema": {
+      "schema": {
+        "additionalProperties": true,
+        "properties": {
+          "fired_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fired_at"
+        ],
+        "type": "object"
+      }
+    },
+    "source": {
+      "$lash_host_descriptor_type": "timer.Schedule",
+      "$lash_host_descriptor_value": {
+        "expr": "0 8 * * *",
+        "tz": "UTC"
+      }
+    },
+    "source_key": "trigger-source:v1:blake3:1df8ceb8c447dace217ee8674ea4e52237459280901e26e29ca0a0c6a69d97d7",
+    "source_type": "timer.Schedule",
+    "subscription_key": "remembered-key",
+    "target": {
+      "kind": "lashlang",
+      "payload": {
+        "args": {},
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:821581274001f7b50ef53b37f51150267a8f8ab095d6fb8a73cb15f392ba687e",
+        "module_ref": "lashlang:v2:blake3:bbf2f60c0225f72d4feef56abd53e38ab9d3f1f81c901e3b2a5596e8b6d3ff2f",
+        "process_name": "remember",
+        "process_ref": {
+          "component": "d3074a0ae8326d4b269c555bae6e7a68000bc57a529663f69aaea7446a25bd62",
+          "pos": 0
+        }
+      },
+      "type": "engine"
+    },
+    "target_identity": {
+      "definition": {
+        "$lash_process": true,
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:821581274001f7b50ef53b37f51150267a8f8ab095d6fb8a73cb15f392ba687e",
+        "module_ref": "lashlang:v2:blake3:bbf2f60c0225f72d4feef56abd53e38ab9d3f1f81c901e3b2a5596e8b6d3ff2f",
+        "process_name": "remember",
+        "process_ref": {
+          "component": "d3074a0ae8326d4b269c555bae6e7a68000bc57a529663f69aaea7446a25bd62",
+          "pos": 0
+        }
+      },
+      "kind": "lashlang",
+      "label": "remember"
+    },
+    "target_label": "remember",
+    "wake_target": {
+      "agent_frame_id": "test-frame",
+      "session_id": "test-session"
+    }
+  },
+  "source": "const remember = defineProcess({\n  name: \"remember\",\n  signals: {},\n  run: async (tick: timer.Tick, label: string) => {\n    return true;\n  }\n});\nconst source = timer.Schedule({ expr: \"0 8 * * *\", tz: \"UTC\" });\nconst handle = await registerTrigger({\n  source,\n  target: remember,\n  inputs: { tick: trigger.event, label: \"daily\" },\n  name: \"remembered\",\n  subscription_key: \"remembered-key\"\n});\nfinish(handle);\n"
+}

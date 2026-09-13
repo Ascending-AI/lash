@@ -1061,6 +1061,31 @@ fn zero_parameter_process_is_valid_but_trigger_registration_still_requires_event
 }
 
 #[test]
+fn omitted_trigger_inputs_bind_the_event_to_a_single_target_parameter() {
+    let register = |process: &str| {
+        let name = process.split('(').next().expect("process name");
+        let source = format!(
+            "process {process}\nsource = timer.Schedule({{ expr: \"0 8 * * *\" }})\nawait triggers.register({{ source: source, target: {name} }})?"
+        );
+        let ast = crate::parse(&source).expect("parse");
+        LinkedModule::link(ast, full_host_environment())
+    };
+    register("scan(tick: timer.Tick) { finish tick.fired_at }").expect("event without inputs");
+    assert!(matches!(
+        register("idle() -> bool { finish true }"),
+        Err(LinkError::TriggerTargetTakesNoEvent { .. })
+    ));
+    assert!(matches!(
+        register("scan(tick: timer.Tick, label: str) { finish label }"),
+        Err(LinkError::AmbiguousOmittedTriggerInputs { .. })
+    ));
+    assert!(matches!(
+        register("scan(tick: str) { finish tick }"),
+        Err(LinkError::TriggerEventMismatch { .. })
+    ));
+}
+
+#[test]
 fn linked_module_rejects_bad_trigger_registry_bindings() {
     let missing = crate::parse(
         r#"
@@ -1072,19 +1097,6 @@ fn linked_module_rejects_bad_trigger_registry_bindings() {
     .expect("parse missing source");
     assert!(matches!(
         LinkedModule::link(missing, full_host_environment()),
-        Err(LinkError::InvalidTriggerRegistration { .. })
-    ));
-
-    let missing_inputs = crate::parse(
-        r#"
-            process scan(tick: timer.Tick) { finish true }
-            source = timer.Schedule({ expr: "0 8 * * *" })
-            await triggers.register({ source: source, target: scan })?
-            "#,
-    )
-    .expect("parse missing inputs");
-    assert!(matches!(
-        LinkedModule::link(missing_inputs, full_host_environment()),
         Err(LinkError::InvalidTriggerRegistration { .. })
     ));
 

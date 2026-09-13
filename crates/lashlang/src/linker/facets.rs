@@ -82,6 +82,8 @@ impl LinkError {
             Self::MissingTriggerInput { .. } => "missing_trigger_input",
             Self::UnknownTriggerInput { .. } => "unknown_trigger_input",
             Self::MissingTriggerEventInput { .. } => "missing_trigger_event_input",
+            Self::TriggerTargetTakesNoEvent { .. } => "trigger_target_takes_no_event",
+            Self::AmbiguousOmittedTriggerInputs { .. } => "ambiguous_omitted_trigger_inputs",
             Self::TriggerEventOutsideInputs { .. } => "trigger_event_outside_inputs",
             Self::TriggerEventProjection { .. } => "trigger_event_projection",
             Self::InvalidTriggerList { .. } => "invalid_trigger_list",
