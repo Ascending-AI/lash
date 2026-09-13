@@ -1089,9 +1089,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     self.release_session_execution_lease_in_memory(completion, false);
                 // FIG-884: ancillary stale release must never veto a replayed commit.
             }
+            turn_cancel_closure::consume(self, commit);
             return Ok(replay.into_result());
         }
-        turn_cancel_closure::validate_after_receipt_miss(self, commit, transaction_now)?;
+        turn_cancel_closure::validate_after_receipt_miss(self, commit)?;
         if let (Some(turn_id), Some(observed)) = (
             commit.interrupted_turn_input_turn_id.as_ref(),
             commit.interrupted_turn_cancel_intent.as_ref(),

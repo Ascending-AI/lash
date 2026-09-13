@@ -295,33 +295,6 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             .expect("successor adopts pending authorization"),
         vec![exact.clone()]
     );
-    let stale_state = crate::RuntimeSessionState {
-        session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::new(request.policy.clone())
-    };
-    let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-        .with_operation(crate::OperationId::turn(
-            &request.session_id,
-            &turn,
-            "stale-closure-final",
-        ))
-        .expect("stamp stale closure commit operation");
-    stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
-    stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
-    stale_commit.turn_cancel_closure_settlement = Some(settled_closure(&exact, None));
-    stale_commit.release_session_execution_lease = Some(first.completion());
-    assert!(matches!(
-        store.commit_runtime_state(stale_commit).await,
-        Err(crate::StoreError::SessionExecutionLeaseExpired { .. })
-            | Err(crate::StoreError::SessionExecutionLeaseRenewalRefused { .. })
-    ));
-    assert_eq!(
-        store
-            .pending_turn_cancel_closure_pins()
-            .await
-            .expect("stale commit retains the exact closure pin"),
-        vec![exact.clone()]
-    );
     assert!(matches!(
         store
             .repair_orphaned_active_turn_inputs(
@@ -380,6 +353,27 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
             .is_empty()
     );
 
+    // Consuming the exact authorization is the durable fence. Lease takeover
+    // alone cannot veto final settlement under ADR 0029.
+    let stale_state = crate::RuntimeSessionState {
+        session_id: request.session_id.clone(),
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    let (mut stale_commit, _) = crate::RuntimeCommit::persisted_state_for_test(&stale_state, &[])
+        .with_operation(crate::OperationId::turn(
+            &request.session_id,
+            &turn,
+            "stale-closure-final",
+        ))
+        .expect("stamp stale closure commit operation");
+    stale_commit.interrupted_turn_input_turn_id = Some(turn.clone());
+    stale_commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
+    stale_commit.turn_cancel_closure_settlement = Some(settled_closure(&exact, None));
+    stale_commit.release_session_execution_lease = Some(first.completion());
+    assert!(matches!(
+        store.commit_runtime_state(stale_commit).await,
+        Err(crate::StoreError::TurnCancelClosureAuthorizationMismatch { .. })
+    ));
     let second_address = crate::TurnAddress::new(
         &request.session_id,
         TurnId::from("turn-cancel-closure-authorization:second"),
@@ -391,13 +385,13 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         crate::TurnCancelClosureProposal::CompletionSealed,
         &first.fence(),
     );
-    assert!(matches!(
+    assert_eq!(
         store
             .authorize_turn_cancel_closure(&first.fence(), &stale)
-            .await,
-        Err(crate::StoreError::SessionExecutionLeaseExpired { .. })
-            | Err(crate::StoreError::SessionExecutionLeaseRenewalRefused { .. })
-    ));
+            .await
+            .expect("advisory takeover does not fence closure authorization"),
+        crate::TurnCancelClosureAuthorizationOutcome::Authorized
+    );
     let current = closure_authorization(
         &second_address,
         physical_scope,
@@ -405,20 +399,19 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         crate::TurnCancelClosureProposal::CompletionSealed,
         &successor.fence(),
     );
-    assert_eq!(
+    assert!(matches!(
         store
             .authorize_turn_cancel_closure(&successor.fence(), &current)
-            .await
-            .expect("current successor authorizes after takeover"),
-        crate::TurnCancelClosureAuthorizationOutcome::Authorized
-    );
+            .await,
+        Err(crate::StoreError::TurnCancelClosureConflict { .. })
+    ));
     store
         .repair_orphaned_active_turn_inputs(
             &request.session_id,
             &successor.fence(),
             &second_address.turn_id,
             &crate::TurnCancelIntentSnapshot::Absent,
-            Some(&settled_closure(&current, None)),
+            Some(&settled_closure(&stale, None)),
         )
         .await
         .expect("consume successor authorization")

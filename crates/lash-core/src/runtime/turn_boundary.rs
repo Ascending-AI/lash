@@ -612,12 +612,11 @@ impl TurnBoundary {
         let current_session_lease_generation = current_session_lease_fence
             .as_ref()
             .map(|fence| fence.fencing_token);
-        // A physical frame can commit while retaining the lease for a follow-on
-        // frame. Closure settlement still requires the current writer fence.
+        // ADR 0029: final settlement is authorized by head CAS and durable
+        // cancellation facts, even after expiry or takeover. A retained lease
+        // is not a borrowed append-lane fence. Its release remains ancillary.
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
-        } else {
-            commit.session_execution_lease_fence = current_session_lease_fence;
         }
         commit.completed_queue_claims = claim_settlement.queued.completions.clone();
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();

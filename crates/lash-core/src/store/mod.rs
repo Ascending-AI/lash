@@ -1047,9 +1047,12 @@ pub trait TurnInputStore: Send + Sync {
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError>;
 
-    /// Authorize exact closure of one cancellation gate pair under the current
-    /// execution fence. A vacant slot accepts this value, an identical retry
-    /// adopts it, and a different occupied value returns a typed conflict.
+    /// Authorize exact closure of one cancellation gate pair for the admitted
+    /// session and binding. The recorded lease identity authenticates the
+    /// proposal, but its liveness and generation do not fence final settlement.
+    /// A vacant slot accepts this value, an identical retry adopts it, and a
+    /// different occupied value or retired physical scope returns a typed refusal.
+    /// Final publication additionally requires the session-head CAS.
     async fn authorize_turn_cancel_closure(
         &self,
         session_execution_lease: &SessionExecutionLeaseAuthority,

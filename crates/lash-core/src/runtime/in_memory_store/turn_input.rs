@@ -173,15 +173,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 record_kind: "TurnCancelClosureAuthorization",
                 message: error.to_string(),
             })?;
-        let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(authorization.session_id())?;
-        self.verify_session_execution_lease(
-            authorization.session_id(),
-            session_execution_lease,
-            now,
-        )?;
-        if authorization.authorizing_fencing_token() != session_execution_lease.fencing_token {
+        if authorization.session_id() != session_execution_lease.session_id
+            || authorization.authorizing_fencing_token() != session_execution_lease.fencing_token
+        {
             return Err(crate::StoreError::SessionExecutionLeaseExpired {
                 session_id: authorization.session_id().clone(),
             });

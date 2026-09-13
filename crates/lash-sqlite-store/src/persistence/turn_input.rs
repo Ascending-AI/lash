@@ -109,13 +109,12 @@ impl TurnInputStore for Store {
         }
         let fence = session_execution_lease.clone();
         let authorization = authorization.clone();
-        let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, authorization.session_id())?;
-                    ensure_session_execution_lease_conn(tx, authorization.session_id(), &fence, now)?;
-                    if authorization.authorizing_fencing_token() != fence.fencing_token {
+                    if authorization.session_id() != fence.session_id
+                        || authorization.authorizing_fencing_token() != fence.fencing_token {
                         return Err(StoreError::SessionExecutionLeaseExpired {
                             session_id: authorization.session_id().clone(),
                         });

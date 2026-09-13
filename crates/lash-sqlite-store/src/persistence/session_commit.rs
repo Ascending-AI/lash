@@ -298,8 +298,7 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    if commit.turn_cancel_closure_settlement.is_none()
-                        && let Some(fence) = commit.session_execution_lease_fence.as_ref()
+                    if let Some(fence) = commit.session_execution_lease_fence.as_ref()
                     {
                         ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
                     }
@@ -382,6 +381,16 @@ impl SessionCommitStore for Store {
                                     // FIG-884: ancillary stale release must
                                     // never veto a replayed commit.
                                 }
+                                if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref()
+                        && settlement.authorization().session_id() == commit.session_id
+                        && commit.interrupted_turn_input_turn_id.as_ref() == Some(settlement.authorization().turn_id())
+                        && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()
+                    {
+                                    let closure = settlement.authorization();
+                                    tx.execute("DELETE FROM turn_cancel_closure_authorizations WHERE session_id = ?1 AND turn_id = ?2 AND authorization_json = ?3",
+                                        params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
+                                    ).map_err(sqlite_error)?;
+                                }
                                 return Ok(replay.into_result());
                             }
                         }
@@ -407,22 +416,6 @@ impl SessionCommitStore for Store {
                                 turn_id: closure.turn_id().clone(),
                             });
                         }
-                        let current_fence = commit
-                            .session_execution_lease_fence
-                            .as_ref()
-                            .or(commit.release_session_execution_lease.as_ref())
-                            .ok_or_else(|| {
-                                StoreError::TurnCancelClosureAuthorizationMismatch {
-                                    session_id: commit.session_id.clone(),
-                                    turn_id: closure.turn_id().clone(),
-                                }
-                            })?;
-                        ensure_session_execution_lease_conn(
-                            tx,
-                            &commit.session_id,
-                            current_fence,
-                            now,
-                        )?;
                         if closure.session_id() != commit.session_id
                             || commit.interrupted_turn_input_turn_id.as_ref()
                                 != Some(closure.turn_id())
@@ -430,6 +423,25 @@ impl SessionCommitStore for Store {
                             return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
                                 session_id: commit.session_id.clone(),
                                 turn_id: closure.turn_id().clone(),
+                            });
+                        }
+                        if closure.admitted_scope().session_id().is_none() {
+                            let scope_id = closure.admitted_scope().journal_identity()
+                                .map_err(|error| StoreError::Backend(error.to_string()))?.key().to_string();
+                            let retired = tx.query_row(
+                                "SELECT EXISTS(SELECT 1 FROM turn_cancel_retired_scopes WHERE scope_id = ?1)",
+                                params![scope_id], |row| row.get::<_, bool>(0),
+                            ).map_err(sqlite_error)?;
+                            if retired { return Err(StoreError::TurnCancelClosureScopeRetired { scope_id }); }
+                        }
+                        let final_key = lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
+                        let committed = tx.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE session_id = ?1 AND turn_id = ?2)",
+                            params![closure.session_id().as_str(), final_key], |row| row.get::<_, bool>(0),
+                        ).map_err(sqlite_error)?;
+                        if committed {
+                            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
+                                session_id: closure.session_id().clone(), turn_id: closure.turn_id().clone(),
                             });
                         }
                         let stored = tx

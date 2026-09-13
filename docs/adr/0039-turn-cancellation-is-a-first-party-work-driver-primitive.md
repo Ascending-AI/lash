@@ -32,9 +32,11 @@ the proposed base terminal, the observed cancellation-intent revision, and the a
 generation. A vacant slot accepts the operation, an identical retry adopts it, and a different
 operation conflicts. Lease renewal, release, and takeover preserve the slot. A successor may finish
 the same idempotent promise resolutions, including adopting a legitimate different first writer,
-but only a current lease fence may apply the resulting input disposition, commit the turn, publish
-terminal evidence, or consume the slot. Promise settlement and the store mutation are deliberately
-separate authority domains; the durable authorization bridges a crash between them without becoming
+and final settlement commits by session-head CAS even after advisory lease expiry or takeover
+(ADR 0029). Its fence is keyed on durable cancellation facts: retired scopes and conflicting or
+consumed closure authorizations refuse settlement; lease liveness, renewal, and generation do not
+veto final publication. Claim/reclaim and activation recovery retain their existing lease checks.
+Promise settlement and the store mutation are deliberately separate authority domains; the durable authorization bridges a crash between them without becoming
 a second winner record.
 
 Every store-backed activation validates the selected binding and drains pending closure operations

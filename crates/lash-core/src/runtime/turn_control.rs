@@ -245,9 +245,10 @@ pub enum TurnCancelClosureProposal {
 /// Durable authorization to close one turn's cancellation gate pair.
 ///
 /// Store implementations persist this value in a non-overwritable per-turn
-/// slot under the current session-execution fence. A successor may finish the
-/// exact promise operation after takeover, but only the current fence may apply
-/// input effects, commit, publish, or consume the slot.
+/// slot bound to its admitted execution scope. A successor may finish the exact
+/// promise operation after takeover. Final publication uses head CAS and durable
+/// cancellation facts, independent of advisory lease liveness or generation;
+/// activation's orphan repair retains its current execution fence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelClosureAuthorization {
     session_id: SessionId,

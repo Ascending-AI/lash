@@ -131,13 +131,9 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, authorization.session_id()).await?;
-        ensure_session_execution_lease_tx(
-            &mut tx,
-            authorization.session_id(),
-            session_execution_lease,
-        )
-        .await?;
-        if authorization.authorizing_fencing_token() != session_execution_lease.fencing_token {
+        if authorization.session_id() != session_execution_lease.session_id
+            || authorization.authorizing_fencing_token() != session_execution_lease.fencing_token
+        {
             return Err(StoreError::SessionExecutionLeaseExpired {
                 session_id: authorization.session_id().clone(),
             });

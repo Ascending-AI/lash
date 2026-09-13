@@ -418,12 +418,10 @@ impl LashRuntime {
                 );
                 if let Some(authorization) = recovered_turn_cancel_closure(
                     store
-                        .pending_turn_cancel_closures(
-                            &self.state.session_id,
-                            &lease.fence(),
-                            &turn_control_binding_id,
-                            &admitted_scope,
-                        )
+                        // Finalization may outlive the advisory lease. The exact
+                        // persisted operation is matched to this address, binding,
+                        // and scope below; activation's live-lease check is separate.
+                        .pending_turn_cancel_closure_pins()
                         .await
                         .map_err(runtime_error_from_store_commit)?,
                     &address,
