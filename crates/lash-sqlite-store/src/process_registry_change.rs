@@ -22,7 +22,12 @@ pub(crate) fn compact_process_tombstones_conn(
             "SELECT MAX(pruned_change_seq) FROM process_tombstones
              WHERE pruned_at_ms < ?1
                AND (?2 IS NULL OR pruned_change_seq <= ?2)
-               AND process_id NOT IN (SELECT value FROM json_each(?3))",
+               AND process_id NOT IN (SELECT value FROM json_each(?3))
+               AND NOT EXISTS (
+                   SELECT 1 FROM process_artifact_cleanup AS cleanup
+                   WHERE cleanup.process_id = process_tombstones.process_id
+                     AND cleanup.incarnation = process_tombstones.incarnation
+               )",
             params![
                 cutoff_epoch_ms,
                 max_change_seq,
@@ -36,7 +41,12 @@ pub(crate) fn compact_process_tombstones_conn(
             "DELETE FROM process_tombstones
          WHERE pruned_at_ms < ?1
            AND (?2 IS NULL OR pruned_change_seq <= ?2)
-           AND process_id NOT IN (SELECT value FROM json_each(?3))",
+           AND process_id NOT IN (SELECT value FROM json_each(?3))
+           AND NOT EXISTS (
+               SELECT 1 FROM process_artifact_cleanup AS cleanup
+               WHERE cleanup.process_id = process_tombstones.process_id
+                 AND cleanup.incarnation = process_tombstones.incarnation
+           )",
             params![
                 cutoff_epoch_ms,
                 max_change_seq,
@@ -165,6 +175,7 @@ pub(crate) fn prune_terminal_processes_conn(
             pruned_processes: 0,
             pruned_events: 0,
             pruned_trigger_deliveries: 0,
+            artifact_cleanup_acknowledgements: Vec::new(),
         });
     }
 
@@ -185,6 +196,7 @@ fn prune_process_rows_conn(
         params![process_count],
     )
     .map_err(process_sqlite_error)?;
+
     let final_change_seq = conn
         .query_row(
             "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
@@ -197,8 +209,9 @@ fn prune_process_rows_conn(
     // json_each preserves the sorted candidate array's zero-based order, so
     // tombstone change sequences retain process-id ordering without one clock
     // update and insert per process.
-    conn.execute(
-        "INSERT INTO process_tombstones (
+    let inserted_tombstones = conn
+        .execute(
+            "INSERT INTO process_tombstones (
              process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
          )
          SELECT process.process_id,
@@ -209,9 +222,39 @@ fn prune_process_rows_conn(
          FROM json_each(?1) AS candidate
          JOIN processes AS process ON process.process_id = candidate.value
          ORDER BY CAST(candidate.key AS INTEGER)",
-        params![process_ids_json, pruned_at_ms, first_change_seq],
-    )
-    .map_err(process_sqlite_error)?;
+            params![process_ids_json, pruned_at_ms, first_change_seq],
+        )
+        .map_err(process_sqlite_error)?;
+    if inserted_tombstones != prunable.len() {
+        return Err(lash_core::PluginError::Session(format!(
+            "process prune candidate/tombstone divergence: expected {}, inserted {inserted_tombstones}",
+            prunable.len()
+        )));
+    }
+
+    for process_id in prunable {
+        let record_json: String = conn
+            .query_row(
+                "SELECT record_json FROM processes WHERE process_id = ?1",
+                params![process_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(process_sqlite_error)?;
+        let record: lash_core::ProcessRecord =
+            serde_json::from_str(&record_json).map_err(process_decode_error)?;
+        let cleanup = lash_core::ProcessArtifactCleanup::from_record(&record);
+        let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
+        conn.execute(
+            "INSERT INTO process_artifact_cleanup (process_id, incarnation, cleanup_json)
+             VALUES (?1, ?2, ?3)",
+            params![
+                process_id.as_str(),
+                cleanup.incarnation.registration_sequence() as i64,
+                cleanup_json
+            ],
+        )
+        .map_err(process_sqlite_error)?;
+    }
 
     let pruned_events = conn
         .execute(
@@ -253,6 +296,7 @@ fn prune_process_rows_conn(
         pruned_processes,
         pruned_events,
         pruned_trigger_deliveries: 0,
+        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 

@@ -973,6 +973,33 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         compacted, 0,
         "unprojected deletions must retain their tombstones"
     );
+    let pending_cleanup = registry
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("list retained process artifact cleanup");
+    assert_eq!(
+        pending_cleanup
+            .iter()
+            .map(|cleanup| cleanup.process_id.as_str())
+            .collect::<Vec<_>>(),
+        [external_id, process_id],
+        "tombstones remain protected until exact artifact cleanup is acknowledged"
+    );
+    for cleanup in pending_cleanup {
+        let acknowledgement = registry
+            .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+            .await
+            .expect("acknowledge process artifact cleanup");
+        assert_eq!(
+            acknowledgement,
+            lash::process::ProcessArtifactCleanupAck::Acknowledged {
+                process_ref: lash::process::ProcessRef::new(
+                    cleanup.process_id,
+                    cleanup.incarnation,
+                ),
+            }
+        );
+    }
     assert_eq!(
         registry
             .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None,)

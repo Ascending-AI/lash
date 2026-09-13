@@ -49,14 +49,32 @@ pub(super) async fn prune_process_rows_tx(
              CROSS JOIN event_count
              WHERE event_count.value >= 0
              ORDER BY candidate.ordinality
+             RETURNING process_id, incarnation
+         ),
+         inserted_artifact_cleanup AS (
+             INSERT INTO lash_process_artifact_cleanup (
+                 process_id, incarnation, cleanup_json
+             )
+             SELECT tombstone.process_id,
+                    tombstone.incarnation,
+                    jsonb_build_object(
+                        'process_id', process.process_id,
+                        'incarnation', process.incarnation,
+                        'env_ref', process.record_json::jsonb -> 'env_ref',
+                        'input', process.record_json::jsonb -> 'input'
+                    )::text
+             FROM inserted_tombstones AS tombstone
+             JOIN lash_processes AS process USING (process_id, incarnation)
              RETURNING process_id
          ),
          deleted_processes AS (
              DELETE FROM lash_processes AS process
              USING candidates AS candidate,
-                   (SELECT count(*) FROM inserted_tombstones) AS tombstones
+                   (SELECT count(*) FROM inserted_tombstones) AS tombstones,
+                   (SELECT count(*) FROM inserted_artifact_cleanup) AS cleanup
              WHERE process.process_id = candidate.process_id
                AND tombstones.count = (SELECT count(*) FROM candidates)
+               AND cleanup.count = (SELECT count(*) FROM candidates)
              RETURNING process.process_id
          )
          SELECT (SELECT value FROM event_count),
@@ -84,6 +102,7 @@ pub(super) async fn prune_process_rows_tx(
         pruned_processes: pruned_processes as usize,
         pruned_events: pruned_events as usize,
         pruned_trigger_deliveries: 0,
+        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 

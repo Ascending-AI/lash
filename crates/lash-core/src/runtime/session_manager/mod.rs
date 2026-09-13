@@ -375,7 +375,12 @@ impl RuntimeSessionServices {
                 .work
                 .process_wiring()
                 .cloned()
-                .map(|wiring| crate::TriggerRouter::new(Arc::clone(store), wiring))
+                .map(|wiring| {
+                    crate::TriggerRouter::new(Arc::clone(store), wiring).with_process_artifacts(
+                        Arc::clone(&self.current.host.core.durability.process_env_store),
+                        self.current.host.core.process_engines.clone(),
+                    )
+                })
         })
     }
 

@@ -1074,6 +1074,29 @@ impl lash_core::ProcessWakeOutbox for PostgresProcessRegistry {
 }
 #[async_trait::async_trait]
 impl lash_core::ProcessRetention for PostgresProcessRegistry {
+    async fn pending_process_artifact_cleanup(
+        &self,
+    ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, PluginError> {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT cleanup_json FROM lash_process_artifact_cleanup
+             ORDER BY process_id, incarnation",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        rows.into_iter()
+            .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+            .collect()
+    }
+
+    async fn complete_process_artifact_cleanup(
+        &self,
+        process_id: &ProcessId,
+        incarnation: lash_core::ProcessIncarnation,
+    ) -> Result<lash_core::ProcessArtifactCleanupAck, PluginError> {
+        prune_api::complete_process_artifact_cleanup(self, process_id, incarnation).await
+    }
+
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
@@ -1101,7 +1124,12 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
             "SELECT MAX(pruned_change_seq) FROM lash_process_tombstones
              WHERE pruned_at_ms < $1
                AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-               AND NOT (process_id = ANY($3::TEXT[]))",
+               AND NOT (process_id = ANY($3::TEXT[]))
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_process_artifact_cleanup AS cleanup
+                   WHERE cleanup.process_id = lash_process_tombstones.process_id
+                     AND cleanup.incarnation = lash_process_tombstones.incarnation
+               )",
         )
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
@@ -1118,7 +1146,12 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
             "DELETE FROM lash_process_tombstones
                  WHERE pruned_at_ms < $1
                    AND ($2::BIGINT IS NULL OR pruned_change_seq <= $2)
-                   AND NOT (process_id = ANY($3::TEXT[]))",
+                   AND NOT (process_id = ANY($3::TEXT[]))
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_process_artifact_cleanup AS cleanup
+                       WHERE cleanup.process_id = lash_process_tombstones.process_id
+                         AND cleanup.incarnation = lash_process_tombstones.incarnation
+                   )",
         )
         .bind(cutoff_epoch_ms)
         .bind(max_change_seq)
@@ -1167,7 +1200,6 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 }
-
 impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
     fn with_runtime_clock(
         &self,
@@ -1176,7 +1208,6 @@ impl lash_core::ProcessClockRebind for PostgresProcessRegistry {
         Some(Arc::new(self.clone().with_clock(clock)))
     }
 }
-
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
@@ -1198,7 +1229,6 @@ impl lash_core::ProcessRegistryTestSupport for PostgresProcessRegistry {
         .transpose()
     }
 }
-
 /// This registry's registration truth for a bound effect host (ADR 0049).
 struct PostgresRegistrationProbe {
     pool: sqlx::PgPool,

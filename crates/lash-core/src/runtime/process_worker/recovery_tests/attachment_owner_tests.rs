@@ -280,8 +280,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             .expect("valid model spec"),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("attachment-owner-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
     )
     .await

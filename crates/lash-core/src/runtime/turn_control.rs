@@ -1020,6 +1020,7 @@ impl ActiveTurnControl {
     }
 
     /// An observed after-step request still waiting for its step boundary.
+    #[cfg(any(test, feature = "testing"))]
     pub fn deferred_evidence(&self) -> Option<TurnCancellationEvidence> {
         self.deferred.lock_recover().clone()
     }

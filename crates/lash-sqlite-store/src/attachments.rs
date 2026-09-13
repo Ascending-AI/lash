@@ -37,8 +37,6 @@ use lash_sansio::sync::MutexExt;
 /// `INSERT OR REPLACE`, so content-addressing alone does not keep the namespaces
 /// disjoint. The composite key does.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
-#[cfg(any(feature = "lashlang", test))]
-pub(crate) const RAW_ARTIFACT_NAMESPACE: &str = "lashlang_artifact";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 
 /// Adopt stored references under the boundary transaction, including a new
@@ -101,23 +99,227 @@ pub(crate) fn commit_attachment_refs_conn(
 }
 
 impl Store {
-    async fn put_artifact_ref_blob(
+    async fn publish_artifact_ref_blob(
         &self,
         namespace: &'static str,
         artifact_ref: String,
         descriptor: BlobArtifactDescriptor,
         bytes: Vec<u8>,
+        owner: lash_core::ArtifactOwner,
     ) -> Result<(), StoreError> {
         let blob_profile = self.options.blob_profile;
         self.conn
             .write(move |tx| {
+                let (owner_kind, owner_id) = owner
+                    .storage_parts()
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                let retired = tx.query_row(
+                    "SELECT EXISTS (
+                         SELECT 1 FROM artifact_owner_retirements
+                         WHERE owner_kind = ?1 AND owner_id = ?2
+                     )",
+                    params![owner_kind, owner_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if retired {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "artifact owner has been permanently retired".to_string(),
+                    ));
+                }
                 let blob_ref =
                     Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
                 tx.execute(
-                    "INSERT OR REPLACE INTO artifact_refs (namespace, artifact_ref, blob_ref)
-                     VALUES (?1, ?2, ?3)",
+                    "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT (namespace, artifact_ref) DO NOTHING",
                     params![namespace, artifact_ref, blob_ref.as_str()],
                 )?;
+                let stored_blob_ref: String = tx.query_row(
+                    "SELECT blob_ref FROM artifact_refs
+                     WHERE namespace = ?1 AND artifact_ref = ?2",
+                    params![namespace, artifact_ref],
+                    |row| row.get(0),
+                )?;
+                if stored_blob_ref != blob_ref.as_str() {
+                    return Err(rusqlite::Error::InvalidParameterName(format!(
+                        "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
+                    )));
+                }
+                tx.execute(
+                    "INSERT INTO artifact_owners
+                     (namespace, artifact_ref, owner_kind, owner_id)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT DO NOTHING",
+                    params![namespace, artifact_ref, owner_kind, owner_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
+    async fn transfer_artifact_ref_owner(
+        &self,
+        namespace: &'static str,
+        artifact_ref: String,
+        from: lash_core::ArtifactOwner,
+        to: lash_core::ArtifactOwner,
+    ) -> Result<(), StoreError> {
+        self.conn
+            .write(move |tx| {
+                let (from_kind, from_id) = from
+                    .storage_parts()
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                let (to_kind, to_id) = to
+                    .storage_parts()
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                let retired = tx.query_row(
+                    "SELECT EXISTS (
+                         SELECT 1 FROM artifact_owner_retirements
+                         WHERE owner_kind = ?1 AND owner_id = ?2
+                     )",
+                    params![to_kind, to_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if retired {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "artifact destination owner has been permanently retired".to_string(),
+                    ));
+                }
+                let inserted = tx.execute(
+                    "INSERT INTO artifact_owners
+                     (namespace, artifact_ref, owner_kind, owner_id)
+                     SELECT namespace, artifact_ref, ?3, ?4
+                     FROM artifact_owners
+                     WHERE namespace = ?1 AND artifact_ref = ?2
+                       AND owner_kind = ?5 AND owner_id = ?6
+                     ON CONFLICT DO NOTHING",
+                    params![namespace, artifact_ref, to_kind, to_id, from_kind, from_id],
+                )?;
+                if inserted == 0 {
+                    let destination_exists = tx.query_row(
+                        "SELECT EXISTS (
+                             SELECT 1 FROM artifact_owners
+                             WHERE namespace = ?1 AND artifact_ref = ?2
+                               AND owner_kind = ?3 AND owner_id = ?4
+                         )",
+                        params![namespace, artifact_ref, to_kind, to_id],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    if !destination_exists {
+                        return Err(rusqlite::Error::InvalidParameterName(format!(
+                            "artifact `{artifact_ref}` is not retained by the staging owner"
+                        )));
+                    }
+                }
+                tx.execute(
+                    "DELETE FROM artifact_owners
+                     WHERE namespace = ?1 AND artifact_ref = ?2
+                       AND owner_kind = ?3 AND owner_id = ?4",
+                    params![namespace, artifact_ref, from_kind, from_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
+    fn reclaim_unowned_artifact_conn(
+        tx: &rusqlite::Connection,
+        namespace: &str,
+        artifact_ref: &str,
+    ) -> rusqlite::Result<()> {
+        let blob_ref = tx
+            .query_row(
+                "SELECT blob_ref FROM artifact_refs
+                 WHERE namespace = ?1 AND artifact_ref = ?2",
+                params![namespace, artifact_ref],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(blob_ref) = blob_ref else {
+            return Ok(());
+        };
+        tx.execute(
+            "DELETE FROM artifact_refs
+             WHERE namespace = ?1 AND artifact_ref = ?2
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_owners
+                   WHERE namespace = ?1 AND artifact_ref = ?2
+               )",
+            params![namespace, artifact_ref],
+        )?;
+        tx.execute(
+            "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)",
+            params![blob_ref],
+        )?;
+        Ok(())
+    }
+
+    async fn release_artifact_ref_owner(
+        &self,
+        namespace: &'static str,
+        artifact_ref: String,
+        owner: lash_core::ArtifactOwner,
+    ) -> Result<(), StoreError> {
+        self.conn
+            .write(move |tx| {
+                let (owner_kind, owner_id) = owner
+                    .storage_parts()
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                tx.execute(
+                    "DELETE FROM artifact_owners
+                     WHERE namespace = ?1 AND artifact_ref = ?2
+                       AND owner_kind = ?3 AND owner_id = ?4",
+                    params![namespace, artifact_ref, owner_kind, owner_id],
+                )?;
+                Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
+    async fn retire_artifact_owner(
+        &self,
+        namespace: &'static str,
+        owner: lash_core::ArtifactOwner,
+    ) -> Result<(), StoreError> {
+        self.conn
+            .write(move |tx| {
+                if !matches!(owner, lash_core::ArtifactOwner::Execution(_)) {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "only execution artifact owners can be retired".to_string(),
+                    ));
+                }
+                let (owner_kind, owner_id) = owner
+                    .storage_parts()
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                tx.execute(
+                    "INSERT INTO artifact_owner_retirements (owner_kind, owner_id)
+                     VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+                    params![owner_kind, owner_id],
+                )?;
+                let refs = {
+                    let mut stmt = tx.prepare(
+                        "SELECT artifact_ref FROM artifact_owners
+                         WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3",
+                    )?;
+                    stmt.query_map(params![namespace, owner_kind, owner_id], |row| row.get(0))?
+                        .collect::<Result<Vec<String>, _>>()?
+                };
+                tx.execute(
+                    "DELETE FROM artifact_owners
+                     WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3",
+                    params![namespace, owner_kind, owner_id],
+                )?;
+                for artifact_ref in refs {
+                    Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)?;
+                }
                 Ok(())
             })
             .await
@@ -167,12 +369,19 @@ impl Store {
 #[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
 impl lashlang::LashlangArtifactStore for Store {
+    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
+        let pause = lashlang::ArtifactPublicationPause::default();
+        *self.artifact_publication_pause.lock_recover() = Some(pause.clone());
+        Some(pause)
+    }
+
     fn durability_tier(&self) -> lashlang::DurabilityTier {
         lashlang::DurabilityTier::Durable
     }
 
-    async fn put_module_artifact(
+    async fn publish_module_artifact(
         &self,
+        owner: &lash_core::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
@@ -184,17 +393,94 @@ impl lashlang::LashlangArtifactStore for Store {
             .to_store_bytes()
             .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
         let artifact_ref = artifact.module_ref.as_str().to_string();
-        self.put_artifact_ref_blob(
+        let publication_pause = self.artifact_publication_pause.lock_recover().take();
+        if let Some(pause) = publication_pause {
+            pause.pause().await;
+        }
+        self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
             artifact_ref,
             BlobArtifactDescriptor::lashlang_module(),
             bytes,
+            owner.clone(),
         )
         .await
         .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
         self.artifact_cache
             .lock_recover()
             .insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
+        Ok(())
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        let bytes = self
+            .get_artifact_ref_blob(
+                MODULE_ARTIFACT_NAMESPACE,
+                module_ref.as_str().to_string(),
+                format!("lashlang module artifact `{module_ref}`"),
+            )
+            .await
+            .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?
+            .ok_or_else(|| {
+                lashlang::ArtifactStoreError::Backend(format!(
+                    "missing module artifact `{module_ref}`"
+                ))
+            })?;
+        self.publish_artifact_ref_blob(
+            MODULE_ARTIFACT_NAMESPACE,
+            module_ref.as_str().to_string(),
+            BlobArtifactDescriptor::lashlang_module(),
+            bytes,
+            owner.clone(),
+        )
+        .await
+        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.transfer_artifact_ref_owner(
+            MODULE_ARTIFACT_NAMESPACE,
+            module_ref.as_str().to_string(),
+            from.clone(),
+            to.clone(),
+        )
+        .await
+        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))
+    }
+
+    async fn release_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.release_artifact_ref_owner(
+            MODULE_ARTIFACT_NAMESPACE,
+            module_ref.as_str().to_string(),
+            owner.clone(),
+        )
+        .await
+        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?;
+        self.artifact_cache.lock_recover().remove(module_ref);
+        Ok(())
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
+            .await
+            .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?;
+        self.artifact_cache.lock_recover().clear();
         Ok(())
     }
 
@@ -207,10 +493,6 @@ impl lashlang::LashlangArtifactStore for Store {
                 "invalid module reference".into(),
             ));
         }
-        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
-            return Ok(Some(artifact));
-        }
-
         let artifact_ref = module_ref.as_str().to_string();
         let Some(bytes) = self
             .get_artifact_ref_blob(
@@ -221,8 +503,12 @@ impl lashlang::LashlangArtifactStore for Store {
             .await
             .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?
         else {
+            self.artifact_cache.lock_recover().remove(module_ref);
             return Ok(None);
         };
+        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
+            return Ok(Some(artifact));
+        }
         let artifact = Arc::new(
             lashlang::ModuleArtifact::from_store_bytes(&bytes)
                 .map_err(lashlang::ArtifactStoreError::from)?,
@@ -232,57 +518,13 @@ impl lashlang::LashlangArtifactStore for Store {
             .insert(module_ref.clone(), artifact.clone());
         Ok(Some(artifact))
     }
-
-    async fn put_artifact_bytes(
-        &self,
-        artifact_ref: &str,
-        descriptor: &str,
-        bytes: &[u8],
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        let artifact_ref = artifact_ref.to_string();
-        let descriptor = match descriptor {
-            "process_execution_env" => BlobArtifactDescriptor::process_execution_env(),
-            _ => BlobArtifactDescriptor::new(PersistedArtifactKind::GenericBlob, Vec::new()),
-        };
-        self.put_artifact_ref_blob(
-            RAW_ARTIFACT_NAMESPACE,
-            artifact_ref,
-            descriptor,
-            bytes.to_vec(),
-        )
-        .await
-        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
-    }
-
-    async fn get_artifact_bytes(
-        &self,
-        artifact_ref: &str,
-    ) -> Result<Option<Vec<u8>>, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact_ref) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid artifact namespace key".into(),
-            ));
-        }
-        let artifact_ref = artifact_ref.to_string();
-        self.get_artifact_ref_blob(
-            RAW_ARTIFACT_NAMESPACE,
-            artifact_ref.clone(),
-            format!("artifact `{artifact_ref}`"),
-        )
-        .await
-        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))
-    }
 }
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for Store {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &lash_core::ArtifactOwner,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), lash_core::PluginError> {
@@ -291,15 +533,60 @@ impl lash_core::ProcessExecutionEnvStore for Store {
                 "invalid process execution environment reference".into(),
             ));
         }
+        if !env_ref.matches_store_bytes(bytes) {
+            return Err(lash_core::PluginError::Session(format!(
+                "process execution environment bytes do not match `{env_ref}`"
+            )));
+        }
         let artifact_ref = env_ref.as_str().to_string();
-        self.put_artifact_ref_blob(
+        self.publish_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
             artifact_ref,
             BlobArtifactDescriptor::process_execution_env(),
             bytes.to_vec(),
+            owner.clone(),
         )
         .await
         .map_err(|err| lash_core::PluginError::Session(err.to_string()))
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core::PluginError> {
+        self.transfer_artifact_ref_owner(
+            PROCESS_ENV_NAMESPACE,
+            env_ref.as_str().to_string(),
+            from.clone(),
+            to.clone(),
+        )
+        .await
+        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core::PluginError> {
+        self.release_artifact_ref_owner(
+            PROCESS_ENV_NAMESPACE,
+            env_ref.as_str().to_string(),
+            owner.clone(),
+        )
+        .await
+        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lash_core::PluginError> {
+        self.retire_artifact_owner(PROCESS_ENV_NAMESPACE, owner.clone())
+            .await
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
     }
 
     async fn get_process_execution_env(

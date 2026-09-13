@@ -612,6 +612,26 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             tx.commit().await.map_err(retirement_error)?;
             return Ok(children);
         }
+        sqlx::query(
+            "INSERT INTO lash_effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             SELECT scope_id,
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    FALSE
+             FROM (
+                 SELECT DISTINCT scope_id FROM lash_runtime_effect_replay
+                 WHERE session_id = $1
+                 UNION
+                 SELECT DISTINCT scope_id FROM lash_runtime_effect_group
+                 WHERE session_id = $1
+             ) AS retired
+             ON CONFLICT (scope_id) DO NOTHING",
+        )
+        .bind(&key)
+        .execute(&mut *tx)
+        .await
+        .map_err(retirement_error)?;
         let children = sqlx::query(children_sql)
             .bind(&key)
             .execute(&mut *tx)
@@ -644,6 +664,52 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .await
             .map_err(retirement_error)?;
         tx.commit().await.map_err(retirement_error)
+    }
+
+    async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<lash_core::ExecutionScope>, RuntimeError> {
+        let keys: Vec<String> = sqlx::query_scalar(
+            "SELECT scope_id FROM lash_effect_scope_retirements
+             WHERE artifact_cleanup_completed = FALSE
+             ORDER BY scope_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        })?;
+        keys.into_iter()
+            .map(|key| {
+                lash_core::ExecutionScope::from_journal_key(&key).ok_or_else(|| {
+                    RuntimeError::new(
+                        lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                        format!("invalid retired effect scope key `{key}`"),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        sqlx::query(
+            "UPDATE lash_effect_scope_retirements
+             SET artifact_cleanup_completed = TRUE
+             WHERE scope_id = $1",
+        )
+        .bind(scope_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        })?;
+        Ok(())
     }
 }
 
@@ -690,8 +756,10 @@ pub(crate) async fn retire_scope_rows_tx(
     scope_json: &str,
 ) -> Result<usize, sqlx::Error> {
     sqlx::query(
-        "INSERT INTO lash_effect_scope_retirements (scope_id, retired_at_ms)
-         VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
+        "INSERT INTO lash_effect_scope_retirements (
+             scope_id, retired_at_ms, artifact_cleanup_completed
+         )
+         VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, FALSE)
          ON CONFLICT (scope_id) DO NOTHING",
     )
     .bind(scope_id)

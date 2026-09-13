@@ -38,11 +38,11 @@ use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOp
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
-    ProcessEffectOutcome, ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, Resolution,
-    ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, ScopedEffectController, facade_support::DurableProcessWorker,
-    facade_support::TurnAddress, facade_support::TurnAttach,
+    ProcessEffectOutcome, ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef,
+    ProcessQuery as _, ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    facade_support::DurableProcessWorker, facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
 use lash_http_transport::HttpRequest;

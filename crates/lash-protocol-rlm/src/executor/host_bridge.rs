@@ -368,9 +368,7 @@ impl HostBridge<'_> {
                     .await
             }
             (None, None) => {
-                self.ctx
-                    .call_tool_by_id(call_id, tool_id, payload, index)
-                    .await
+                Box::pin(self.ctx.call_tool_by_id(call_id, tool_id, payload, index)).await
             }
         };
         // Invocation replies are terminal: pending calls are resolved before

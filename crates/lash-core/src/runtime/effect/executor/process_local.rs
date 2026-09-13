@@ -21,6 +21,7 @@ impl ProcessLocalExecution {
             registry,
             process_work,
             process_env_store,
+            process_engines,
             turn_cancellation,
             effect_controller,
             outcome_observer,
@@ -32,20 +33,144 @@ impl ProcessLocalExecution {
                 env_spec,
                 execution_context: _,
             } => {
-                if let Some(env_spec) = env_spec.as_ref() {
+                let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
+                let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                     let env_store = process_env_store.as_ref().ok_or_else(|| {
                         RuntimeEffectControllerError::foreign(
                             "process_env_store_unavailable",
                             "admitted process start carries an execution environment but the local executor has no environment store",
                         )
                     })?;
-                    let env_ref =
-                        crate::persist_process_execution_env(env_store.as_ref(), env_spec).await?;
-                    registration = registration.with_execution_env_ref(Some(env_ref));
+                    let expected_ref = env_spec.stable_ref().map_err(|error| {
+                        crate::PluginError::Session(format!(
+                            "failed to encode process execution environment: {error}"
+                        ))
+                    })?;
+                    let bytes = env_spec.to_store_bytes().map_err(|error| {
+                        crate::PluginError::Session(format!(
+                            "failed to encode process execution environment: {error}"
+                        ))
+                    })?;
+                    let (env_ref, staged) = match crate::publish_process_execution_env(
+                        env_store.as_ref(),
+                        &staging_owner,
+                        env_spec,
+                    )
+                    .await
+                    {
+                        Ok(env_ref) => (env_ref, true),
+                        Err(publish_error)
+                            if artifact_owner_is_permanently_retired(&publish_error) =>
+                        {
+                            (expected_ref, false)
+                        }
+                        Err(publish_error) => return Err(publish_error.into()),
+                    };
+                    registration = registration.with_execution_env_ref(Some(env_ref.clone()));
+                    Some((env_ref, bytes, staged))
+                } else if let Some(env_ref) = registration.env_ref.as_ref() {
+                    let env_store = process_env_store.as_ref().ok_or_else(|| {
+                        RuntimeEffectControllerError::foreign(
+                            "process_env_store_unavailable",
+                            "admitted process start references an execution environment but the local executor has no environment store",
+                        )
+                    })?;
+                    let bytes = env_store
+                        .get_process_execution_env(env_ref)
+                        .await?
+                        .ok_or_else(|| {
+                            crate::PluginError::Session(format!(
+                                "missing process execution env `{env_ref}`"
+                            ))
+                        })?;
+                    let staged = if let Err(publish_error) = env_store
+                        .publish_process_execution_env(&staging_owner, env_ref, &bytes)
+                        .await
+                    {
+                        if artifact_owner_is_permanently_retired(&publish_error) {
+                            false
+                        } else {
+                            return Err(publish_error.into());
+                        }
+                    } else {
+                        true
+                    };
+                    Some((env_ref.clone(), bytes, staged))
+                } else {
+                    None
+                };
+                let engine_artifacts = match registration.input.as_ref() {
+                    crate::ProcessInput::Engine { kind, payload } if process_engines.is_some() => {
+                        let engine = process_engines
+                            .as_ref()
+                            .expect("checked above")
+                            .require(kind)?;
+                        let staged = if let Err(protect_error) = engine
+                            .protect_start_artifacts(&staging_owner, payload)
+                            .await
+                        {
+                            if artifact_owner_is_permanently_retired(&protect_error) {
+                                false
+                            } else {
+                                return Err(protect_error.into());
+                            }
+                        } else {
+                            true
+                        };
+                        Some((engine, payload.clone(), staged))
+                    }
+                    _ => None,
+                };
+                let record = match NativeRuntimeEffectController::start_process(
+                    Arc::clone(&registry),
+                    registration,
+                    observers,
+                )
+                .await
+                {
+                    Ok(record) => record,
+                    Err(error) => {
+                        if let Some(env_store) = process_env_store.as_ref() {
+                            env_store
+                                .retire_process_execution_env_owner(&staging_owner)
+                                .await?;
+                        }
+                        if let Some((engine, _, _)) = engine_artifacts.as_ref() {
+                            engine.retire_artifact_owner(&staging_owner).await?;
+                        }
+                        return Err(error.into());
+                    }
+                };
+                let process_owner =
+                    crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
+                if let (Some(env_store), Some((env_ref, bytes, staged))) =
+                    (process_env_store.as_ref(), env_artifacts.as_ref())
+                {
+                    if *staged {
+                        env_store
+                            .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                            .await?;
+                        env_store
+                            .retire_process_execution_env_owner(&staging_owner)
+                            .await?;
+                    } else {
+                        env_store
+                            .publish_process_execution_env(&process_owner, env_ref, bytes)
+                            .await?;
+                    }
                 }
-                let record =
-                    NativeRuntimeEffectController::start_process(registry, registration, observers)
-                        .await?;
+                if let Some((engine, payload, staged)) = engine_artifacts {
+                    if staged {
+                        engine
+                            .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
+                            .await?;
+                        engine.retire_artifact_owner(&staging_owner).await?;
+                    } else {
+                        engine
+                            .protect_start_artifacts(&process_owner, &payload)
+                            .await?;
+                    }
+                }
                 let _ = process_work
                     .admit_pending_processes("process_start")
                     .await?;
@@ -288,6 +413,14 @@ impl ProcessLocalExecution {
     }
 }
 
+fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Session(message)
+            if message.contains("artifact owner has been permanently retired")
+    )
+}
+
 #[cfg(test)]
 mod terminal_wait_tests {
     use super::*;
@@ -348,9 +481,171 @@ mod terminal_wait_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessExecutionEnvStore as _;
     use crate::ProcessId;
     use crate::TestProcessRegistryWriteExt as _;
-    use crate::{ProcessEventLog as _, ProcessRegistrar as _};
+    use crate::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
+
+    fn tool_registration(process_id: &str, marker: &str) -> crate::ProcessRegistration {
+        crate::ProcessRegistration::new(
+            process_id,
+            crate::ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    process_id,
+                    crate::ToolId::new("test-tool"),
+                    "test_tool",
+                    serde_json::json!({"marker": marker}),
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+    }
+
+    fn start_envelope(
+        effect_id: &str,
+        registration: crate::ProcessRegistration,
+        env_spec: crate::ProcessExecutionEnvSpec,
+    ) -> crate::RuntimeEffectEnvelope {
+        crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("runtime"),
+                    effect_id,
+                )
+                .expect("valid process-start test address"),
+                crate::RuntimeAttribution::none(),
+                effect_id,
+            ),
+            crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
+                registration,
+                observers: Vec::new(),
+                env_spec: Some(env_spec),
+                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn process_start_transfers_environment_and_replays_after_staging_retirement() {
+        let process_id = ProcessId::from("owned-env-start");
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let env_ref = env_spec.stable_ref().expect("stable environment reference");
+        let command = start_envelope(
+            "owned-env-start",
+            tool_registration(process_id.as_str(), "original"),
+            env_spec,
+        );
+        let executor = || {
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+                Arc::new(crate::NativeProcessWork::for_registry(
+                    Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+                )),
+            )
+            .with_process_env_store(
+                Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>
+            )
+        };
+        let controller = NativeRuntimeEffectController::default();
+
+        controller
+            .execute_effect(command.clone(), executor())
+            .await
+            .expect("initial process start");
+        controller
+            .execute_effect(command, executor())
+            .await
+            .expect("replayed process start after staging retirement");
+        let record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read registered process")
+            .expect("registered process remains live");
+
+        env_store
+            .release_process_execution_env(
+                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record)),
+                &env_ref,
+            )
+            .await
+            .expect("release process environment owner");
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read reclaimed environment"),
+            None,
+            "the process owner must be the only surviving edge after transfer"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_process_registration_retires_staging_environment_owner() {
+        let process_id = ProcessId::from("failed-owned-env-start");
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let env_ref = env_spec.stable_ref().expect("stable environment reference");
+        registry
+            .register_process(
+                tool_registration(process_id.as_str(), "existing")
+                    .with_execution_env_ref(Some(env_ref.clone())),
+            )
+            .await
+            .expect("register conflicting process");
+        let bytes = env_spec.to_store_bytes().expect("encode environment");
+        let staging_owner = crate::ArtifactOwner::process_start(&process_id);
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+            Arc::new(crate::NativeProcessWork::for_registry(
+                Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+            )),
+        )
+        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
+
+        NativeRuntimeEffectController::default()
+            .execute_effect(
+                start_envelope(
+                    "failed-owned-env-start",
+                    tool_registration(process_id.as_str(), "conflict"),
+                    env_spec,
+                ),
+                executor,
+            )
+            .await
+            .expect_err("conflicting registration must fail");
+
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read reclaimed environment"),
+            None,
+            "failed registration must reclaim its staging edge"
+        );
+        assert!(
+            env_store
+                .publish_process_execution_env(&staging_owner, &env_ref, &bytes)
+                .await
+                .is_err(),
+            "failed registration must fence a late staging publication"
+        );
+    }
 
     #[tokio::test]
     async fn signal_prefers_declared_wait_ordinal_when_event_count_diverges() {

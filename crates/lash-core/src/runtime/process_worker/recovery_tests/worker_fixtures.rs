@@ -171,8 +171,9 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         runtime_host = runtime_host.with_lease_timings(lease_timings);
     }
     let policy = test_session_policy();
-    let env_ref = crate::persist_process_execution_env(
+    let env_ref = crate::publish_process_execution_env(
         runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("worker-fixture"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
     )
     .await
@@ -282,12 +283,19 @@ pub(super) fn native_worker_with_trigger_store(
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
     let watched = crate::watch_process_registry(registry);
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_process_env_store(process_env_store)
+            .with_process_engine_registration(
+                crate::ProcessEngineRegistration::accepting(Arc::new(
+                    crate::testing::FixtureProcessEngine,
+                )),
             ),
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),
@@ -311,12 +319,19 @@ pub(super) fn reentrant_worker_with_trigger_store(
 ) -> DurableProcessWorker {
     let (_driver_registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_process_env_store(process_env_store)
+            .with_process_engine_registration(
+                crate::ProcessEngineRegistration::accepting(Arc::new(
+                    crate::testing::FixtureProcessEngine,
+                )),
             ),
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::External(process_work),

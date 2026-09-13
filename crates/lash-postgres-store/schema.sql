@@ -417,6 +417,14 @@ CREATE TABLE IF NOT EXISTS lash_process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_lash_process_tombstones_change
     ON lash_process_tombstones(pruned_change_seq);
 
+CREATE TABLE IF NOT EXISTS lash_process_artifact_cleanup (
+    process_id TEXT COLLATE "C" NOT NULL,
+    incarnation BIGINT NOT NULL,
+    cleanup_json TEXT NOT NULL,
+    PRIMARY KEY (process_id, incarnation),
+    FOREIGN KEY (process_id, incarnation) REFERENCES lash_process_tombstones(process_id, incarnation) ON DELETE RESTRICT
+);
+
 CREATE TABLE IF NOT EXISTS lash_process_leases (
     process_id TEXT COLLATE "C" PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
     lease_owner_id TEXT,
@@ -540,7 +548,8 @@ CREATE TABLE IF NOT EXISTS lash_await_event_revoked_sessions (
 -- Keyed by the scope's journal identity, the same key its effect rows carry.
 CREATE TABLE IF NOT EXISTS lash_effect_scope_retirements (
     scope_id TEXT PRIMARY KEY,
-    retired_at_ms BIGINT NOT NULL
+    retired_at_ms BIGINT NOT NULL,
+    artifact_cleanup_completed BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
@@ -607,13 +616,28 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
     artifact_bytes BYTEA NOT NULL,
     PRIMARY KEY (namespace, artifact_ref)
 );
+CREATE TABLE IF NOT EXISTS lash_artifact_owners (
+    namespace TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_id TEXT NOT NULL,
+    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_lash_artifact_owners_owner
+    ON lash_artifact_owners(owner_kind, owner_id);
+CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
+    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_id TEXT NOT NULL,
+    PRIMARY KEY (owner_kind, owner_id)
+);
 
 -- Seed rows. Every open mode requires all three: the component version stamp,
 -- the transactional process-change clock row, and the store-resident
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 88)
+VALUES ('lash-postgres-store', 89)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

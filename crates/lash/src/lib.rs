@@ -675,6 +675,7 @@ pub mod process {
     pub use crate::process_admin::Processes;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
+    pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
@@ -685,31 +686,32 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, NativeProcessWork, OnParentEnd,
-        ParentScope, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
-        ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore, ProcessEvent,
-        ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventLog, ProcessEventType,
-        ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessIncarnation, ProcessInput,
-        ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeases,
-        ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-        ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-        ProcessOriginator, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-        ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRetention,
-        ProcessService, ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest,
-        ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
-        ProcessToolIntents, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
-        ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage,
-        ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
-        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
-        facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionIntake,
-        facade_support::ProcessAdmissionReport, facade_support::ProcessChangeHub,
-        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
-        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::ProcessWorkerFault, facade_support::SessionScopeId,
-        facade_support::watch_process_registry, facade_support::watch_process_registry_with_sink,
+        AbandonEvidence, AbandonRequest, AbandonWriter, ArtifactOwner, CausalRef,
+        NativeProcessWork, OnParentEnd, ParentScope, ProcessArtifactCleanupAck, ProcessAwaitOutput,
+        ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
+        ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventAppendRequest, ProcessEventLog, ProcessEventType, ProcessExecutionContext,
+        ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView,
+        ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+        ProcessLeaseCompletion, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+        ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+        ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessProvenance,
+        ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef, ProcessRegistrar,
+        ProcessRegistration, ProcessRegistry, ProcessRetention, ProcessService,
+        ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
+        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessToolIntents,
+        ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate,
+        ProcessWorkWiring, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
+        RecoveryContract, SessionScope, WatchedRegistry, facade_support::ObservedProcess,
+        facade_support::ObservedProcessEvent, facade_support::ObservedWorkItem,
+        facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
+        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
+        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
+        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
+        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
+        facade_support::SessionScopeId, facade_support::watch_process_registry,
+        facade_support::watch_process_registry_with_sink,
     };
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).

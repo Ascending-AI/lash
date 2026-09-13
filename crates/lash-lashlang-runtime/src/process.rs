@@ -672,7 +672,7 @@ impl LashlangProcessHost<'_> {
                 .call_tool_by_id_with_child_execution_trace_hook(id, tool_id, args, 0, call_site)
                 .await
         } else {
-            self.ctx.call_tool_by_id(id, tool_id, args, 0).await
+            Box::pin(self.ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
         protocol_tool_reply_to_lashlang_value(reply)
     }

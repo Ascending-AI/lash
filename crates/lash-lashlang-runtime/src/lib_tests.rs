@@ -1,5 +1,72 @@
 use super::*;
 
+/// Test-only read seam for malformed-artifact rejection. Production stores
+/// correctly refuse malformed publications, so the runtime oracle must inject
+/// corruption at the read boundary it is responsible for validating.
+struct ForgedReadArtifactStore {
+    inner: Arc<dyn LashlangArtifactStore>,
+    forged: Arc<lashlang::ModuleArtifact>,
+}
+
+#[async_trait::async_trait]
+impl LashlangArtifactStore for ForgedReadArtifactStore {
+    fn durability_tier(&self) -> lashlang::DurabilityTier {
+        self.inner.durability_tier()
+    }
+
+    async fn publish_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        artifact: &lashlang::ModuleArtifact,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.publish_module_artifact(owner, artifact).await
+    }
+
+    async fn retain_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.retain_module_artifact(owner, module_ref).await
+    }
+
+    async fn transfer_module_artifact(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner
+            .transfer_module_artifact(from, to, module_ref)
+            .await
+    }
+
+    async fn release_module_artifact(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.release_module_artifact(owner, module_ref).await
+    }
+
+    async fn retire_module_artifact_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> Result<(), lashlang::ArtifactStoreError> {
+        self.inner.retire_module_artifact_owner(owner).await
+    }
+
+    async fn get_module_artifact(
+        &self,
+        module_ref: &lashlang::ModuleRef,
+    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        if module_ref == &self.forged.module_ref {
+            return Ok(Some(Arc::clone(&self.forged)));
+        }
+        self.inner.get_module_artifact(module_ref).await
+    }
+}
+
 struct EveryNEffectsController(usize);
 
 #[async_trait::async_trait]
@@ -80,9 +147,7 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source,
         environment: &environment,
-        artifact_store: None,
     })
-    .await
     .expect("labeled workflow compiles");
     let graph = lashlang::workflow_graph_from_source(source).expect("workflow graph projects");
     let trace_map = trace_lashlang_main_map(&output.artifact);
@@ -584,10 +649,12 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
-    .expect("module compiles and persists");
+    .expect("module compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
     let artifact_store: Arc<dyn LashlangArtifactStore> = store;
     let site = test_start_site("child_process:scan", 1);
 
@@ -646,10 +713,12 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
         environment: &required_environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("module compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
     let start = test_process_start(&output, test_start_site("child_process:scan", 1), ".");
     let input = LashlangProcessInput {
         module_ref: start.module_ref.clone(),
@@ -833,38 +902,41 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: str, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("matching handler compiles");
     let mismatching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(payload: str, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("mismatching handler compiles");
     let wrong_type = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: int, other: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("wrong-type handler compiles");
     let wrong_order = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(other: str, event: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("wrong-order handler compiles");
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "type Handler = Process<(event: str, other: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("receiver compiles");
+    let owner = lash_core::ArtifactOwner::host("fixture");
+    for artifact in [
+        &matching.artifact,
+        &mismatching.artifact,
+        &wrong_type.artifact,
+        &wrong_order.artifact,
+        &receiver.artifact,
+    ] {
+        store
+            .publish_module_artifact(&owner, artifact)
+            .await
+            .expect("module publishes");
+    }
     let artifact_store: Arc<dyn LashlangArtifactStore> = store.clone();
 
     let start_with = |definition: lashlang::ProcessDefinitionIdentity| {
@@ -1015,12 +1087,12 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         .expect("handler declaration exists");
     process.params[0].name = "event".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
-    store
-        .put_module_artifact(&forged)
-        .await
-        .expect("test store accepts public artifact values");
+    let forged_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
+        inner: Arc::clone(&artifact_store),
+        forged: Arc::new(forged),
+    });
     let error = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        forged_store,
         "parent:root",
         start_with(mismatching_identity),
         lash_core::ProcessOriginator::host(),
@@ -1049,10 +1121,12 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(value: str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("receiver compiles");
+    store
+        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
+        .await
+        .expect("module publishes");
     let mut forged = output.artifact.clone();
     let process = forged
         .canonical_ir
@@ -1065,11 +1139,10 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
         .expect("install declaration exists");
     process.params[0].name = "forged".into();
     assert!(forged.verify().is_err(), "forged artifact must not verify");
-    store
-        .put_module_artifact(&forged)
-        .await
-        .expect("test store accepts public artifact values");
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
+        inner: store,
+        forged: Arc::new(forged),
+    });
     let mut args = lashlang::Record::new();
     args.insert("value".to_string(), lashlang::Value::String("value".into()));
     let start = lashlang::ProcessStart {
@@ -1110,10 +1183,15 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(handler: Process<(event: str), bool> | str) -> bool { finish true }",
         environment: &environment,
-        artifact_store: Some(store.as_ref()),
     })
-    .await
     .expect("union receiver compiles");
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("fixture"),
+            &receiver.artifact,
+        )
+        .await
+        .expect("module publishes");
     let mut args = lashlang::Record::new();
     args.insert(
         "handler".to_string(),

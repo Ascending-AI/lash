@@ -239,6 +239,23 @@ impl<T: StoreReplayHost> EffectHost for T {
         self.replay_driver().retire_effect_journal(retirement).await
     }
 
+    async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
+        self.replay_driver()
+            .pending_artifact_owner_retirements()
+            .await
+    }
+
+    async fn complete_artifact_owner_retirement(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<(), RuntimeError> {
+        self.replay_driver()
+            .complete_artifact_owner_retirement(scope)
+            .await
+    }
+
     async fn reinstate_effect_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         self.replay_driver().reinstate_effect_scope(scope).await
     }

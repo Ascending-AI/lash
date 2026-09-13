@@ -53,6 +53,7 @@ async fn ingress_core_with_effect_host_and_env_store(
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -70,16 +71,18 @@ async fn register_ingress_trigger_subscription(
     store: &lash_core::facade_support::InMemoryTriggerStore,
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     use lash_core::TriggerStore as _;
+    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/intent-ingress-delivery",
-        lash_core::ProcessExecutionEnvRef::new("process-env:intent-ingress-delivery"),
+        process_env_ref,
         "intent.ingress.trigger",
         "intent-ingress-source",
         lash_core::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: serde_json::json!({"process": "intent-ingress-delivery"}),
         },
-        lash_core::ProcessIdentity::new("test-engine").with_label(Some("intent-ingress-delivery")),
+        lash_core::ProcessIdentity::new("testing-fixture")
+            .with_label(Some("intent-ingress-delivery")),
     )
     .with_payload_schema(lash_core::LashSchema::any());
     let outcome = store
@@ -111,16 +114,16 @@ async fn ingress_core_with_trigger_store(
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let subscription = register_ingress_trigger_subscription(&store).await?;
     let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(effect_host)
         .provider(mock_provider())
         .model(mock_model_spec())
+        .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_env_store(Arc::new(
-            lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
-        ))
+        .process_env_store(process_env_store)
         .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
         .trigger_store(Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>)
         .build(crate::testing::runtime_lease_owner())?;
@@ -422,13 +425,14 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
 struct ProbeProcessEnvStore {
     puts: std::sync::atomic::AtomicUsize,
     fail_put: std::sync::atomic::AtomicBool,
-    values: tokio::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    inner: lash_core::facade_support::InMemoryProcessExecutionEnvStore,
 }
 
 #[async_trait::async_trait]
 impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &lash_core::ArtifactOwner,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> std::result::Result<(), lash_core::PluginError> {
@@ -438,18 +442,44 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
                 "injected process env persist failure".to_string(),
             ));
         }
-        self.values
-            .lock()
+        self.inner
+            .publish_process_execution_env(owner, env_ref, bytes)
             .await
-            .insert(env_ref.as_str().to_string(), bytes.to_vec());
-        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &lash_core::ArtifactOwner,
+        to: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .transfer_process_execution_env(from, to, env_ref)
+            .await
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+        env_ref: &lash_core::ProcessExecutionEnvRef,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .release_process_execution_env(owner, env_ref)
+            .await
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &lash_core::ArtifactOwner,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner.retire_process_execution_env_owner(owner).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
     ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
-        Ok(self.values.lock().await.get(env_ref.as_str()).cloned())
+        self.inner.get_process_execution_env(env_ref).await
     }
 }
 

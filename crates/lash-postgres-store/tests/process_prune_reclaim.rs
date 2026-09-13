@@ -8,7 +8,10 @@
 
 use std::sync::Arc;
 
-use lash_core::{ProcessRegistry, SessionStoreFactory};
+use lash_core::{
+    ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry, ProcessRetention as _,
+    SessionStoreFactory,
+};
 use lash_postgres_store::PostgresStorage;
 
 use crate::support::{SharedDatabaseLock, database_url};
@@ -74,3 +77,76 @@ lash_conformance::process_prune_reclaim_tests!({
     ));
     (database_lock, "postgres", factory, registry, probe)
 });
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres process cleanup recovery: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = storage.process_registry();
+    let registered = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "postgres-prune-cleanup",
+                lash_core::ProcessInput::Engine {
+                    kind: "test-engine".to_string(),
+                    payload: serde_json::json!({"module_ref": "module-postgres"}),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+                "process-env:postgres-cleanup",
+            ))),
+        )
+        .await
+        .expect("register cleanup process");
+    registry
+        .complete_process(
+            &registered.id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key("postgres-prune-cleanup"),
+        )
+        .await
+        .expect("complete cleanup process");
+    registry
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune with cleanup evidence");
+    drop(registry);
+
+    let reopened = storage.process_registry();
+    let pending = reopened
+        .pending_process_artifact_cleanup()
+        .await
+        .expect("read cleanup evidence after reopen");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].process_id, registered.id);
+    assert_eq!(pending[0].env_ref, registered.env_ref);
+    assert_eq!(pending[0].input, registered.input);
+    let acknowledgement = reopened
+        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .await
+        .expect("ack cleanup evidence");
+    assert_eq!(
+        acknowledgement,
+        lash_core::ProcessArtifactCleanupAck::Acknowledged {
+            process_ref: lash_core::ProcessRef::from_record(&registered),
+        }
+    );
+    assert!(
+        reopened
+            .pending_process_artifact_cleanup()
+            .await
+            .expect("read acknowledged cleanup")
+            .is_empty()
+    );
+}

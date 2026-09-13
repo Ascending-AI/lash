@@ -62,6 +62,108 @@ pub fn process_work_wiring_for_registry(
     crate::ProcessWorkWiring::new(watched, port)
 }
 
+/// Construct a real, identity-checked in-memory process environment fixture.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn process_execution_env_fixture() -> (
+    Arc<dyn crate::ProcessExecutionEnvStore>,
+    crate::ProcessExecutionEnvRef,
+) {
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let (store, env_ref) = crate::InMemoryProcessExecutionEnvStore::from_spec_for_testing(
+        crate::ArtifactOwner::host("process-execution-env-fixture"),
+        &spec,
+    )
+    .expect("fixed process execution environment fixture is valid");
+    (Arc::new(store), env_ref)
+}
+
+/// Engine fixture for trigger-delivery tests that need to exercise the real
+/// engine-only start contract without publishing unrelated language artifacts.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub struct FixtureProcessEngine;
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl crate::ProcessEngine for FixtureProcessEngine {
+    fn kind(&self) -> &'static str {
+        "testing-fixture"
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        Ok(
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({ "fixture": "complete" }),
+            ))
+            .into(),
+        )
+    }
+}
+
+/// Construct the engine registry paired with [`process_execution_env_fixture`].
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn process_engine_fixture() -> crate::ProcessEngineRegistry {
+    crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(FixtureProcessEngine)),
+    )
+}
+
+#[cfg(any(test, feature = "testing"))]
+struct FixtureProcessEnginePlugin;
+
+#[cfg(any(test, feature = "testing"))]
+impl crate::SessionPlugin for FixtureProcessEnginePlugin {
+    fn id(&self) -> &'static str {
+        "testing-fixture-process-engine"
+    }
+
+    fn register(&self, _registrar: &mut crate::PluginRegistrar) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+struct FixtureProcessEngineFactory;
+
+#[cfg(any(test, feature = "testing"))]
+impl crate::PluginFactory for FixtureProcessEngineFactory {
+    fn id(&self) -> &'static str {
+        "testing-fixture-process-engine"
+    }
+
+    fn process_engine_contributions(
+        &self,
+        _context: &crate::ProcessEngineContributionContext<'_>,
+    ) -> Result<Vec<crate::ProcessEngineRegistration>, crate::PluginError> {
+        Ok(vec![crate::ProcessEngineRegistration::accepting(Arc::new(
+            FixtureProcessEngine,
+        ))])
+    }
+
+    fn build(
+        &self,
+        _context: &crate::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
+        Ok(Arc::new(FixtureProcessEnginePlugin))
+    }
+}
+
+/// Plugin factory that contributes [`FixtureProcessEngine`] to a facade host.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn process_engine_plugin_fixture() -> Arc<dyn crate::PluginFactory> {
+    Arc::new(FixtureProcessEngineFactory)
+}
+
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};

@@ -442,8 +442,9 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     let env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let env_ref = lash_core::runtime::persist_process_execution_env(
+    let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
+        &lash_core::ArtifactOwner::host("postgres-parent-atomicity"),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::empty(),
             lash_core::testing::mock_session_policy(),

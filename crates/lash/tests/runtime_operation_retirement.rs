@@ -567,11 +567,11 @@ async fn plugin_command_scopes_retire_after_their_receipt() {
     }
 }
 
-/// The receipt and its observations are recorded before retirement runs, and
-/// a retirement failure is logged rather than turned into an operation
-/// failure (review round 1): the task's work is not lost because its reclaim failed.
+/// The task's durable work is recorded before retirement runs, but a retirement
+/// failure is surfaced to the caller: cleanup failure must not be mistaken for
+/// a fully settled operation.
 #[tokio::test]
-async fn plugin_task_receipt_stands_when_scope_retirement_fails() {
+async fn plugin_task_retirement_failure_is_surfaced_after_durable_work() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("retirement-failure.db");
     let inner: Arc<dyn EffectHost> = Arc::new(
@@ -593,16 +593,14 @@ async fn plugin_task_receipt_stands_when_scope_retirement_fails() {
         .open()
         .await
         .expect("session");
-    let receipt = session
+    let error = session
         .plugin_operations()
         .run_task::<JournalTaskOp>(json!({}))
         .await
-        .expect("the receipt stands even though retirement failed");
-    let scope_key = receipt.output["scope"]
-        .as_str()
-        .expect("the receipt names its scope")
-        .to_string();
+        .expect_err("retirement failure is part of the operation result");
+    assert!(error.to_string().contains("injected retirement failure"));
     assert_eq!(minted.0.lock_recover().len(), 1);
+    let scope_key = minted.0.lock_recover()[0].0.clone();
 
     let conn = rusqlite::Connection::open(&path).expect("open the effect journal");
     let count = |sql: &str| -> i64 {

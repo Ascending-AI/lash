@@ -195,6 +195,7 @@ pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
+    pub process_engines: Option<crate::ProcessEngineRegistry>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
@@ -505,6 +506,16 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Binds process engines that own start-time artifact lifecycle hooks.
+    pub fn with_process_engines(mut self, engines: crate::ProcessEngineRegistry) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.process_engines = Some(engines);
+        }
+        self
+    }
+
     /// Removes and returns the process outcome observer.
     ///
     /// This is public for **effect-host implementors** that transfer local
@@ -531,6 +542,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     registry,
                     process_work,
                     process_env_store: None,
+                    process_engines: None,
                     turn_cancellation: None,
                     effect_controller: None,
                     outcome_observer: None,

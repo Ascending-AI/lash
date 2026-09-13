@@ -989,7 +989,11 @@ impl ToolIntentIngress {
         let process_work = ports
             .process
             .ok_or(crate::EmbedError::MissingProcessRegistry)?;
-        let router = lash_core::facade_support::TriggerRouter::new(store, process_work);
+        let router = lash_core::facade_support::TriggerRouter::new(store, process_work)
+            .with_process_artifacts(
+                std::sync::Arc::clone(&self.core.env.core.durability.process_env_store),
+                self.core.host_process_engines.clone(),
+            );
         let scoped = self
             .core
             .env
@@ -1030,17 +1034,7 @@ impl ToolIntentIngress {
     fn resolved_process_engines(
         &self,
     ) -> crate::Result<lash_core::facade_support::ProcessEngineRegistry> {
-        let plugin_host = crate::core::build_plugin_host(
-            self.core.protocol_factory.as_ref(),
-            self.core.plugin_factories.as_ref(),
-            Vec::new(),
-        )?;
-        Ok(plugin_host
-            .install_process_engine_contributions(
-                self.core.env.core.clone(),
-                self.core.process_lifecycle_available,
-            )?
-            .process_engines)
+        Ok(self.core.host_process_engines.clone())
     }
 
     fn process_registry(&self) -> crate::Result<std::sync::Arc<dyn lash_core::ProcessRegistry>> {
@@ -1113,6 +1107,7 @@ impl ToolIntentIngress {
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))
+                .with_process_engines(self.core.host_process_engines.clone())
                 .with_process_outcome_observer(outcome_observer),
             )
             .await

@@ -1,39 +1,36 @@
-//! Backend-agnostic conformance for [`crate::LashlangArtifactStore`].
+//! Backend-agnostic conformance for owner-bound Lashlang artifact storage.
 //!
-//! ADR-0013 makes durable engine rebuilds depend on artifact-store round-trips;
-//! this suite is the executable contract for the two keyspaces this trait owns —
-//! module artifacts and raw artifact bytes. Run it against every implementation
-//! (the in-memory double here and the durable backends in `lash-sqlite-store` /
-//! `lash-postgres-store`) so the doubles cannot drift from production behavior.
-//!
-//! The [`module_and_raw_namespaces_isolate`] case is the load-bearing one: a
-//! durable backend multiplexes both keyspaces (plus process-execution-env blobs,
-//! whose trait lives in `lash-core`) onto one physical store, and the two must
-//! stay disjoint even when addressed by an identical key value rather than
-//! silently clobbering under last-writer-wins.
+//! The suite proves exact owner edges, transfer, fencing, reclamation, and
+//! durable reopen behavior. Generic raw-byte storage is deliberately absent:
+//! every publication is a verified, content-addressed module artifact.
 
+use std::future::Future as _;
 use std::sync::Arc;
+
+use lash_core::{ArtifactOwner, ExecutionScope};
 
 use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, parse};
 
-/// A writer plus a factory that constructs a post-write
-/// [`LashlangArtifactStore`] handle over the same durable backing store.
+/// A writer plus a factory that constructs a post-write store handle over the
+/// same durable backing store.
 pub struct ReopenableLashlangArtifactStore {
     pub open: Arc<dyn LashlangArtifactStore>,
     pub reopen: Arc<dyn Fn() -> Arc<dyn LashlangArtifactStore> + Send + Sync>,
 }
 
-/// Build a real, self-consistent module artifact. `to_store_bytes` re-verifies
-/// the content-derived `module_ref`, so the artifact cannot be fabricated with
-/// an arbitrary key — it is compiled from source.
 fn sample_module_artifact(source: &str) -> ModuleArtifact {
     let program = parse(source).expect("parse sample lashlang module");
     ModuleArtifact::from_program(program).expect("build sample module artifact")
 }
 
-/// Run the [`LashlangArtifactStore`] contract against the store produced by
-/// `make`. `make` must return a fresh, empty store on each call.
-pub async fn lashlang_artifact_store<F>(make: F, expected_tier: DurabilityTier)
+fn execution_owner(id: &str) -> ArtifactOwner {
+    ArtifactOwner::execution(ExecutionScope::RuntimeOperation {
+        operation_id: id.to_string(),
+    })
+}
+
+/// Prove that a backend fixture returns independent store handles.
+pub async fn lashlang_artifact_store_fresh_instances<F>(make: &F)
 where
     F: Fn() -> Arc<dyn LashlangArtifactStore>,
 {
@@ -41,221 +38,232 @@ where
     let second = make();
     assert!(
         !Arc::ptr_eq(&first, &second),
-        "lashlang_artifact_store factory reused one Arc across conformance roles"
+        "factory reused one store Arc"
     );
-    drop((first, second));
-    assert_eq!(
-        make().durability_tier(),
-        expected_tier,
-        "lashlang artifact store must report its declared durability tier"
-    );
-    module_artifact_round_trips(make()).await;
-    hostile_artifact_namespaces(make()).await;
-    raw_artifact_round_trips(make()).await;
-    raw_artifact_overwrite(make()).await;
-    module_and_raw_namespaces_isolate(make()).await;
 }
 
-/// Run the full contract plus a durable reopen check across both keyspaces:
-/// writes through the `open` handle must be visible through a `reopen` handle
-/// over the same store.
-pub async fn lashlang_artifact_store_reopenable<F>(make: F)
-where
-    F: Fn() -> ReopenableLashlangArtifactStore,
-{
-    lashlang_artifact_store(|| make().open, DurabilityTier::Durable).await;
-    survives_reopen(make()).await;
+/// Prove that the store reports the backend's declared durability tier.
+pub async fn lashlang_artifact_store_durability_tier(
+    store: Arc<dyn LashlangArtifactStore>,
+    expected_tier: DurabilityTier,
+) {
+    assert_eq!(store.durability_tier(), expected_tier);
 }
 
-async fn module_artifact_round_trips(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process alpha(root: str) -> str { finish root }");
+pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtifactStore>) {
+    let artifact = sample_module_artifact("process failed(root: str) -> str { finish root }");
+    let staged = execution_owner("failed-registration");
+    store
+        .publish_module_artifact(&staged, &artifact)
+        .await
+        .expect("protect before registration");
+    store
+        .retire_module_artifact_owner(&staged)
+        .await
+        .expect("fence and reclaim abandoned registration");
     assert!(
         store
             .get_module_artifact(&artifact.module_ref)
             .await
-            .expect("get missing module artifact")
-            .is_none(),
-        "a fresh store must not resolve an unwritten module artifact"
+            .expect("read failed-registration artifact")
+            .is_none()
     );
-
-    store
-        .put_module_artifact(&artifact)
-        .await
-        .expect("put module artifact");
-    let loaded = store
-        .get_module_artifact(&artifact.module_ref)
-        .await
-        .expect("get module artifact")
-        .expect("module artifact present after put");
-    assert_eq!(*loaded, artifact, "module artifact must round-trip");
-
-    // Re-putting the same content-addressed artifact is idempotent.
-    store
-        .put_module_artifact(&artifact)
-        .await
-        .expect("re-put module artifact");
-    let reloaded = store
-        .get_module_artifact(&artifact.module_ref)
-        .await
-        .expect("get module artifact after re-put")
-        .expect("module artifact present after re-put");
-    assert_eq!(*reloaded, artifact);
 }
 
-async fn raw_artifact_round_trips(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
+    let artifact = sample_module_artifact("process alpha(root: str) -> str { finish root }");
+    let first = ArtifactOwner::host("host-a");
+    let second = ArtifactOwner::host("host-b");
     assert!(
         store
-            .get_artifact_bytes("raw:missing")
+            .get_module_artifact(&artifact.module_ref)
             .await
-            .expect("get missing raw artifact")
+            .expect("read missing module")
+            .is_none()
+    );
+
+    store
+        .publish_module_artifact(&first, &artifact)
+        .await
+        .expect("publish first owner");
+    store
+        .retain_module_artifact(&second, &artifact.module_ref)
+        .await
+        .expect("retain second owner");
+    store
+        .release_module_artifact(&first, &artifact.module_ref)
+        .await
+        .expect("release first owner");
+    assert!(
+        store
+            .get_module_artifact(&artifact.module_ref)
+            .await
+            .expect("read second-owned module")
+            .is_some(),
+        "one owner's release must not affect another owner"
+    );
+
+    store
+        .release_module_artifact(&second, &artifact.module_ref)
+        .await
+        .expect("release final owner");
+    assert!(
+        store
+            .get_module_artifact(&artifact.module_ref)
+            .await
+            .expect("read reclaimed module")
             .is_none(),
-        "a fresh store must not resolve unwritten raw artifact bytes"
+        "the final exact release must reclaim the artifact"
     );
-
     store
-        .put_artifact_bytes("raw:sample", "generic", b"raw-artifact-payload")
+        .release_module_artifact(&second, &artifact.module_ref)
         .await
-        .expect("put raw artifact bytes");
-    assert_eq!(
+        .expect("repeated release is idempotent");
+}
+
+pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
+    let artifact = sample_module_artifact("process beta(root: str) -> str { finish root }");
+    let staged = execution_owner("module-transfer");
+    let process = ArtifactOwner::process(lash_core::ProcessRef::new(
+        "process-beta",
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    ));
+    store
+        .publish_module_artifact(&staged, &artifact)
+        .await
+        .expect("stage module");
+    store
+        .transfer_module_artifact(&staged, &process, &artifact.module_ref)
+        .await
+        .expect("transfer module");
+    store
+        .transfer_module_artifact(&staged, &process, &artifact.module_ref)
+        .await
+        .expect("replayed transfer is idempotent");
+    store
+        .release_module_artifact(&process, &artifact.module_ref)
+        .await
+        .expect("release process owner");
+    assert!(
         store
-            .get_artifact_bytes("raw:sample")
+            .get_module_artifact(&artifact.module_ref)
             .await
-            .expect("get raw artifact bytes"),
-        Some(b"raw-artifact-payload".to_vec()),
-        "raw artifact bytes must round-trip"
+            .expect("read reclaimed transfer")
+            .is_none()
     );
 }
 
-async fn raw_artifact_overwrite(store: Arc<dyn LashlangArtifactStore>) {
-    store
-        .put_artifact_bytes("raw:overwrite", "generic", b"first")
-        .await
-        .expect("put first raw bytes");
-    store
-        .put_artifact_bytes("raw:overwrite", "generic", b"second")
-        .await
-        .expect("overwrite raw bytes");
-    assert_eq!(
-        store
-            .get_artifact_bytes("raw:overwrite")
-            .await
-            .expect("get overwritten raw bytes"),
-        Some(b"second".to_vec()),
-        "re-putting a raw artifact key must overwrite its bytes"
-    );
-}
-
-/// The module and raw keyspaces must not clobber each other even when addressed
-/// by the identical key value — the case that would have caught a backend
-/// keying both namespaces on one column.
-async fn module_and_raw_namespaces_isolate(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("process gamma(root: str) -> str { finish root }");
-    let colliding_key = artifact.module_ref.as_str().to_string();
-
+    let abandoned = execution_owner("abandoned-module-writer");
     store
-        .put_module_artifact(&artifact)
+        .publish_module_artifact(&abandoned, &artifact)
         .await
-        .expect("put module artifact");
+        .expect("stage module before abandonment");
     store
-        .put_artifact_bytes(&colliding_key, "generic", b"not-a-module-artifact")
+        .retire_module_artifact_owner(&abandoned)
         .await
-        .expect("put raw bytes at the module key");
-
-    let module = store
-        .get_module_artifact(&artifact.module_ref)
-        .await
-        .expect("module artifact survives raw write at the same key")
-        .expect("module artifact still present");
-    assert_eq!(*module, artifact);
-    assert_eq!(
+        .expect("retire abandoned owner");
+    assert!(
         store
-            .get_artifact_bytes(&colliding_key)
+            .get_module_artifact(&artifact.module_ref)
             .await
-            .expect("raw bytes survive module write at the same key"),
-        Some(b"not-a-module-artifact".to_vec()),
+            .expect("read abandoned module")
+            .is_none()
+    );
+    assert!(
+        store
+            .publish_module_artifact(&abandoned, &artifact)
+            .await
+            .is_err(),
+        "retirement must fence a late writer"
     );
 }
 
-async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
+pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
+    let artifact = sample_module_artifact("process slow(root: str) -> str { finish root }");
+    let abandoned = execution_owner("slow-module-writer");
+    let pause = store
+        .pause_next_publication_for_testing()
+        .expect("conformance store exposes its publication serialization pause");
+    let mut writer = Box::pin(store.publish_module_artifact(&abandoned, &artifact));
+    std::future::poll_fn(|context| {
+        let _ = writer.as_mut().poll(context);
+        if pause.is_reached() {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
+    store
+        .retire_module_artifact_owner(&abandoned)
+        .await
+        .expect("retire after publication reached the backend serialization point");
+    pause.resume();
+    assert!(
+        writer.await.is_err(),
+        "a writer paused across retirement must remain fenced"
+    );
+}
+
+pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
     let artifact = sample_module_artifact("process epsilon(root: str) -> str { finish root }");
-
-    open.put_module_artifact(&artifact)
+    let first = ArtifactOwner::host("reopen-host-first");
+    let second = ArtifactOwner::host("reopen-host-second");
+    open.publish_module_artifact(&first, &artifact)
         .await
-        .expect("put module artifact");
-    open.put_artifact_bytes("raw:reopen", "generic", b"raw-reopen")
+        .expect("publish module");
+    open.retain_module_artifact(&second, &artifact.module_ref)
         .await
-        .expect("put raw bytes");
+        .expect("retain second owner");
+    open.release_module_artifact(&first, &artifact.module_ref)
+        .await
+        .expect("sever first owner before reopen");
     drop(open);
 
-    let reopen = reopen();
+    let reopened = reopen();
     assert!(
-        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopen)),
+        !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopened)),
         "lashlang artifact reopen factory reused the writer handle"
     );
-
-    let module = reopen
-        .get_module_artifact(&artifact.module_ref)
-        .await
-        .expect("get module artifact after reopen")
-        .expect("module artifact survives reopen");
-    assert_eq!(*module, artifact);
-    assert_eq!(
-        reopen
-            .get_artifact_bytes("raw:reopen")
+    assert!(
+        reopened
+            .get_module_artifact(&artifact.module_ref)
             .await
-            .expect("get raw bytes after reopen"),
-        Some(b"raw-reopen".to_vec()),
+            .expect("read after reopen")
+            .is_some()
+    );
+    reopened
+        .release_module_artifact(&first, &artifact.module_ref)
+        .await
+        .expect("retry interrupted owner sever after reopen");
+    reopened
+        .release_module_artifact(&second, &artifact.module_ref)
+        .await
+        .expect("release final owner after reopen");
+    assert!(
+        reopened
+            .get_module_artifact(&artifact.module_ref)
+            .await
+            .expect("read reclaimed after reopen")
+            .is_none()
     );
 }
 
-async fn hostile_artifact_namespaces(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtifactStore>) {
     for raw in ["", "nul\0reference"] {
         let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
-        assert!(
-            store.get_module_artifact(&module_ref).await.is_err(),
-            "malformed module reference must not reach lookup"
-        );
+        assert!(store.get_module_artifact(&module_ref).await.is_err());
         let mut artifact = sample_module_artifact("finish true");
         artifact.module_ref = module_ref;
         assert!(
-            store.put_module_artifact(&artifact).await.is_err(),
-            "malformed module reference must not reach mutation"
-        );
-        assert!(
             store
-                .put_artifact_bytes(raw, "opaque", b"hostile")
+                .publish_module_artifact(&ArtifactOwner::host("hostile-test"), &artifact)
                 .await
-                .is_err(),
-            "malformed artifact reference must not reach blob mutation"
-        );
-        assert!(
-            store.get_artifact_bytes(raw).await.is_err(),
-            "malformed artifact reference must not reach blob lookup"
-        );
-    }
-    for raw in [
-        "canary",
-        "../canary",
-        "'; DROP TABLE lash_artifact_blobs; --",
-    ] {
-        store
-            .put_artifact_bytes(raw, "opaque", raw.as_bytes())
-            .await
-            .expect("opaque reference write");
-    }
-    for raw in [
-        "canary",
-        "../canary",
-        "'; DROP TABLE lash_artifact_blobs; --",
-    ] {
-        assert_eq!(
-            store
-                .get_artifact_bytes(raw)
-                .await
-                .expect("opaque reference read"),
-            Some(raw.as_bytes().to_vec())
+                .is_err()
         );
     }
 }
@@ -265,12 +273,47 @@ mod tests {
     use super::*;
     use crate::InMemoryLashlangArtifactStore;
 
+    fn make() -> Arc<dyn LashlangArtifactStore> {
+        Arc::new(InMemoryLashlangArtifactStore::new())
+    }
+
     #[tokio::test]
-    async fn in_memory_lashlang_artifact_store_satisfies_conformance() {
-        lashlang_artifact_store(
-            || Arc::new(InMemoryLashlangArtifactStore::new()) as Arc<dyn LashlangArtifactStore>,
-            DurabilityTier::Inline,
-        )
-        .await;
+    async fn in_memory_lashlang_artifact_store_returns_fresh_instances() {
+        lashlang_artifact_store_fresh_instances(&make).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_reports_inline_durability() {
+        lashlang_artifact_store_durability_tier(make(), DurabilityTier::Inline).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_satisfies_owner_lifecycle() {
+        owner_lifecycle(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_reclaims_failed_registration() {
+        failed_registration_reclaims_staging_owner(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_transfer_is_idempotent() {
+        transfer_is_idempotent(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_retirement_fences_late_publication() {
+        retirement_fences_late_publication(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_fences_slow_writer_after_retirement() {
+        slow_writer_is_fenced_after_retirement(make()).await;
+    }
+
+    #[tokio::test]
+    async fn in_memory_lashlang_artifact_store_rejects_hostile_module_references() {
+        hostile_module_references_are_rejected(make()).await;
     }
 }

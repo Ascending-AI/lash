@@ -127,6 +127,7 @@ where
     let execution = local_executor.into_process()?;
     let registry = execution.registry;
     let process_env_store = execution.process_env_store;
+    let process_engines = execution.process_engines;
     let turn_cancellation = execution.turn_cancellation;
     let outcome = match command {
         ProcessCommand::Start {
@@ -135,26 +136,142 @@ where
             env_spec,
             execution_context,
         } => {
-            if let Some(env_spec) = env_spec.as_ref() {
+            let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
+            let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
                 let env_store = process_env_store.as_ref().ok_or_else(|| {
                     RuntimeEffectControllerError::foreign(
                         "process_env_store_unavailable",
                         "admitted Restate process start carries an execution environment but the executor has no environment store",
                     )
                 })?;
-                let env_ref =
-                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
-                        .await?;
-                registration = registration.with_execution_env_ref(Some(env_ref));
-            }
-            let record = schedule_restate_process(
-                registry,
+                let expected_ref = env_spec.stable_ref().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?;
+                let bytes = env_spec.to_store_bytes().map_err(|error| {
+                    lash_core::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?;
+                let (env_ref, staged) = match lash_core::runtime::publish_process_execution_env(
+                    env_store.as_ref(),
+                    &staging_owner,
+                    env_spec,
+                )
+                .await
+                {
+                    Ok(env_ref) => (env_ref, true),
+                    Err(publish_error) if artifact_owner_is_permanently_retired(&publish_error) => {
+                        (expected_ref, false)
+                    }
+                    Err(publish_error) => return Err(publish_error.into()),
+                };
+                registration = registration.with_execution_env_ref(Some(env_ref.clone()));
+                Some((env_ref, bytes, staged))
+            } else if let Some(env_ref) = registration.env_ref.as_ref() {
+                let env_store = process_env_store.as_ref().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_env_store_unavailable",
+                        "admitted Restate process start references an execution environment but the executor has no environment store",
+                    )
+                })?;
+                let bytes = env_store
+                    .get_process_execution_env(env_ref)
+                    .await?
+                    .ok_or_else(|| {
+                        lash_core::PluginError::Session(format!(
+                            "missing process execution env `{env_ref}`"
+                        ))
+                    })?;
+                let staged = if let Err(publish_error) = env_store
+                    .publish_process_execution_env(&staging_owner, env_ref, &bytes)
+                    .await
+                {
+                    if artifact_owner_is_permanently_retired(&publish_error) {
+                        false
+                    } else {
+                        return Err(publish_error.into());
+                    }
+                } else {
+                    true
+                };
+                Some((env_ref.clone(), bytes, staged))
+            } else {
+                None
+            };
+            let engine_artifacts = match registration.input.as_ref() {
+                lash_core::ProcessInput::Engine { kind, payload } => {
+                    let process_engines = process_engines.as_ref().ok_or_else(|| {
+                        RuntimeEffectControllerError::foreign(
+                            "process_engine_registry_unavailable",
+                            "admitted Restate process start requires an engine but the executor has no process-engine registry",
+                        )
+                    })?;
+                    let engine = process_engines.require(kind)?;
+                    let staged = if let Err(protect_error) = engine
+                        .protect_start_artifacts(&staging_owner, payload)
+                        .await
+                    {
+                        if artifact_owner_is_permanently_retired(&protect_error) {
+                            false
+                        } else {
+                            return Err(protect_error.into());
+                        }
+                    } else {
+                        true
+                    };
+                    Some((engine, payload.clone(), staged))
+                }
+                _ => None,
+            };
+            let record = match schedule_restate_process(
+                Arc::clone(&registry),
                 registration,
                 observers,
                 *execution_context,
                 context,
             )
-            .await?;
+            .await
+            {
+                Ok(record) => record,
+                // Registration, workflow submission, and external-ref persistence are
+                // separate durable authorities. An error after any one of them is an
+                // unknown/retriable start, not proof that the process was abandoned.
+                // Keep the staging edges so an exact redrive can finish the transfer;
+                // authoritative process retirement owns their eventual permanent fence.
+                Err(error) => return Err(error.into()),
+            };
+            let process_owner =
+                lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&record));
+            if let (Some(store), Some((env_ref, bytes, staged))) =
+                (process_env_store.as_ref(), env_artifacts.as_ref())
+            {
+                if *staged {
+                    store
+                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
+                        .await?;
+                    store
+                        .retire_process_execution_env_owner(&staging_owner)
+                        .await?;
+                } else {
+                    store
+                        .publish_process_execution_env(&process_owner, env_ref, bytes)
+                        .await?;
+                }
+            }
+            if let Some((engine, payload, staged)) = engine_artifacts {
+                if staged {
+                    engine
+                        .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
+                        .await?;
+                    engine.retire_artifact_owner(&staging_owner).await?;
+                } else {
+                    engine
+                        .protect_start_artifacts(&process_owner, &payload)
+                        .await?;
+                }
+            }
             Ok(ProcessEffectOutcome::Start {
                 record: Box::new(record),
             })
@@ -602,4 +719,12 @@ where
         observer(outcome);
     }
     outcome
+}
+
+fn artifact_owner_is_permanently_retired(error: &lash_core::PluginError) -> bool {
+    matches!(
+        error,
+        lash_core::PluginError::Session(message)
+            if message.contains("artifact owner has been permanently retired")
+    )
 }

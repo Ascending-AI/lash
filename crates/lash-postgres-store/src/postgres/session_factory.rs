@@ -1,5 +1,8 @@
 use crate::*;
 
+#[path = "session_factory/artifact_retirement.rs"]
+mod artifact_retirement;
+
 pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "enqueue_seq",
     "batch_id",
@@ -16,22 +19,6 @@ pub(crate) const QUEUED_WORK_COLUMNS: [&str; 14] = [
     "claim_session_lease_generation",
     "claim_id",
 ];
-
-impl PostgresSessionStoreFactory {
-    fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
-        PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::clone(&self.clock),
-            session_id,
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: self.lease_clock_for_testing.clone(),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-}
 
 impl PostgresSessionStoreFactory {
     /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
@@ -98,13 +85,36 @@ impl PostgresSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+        *self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
+    }
+
+    fn bind_artifact_stores(
+        &self,
+        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        process_engines: lash_core::ProcessEngineRegistry,
+    ) {
+        *self
+            .artifact_stores
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some((process_env_store, process_engines));
+    }
+
     async fn reclaim_retained_evidence(
         &self,
         bound: lash_core::store::RetentionBound,
     ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
-        crate::evidence_retention::reclaim(self, bound)
+        let report = crate::evidence_retention::reclaim(self, bound)
             .await
-            .map_err(|failure| *failure)
+            .map_err(|failure| *failure)?;
+        if let Err(error) = self.resume_artifact_owner_retirements().await {
+            return Err(lash_core::MaintenanceFailure::failed(error, report));
+        }
+        Ok(report)
     }
 
     async fn create_store(

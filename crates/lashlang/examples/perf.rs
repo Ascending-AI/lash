@@ -217,8 +217,9 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                     .len(),
             );
             let store = InMemoryLashlangArtifactStore::new();
+            let owner = lash_core::ArtifactOwner::host("artifact-roundtrip-benchmark");
             for _ in 0..iterations {
-                rt.block_on(store.put_module_artifact(&linked.artifact))
+                rt.block_on(store.publish_module_artifact(&owner, &linked.artifact))
                     .expect("artifact store put should succeed");
                 let artifact = rt
                     .block_on(store.get_module_artifact(&linked.module_ref))

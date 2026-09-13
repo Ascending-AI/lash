@@ -554,14 +554,13 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let execution =
         runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
 
-    let reply = execution
-        .call_tool_by_id(
-            "fixed-intent-call".to_string(),
-            crate::ToolId::from("tool:fixed_intent_law"),
-            json!({"value": "drive"}),
-            0,
-        )
-        .await;
+    let reply = Box::pin(execution.call_tool_by_id(
+        "fixed-intent-call".to_string(),
+        crate::ToolId::from("tool:fixed_intent_law"),
+        json!({"value": "drive"}),
+        0,
+    ))
+    .await;
 
     assert!(!reply.output.is_success());
     let error = execution
@@ -960,16 +959,17 @@ async fn register_trigger_intent_subscription_with_schema(
     payload_schema: crate::LashSchema,
 ) -> crate::TriggerSubscriptionRecord {
     use crate::TriggerStore as _;
+    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
     let draft = crate::TriggerSubscriptionDraft::for_process(
         "test/intent-trigger-delivery",
-        crate::ProcessExecutionEnvRef::new("process-env:intent-trigger-delivery"),
+        process_env_ref,
         "intent.trigger.emitted",
         "intent-law-source",
         crate::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
+            kind: "testing-fixture".to_string(),
             payload: json!({"process": "intent-trigger-delivery"}),
         },
-        crate::ProcessIdentity::new("test-engine").with_label(Some("intent-trigger-delivery")),
+        crate::ProcessIdentity::new("testing-fixture").with_label(Some("intent-trigger-delivery")),
     )
     .with_payload_schema(payload_schema);
     let outcome = store
@@ -1019,12 +1019,16 @@ fn trigger_intent_dispatch_context(
         recorded_trigger_intents(),
         calls,
     );
-    context.trigger_router = Some(crate::TriggerRouter::new(
-        Arc::clone(store) as Arc<dyn crate::TriggerStore>,
-        crate::testing::process_work_wiring_for_registry(
-            registry as Arc<dyn crate::ProcessRegistry>,
-        ),
-    ));
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    context.trigger_router = Some(
+        crate::TriggerRouter::new(
+            Arc::clone(store) as Arc<dyn crate::TriggerStore>,
+            crate::testing::process_work_wiring_for_registry(
+                registry as Arc<dyn crate::ProcessRegistry>,
+            ),
+        )
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture()),
+    );
     context
 }
 
@@ -1251,19 +1255,23 @@ async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key
             "shared-caller-key",
         ),
     });
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let mut context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
-        Arc::new(crate::TestLocalProcessRegistry::default()),
+        Arc::clone(&registry),
         crate::ToolIntents::v2(vec![declaration.clone(), declaration]),
         Arc::clone(&calls),
     );
-    context.trigger_router = Some(crate::TriggerRouter::new(
-        Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
-        crate::testing::process_work_wiring_for_registry(Arc::new(
-            crate::TestLocalProcessRegistry::default(),
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
+    context.trigger_router = Some(
+        crate::TriggerRouter::new(
+            Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
+            crate::testing::process_work_wiring_for_registry(
+                registry as Arc<dyn crate::ProcessRegistry>,
+            ),
         )
-            as Arc<dyn crate::ProcessRegistry>),
-    ));
+        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture()),
+    );
 
     let first = run_fixed_intent_attempt(&context).await;
     let replay_keys = first

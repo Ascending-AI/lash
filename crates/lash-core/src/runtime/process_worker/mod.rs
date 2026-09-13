@@ -883,7 +883,11 @@ impl DurableProcessWorker {
             .collect::<BTreeSet<_>>();
         let process_work = self.process_wiring();
         let router =
-            crate::TriggerRouter::new(Arc::clone(&self.config.trigger_store), process_work.clone());
+            crate::TriggerRouter::new(Arc::clone(&self.config.trigger_store), process_work.clone())
+                .with_process_artifacts(
+                    Arc::clone(&self.config.runtime_host.durability.process_env_store),
+                    self.config.runtime_host.process_engines.clone(),
+                );
         let mut started_any = false;
         for delivery in candidates {
             if missing_process_ids.contains(&delivery.process_id) {
