@@ -1486,6 +1486,7 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
         intent_at_epoch_ms: at,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     };
     store
         .record_intent(intent(&intent_id, 100))
@@ -1683,6 +1684,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
             intent_at_epoch_ms: 100,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         })
         .expect("record attachment intent");
 

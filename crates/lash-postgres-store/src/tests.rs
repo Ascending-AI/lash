@@ -1192,6 +1192,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         }
     };
 
@@ -1334,6 +1335,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         },
     )
     .expect("record live attachment intent");

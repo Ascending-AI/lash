@@ -20,6 +20,7 @@ impl AttachmentManifest for RecordingManifest {
                 committed_at_epoch_ms: None,
                 owner_kind: intent.owner_kind,
                 owner_id: intent.owner_id,
+                owner_incarnation: intent.owner_incarnation,
             });
         Ok(())
     }
@@ -153,6 +154,7 @@ async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,
+            owner_incarnation: None,
         })
         .expect("record intent");
     let roots = RecordingRootSet {
@@ -1564,7 +1566,10 @@ async fn nested_owner_binding_restores_the_previous_owner() {
         manifest.clone(),
         "session-1",
     ));
-    let process_binding = store.bind_process_scoped("process-1");
+    let process_binding = store.bind_process_scoped(crate::ProcessRef::new(
+        "process-1",
+        crate::ProcessIncarnation::from_registration_sequence(7),
+    ));
     let turn_binding = store.bind_turn_scoped("turn-1");
 
     let turn_ref = store.put(vec![1], meta()).await.expect("turn put");
@@ -1587,6 +1592,10 @@ async fn nested_owner_binding_restores_the_previous_owner() {
         Some(crate::AttachmentOwnerKind::Process)
     );
     assert_eq!(process.owner_id.as_deref(), Some("process-1"));
+    assert_eq!(
+        process.owner_incarnation,
+        Some(crate::ProcessIncarnation::from_registration_sequence(7))
+    );
     let host = entries
         .get(&(SessionId::from("session-1"), host_ref.id))
         .expect("host entry");
@@ -1616,6 +1625,7 @@ fn persistence_manifest_adapter_forwards_root_tracking() {
         intent_at_epoch_ms: 10,
         owner_kind: None,
         owner_id: None,
+        owner_incarnation: None,
     };
     adapter.record_intent(intent).expect("record intent");
     assert!(

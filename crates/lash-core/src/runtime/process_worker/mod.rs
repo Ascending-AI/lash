@@ -565,6 +565,7 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
+        let attachment_owner = crate::ProcessRef::from_record(&current);
         let (owner, fencing_token) = match &execution_write_authority {
             crate::ProcessExecutionWriteAuthority::Lease(lease) => {
                 (self.config.lease_owner.clone(), lease.fencing_token)
@@ -586,7 +587,8 @@ impl DurableProcessWorker {
             }
         });
         let execution_write_authority = execution_write_authority.bind_attempt(attempt);
-        self.config
+        let admitted = self
+            .config
             .process_registry()
             .record_first_started_with_authority(
                 &registration.id,
@@ -600,6 +602,17 @@ impl DurableProcessWorker {
             )
             .await?
             .into_record()?;
+        // The attachment owner was read from `current`, before this authority
+        // CAS. The CAS is what decides whether this execution may write at all,
+        // and it refuses a superseded incarnation, so reaching here means the
+        // record it admitted still carries the incarnation we are about to bind
+        // under. Pinned because an owner bound from a stale incarnation would
+        // root the earlier incarnation's blobs forever (FIG-2980), and because
+        // the binding below must never be hoisted above this call.
+        debug_assert_eq!(
+            admitted.incarnation, attachment_owner.incarnation,
+            "attachment owner must carry the incarnation the authority CAS admitted"
+        );
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -613,7 +626,7 @@ impl DurableProcessWorker {
                 .core
                 .durability
                 .attachment_store
-                .bind_process_scoped(registration.id.clone())
+                .bind_process_scoped(attachment_owner)
         });
         let originator_scope = if let crate::ProcessOriginator::Session { session_id, .. } =
             &registration.provenance.originator

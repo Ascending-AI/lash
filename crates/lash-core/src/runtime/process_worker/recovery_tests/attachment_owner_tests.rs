@@ -227,7 +227,10 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .core
         .durability
         .attachment_store
-        .bind_process_scoped(PROCESS_ID);
+        .bind_process_scoped(crate::ProcessRef::new(
+            PROCESS_ID,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ));
     runtime
         .host
         .core
@@ -367,4 +370,167 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             .await
             .expect("recovered process attachment survives");
     }
+}
+
+/// FIG-2980: the worker binds the attachment owner from the record the registry
+/// hands it, so a reused process name must root its blobs under the incarnation
+/// that is actually running. `register_process` only mints a fresh incarnation
+/// when no row exists, so this drives the real lifecycle — run, complete, prune,
+/// re-register — rather than hand-minting a second incarnation.
+#[tokio::test]
+async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
+    const PROCESS_ID: &str = "attachment-owner-reincarnated-engine";
+    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host.durability.attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
+        attachment_backend.clone(),
+    ));
+    runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(AttachmentWritingEngine)),
+    );
+    let policy = crate::SessionPolicy {
+        provider_id: "test".to_string(),
+        model: crate::ModelSpec::builder("test-model")
+            .context_window_tokens(16_384)
+            .build()
+            .expect("valid model spec"),
+        ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+    };
+    let env_ref = crate::publish_process_execution_env(
+        runtime_host.durability.process_env_store.as_ref(),
+        &crate::ArtifactOwner::host("attachment-owner-reincarnation-test"),
+        &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
+    )
+    .await
+    .expect("persist process env");
+    let worker = DurableProcessWorker::new({
+        let watched =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(Vec::new())),
+            runtime_host,
+            factory.clone() as Arc<dyn SessionStoreFactory>,
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
+            local_owner("attachment-reincarnation-worker", "host-a", "start-a"),
+        )
+        .with_session_policy(policy)
+    })
+    .expect("valid test native substrate config");
+
+    let registration = || {
+        ProcessRegistration::new(
+            PROCESS_ID,
+            ProcessInput::Engine {
+                kind: "attachment-writing-engine".to_string(),
+                payload: serde_json::Value::Null,
+            },
+            RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+        .with_execution_env_ref(Some(env_ref.clone()))
+    };
+
+    let first = registry
+        .register_process(registration())
+        .await
+        .expect("register first incarnation");
+    let _ = worker
+        .drive_pending_processes()
+        .await
+        .expect("drive first incarnation");
+    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
+
+    let owner_incarnations = |entries: &[crate::AttachmentManifestEntry]| {
+        assert!(
+            entries.iter().all(|entry| {
+                entry.owner_kind == Some(crate::AttachmentOwnerKind::Process)
+                    && entry.owner_id.as_deref() == Some(PROCESS_ID)
+            }),
+            "every intent is process-owned under the reused name"
+        );
+        entries
+            .iter()
+            .map(|entry| entry.owner_incarnation)
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let process_env_store = || async {
+        let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from(format!("process-env:{PROCESS_ID}")),
+            relation: crate::SessionRelation::default(),
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        };
+        factory
+            .open_existing_store(&request)
+            .await
+            .expect("open process owner store")
+            .expect("process owner store exists")
+    };
+
+    let first_entries = process_env_store()
+        .await
+        .list_uncommitted(u64::MAX)
+        .expect("list first-incarnation process intents");
+    assert!(
+        !first_entries.is_empty(),
+        "precondition: the first run wrote process-owned intents"
+    );
+    assert_eq!(
+        owner_incarnations(&first_entries),
+        std::collections::BTreeSet::from([Some(first.incarnation)]),
+        "the first run roots its attachments under its own incarnation"
+    );
+
+    let terminal = registry
+        .get_process(&ProcessId::from(PROCESS_ID))
+        .await
+        .expect("read terminal first incarnation")
+        .expect("first incarnation still registered");
+    registry
+        .prune_terminal_processes(
+            terminal.updated_at_ms.saturating_add(1),
+            None,
+            crate::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .expect("prune the first incarnation");
+    let second = registry
+        .register_process(registration())
+        .await
+        .expect("register second incarnation");
+    assert_ne!(
+        first.incarnation, second.incarnation,
+        "precondition: re-registration under the same name must mint a new incarnation"
+    );
+
+    let _ = worker
+        .drive_pending_processes()
+        .await
+        .expect("drive second incarnation");
+    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
+
+    let second_entries = process_env_store()
+        .await
+        .list_uncommitted(u64::MAX)
+        .expect("list second-incarnation process intents");
+    assert!(
+        !second_entries.is_empty(),
+        "precondition: the second run wrote process-owned intents"
+    );
+    assert_eq!(
+        owner_incarnations(&second_entries),
+        std::collections::BTreeSet::from([Some(second.incarnation)]),
+        "the reused name binds under the incarnation that is running, never the \
+         pruned predecessor's"
+    );
 }
