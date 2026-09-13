@@ -1437,17 +1437,8 @@ impl lash_core::ProcessRetention for PostgresProcessRegistry {
         &self,
         process_id: &ProcessId,
         incarnation: lash_core::ProcessIncarnation,
-    ) -> Result<(), PluginError> {
-        sqlx::query(
-            "DELETE FROM lash_process_artifact_cleanup
-             WHERE process_id = $1 AND incarnation = $2",
-        )
-        .bind(process_id.as_str())
-        .bind(incarnation.registration_sequence() as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
-        Ok(())
+    ) -> Result<lash_core::ProcessArtifactCleanupAck, PluginError> {
+        prune_api::complete_process_artifact_cleanup(self, process_id, incarnation).await
     }
 
     async fn compact_process_tombstones(

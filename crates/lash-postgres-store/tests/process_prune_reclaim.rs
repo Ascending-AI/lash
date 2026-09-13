@@ -236,10 +236,16 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
     assert_eq!(pending[0].process_id, registered.id);
     assert_eq!(pending[0].env_ref, registered.env_ref);
     assert_eq!(pending[0].input, registered.input);
-    reopened
+    let acknowledgement = reopened
         .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
         .await
         .expect("ack cleanup evidence");
+    assert_eq!(
+        acknowledgement,
+        lash_core::ProcessArtifactCleanupAck::Acknowledged {
+            process_ref: lash_core::ProcessRef::from_record(&registered),
+        }
+    );
     assert!(
         reopened
             .pending_process_artifact_cleanup()

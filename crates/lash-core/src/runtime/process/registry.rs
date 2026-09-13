@@ -4,7 +4,7 @@ use crate::plugin::PluginError;
 
 use super::engine::PersistedSegmentHandover;
 use super::events::ProcessWakeDelivery;
-use super::model::{ProcessChangeCursor, ProcessRecord};
+use super::model::{ProcessArtifactCleanupAck, ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry,
     ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistryBinding,
@@ -24,6 +24,12 @@ pub struct ProcessPruneReport {
     /// Low-level registry implementations report zero; the public Lash facade
     /// fills this field after coordinating with its configured trigger store.
     pub pruned_trigger_deliveries: usize,
+    /// Typed acknowledgements for durable artifact cleanup drained by the facade.
+    ///
+    /// Low-level registry implementations report an empty list; the public Lash
+    /// facade fills it after every configured artifact store has released the
+    /// exact process owner.
+    pub artifact_cleanup_acknowledgements: Vec<ProcessArtifactCleanupAck>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

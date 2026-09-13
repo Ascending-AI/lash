@@ -716,9 +716,12 @@ impl Processes {
                 .host_process_engines
                 .release_pruned_process_artifacts(&cleanup)
                 .await?;
-            registry
+            let acknowledgement = registry
                 .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
                 .await?;
+            report
+                .artifact_cleanup_acknowledgements
+                .push(acknowledgement);
         }
         if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
             let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(

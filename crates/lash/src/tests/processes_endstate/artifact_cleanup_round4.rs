@@ -112,9 +112,18 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
         .await?;
     engine.retain(second_owner);
 
-    core.processes()
+    let report = core
+        .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
         .await?;
+    assert_eq!(
+        report.artifact_cleanup_acknowledgements,
+        vec![lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+            expected: lash_core::ProcessRef::from_record(&first),
+            found: lash_core::ProcessRef::from_record(&second),
+        }],
+        "the facade must surface that the durable cleanup belonged to a predecessor incarnation"
+    );
     assert!(
         artifact_store
             .get_process_execution_env(&env_ref)
@@ -251,10 +260,44 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
         reopened_env.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;
-    recovered_core
+    let successor = reopened_registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                registered.id.clone(),
+                lash_core::ProcessInput::Engine {
+                    kind: engine.kind().to_string(),
+                    payload: serde_json::json!({"artifact_ref": "postgres-prune-recovery"}),
+                },
+                lash_core::RecoveryContract::Rerunnable,
+                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_execution_env_ref(Some(env_ref.clone())),
+        )
+        .await?;
+    assert_ne!(registered.incarnation, successor.incarnation);
+    let successor_owner =
+        lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&successor));
+    reopened_env
+        .publish_process_execution_env(&successor_owner, &env_ref, &env_bytes)
+        .await?;
+    engine.retain(successor_owner.clone());
+
+    let report = recovered_core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
         .await?;
+    assert_eq!(
+        report.artifact_cleanup_acknowledgements,
+        vec![lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+            expected: lash_core::ProcessRef::from_record(&registered),
+            found: lash_core::ProcessRef::from_record(&successor),
+        }],
+        "the reopened PostgreSQL facade must surface predecessor cleanup explicitly"
+    );
     assert!(
         reopened_registry
             .pending_process_artifact_cleanup()
@@ -270,6 +313,9 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
     );
     let (engine_bytes, engine_owners) = engine.snapshot();
     assert!(engine_bytes);
-    assert_eq!(engine_owners, HashSet::from([shared_owner]));
+    assert_eq!(
+        engine_owners,
+        HashSet::from([shared_owner, successor_owner])
+    );
     Ok(())
 }

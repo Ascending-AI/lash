@@ -19,12 +19,31 @@ impl super::super::registry::ProcessRetention for TestLocalProcessRegistry {
         &self,
         process_id: &ProcessId,
         incarnation: ProcessIncarnation,
-    ) -> Result<(), PluginError> {
-        self.artifact_cleanup
+    ) -> Result<crate::ProcessArtifactCleanupAck, PluginError> {
+        let _transaction = self.transaction.lock().await;
+        let process_ref = crate::ProcessRef::new(process_id.clone(), incarnation);
+        let found = self
+            .managed
             .lock()
             .await
-            .remove(&(process_id.clone(), incarnation));
-        Ok(())
+            .get(process_id)
+            .map(|record| record.record.incarnation);
+        let removed = self
+            .artifact_cleanup
+            .lock()
+            .await
+            .remove(&(process_id.clone(), incarnation))
+            .is_some();
+        Ok(match found {
+            Some(found) if found != incarnation => {
+                crate::ProcessArtifactCleanupAck::StaleIncarnation {
+                    expected: process_ref,
+                    found: crate::ProcessRef::new(process_id.clone(), found),
+                }
+            }
+            _ if removed => crate::ProcessArtifactCleanupAck::Acknowledged { process_ref },
+            _ => crate::ProcessArtifactCleanupAck::Unknown { process_ref },
+        })
     }
 
     async fn compact_process_tombstones(
@@ -169,6 +188,7 @@ impl super::super::registry::ProcessRetention for TestLocalProcessRegistry {
             pruned_processes: prunable.len(),
             pruned_events,
             pruned_trigger_deliveries: 0,
+            artifact_cleanup_acknowledgements: Vec::new(),
         })
     }
 }

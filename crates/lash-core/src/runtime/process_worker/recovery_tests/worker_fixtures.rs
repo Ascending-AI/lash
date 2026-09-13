@@ -283,12 +283,19 @@ pub(super) fn native_worker_with_trigger_store(
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
     let watched = crate::watch_process_registry(registry);
+    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_process_env_store(process_env_store)
+            .with_process_engine_registration(
+                crate::ProcessEngineRegistration::accepting(Arc::new(
+                    crate::testing::FixtureProcessEngine,
+                )),
             ),
             Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),

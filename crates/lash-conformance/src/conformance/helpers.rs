@@ -21,10 +21,17 @@ pub(crate) async fn acknowledge_pending_process_artifact_cleanup(
         .await
         .expect("list pending process artifact cleanup")
     {
-        registry
+        let acknowledgement = registry
             .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
             .await
             .expect("acknowledge process artifact cleanup");
+        assert_eq!(
+            acknowledgement,
+            crate::ProcessArtifactCleanupAck::Acknowledged {
+                process_ref: crate::ProcessRef::new(cleanup.process_id, cleanup.incarnation),
+            },
+            "cleanup without a successor must acknowledge its exact incarnation"
+        );
     }
 }
 

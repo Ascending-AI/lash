@@ -387,7 +387,7 @@ macro_rules! delegate_process_retention {
                 &self,
                 process_id: &$crate::ProcessId,
                 incarnation: $crate::ProcessIncarnation,
-            ) -> Result<(), $crate::PluginError> {
+            ) -> Result<$crate::ProcessArtifactCleanupAck, $crate::PluginError> {
                 self.$inner
                     .complete_process_artifact_cleanup(process_id, incarnation)
                     .await

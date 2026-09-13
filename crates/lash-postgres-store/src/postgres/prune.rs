@@ -102,6 +102,7 @@ pub(super) async fn prune_process_rows_tx(
         pruned_processes: pruned_processes as usize,
         pruned_events: pruned_events as usize,
         pruned_trigger_deliveries: 0,
+        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 

@@ -578,10 +578,16 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         "the tombstone is the durable parent of pending cleanup evidence"
     );
 
-    registry
+    let acknowledgement = registry
         .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
         .await
         .expect("acknowledge artifact cleanup");
+    assert_eq!(
+        acknowledgement,
+        ProcessArtifactCleanupAck::Acknowledged {
+            process_ref: ProcessRef::from_record(&registered),
+        }
+    );
     assert!(
         registry
             .pending_process_artifact_cleanup()

@@ -813,12 +813,18 @@ pub trait ProcessRetention: Send + Sync {
     }
 
     /// Acknowledge that all configured artifact stores applied one cleanup.
+    ///
+    /// Implementations remove the exact cleanup record and report whether the
+    /// reusable process id now names a successor incarnation. A stale successor
+    /// is an expected typed outcome, never silent success.
     async fn complete_process_artifact_cleanup(
         &self,
-        _process_id: &ProcessId,
-        _incarnation: super::model::ProcessIncarnation,
-    ) -> Result<(), PluginError> {
-        Ok(())
+        process_id: &ProcessId,
+        incarnation: super::model::ProcessIncarnation,
+    ) -> Result<super::model::ProcessArtifactCleanupAck, PluginError> {
+        Ok(super::model::ProcessArtifactCleanupAck::Unknown {
+            process_ref: super::model::ProcessRef::new(process_id.clone(), incarnation),
+        })
     }
 
     /// Delete payload-free tombstones older than `cutoff_epoch_ms` without

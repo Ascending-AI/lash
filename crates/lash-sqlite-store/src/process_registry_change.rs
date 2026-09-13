@@ -175,6 +175,7 @@ pub(crate) fn prune_terminal_processes_conn(
             pruned_processes: 0,
             pruned_events: 0,
             pruned_trigger_deliveries: 0,
+            artifact_cleanup_acknowledgements: Vec::new(),
         });
     }
 
@@ -295,6 +296,7 @@ fn prune_process_rows_conn(
         pruned_processes,
         pruned_events,
         pruned_trigger_deliveries: 0,
+        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 
