@@ -408,14 +408,16 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let enqueue_seq = queued[indices[0]].batch.enqueue_seq;
         let minted = super::claim_hold::mint_in_memory_claim(
             queued.as_mut_slice(),
-            &indices,
-            enqueue_seq,
-            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-            "queued_work_claim_fencing_token",
-            session_id,
-            owner,
-            generation,
-            now,
+            super::claim_hold::InMemoryClaimMint {
+                selected_indices: &indices,
+                enqueue_seq,
+                dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+                fencing_label: "queued_work_claim_fencing_token",
+                session_id,
+                owner,
+                generation,
+                now,
+            },
         )?;
         let batches = indices
             .iter()

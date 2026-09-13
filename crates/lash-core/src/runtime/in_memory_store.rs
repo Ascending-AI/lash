@@ -38,7 +38,7 @@ mod testing_access;
 pub use testing_access::RawSessionExecutionLeaseRow;
 mod claim_hold;
 mod turn_input;
-use claim_hold::{ClaimHold, InMemoryClaimRow, mint_in_memory_claim};
+use claim_hold::{ClaimHold, InMemoryClaimMint, InMemoryClaimRow, mint_in_memory_claim};
 
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
@@ -673,14 +673,16 @@ impl InMemorySessionStore {
         let enqueue_seq = queued[selected_indices[0]].batch.enqueue_seq;
         let minted = mint_in_memory_claim(
             queued,
-            &selected_indices,
-            enqueue_seq,
-            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
-            "queued_work_claim_fencing_token",
-            session_id,
-            owner,
-            generation,
-            now,
+            InMemoryClaimMint {
+                selected_indices: &selected_indices,
+                enqueue_seq,
+                dialect: crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+                fencing_label: "queued_work_claim_fencing_token",
+                session_id,
+                owner,
+                generation,
+                now,
+            },
         )?;
         let batches = selected_indices
             .iter()
@@ -805,14 +807,16 @@ impl InMemorySessionStore {
         let enqueue_seq = pending[first_index].input.enqueue_seq;
         let minted = mint_in_memory_claim(
             pending,
-            &selected_indices,
-            enqueue_seq,
-            crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
-            "turn_input_claim_fencing_token",
-            session_id,
-            owner,
-            generation,
-            now,
+            InMemoryClaimMint {
+                selected_indices: &selected_indices,
+                enqueue_seq,
+                dialect: crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+                fencing_label: "turn_input_claim_fencing_token",
+                session_id,
+                owner,
+                generation,
+                now,
+            },
         )?;
         let mut inputs = Vec::new();
         for index in selected_indices {
