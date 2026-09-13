@@ -2414,17 +2414,22 @@ fn remote_process_event_type() -> RemoteProcessEventType {
 }
 
 fn remote_process_record() -> RemoteProcessRecord {
+    // Engine input, not External: core refuses a record that captures an
+    // execution env for a declarative input kind, and remote ingress now
+    // refuses the same shape (FIG-2985). Keeping the env ref here is what
+    // exercises its round trip.
     RemoteProcessRecord {
         process_id: ProcessId::from("process:1"),
         incarnation: 1,
         last_event_sequence: 0,
-        input: RemoteProcessInput::External {
-            metadata: serde_json::json!({ "label": "Import" }),
+        input: RemoteProcessInput::Engine {
+            kind: "import".to_string(),
+            payload: serde_json::json!({ "label": "Import" }),
         },
         disposition: RemoteRecoveryContract::ExternallyOwned,
         max_attempts: None,
         identity: RemoteProcessIdentity {
-            kind: "external".to_string(),
+            kind: "engine".to_string(),
             label: Some("Import".to_string()),
             definition: None,
         },

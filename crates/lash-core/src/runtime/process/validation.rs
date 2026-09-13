@@ -1182,14 +1182,74 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
     }
 }
 
-pub(super) fn validate_process_registration(
+/// One refusal rule enforced by [`validate_process_registration`].
+///
+/// Remote ingress must refuse every shape core refuses (FIG-2985), so this
+/// registry is the shared vocabulary of the two validators: each variant has a
+/// fixture in [`crate::testing::refused_process_registration`], and both the
+/// core parity test and the `lash-remote-protocol` decoder parity test iterate
+/// [`ProcessRegistrationRefusal::ALL`]. Adding a core rule means adding a
+/// variant, which stops the exhaustive fixture match from compiling until the
+/// new shape is also fed through the remote decoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProcessRegistrationRefusal {
+    HostParentCancels,
+    TurnParentSessionMismatch,
+    InvalidProcessKey,
+    ZeroMaxAttempts,
+    ToolCallWithoutCallId,
+    ToolCallWithoutToolName,
+    ExecutionEnvMissing,
+    ExecutionEnvNotAllowed,
+    EmptySessionTurnDefinitionKey,
+    EmptyEventTypeName,
+    DuplicateEventType,
+    ReservedRuntimeEventType,
+    NonTerminalTerminalStatus,
+    TerminalEventWithoutAwaitOutput,
+}
+
+impl ProcessRegistrationRefusal {
+    /// Every refusal rule, in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::HostParentCancels,
+        Self::TurnParentSessionMismatch,
+        Self::InvalidProcessKey,
+        Self::ZeroMaxAttempts,
+        Self::ToolCallWithoutCallId,
+        Self::ToolCallWithoutToolName,
+        Self::ExecutionEnvMissing,
+        Self::ExecutionEnvNotAllowed,
+        Self::EmptySessionTurnDefinitionKey,
+        Self::EmptyEventTypeName,
+        Self::DuplicateEventType,
+        Self::ReservedRuntimeEventType,
+        Self::NonTerminalTerminalStatus,
+        Self::TerminalEventWithoutAwaitOutput,
+    ];
+}
+
+/// A registration core refuses: the rule that fired, with the error callers see.
+pub(crate) type ProcessRegistrationRefused = (ProcessRegistrationRefusal, PluginError);
+
+fn refuse(rule: ProcessRegistrationRefusal, message: String) -> ProcessRegistrationRefused {
+    (rule, PluginError::Session(message))
+}
+
+/// Validates a registration and names the rule that refused it.
+///
+/// [`validate_process_registration`] is the plain-error face of this function;
+/// the rule tag exists so the parity fixtures can assert that each fixture
+/// trips the rule it was written for rather than an unrelated earlier check.
+pub(crate) fn classify_process_registration(
     registration: &ProcessRegistration,
-) -> Result<(), PluginError> {
+) -> Result<(), ProcessRegistrationRefused> {
     match &registration.lifecycle.parent {
         super::model::ParentScope::Host
             if registration.lifecycle.on_parent_end == super::model::OnParentEnd::Cancel =>
         {
-            return Err(PluginError::Session(
+            return Err(refuse(
+                ProcessRegistrationRefusal::HostParentCancels,
                 "Host parent scope cannot declare Cancel: a host scope never ends".to_string(),
             ));
         }
@@ -1200,113 +1260,159 @@ pub(super) fn validate_process_registration(
                     if originator == session_id
             ) =>
         {
-            return Err(PluginError::Session(
+            return Err(refuse(
+                ProcessRegistrationRefusal::TurnParentSessionMismatch,
                 "turn parent session must match the process originator session".to_string(),
             ));
         }
         _ => {}
     }
     if let Some(reason) = crate::store::process_key::invalid_process_key_reason(&registration.id) {
-        return Err(PluginError::Session(reason.into()));
+        return Err(refuse(
+            ProcessRegistrationRefusal::InvalidProcessKey,
+            reason.into(),
+        ));
     }
     if registration.max_attempts == Some(0) {
-        return Err(PluginError::Session(format!(
-            "process `{}` max_attempts must be greater than zero",
-            registration.id
-        )));
+        return Err(refuse(
+            ProcessRegistrationRefusal::ZeroMaxAttempts,
+            format!(
+                "process `{}` max_attempts must be greater than zero",
+                registration.id
+            ),
+        ));
     }
     match registration.input.as_ref() {
         super::model::ProcessInput::ToolCall { call } => {
             if call.call_id.trim().is_empty() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` tool call must carry a call id",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ToolCallWithoutCallId,
+                    format!(
+                        "process `{}` tool call must carry a call id",
+                        registration.id
+                    ),
+                ));
             }
             if call.tool_name.trim().is_empty() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` tool call must carry a tool name",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ToolCallWithoutToolName,
+                    format!(
+                        "process `{}` tool call must carry a tool name",
+                        registration.id
+                    ),
+                ));
             }
             if registration.env_ref.is_none() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` requires a captured execution env",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ExecutionEnvMissing,
+                    format!(
+                        "process `{}` requires a captured execution env",
+                        registration.id
+                    ),
+                ));
             }
         }
         super::model::ProcessInput::Engine { .. } => {
             if registration.env_ref.is_none() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` requires a captured execution env",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ExecutionEnvMissing,
+                    format!(
+                        "process `{}` requires a captured execution env",
+                        registration.id
+                    ),
+                ));
             }
         }
         super::model::ProcessInput::External { .. } => {
             if registration.env_ref.is_some() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` must not capture an execution env for this input kind",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
+                    format!(
+                        "process `{}` must not capture an execution env for this input kind",
+                        registration.id
+                    ),
+                ));
             }
         }
         super::model::ProcessInput::SessionTurn { definition_key, .. } => {
             if definition_key.trim().is_empty() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` session-turn definition_key must not be empty",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey,
+                    format!(
+                        "process `{}` session-turn definition_key must not be empty",
+                        registration.id
+                    ),
+                ));
             }
             if registration.env_ref.is_some() {
-                return Err(PluginError::Session(format!(
-                    "process `{}` must not capture an execution env for this input kind",
-                    registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
+                    format!(
+                        "process `{}` must not capture an execution env for this input kind",
+                        registration.id
+                    ),
+                ));
             }
         }
     }
     let mut names = HashSet::new();
     for event_type in &registration.event_types {
         if event_type.name.trim().is_empty() {
-            return Err(PluginError::Session(format!(
-                "process `{}` declares an empty event type",
-                registration.id
-            )));
+            return Err(refuse(
+                ProcessRegistrationRefusal::EmptyEventTypeName,
+                format!("process `{}` declares an empty event type", registration.id),
+            ));
         }
         if !names.insert(event_type.name.as_str()) {
-            return Err(PluginError::Session(format!(
-                "process `{}` declares duplicate event type `{}`",
-                registration.id, event_type.name
-            )));
+            return Err(refuse(
+                ProcessRegistrationRefusal::DuplicateEventType,
+                format!(
+                    "process `{}` declares duplicate event type `{}`",
+                    registration.id, event_type.name
+                ),
+            ));
         }
         if let Some(runtime_owned) = runtime_lifecycle_event_type(&event_type.name)
             && event_type != &runtime_owned
         {
-            return Err(PluginError::Session(format!(
-                "process `{}` declares reserved runtime lifecycle event type `{}`",
-                registration.id, event_type.name
-            )));
+            return Err(refuse(
+                ProcessRegistrationRefusal::ReservedRuntimeEventType,
+                format!(
+                    "process `{}` declares reserved runtime lifecycle event type `{}`",
+                    registration.id, event_type.name
+                ),
+            ));
         }
         if let Some(terminal) = &event_type.semantics.terminal {
             if !terminal.status.is_terminal() {
-                return Err(PluginError::Session(format!(
-                    "terminal event `{}` for process `{}` must declare a terminal status, got `{}`",
-                    event_type.name,
-                    registration.id,
-                    terminal.status.label()
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::NonTerminalTerminalStatus,
+                    format!(
+                        "terminal event `{}` for process `{}` must declare a terminal status, got `{}`",
+                        event_type.name,
+                        registration.id,
+                        terminal.status.label()
+                    ),
+                ));
             }
             if terminal.status != ProcessStatus::Completed && terminal.await_output.is_none() {
-                return Err(PluginError::Session(format!(
-                    "terminal event `{}` for process `{}` must declare await output",
-                    event_type.name, registration.id
-                )));
+                return Err(refuse(
+                    ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput,
+                    format!(
+                        "terminal event `{}` for process `{}` must declare await output",
+                        event_type.name, registration.id
+                    ),
+                ));
             }
         }
     }
     Ok(())
+}
+
+pub(super) fn validate_process_registration(
+    registration: &ProcessRegistration,
+) -> Result<(), PluginError> {
+    classify_process_registration(registration).map_err(|(_rule, error)| error)
 }
 
 #[cfg(test)]

@@ -19,6 +19,13 @@ use crate::turn_result::RemoteCausalRef;
 mod lifecycle;
 pub use lifecycle::{RemoteOnParentEnd, RemoteParentScope, RemoteProcessLifecyclePolicy};
 
+mod outcomes;
+pub use outcomes::{
+    RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+    RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
+    RemoteProcessToolRetryStatus, RemoteToolFailureClass,
+};
+
 mod operations;
 pub use operations::*;
 
@@ -108,6 +115,29 @@ impl<'de> serde::Deserialize<'de> for RemoteProcessExecutionEnvRef {
         let value = String::deserialize(deserializer)?;
         Self::parse(value).map_err(serde::de::Error::custom)
     }
+}
+
+/// Refuses process ids the durable process key encoding cannot store.
+///
+/// The rule is core's `invalid_process_key_reason`, restated because the base
+/// remote DTOs deliberately do not depend on `lash-core` (the `core-conversions`
+/// feature is optional). The decoder re-runs core's own validator, so this is
+/// an early, field-named refusal and not the authority (FIG-2985).
+fn require_storable_process_key(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), RemoteProtocolError> {
+    let reason = if value.contains('\0') {
+        "process_id must not contain NUL"
+    } else if value.contains('#') {
+        "process_id contains reserved segment separator `#`"
+    } else {
+        return Ok(());
+    };
+    Err(RemoteProtocolError::InvalidEnvelope {
+        type_name,
+        message: reason.to_string(),
+    })
 }
 
 fn is_canonical_process_execution_env_ref(value: &str) -> bool {
@@ -238,9 +268,30 @@ pub enum RemoteProcessInput {
 impl RemoteProcessInput {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::ToolCall {
-                prepared_tool_call: _,
-            } => Ok(()),
+            Self::ToolCall { prepared_tool_call } => {
+                // The payload stays opaque JSON on the wire, but core refuses a
+                // registration whose prepared call has no call id or tool name
+                // (FIG-2869), and the record decoder builds exactly that
+                // registration. Refuse the same two fields here so peer input
+                // fails with a named field rather than deeper in the decode
+                // (FIG-2985).
+                require_non_empty(
+                    type_name,
+                    "prepared_tool_call.call_id",
+                    prepared_tool_call
+                        .get("call_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                )?;
+                require_non_empty(
+                    type_name,
+                    "prepared_tool_call.tool_name",
+                    prepared_tool_call
+                        .get("tool_name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                )
+            }
             Self::Engine { kind, payload: _ } => require_non_empty(type_name, "kind", kind),
             Self::SessionTurn {
                 definition_key,
@@ -259,6 +310,17 @@ impl RemoteProcessInput {
                 }
             }
             Self::External { metadata: _ } => Ok(()),
+        }
+    }
+
+    /// Whether core requires a captured execution env for this input kind.
+    ///
+    /// Mirrors `validate_process_registration`: executable inputs carry an env
+    /// ref and declarative ones must not (FIG-2985).
+    fn requires_execution_env(&self) -> bool {
+        match self {
+            Self::ToolCall { .. } | Self::Engine { .. } => true,
+            Self::SessionTurn { .. } | Self::External { .. } => false,
         }
     }
 }
@@ -299,144 +361,6 @@ impl RemoteProcessStatus {
             Self::CallerDeparted => "caller_departed",
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RemoteProcessAwaitOutput {
-    Settled {
-        output: RemoteProcessToolCallOutput,
-    },
-    Abandoned {
-        evidence: RemoteAbandonEvidence,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<serde_json::Value>,
-    },
-    NoLongerRetained {
-        terminal_label: String,
-        pruned_at_ms: u64,
-    },
-}
-
-impl RemoteProcessAwaitOutput {
-    fn terminal_status(&self) -> Option<RemoteProcessStatus> {
-        match self {
-            Self::Settled { output } => Some(match &output.outcome {
-                RemoteProcessToolCallOutcome::Success(_) => RemoteProcessStatus::Completed,
-                RemoteProcessToolCallOutcome::Failure(_) => RemoteProcessStatus::Failed,
-                RemoteProcessToolCallOutcome::Cancelled(_) => RemoteProcessStatus::Cancelled,
-            }),
-            Self::Abandoned { .. } => Some(RemoteProcessStatus::Abandoned),
-            Self::NoLongerRetained { .. } => None,
-        }
-    }
-
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        match self {
-            Self::Settled { output } => output.validate(type_name),
-            Self::Abandoned { evidence, .. } => match &evidence.owner {
-                Some(owner) => owner.validate(type_name),
-                None => Ok(()),
-            },
-            Self::NoLongerRetained { .. } => Ok(()),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessToolCallOutput {
-    pub outcome: RemoteProcessToolCallOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub control: Option<serde_json::Value>,
-}
-
-impl RemoteProcessToolCallOutput {
-    fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        match &self.outcome {
-            RemoteProcessToolCallOutcome::Success(_) => Ok(()),
-            RemoteProcessToolCallOutcome::Failure(failure) => {
-                require_non_empty(type_name, "await_output.output.outcome.code", &failure.code)?;
-                require_non_empty(
-                    type_name,
-                    "await_output.output.outcome.message",
-                    &failure.message,
-                )
-            }
-            RemoteProcessToolCallOutcome::Cancelled(cancellation) => require_non_empty(
-                type_name,
-                "await_output.output.outcome.message",
-                &cancellation.message,
-            ),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
-pub enum RemoteProcessToolCallOutcome {
-    Success(serde_json::Value),
-    Failure(RemoteProcessToolFailure),
-    Cancelled(RemoteProcessToolCancellation),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessToolFailure {
-    pub class: RemoteToolFailureClass,
-    pub code: String,
-    pub message: String,
-    pub source: RemoteProcessToolFailureSource,
-    pub retry: RemoteProcessToolRetryStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw: Option<serde_json::Value>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteProcessToolFailureSource {
-    Runtime,
-    Tool,
-    Plugin,
-    Policy,
-    Cancellation,
-    UnknownLegacy,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RemoteProcessToolRetryStatus {
-    Never,
-    Safe {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        after_ms: Option<u64>,
-    },
-    Exhausted {
-        attempts: u32,
-    },
-    UnknownLegacy,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessToolCancellation {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<lash_sansio::CancelOrigin>,
-    pub message: String,
-    pub source: RemoteProcessToolFailureSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw: Option<serde_json::Value>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteToolFailureClass {
-    InvalidRequest,
-    Io,
-    Unavailable,
-    PermissionDenied,
-    Timeout,
-    Execution,
-    External,
-    ResourceLimit,
-    Internal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -584,6 +508,7 @@ pub struct RemoteProcessRecord {
 impl RemoteProcessRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
+        require_storable_process_key(type_name, &self.process_id)?;
         RemoteProcessRef {
             process_id: self.process_id.clone(),
             incarnation: self.incarnation,
@@ -593,10 +518,38 @@ impl RemoteProcessRecord {
             .validate(type_name, &self.provenance.originator)?;
         self.input.validate(type_name)?;
         self.identity.validate(type_name)?;
+        let mut event_type_names = std::collections::BTreeSet::new();
         for event_type in &self.event_types {
             event_type.validate(type_name)?;
+            if !event_type_names.insert(event_type.name.as_str()) {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: format!("duplicate event type `{}`", event_type.name),
+                });
+            }
         }
         self.provenance.validate(type_name)?;
+        if self.max_attempts == Some(0) {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: "max_attempts must be greater than zero".to_string(),
+            });
+        }
+        match (self.input.requires_execution_env(), self.env_ref.is_some()) {
+            (true, false) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: "this input kind requires a captured execution env".to_string(),
+                });
+            }
+            (false, true) => {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name,
+                    message: "this input kind must not capture an execution env".to_string(),
+                });
+            }
+            (true, true) | (false, false) => {}
+        }
         if let Some(env_ref) = &self.env_ref {
             env_ref.validate(type_name)?;
         }

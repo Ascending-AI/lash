@@ -86,8 +86,8 @@ pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProces
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 pub use validation::{
-    ProcessEventAppendPlan, ProcessStartPlan, ProcessTransition, ProcessTransitionPlan,
-    allocate_process_event_sequence, apply_process_event_projection,
+    ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
+    ProcessTransitionPlan, allocate_process_event_sequence, apply_process_event_projection,
     apply_process_status_projection, fold_process_record, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_registration_fingerprint, require_event_replay, validate_generic_process_event_append,
