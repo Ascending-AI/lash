@@ -20,9 +20,10 @@ is the **workflow-graph lens's** canonical printer over the IR — the `/project
 `/workflow` seams round-trip through it — and
 [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves that printer
 where it is while retiring the authoring surface: a TypeScript canonical printer and its
-round-trip laws are named there as unbuilt future work with their own ADR. So every source
-string asserted below is the lens's output, not a language a model was asked to write, and
-it changes when the lens's printer changes, not with this arc.
+round-trip laws are named there as unbuilt future work with their own ADR, tracked as
+FIG-3033. So every source string asserted below is the lens's output, not a language a
+model was asked to write, and it changes when the lens's printer changes, not with this
+arc.
 
 ## Scenario-specific golden rules
 
@@ -81,7 +82,7 @@ After readiness, gate these API facts before opening the editor:
   source, one process, and one terminal without changing `GET /workflow`'s version. Every
   such source string in this runbook is the workflow-graph lens's canonical printer output,
   not a language a model was asked to write, and it changes when the TypeScript canonical
-  printer lands, not with this arc.
+  printer lands under FIG-3033, not with this arc.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical
 source pane, and Display panel. Screenshot `00-ready.png`.
