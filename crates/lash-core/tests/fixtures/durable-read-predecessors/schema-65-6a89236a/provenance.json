@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 65,
+  "source_commit": "6a89236a64b0ddaf116b937c201ded632f73fbcb",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2886 schema-66 effect-envelope cutover",
+  "artifacts": {
+    "postgres-expected.json": "76d4ff2e149dda12fa19dcdcc8d7c82f58a93e23538f0183bff26f8b68719a5c",
+    "sqlite-expected.json": "344f51305680c9d7ebeb57344b39e02f7bf1510f858b58e51ec9dc5af8a42646"
+  }
+}

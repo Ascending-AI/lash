@@ -20,6 +20,7 @@ where
     committed_mutation_receipt_survives_later_revision(make()).await;
     conflicting_mutation_receipt_survives_later_revision(make()).await;
     list_operations_are_not_receipted(make()).await;
+    for_session_filter_is_canonical_and_scoped(make()).await;
     mutation_receipts_follow_owner_retention(make()).await;
     reservations_execute_the_reserved_revision(make()).await;
     disable_preserves_reserved_work_and_requires_explicit_enable(make()).await;
@@ -39,6 +40,33 @@ where
     cutoff_defers_but_never_initiates_occurrence_reclaim(make()).await;
     null_source_occurrence_replay_is_idempotent(make()).await;
     first_ingress_and_replay_share_canonical_subscription_order(make()).await;
+}
+
+/// Proves that every spelling which selects an owner emits the one indexed SQL predicate.
+pub fn trigger_subscription_owner_filter_is_pushed_down(
+    backend: &str,
+    sql_for: impl Fn(&crate::TriggerSubscriptionFilter) -> String,
+) {
+    let session_filter = crate::TriggerSubscriptionFilter::for_session("sql-owner-session");
+    assert_eq!(
+        session_filter.registrant_scope_id.as_deref(),
+        Some("session:sql-owner-session"),
+        "{backend} for_session must construct the canonical owner scope"
+    );
+    for filter in [
+        session_filter,
+        crate::TriggerSubscriptionFilter::for_registrant_scope("host:sql-owner-binding"),
+    ] {
+        let sql = sql_for(&filter);
+        assert!(
+            sql.contains("AND owner_scope ="),
+            "{backend} owner filter was not pushed into SQL: {sql}"
+        );
+        assert!(
+            !sql.contains("session_id"),
+            "{backend} SQL retained the deleted session predicate: {sql}"
+        );
+    }
 }
 
 /// Arms a backend failure on the delete of one exact occurrence.
@@ -870,6 +898,44 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
         listed_disabled,
         crate::TriggerCommandOutcome::List { records } if records.len() == 1
     ));
+}
+
+async fn for_session_filter_is_canonical_and_scoped(store: Arc<dyn crate::TriggerStore>) {
+    for session_id in ["canonical-session", "canonical-neighbor"] {
+        mutate(
+            &store,
+            &format!("canonical-register-{session_id}"),
+            register_command(
+                &SessionId::from(session_id),
+                sample_draft(
+                    &SessionId::from(session_id),
+                    "canonical-shared-key",
+                    session_id,
+                    "canonical-worker",
+                ),
+            ),
+        )
+        .await;
+    }
+
+    let filter = crate::TriggerSubscriptionFilter::for_session("canonical-session");
+    assert_eq!(
+        filter.registrant_scope_id.as_deref(),
+        Some("session:canonical-session")
+    );
+    assert!(
+        serde_json::to_value(&filter)
+            .expect("canonical session filter json")
+            .get("session_id")
+            .is_none(),
+        "the core filter must not emit the removed session spelling"
+    );
+    let rows = store.list_subscriptions(filter).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].owner_scope,
+        crate::TriggerOwnerScope::session("canonical-session")
+    );
 }
 
 async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerStore>) {

@@ -23,18 +23,18 @@ fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolErro
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
-/// Refusal witness (FIG-1123): the generation-62 decoder rejects its immediate
+/// Refusal witness (FIG-2886): the generation-63 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_61_is_refused() {
-    const PREDECESSOR: u32 = 61;
+fn immediate_predecessor_remote_protocol_generation_62_is_refused() {
+    const PREDECESSOR: u32 = 62;
     assert_eq!(
         PREDECESSOR + 1,
         REMOTE_PROTOCOL_VERSION,
         "remote-protocol generation adjacency pin"
     );
     let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-61 remote envelope must be refused");
+        .expect_err("generation-62 remote envelope must be refused");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
@@ -1213,7 +1213,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 62,
+            expected: 63,
         }
     ));
 
@@ -1226,6 +1226,94 @@ fn remote_trigger_dtos_json_round_trip() {
     let value = serde_json::to_value(&cause).expect("serialize cause");
     assert_eq!(value["type"], "trigger_occurrence");
     assert_eq!(value["occurrence_id"], "occurrence:1");
+}
+
+/// Frozen from `RemoteTriggerSubscriptionFilter` at origin/main
+/// `847ba3b0b3428e8c81c4459ec9ee2d7d870ea1a4`, the immediate pre-v63
+/// protocol source.
+#[derive(serde::Serialize)]
+struct Protocol62TriggerSubscriptionFilterEnvelope {
+    protocol_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    registrant_scope_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subscription_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target: Option<RemoteProcessDefinitionIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+}
+
+#[test]
+fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
+    let predecessor = Protocol62TriggerSubscriptionFilterEnvelope {
+        protocol_version: 62,
+        registrant_scope_id: None,
+        session_id: Some(SessionId::from("session-blue")),
+        subscription_key: None,
+        name: None,
+        source_type: None,
+        source_key: None,
+        target: None,
+        enabled: None,
+    };
+    let wire = serde_json::to_vec(&predecessor).expect("serialize frozen version-62 filter");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect predecessor filter"),
+        serde_json::json!({
+            "protocol_version": 62,
+            "session_id": "session-blue",
+        })
+    );
+    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(&wire)
+        .expect_err("version-62 session spelling must be refused");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 62,
+            expected: 63,
+        }
+    ));
+
+    assert_eq!(
+        serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
+            "session-blue",
+        )))
+        .expect("serialize canonical version-63 filter"),
+        serde_json::json!({
+            "protocol_version": 63,
+            "registrant_scope_id": "session:session-blue",
+        })
+    );
+}
+
+#[test]
+fn remote_protocol_63_session_filter_refuses_retired_session_id() {
+    let wire = br#"{"protocol_version":63,"session_id":"session-blue"}"#;
+    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
+        .expect_err("version-63 filter must reject the retired session_id field");
+    assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
+    assert!(error.to_string().contains("session_id"), "{error}");
+}
+
+#[test]
+fn remote_protocol_63_session_filter_refuses_nested_duplicate_fields() {
+    let wire = br#"{"protocol_version":63,"target":{"value":1,"value":2}}"#;
+    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
+        .expect_err("version-63 envelope must preserve nested duplicate-field rejection");
+    assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
+    assert!(
+        error.to_string().contains("duplicate field `value`"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1403,7 +1491,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 62,
+            "protocol_version": 63,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1418,7 +1506,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 62,
+            actual: 63,
             expected: 41,
         }
     ));
@@ -1464,7 +1552,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 62,
+            expected: 63,
         }
     ));
 
@@ -1481,7 +1569,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 62, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 63, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1826,7 +1914,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 62,
+            expected: 63,
         })
     ));
 }
@@ -1865,7 +1953,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1901,7 +1989,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1956,7 +2044,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1988,7 +2076,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 62,
+                expected: 63,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
