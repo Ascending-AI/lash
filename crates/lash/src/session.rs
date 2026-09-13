@@ -763,6 +763,16 @@ impl LashSession {
     /// it and reports [`TurnCancelOutcome::Escalated`](lash_core::facade_support::TurnCancelOutcome::Escalated);
     /// a same-or-weaker request reports `AlreadyRequested`. No timer escalates
     /// on Lash's behalf; that is host policy.
+    ///
+    /// Both of those outcomes require agreeing with the accepted
+    /// undelivered-input disposition: the first request the turn's
+    /// cancellation gate accepts owns that policy for the rest of the turn.
+    /// A repeat asking for a different `undelivered` is refused with
+    /// [`TurnCancelOutcome::PolicyConflict`](lash_core::facade_support::TurnCancelOutcome::PolicyConflict),
+    /// which names the requested and accepted policies and the accepted
+    /// request, and changes nothing — not the honoured policy, not the durable
+    /// request row, not the queued inputs. Escalating timing never substitutes
+    /// the disposition; it only changes when the accepted policy is applied.
     pub async fn request_turn_cancel_with_mode(
         &self,
         turn_id: &TurnId,
