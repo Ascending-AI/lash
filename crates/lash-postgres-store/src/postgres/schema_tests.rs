@@ -1,22 +1,14 @@
 use super::*;
 
-const RETAINED_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION - 2;
+const RETAINED_MIGRATION_ENDPOINT: i32 = SCHEMA_VERSION - 1;
 
 #[test]
 fn current_destructive_cutover_has_no_migration_arm() {
-    let current = SCHEMA_MIGRATIONS
-        .iter()
-        .filter(|migration| migration.to == SCHEMA_VERSION)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        current.len(),
-        1,
-        "component 89 must expose exactly its immediate refusal boundary"
-    );
-    assert_eq!(current[0].from, SCHEMA_VERSION - 1);
     assert!(
-        current[0].is_recreate_boundary(),
-        "component 89 must reject every pre-cutover schema rather than migrate it"
+        SCHEMA_MIGRATIONS
+            .iter()
+            .all(|migration| migration.to != SCHEMA_VERSION),
+        "component 78 must reject every pre-cutover schema rather than migrate it"
     );
 
     let predecessor = SCHEMA_MIGRATIONS

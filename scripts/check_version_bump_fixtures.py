@@ -300,43 +300,28 @@ def check(repo: Path) -> tuple[bool, str]:
     )
     migrations = parse_migrations(migrations_text)
     migration_targets = {migration.to_version for migration in migrations}
-    if migration_targets == {component_version}:
-        migration_target = component_version
-    elif migration_targets == {component_version - 1}:
-        migration_target = component_version - 1
-    elif component_version in migration_targets:
-        historical_targets = migration_targets - {component_version}
-        expected_historical_target = component_version - 2
-        if historical_targets != {expected_historical_target}:
-            versions = ", ".join(str(version) for version in sorted(migration_targets))
-            return False, (
-                f"{MIGRATIONS_SOURCE}: current component {component_version} may layer its "
-                "immediate refusal row only over the retained pre-cutover generation "
-                f"{expected_historical_target}, but the catalog targets {versions}"
-            )
-        current_rows = [
-            migration
-            for migration in migrations
-            if migration.to_version == component_version
-        ]
-        if len(current_rows) != 1 or current_rows[0].from_version != component_version - 1:
-            sources = ", ".join(
-                str(migration.from_version) for migration in current_rows
-            )
-            return False, (
-                f"{MIGRATIONS_SOURCE}: layered component {component_version} must have exactly "
-                f"one current row from immediate predecessor {component_version - 1}, found "
-                f"sources {sources or 'none'}"
-            )
-        migration_target = component_version
-    else:
+    if len(migration_targets) != 1:
         versions = ", ".join(str(version) for version in sorted(migration_targets))
         return False, (
-            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets {versions}, which is neither "
-            f"the current component {component_version} nor its retained pre-cutover generation "
-            f"{component_version - 1}"
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets multiple generations: {versions}"
+        )
+    migration_target = migration_targets.pop()
+    if migration_target not in {component_version, component_version - 1}:
+        return False, (
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets component {migration_target}, "
+            f"which is neither the current component {component_version} nor its retained "
+            "pre-cutover generation"
         )
     destructive_cutover = migration_target == component_version - 1
+    off_target = [
+        migration for migration in migrations if migration.to_version != migration_target
+    ]
+    if off_target:
+        versions = ", ".join(str(migration.to_version) for migration in off_target)
+        return False, (
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets {versions}, not the selected "
+            f"migration generation {migration_target}"
+        )
 
     floor = min(migrations, key=lambda migration: migration.from_version)
     predecessors = [
