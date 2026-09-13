@@ -14,13 +14,13 @@ land in the other account's inbox via a Restate-backed background process.
 **Why this matters.** The workbench is the full demo surface: triggers, typed module
 authorities, durable processes, and the split app/observation event stream. Forwarding is
 the one flow that exercises the whole chain — UI compose → host `mail.received` emission
-inside a Restate execution scope → trigger registration match → durable Lashlang process →
+inside a Restate execution scope → trigger registration match → durable process →
 `inbox.personal.send` back through the same authority the chat uses. If any link drops,
 the message never arrives — a single structural gate covers the chain.
 
 **Real tokens.** OpenRouter for turns; web search rides the keyless Parallel Search MCP
 server, so only the OpenRouter key comes from the environment / repo `.env`. The model's
-prose and its exact Lashlang are its own; gate on structural outcomes only.
+prose and the exact TypeScript it writes are its own; gate on structural outcomes only.
 
 ## Scenario-specific golden rules
 
@@ -34,9 +34,9 @@ prose and its exact Lashlang are its own; gate on structural outcomes only.
 3. **The forwarding processes are durable and visible.** After the trigger fires, the
    process registry (`GET /api/work`, the right rail) must show the concierge run, and
    `GET /api/lashlang-graphs` must know its graph. Invisible background work is a finding.
-4. **Instruct outcomes, not Lashlang.** Ask the agent *what to do* ("register a trigger
-   that forwards…"); never paste ready-made Lashlang into the chat. The model authoring
-   the process is part of what this scenario proves.
+4. **Instruct outcomes, not code.** Ask the agent *what to do* ("register a trigger
+   that forwards…"); never paste a ready-made `<typescript>` cell into the chat. The
+   model authoring the process is part of what this scenario proves.
 
 ## Working material
 
@@ -82,7 +82,7 @@ marker). Gates: the transcript gains your user row and an assistant reply;
 Ask a question that requires current web knowledge (so the model must call the Parallel
 web-search tool). Gates: the turn completes with a non-empty answer; `trace.jsonl` (or the
 rendered tool activity) shows a web-search call for this turn — the model-facing tool name
-starts with `mcp__parallel__web_search_`, and its Lashlang authority is
+starts with `mcp__parallel__web_search_`, and the call path a cell addresses it by is
 `parallel.web_search_<digest>`, so grep for `mcp__parallel__web_search_`. The answer's
 correctness is judged, lightly — the gate is the tool call happening and a grounded reply
 arriving. Screenshot `02-web-search.png`.

@@ -14,6 +14,16 @@ workflow.
 **No real tokens.** `examples/workflow-graph-roundtrip` uses deterministic host-owned
 mock operations. Do not configure OpenRouter or a Restate stack for this run.
 
+**The canonical source in this scenario is not an RLM dialect.** This host opens no RLM
+session and prompts no model. The `process blank() { finish 0 }` text the code pane shows
+is the **workflow-graph lens's** canonical printer over the IR — the `/project` and
+`/workflow` seams round-trip through it — and
+[ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves that printer
+where it is while retiring the authoring surface: a TypeScript canonical printer and its
+round-trip laws are named there as unbuilt future work with their own ADR. So every source
+string asserted below is the lens's output, not a language a model was asked to write, and
+it changes when the lens's printer changes, not with this arc.
+
 ## Scenario-specific golden rules
 
 1. **The draft is not the saved workflow.** Before Save, `GET /workflow` must still
