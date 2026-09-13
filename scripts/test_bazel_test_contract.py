@@ -68,6 +68,16 @@ def job_step(job: dict[str, object], name: str) -> dict[str, str]:
     return next(step for step in job["steps"] if step.get("name") == name)
 
 
+def shared_cache_action() -> dict[str, object]:
+    parsed = yaml.load(
+        (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text(
+            encoding="utf-8"
+        ),
+        Loader=yaml.BaseLoader,
+    )
+    return parsed["runs"]
+
+
 def generated_nextest_terms() -> set[tuple[str, str, str | None]]:
     source = (ROOT / "tools/bazel/cargo_owned_nextest_filter.txt").read_text(
         encoding="utf-8"
@@ -103,8 +113,8 @@ class BazelTestContractTests(unittest.TestCase):
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
 
         self.assertEqual(109, len(all_labels))
-        self.assertEqual(87, len(bazel_labels))
-        self.assertEqual(22, len(cargo_labels))
+        self.assertEqual(89, len(bazel_labels))
+        self.assertEqual(20, len(cargo_labels))
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertEqual(all_labels, bazel_labels | cargo_labels)
         self.assertEqual(all_labels, set(generated_list("WORKSPACE_TEST_TARGETS")))
@@ -133,7 +143,7 @@ class BazelTestContractTests(unittest.TestCase):
                 "cargo-heavy-suite": 1,
                 "cargo-nested-suite": 2,
                 "cargo-path-assets": 1,
-                "cargo-service-gate": 13,
+                "cargo-service-gate": 11,
                 "cargo-trybuild": 1,
             },
             dict(exception_classes),
@@ -155,7 +165,7 @@ class BazelTestContractTests(unittest.TestCase):
                     None if kind == "unit-test" else target["cargo"],
                 )
             )
-        self.assertEqual(22, len(expected_nextest))
+        self.assertEqual(20, len(expected_nextest))
         self.assertEqual(expected_nextest, generated_nextest_terms())
 
     def test_workspace_suite_and_cli_default_to_the_generated_partition(self) -> None:
@@ -258,7 +268,8 @@ class BazelTestContractTests(unittest.TestCase):
             repository_tests.count("python3 scripts/test_bazel_test_contract.py"),
         )
 
-        runtime = job_step(jobs["bazel-tests"], "Resolve GitHub runner cache identity")
+        setup = shared_cache_action()
+        runtime = job_step(setup, "Resolve GitHub runner cache identity")
         self.assertIn("scripts/ci_plan.py bazel-runtime", runtime["run"])
         with tempfile.TemporaryDirectory() as temporary:
             github_output = pathlib.Path(temporary) / "output"
@@ -282,19 +293,21 @@ class BazelTestContractTests(unittest.TestCase):
                 ),
                 github_output.read_text(encoding="utf-8").strip(),
             )
+        flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
-        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", bazel_command)
-        self.assertIn("--remote_instance_name=kiln", bazel_command)
+        self.assertIn("--remote_cache=grpcs://178.105.21.6:8443", flags)
+        self.assertIn("--remote_instance_name=kiln", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
+        self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)
         self.assertIn(
-            "--remote_default_exec_properties=github_runner_runtime=${{ "
-            "steps.bazel-runtime.outputs.bazel_runtime }}",
-            bazel_command,
+            "--remote_default_exec_properties=github_runner_runtime=${BAZEL_RUNTIME}",
+            flags,
         )
+        self.assertNotIn("kiln_executor_runtime", flags)
         self.assertNotIn("kiln_executor_runtime", bazel_command)
 
     def test_workspace_nextest_step_filters_only_trusted_events(self) -> None:
@@ -501,6 +514,79 @@ class BazelTestContractTests(unittest.TestCase):
                 self.assertEqual(
                     "./.github/actions/bazel-shared-cache", setup["uses"]
                 )
+    def test_service_jobs_never_reuse_a_cached_service_test_result(self) -> None:
+        """A cached green for a live-service test is a false green.
+
+        Both halves matter: the labels a service job executes must be absent
+        from the cacheable `//:workspace_tests` aggregate, and every Bazel
+        invocation in scripts/ci/store-tests.sh must refuse cached results and
+        keep them off the shared cache. The `--modify_execution_info` filter is
+        scoped to `TestRunner` so the compile actions stay shared.
+        """
+        bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
+        service_labels = set()
+        for service in ("postgres", "minio"):
+            labels = (
+                ROOT / f"tools/bazel/{service}_test_labels.txt"
+            ).read_text(encoding="utf-8").split()
+            self.assertTrue(labels)
+            service_labels.update(labels)
+        self.assertFalse(service_labels & bazel_labels)
+
+        by_label = {target["label"]: target for target in test_targets()}
+        for label in service_labels:
+            self.assertIn("cargo-service-gate", by_label[label]["tags"])
+
+        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+        self.assertIn("--nocache_test_results", script)
+        self.assertIn(
+            "--modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache",
+            script,
+        )
+        self.assertNotIn("--cache_test_results=yes", script)
+        # One database, one bucket: the binaries must not overlap.
+        self.assertIn("--local_test_jobs=1", script)
+
+    def test_store_jobs_run_the_same_suites_on_both_trust_paths(self) -> None:
+        jobs = workflow()["jobs"]
+        suites = []
+        for job_id in ("postgres-store", "s3-store"):
+            job = jobs[job_id]
+            self.assertEqual("build-cache", job["environment"])
+            self.assertEqual(
+                "${{ needs.plan.outputs.bazel_trusted }}", job["env"]["BAZEL_TRUSTED"]
+            )
+            for step in job["steps"]:
+                run = step.get("run", "")
+                if "scripts/ci/store-tests.sh" in run:
+                    suites.append(run.split()[-1])
+                # Cargo toolchain setup exists only for the untrusted path.
+                if step.get("uses", "").startswith("./.github/actions/rust-toolchain"):
+                    self.assertEqual(
+                        "needs.plan.outputs.bazel_trusted != 'true'", step["if"]
+                    )
+        self.assertEqual(
+            [
+                "pg-catalog-compatibility",
+                "pg-store",
+                "pg-pool-wait",
+                "pg-agent-scenario",
+                "pg-cross-backend",
+                "s3-store",
+                "s3-attachment-differential",
+            ],
+            suites,
+        )
+
+        # Every suite the workflow names must dispatch on both trust decisions,
+        # and no suite may exist that the workflow never runs.
+        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
+        declared = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, flags=re.MULTILINE))
+        self.assertEqual(set(suites), declared)
+        for suite in suites:
+            body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
+            self.assertIn('if [ "${trusted}" = true ]; then', body)
+            self.assertIn("cargo ", body)
 
     def test_ci_policy_accepts_bazel_skip_only_for_untrusted_events(self) -> None:
         needs = {

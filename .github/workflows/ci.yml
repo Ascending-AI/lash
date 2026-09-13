@@ -130,6 +130,7 @@ jobs:
       scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
+      postgres_matrix: ${{ steps.postgres-matrix.outputs.postgres_matrix }}
       bazel_trusted: >-
         ${{ github.event_name == 'merge_group'
         || github.event_name == 'push'
@@ -203,6 +204,17 @@ jobs:
           fi
           python3 scripts/ci_plan.py classify \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
+
+      # PG16 is the sole primary lane and runs on every event. The PG14/PG18
+      # compatibility lanes are deferred off the pull-request critical path;
+      # the merge queue and every push to main still run all three, so nothing
+      # reaches trunk without compatibility evidence. scripts/ci_plan.py owns
+      # the rule and scripts/test_ci_plan.py pins it per event.
+      - name: Resolve PostgreSQL matrix
+        id: postgres-matrix
+        run: |
+          python3 scripts/ci_plan.py postgres-matrix \
+            --event "${GITHUB_EVENT_NAME}" >> "${GITHUB_OUTPUT}"
 
       - name: Summarize plan
         env:
@@ -761,55 +773,23 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Install pinned Bazelisk
-        shell: bash
-        run: |
-          curl --fail --location --silent --show-error \
-            https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64 \
-            -o "$RUNNER_TEMP/bazel"
-          printf '5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  %s\n' \
-            "$RUNNER_TEMP/bazel" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/bazel"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-
-      - name: Resolve GitHub runner cache identity
-        id: bazel-runtime
-        run: |
-          python3 scripts/ci_plan.py bazel-runtime \
-            --runner-os "${RUNNER_OS}" \
-            --runner-arch "${RUNNER_ARCH}" \
-            --image-os "${ImageOS:-}" \
-            --image-version "${ImageVersion:-}" >> "${GITHUB_OUTPUT}"
-
-      - name: Configure authenticated cache
-        shell: bash
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
         env:
           CACHE_CA: ${{ secrets.CACHE_CA }}
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
-        run: |
-          set -euo pipefail
-          umask 077
-          test -n "$CACHE_CA" && test -n "$CACHE_CERT" && test -n "$CACHE_KEY"
-          mkdir -p "$RUNNER_TEMP/build-cache"
-          printf '%s' "$CACHE_CA" > "$RUNNER_TEMP/build-cache/ca.crt"
-          printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
-          printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
 
+      # Every label here is deterministic and service-free, so reusing a
+      # successful result is sound. The service-backed labels are `manual` and
+      # never reach this aggregate; scripts/ci/store-tests.sh runs those with
+      # `--nocache_test_results`.
       - name: Test deterministic workspace suite with shared cache
         shell: bash
         run: |
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
-            --repository_cache="$RUNNER_TEMP/bazel-repository" \
-            --disk_cache= --spawn_strategy=local \
-            --remote_cache=grpcs://178.105.21.6:8443 --remote_instance_name=kiln \
-            --tls_certificate="$RUNNER_TEMP/build-cache/ca.crt" \
-            --tls_client_certificate="$RUNNER_TEMP/build-cache/client.crt" \
-            --tls_client_key="$RUNNER_TEMP/build-cache/client.key" \
-            --remote_default_exec_properties=github_runner_runtime=${{ steps.bazel-runtime.outputs.bazel_runtime }} \
-            --remote_default_exec_properties=cpu_count=1 \
-            --remote_default_exec_properties=memory_kb=2097152 \
-            --remote_download_outputs=toplevel --remote_timeout=120 \
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
             --jobs=16 --local_resources=cpu=3 --local_resources=memory=10000 \
             //:workspace_tests
@@ -1444,6 +1424,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
+    # Trusted events build every binary below from the shared cache; the
+    # PostgreSQL version and connection settings are execution-only inputs, so
+    # all three matrix legs reuse one set of compiled outputs. Untrusted events
+    # receive no credentials and keep the Cargo compile. See
+    # scripts/ci/store-tests.sh.
+    environment: build-cache
+    env:
+      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+      LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+      LASH_REQUIRE_POSTGRES: "1"
     # The stable matrix always supplies real PostgreSQL evidence on pull requests
     # and merge groups. The heavier PG16 store/perf coverage remains deferred to
     # relevant trunk runs per the 2026-08-25 CI-scope ruling.
@@ -1460,20 +1450,18 @@ jobs:
     # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
     # and the shape suite asserts all three produce the byte-identical artifact.
     # PG14 and PG18 are compatibility lanes: they run only the live catalog
-    # artifact comparison and a focused version-stamp gate. PG16 is the sole
-    # primary lane. On PR-class events it runs the proven runtime identity oracle;
+    # artifact comparison and a focused version-stamp gate, so they are deferred
+    # off the pull-request critical path and run on merge_group, push and
+    # workflow_dispatch. Nothing reaches trunk without all three majors: the
+    # merge queue runs the full matrix before anything lands, and so does every
+    # push to main. scripts/ci_plan.py `postgres-matrix` owns the per-event
+    # matrix. PG16 is the sole primary lane and runs on every event. On PR-class events it runs the proven runtime identity oracle;
     # on trunk/full runs it retains the package-wide, pool-wait, runtime, and
     # cross-backend behavior coverage without triplicating it across majors.
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - postgres: "14"
-            role: compatibility
-          - postgres: "16"
-            role: primary
-          - postgres: "18"
-            role: compatibility
+        include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}
 
     services:
       postgres:
@@ -1508,10 +1496,20 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
+      - name: Configure shared build cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Install Rust toolchain
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -1519,6 +1517,7 @@ jobs:
           save-if: false
 
       - name: Install protoc and nextest
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
@@ -1526,21 +1525,14 @@ jobs:
       # Provides the linker the workflow-level RUSTFLAGS names. This job
       # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
-      # The compatibility lanes provision the published DDL and compare its live
-      # catalog rendering byte-for-byte with schema-shape.txt. The second test is
-      # a distinct version-stamp gate. Required mode makes a missing URL fail.
+      # Required mode makes a missing URL fail, so missing CI configuration
+      # cannot silently skip a lane.
       - name: Test PostgreSQL catalog compatibility
         if: matrix.role == 'compatibility'
-        run: |
-          cargo test -p lash-internal-postgres-store --locked --lib \
-            committed_shape_artifact_matches_the_ddl_artifact
-          cargo test -p lash-internal-postgres-store --locked --test schema_drift \
-            a_mismatched_version_stamp_is_reported_without_a_column_diff
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-          LASH_REQUIRE_POSTGRES: "1"
+        run: bash scripts/ci/store-tests.sh pg-catalog-compatibility
 
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
@@ -1559,17 +1551,11 @@ jobs:
       # narrowing to --test conformance would silently drop attempt atomicity.
       - name: Test Postgres store (conformance and attempt atomicity)
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: cargo test -p lash-internal-postgres-store --locked
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-          LASH_REQUIRE_POSTGRES: "1"
+        run: bash scripts/ci/store-tests.sh pg-store
 
       - name: Test runtime pool-wait binding
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-          LASH_REQUIRE_POSTGRES: "1"
+        run: bash scripts/ci/store-tests.sh pg-pool-wait
 
       # crates/lash currently has one Agent Scenario gated by the shared
       # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the
@@ -1577,26 +1563,20 @@ jobs:
       # focused instead of scheduling tests by parsing changed source literals.
       - name: Test runtime Postgres agent scenarios
         if: matrix.role == 'primary'
-        run: >-
-          cargo nextest run --profile ci -p lash-runtime --features rlm
-          --locked -E
-          'test(agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres)'
-        env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-          LASH_REQUIRE_POSTGRES: "1"
+        run: bash scripts/ci/store-tests.sh pg-agent-scenario
 
       # The full differential compares backend semantics, not catalog rendering,
       # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
         if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
-        run: >-
-          cargo nextest run --profile ci -p lash-sim
-          --test cross_backend_store_differential
-          --locked -j1 --no-capture --run-ignored all
+        run: bash scripts/ci/store-tests.sh pg-cross-backend
         env:
-          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
-          LASH_REQUIRE_POSTGRES: "1"
           LASH_CROSS_BACKEND_CASES: "4"
+
+      - name: Remove client credentials
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   s3-store:
     name: Test S3 store against MinIO
@@ -1606,6 +1586,13 @@ jobs:
     # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.stores == 'true'
+    # Trusted events build these binaries from the shared cache and execute
+    # them uncached against the MinIO this job starts. See
+    # scripts/ci/store-tests.sh.
+    environment: build-cache
+    env:
+      BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
+      LASH_REQUIRE_MINIO: "1"
 
     steps:
       - name: Check out repository
@@ -1624,10 +1611,20 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
+      - name: Configure shared build cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Install Rust toolchain
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -1635,6 +1632,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
@@ -1642,6 +1640,7 @@ jobs:
       # Provides the linker the workflow-level RUSTFLAGS names. This job
       # restores the `linux-debug` cache and installs its linker directly.
       - name: Install mold
+        if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Start MinIO and create test bucket
@@ -1671,21 +1670,19 @@ jobs:
             'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
 
       - name: Test S3 store conformance
-        run: cargo test -p lash-internal-s3-store --locked
-        env:
-          LASH_REQUIRE_MINIO: "1"
+        run: bash scripts/ci/store-tests.sh s3-store
 
       - name: Test attachment blob-store differential
-        run: >-
-          cargo test -p lash-sim
-          --test cross_backend_store_differential
-          --locked attachment_blob_store_differential_agrees -- --nocapture --include-ignored
-        env:
-          LASH_REQUIRE_MINIO: "1"
+        run: bash scripts/ci/store-tests.sh s3-attachment-differential
 
       - name: Stop MinIO
         if: always()
         run: docker rm -f lash-ci-minio
+
+      - name: Remove client credentials
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   fuzz-smoke:
     name: Fuzz smoke

@@ -33,10 +33,7 @@ lash_rust_unit_test(
     extra_compile_data = [],
     manifest_dir = "crates/lash-restate",
     package_name = "lash-internal-restate",
-    tags = [
-        "cargo-service-gate",
-        "manual",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 
