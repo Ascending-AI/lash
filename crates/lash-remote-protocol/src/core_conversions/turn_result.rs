@@ -158,7 +158,7 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
             lash_core::facade_support::TurnOutcome::AgentFrameSwitch {
                 frame_key, task, ..
             } => {
-                // Frame-switch seed bodies stay local; remote projections carry only safe metadata.
+                // See `observations::encode_remote_tool_call_output` for the projection boundary.
                 Self::AgentFrameSwitch {
                     frame_key: frame_key.as_str().to_string(),
                     task,
@@ -383,7 +383,7 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
 
 impl From<lash_core::ToolCallOutput> for RemoteToolCallOutcome {
     fn from(value: lash_core::ToolCallOutput) -> Self {
-        // Frame-switch seed bodies stay local; remote projections carry only safe metadata.
+        // See `observations::encode_remote_tool_call_output` for the projection boundary.
         let lash_core::ToolCallOutput {
             outcome,
             control: _,
