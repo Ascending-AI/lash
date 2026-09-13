@@ -94,20 +94,38 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
 def cargo_test_policy(
     package_name: str, kind: str, target_name: str
 ) -> tuple[list[str], str | None]:
+    """Classify one executable test label as partition-owned or Cargo-owned.
+
+    `manual` keeps a label out of `//:workspace_tests` and out of `bazel test
+    //...`. It is reserved for labels the cacheable partition genuinely cannot
+    execute as proof: a live service, a nested Cargo invocation, a Cargo-relative
+    asset tree, or a toolchain the Bazel job does not install. Service-gated
+    labels are still *built* by Bazel; the PostgreSQL and MinIO jobs execute
+    them with `--nocache_test_results` so a cached result can never stand in for
+    a run against a real service, and so an unconfigured service is never proof.
+    """
     tags = []
     reasons = []
     if package_name in ("lash-internal-postgres-store", "lash-internal-s3-store"):
         tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("requires the Cargo-owned PostgreSQL or MinIO service gate")
-    if kind == "unit-test" and package_name in ("lash-internal-restate", "lash-runtime"):
-        tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("shares a unit-test binary with Cargo-owned live-service tests")
+        reasons.append(
+            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
+            " execute this label uncached against a real service"
+        )
     if package_name == "lash-internal-core" and kind == "unit-test":
         tags.extend(["manual", "cargo-nested-suite"])
-        reasons.append("shares a unit-test binary with nested-Cargo fault-matrix tests")
+        reasons.append(
+            "shares a unit-test binary with the fault-matrix tests, which execute"
+            " scripts/confidence-gate.sh against a fake Cargo on PATH"
+        )
     if package_name == "lash-sim" and kind == "unit-test":
         tags.extend(["manual", "cargo-heavy-suite"])
-        reasons.append("shares a unit-test binary with specially scheduled heavy simulation tests")
+        reasons.append(
+            "shares a unit-test binary with the specially scheduled heavy"
+            " simulation tests, a repository-root docs/gate walk from"
+            " CARGO_MANIFEST_DIR, and a search-mode case whose determinism"
+            " depends on the Cargo runner's scheduling"
+        )
     if package_name == "lash-internal-core" and target_name == "integration_boundary":
         tags.extend(["manual", "cargo-nested-suite"])
         reasons.append("invokes Cargo metadata against the workspace")
@@ -125,7 +143,10 @@ def cargo_test_policy(
         reasons.append("shares a unit-test binary with a Node.js browser projection gate")
     if package_name == "lash-sim" and target_name.startswith("cross_backend"):
         tags.extend(["manual", "cargo-service-gate"])
-        reasons.append("requires explicitly scheduled durable backend services")
+        reasons.append(
+            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
+            " execute this label uncached against a real service"
+        )
     reason = "; ".join(reasons) if reasons else None
     return sorted(set(tags)), reason
 
@@ -583,6 +604,25 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n"
     )
+    # The service jobs build these labels from the shared cache and execute
+    # them uncached against the service they stand up. Generated, so a new
+    # service-gated binary reaches the service job without a hand edit.
+    service_packages = {
+        "postgres": ("lash-internal-postgres-store",),
+        "minio": ("lash-internal-s3-store",),
+    }
+    for service, package_names in service_packages.items():
+        labels = sorted(
+            target["label"]
+            for package in inventory
+            if package["package"] in package_names
+            for target in package["targets"]
+            if target["label"] is not None
+            and target["kind"] in ("bin-unit-test", "test", "unit-test")
+        )
+        outputs[ROOT / f"tools/bazel/{service}_test_labels.txt"] = (
+            "".join(f"{label}\n" for label in labels)
+        )
     return outputs, inventory
 
 

@@ -50,7 +50,7 @@
         },
         {
           "cargo": "lash_core",
-          "cargo_only": "shares a unit-test binary with nested-Cargo fault-matrix tests",
+          "cargo_only": "shares a unit-test binary with the fault-matrix tests, which execute scripts/confidence-gate.sh against a fake Cargo on PATH",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
           "tags": [
@@ -383,7 +383,7 @@
         },
         {
           "cargo": "lash_postgres_store",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test",
           "tags": [
@@ -398,7 +398,7 @@
         },
         {
           "cargo": "postgres-await-event-helper",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "example",
           "label": "//crates/lash-postgres-store:postgres-await-event-helper__example",
           "tags": [
@@ -408,7 +408,7 @@
         },
         {
           "cargo": "integration",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:integration__test",
           "tags": [
@@ -418,7 +418,7 @@
         },
         {
           "cargo": "conformance",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:conformance__test",
           "tags": [
@@ -428,7 +428,7 @@
         },
         {
           "cargo": "durable_read_fixture",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:durable_read_fixture__test",
           "tags": [
@@ -438,7 +438,7 @@
         },
         {
           "cargo": "preflight_durable_walk",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_durable_walk__test",
           "tags": [
@@ -448,7 +448,7 @@
         },
         {
           "cargo": "preflight_schema_status",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:preflight_schema_status__test",
           "tags": [
@@ -458,7 +458,7 @@
         },
         {
           "cargo": "schema_drift",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
           "tags": [
@@ -468,7 +468,7 @@
         },
         {
           "cargo": "schema_constraints",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_constraints__test",
           "tags": [
@@ -808,13 +808,9 @@
         },
         {
           "cargo": "lash_restate",
-          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash-restate:lash-restate__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "kind": "doc-test",
@@ -864,7 +860,7 @@
         },
         {
           "cargo": "lash_s3_store",
-          "cargo_only": "requires the Cargo-owned PostgreSQL or MinIO service gate",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "unit-test",
           "label": "//crates/lash-s3-store:lash-s3-store__unit_test",
           "tags": [
@@ -922,7 +918,7 @@
         },
         {
           "cargo": "lash_sim",
-          "cargo_only": "shares a unit-test binary with specially scheduled heavy simulation tests",
+          "cargo_only": "shares a unit-test binary with the specially scheduled heavy simulation tests, a repository-root docs/gate walk from CARGO_MANIFEST_DIR, and a search-mode case whose determinism depends on the Cargo runner's scheduling",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
           "tags": [
@@ -949,7 +945,7 @@
         },
         {
           "cargo": "cross_backend_active_turn_divergence",
-          "cargo_only": "requires explicitly scheduled durable backend services",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_active_turn_divergence__test",
           "tags": [
@@ -959,7 +955,7 @@
         },
         {
           "cargo": "cross_backend_store_differential",
-          "cargo_only": "requires explicitly scheduled durable backend services",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
           "tags": [
@@ -1206,13 +1202,9 @@
         },
         {
           "cargo": "lash",
-          "cargo_only": "shares a unit-test binary with Cargo-owned live-service tests",
           "kind": "unit-test",
           "label": "//crates/lash:lash__unit_test",
-          "tags": [
-            "cargo-service-gate",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "kind": "doc-test",

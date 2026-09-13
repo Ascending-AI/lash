@@ -1,8 +1,11 @@
 name: Bazel shared cache
 description: >-
   Installs the pinned Bazelisk, derives this runner image's cache identity and
-  writes the authenticated cache client credentials. Exports the resulting
-  Bazel flags as BAZEL_SHARED_CACHE_FLAGS.
+  writes the authenticated cache client credentials. Exports the resulting Bazel
+  flags as BAZEL_SHARED_CACHE_FLAGS and the server's output base as
+  BAZEL_OUTPUT_USER_ROOT, so every job on this runner issues one cache
+  configuration. Pair it with an `if: always()` step that removes
+  "$RUNNER_TEMP/build-cache".
 
 runs:
   using: composite
@@ -21,11 +24,13 @@ runs:
 
     # GitHub-hosted actions execute locally rather than in the shared executor's
     # pinned runtime image, so their remote-cache identity is derived from the
-    # concrete runner image instead of `kiln_executor_runtime`.
+    # concrete runner image instead of `kiln_executor_runtime`. That identity is
+    # what keeps their action keys on their own side of the runtime boundary.
     - name: Resolve GitHub runner cache identity
       id: bazel-runtime
       shell: bash
       run: |
+        set -euo pipefail
         python3 scripts/ci_plan.py bazel-runtime \
           --runner-os "${RUNNER_OS}" \
           --runner-arch "${RUNNER_ARCH}" \
@@ -50,6 +55,7 @@ runs:
       run: |
         set -euo pipefail
         {
+          echo "BAZEL_OUTPUT_USER_ROOT=$RUNNER_TEMP/bazel-output"
           echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
           echo "--repository_cache=$RUNNER_TEMP/bazel-repository"
           echo "--disk_cache="
