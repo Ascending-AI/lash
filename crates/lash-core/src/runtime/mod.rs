@@ -186,8 +186,9 @@ pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 pub use event_pump::drive_with_event_pump;
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
-    EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
-    RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+    DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS, EmbeddedRuntimeHost, ProcessRuntimeHost,
+    RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeHostConfig, RuntimePromptConfig,
+    RuntimeProviderConfig, RuntimeTracingConfig,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use in_memory_store::RawSessionExecutionLeaseRow;

@@ -2,7 +2,7 @@ use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
     LashlangSegmentState, LashlangSegmentStateError, SEGMENT_BOUNDARY_DECLINED_TOTAL,
     decode_lashlang_segment_state, process_lashlang_execution_result, process_trace_session_id,
-    record_segment_boundary_decline, validate_lashlang_program_hash,
+    record_segment_boundary_decline, resolve_child_max_attempts, validate_lashlang_program_hash,
 };
 
 #[test]
@@ -80,6 +80,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         signal_wait_ordinals: [("ready".to_string(), 11)].into(),
         parent_end_actions: Vec::new(),
         started_process_ids: Vec::new(),
+        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
     wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
@@ -177,4 +178,40 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
             if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
                 if failure.code == "process_execution_bound_exhausted")
     ));
+}
+
+#[test]
+fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
+    let program = lashlang::compile("finish null").expect("compile pinning program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm =
+        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct pinning VM");
+    let recorded = std::num::NonZeroU32::new(3).expect("non-zero recorded bound");
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: vm.suspend().expect("capture pinning VM continuation"),
+        sleep_sequence: 0,
+        event_sequence: 0,
+        signal_send_sequence: 0,
+        signal_wait_ordinals: Default::default(),
+        parent_end_actions: Vec::new(),
+        started_process_ids: Vec::new(),
+        child_max_attempts: recorded,
+    };
+    let encoded = serde_json::to_vec(&segment_state).expect("encode segment handover");
+    let decoded = decode_lashlang_segment_state(&encoded).expect("decode segment handover");
+
+    let changed_host_default = std::num::NonZeroU32::new(11).expect("non-zero host default");
+    assert_eq!(
+        resolve_child_max_attempts(Some(&decoded), changed_host_default),
+        recorded,
+        "a resumed segment re-registers children with the bound already in their fingerprint"
+    );
+    assert_eq!(
+        resolve_child_max_attempts(None, changed_host_default),
+        changed_host_default,
+        "only a first segment reads the live host default"
+    );
 }

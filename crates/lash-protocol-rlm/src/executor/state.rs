@@ -21,6 +21,10 @@ pub(super) struct RlmSnapshotRoot {
     globals: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    /// Attempt bound this execution stamps onto the children its code starts,
+    /// pinned the first time a cell needs one. `None` means no cell has started
+    /// a child yet, so nothing is recorded to preserve.
+    child_max_attempts: Option<std::num::NonZeroU32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -452,6 +456,7 @@ pub(super) struct RlmExecutionCheckpoint {
     rlm: FlowState,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    child_max_attempts: Option<std::num::NonZeroU32>,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -476,6 +481,10 @@ pub struct RlmExecutionState {
     /// Trigger-definition outcomes remain separate from tool grants so a
     /// mixed link cannot execute one provider family through the other.
     pub(super) deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
+    /// Attempt bound stamped onto children this execution's code starts, read
+    /// once from the host config and then replayed from the durable snapshot so
+    /// a redrive across a config change re-registers the recorded value.
+    child_max_attempts: Option<std::num::NonZeroU32>,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
@@ -504,6 +513,7 @@ impl RlmExecutionState {
             deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord::default(),
             deferred_trigger_resolutions:
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
+            child_max_attempts: None,
             persisted_globals: BTreeMap::new(),
             persisted_leaf_keys: BTreeSet::new(),
             dirty_globals: BTreeSet::new(),
@@ -514,6 +524,27 @@ impl RlmExecutionState {
             execution_response_returned: false,
             #[cfg(test)]
             encoded_globals_in_last_snapshot: 0,
+        }
+    }
+
+    /// Resolve the attempt bound this execution stamps onto children its code
+    /// starts, pinning the host default the first time a cell asks for it.
+    ///
+    /// Once pinned the value rides the durable snapshot, so a later cell, a
+    /// resumed execution, or a redrive after the host default changed all
+    /// register children with the bound the first start recorded and the
+    /// registration fingerprint therefore stays stable.
+    pub(super) fn pin_child_max_attempts(
+        &mut self,
+        host_default: std::num::NonZeroU32,
+    ) -> std::num::NonZeroU32 {
+        match self.child_max_attempts {
+            Some(pinned) => pinned,
+            None => {
+                self.child_max_attempts = Some(host_default);
+                self.root_dirty = true;
+                host_default
+            }
         }
     }
 
@@ -541,6 +572,7 @@ impl RlmExecutionState {
             rlm: self.rlm.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
+            child_max_attempts: self.child_max_attempts,
             persisted_globals: self.persisted_globals.clone(),
             persisted_leaf_keys: self.persisted_leaf_keys.clone(),
             dirty_globals: self.dirty_globals.clone(),
@@ -556,6 +588,7 @@ impl RlmExecutionState {
         self.rlm = checkpoint.rlm;
         self.deferred_resolutions = checkpoint.deferred_resolutions;
         self.deferred_trigger_resolutions = checkpoint.deferred_trigger_resolutions;
+        self.child_max_attempts = checkpoint.child_max_attempts;
         self.persisted_globals = checkpoint.persisted_globals;
         self.persisted_leaf_keys = checkpoint.persisted_leaf_keys;
         self.dirty_globals = checkpoint.dirty_globals;
@@ -758,6 +791,7 @@ impl RlmExecutionState {
             globals: next_globals.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
+            child_max_attempts: self.child_max_attempts,
         };
         let encoded = rmp_serde::to_vec_named(&root).map_err(|error| {
             SessionError::Protocol(format!("failed to encode RLM snapshot root: {error}"))
@@ -918,6 +952,7 @@ impl RlmExecutionState {
         self.rlm = next_rlm;
         self.deferred_resolutions = parsed.deferred_resolutions;
         self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
+        self.child_max_attempts = parsed.child_max_attempts;
         self.persisted_globals = next_globals;
         self.persisted_leaf_keys = leaf_keys_for_values(&self.persisted_globals);
         self.root_dirty = pruned_reserved;

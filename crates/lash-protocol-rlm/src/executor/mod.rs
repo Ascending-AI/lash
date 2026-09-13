@@ -561,6 +561,7 @@ async fn execute_code_inner(
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
     let print_projector = Arc::new(crate::rlm_support::print_history_projector());
+    let child_max_attempts = state.pin_child_max_attempts(ctx.engine_child_max_attempts());
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         print_projector,
@@ -568,6 +569,7 @@ async fn execute_code_inner(
         host_environment,
         deferred_execution_grants,
         artifact_store: Arc::clone(&artifact_store),
+        child_max_attempts,
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()

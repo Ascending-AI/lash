@@ -44,11 +44,14 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v7 pins the attempt bound this segment stamps onto the children it starts,
+/// so a redrive after a host config change re-registers the recorded bound
+/// instead of conflicting with the fingerprint the first attempt wrote.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 6;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 7;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -79,6 +82,23 @@ struct LashlangSegmentState {
     signal_wait_ordinals: BTreeMap<String, u64>,
     parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
     started_process_ids: Vec<ProcessId>,
+    /// Attempt bound resolved from the host config when this run's first
+    /// segment began. Carried forward so every segment of the run, and every
+    /// redrive of it, registers children with the same recorded value.
+    child_max_attempts: std::num::NonZeroU32,
+}
+
+/// Resolves the attempt bound this segment stamps onto the children it starts.
+///
+/// A segment that resumes carries the bound its first segment recorded, so a
+/// redrive after the host's default changes re-registers every child with the
+/// value already hashed into its registration fingerprint rather than
+/// conflicting against it. Only a first segment reads the live host default.
+fn resolve_child_max_attempts(
+    segment_state: Option<&LashlangSegmentState>,
+    host_default: std::num::NonZeroU32,
+) -> std::num::NonZeroU32 {
+    segment_state.map_or(host_default, |state| state.child_max_attempts)
 }
 
 fn decode_lashlang_segment_state(
@@ -320,6 +340,8 @@ pub async fn run_lashlang_process(
     let signal_wait_ordinals = segment_state
         .as_ref()
         .map_or_else(BTreeMap::new, |state| state.signal_wait_ordinals.clone());
+    let child_max_attempts =
+        resolve_child_max_attempts(segment_state.as_ref(), ctx.engine_child_max_attempts());
     let host = LashlangProcessHost {
         ctx,
         host_environment,
@@ -331,6 +353,7 @@ pub async fn run_lashlang_process(
         event_sequence: AtomicU64::new(event_sequence),
         signal_send_sequence: AtomicU64::new(signal_send_sequence),
         signal_wait_ordinals: tokio::sync::Mutex::new(signal_wait_ordinals),
+        child_max_attempts,
         cancellation: cancellation.clone(),
     };
     let env = lashlang::ExecutionEnvironment::new(&host)
@@ -472,6 +495,7 @@ async fn execute_lashlang(
                             signal_wait_ordinals: host.signal_wait_ordinals.lock().await.clone(),
                             parent_end_actions: host.ctx.parent_end_actions(),
                             started_process_ids: host.ctx.started_process_ids(),
+                            child_max_attempts: host.child_max_attempts,
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {
@@ -514,6 +538,9 @@ struct LashlangProcessHost<'run> {
     event_sequence: AtomicU64,
     signal_send_sequence: AtomicU64,
     signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
+    /// Attempt bound stamped onto every child this run starts, resolved once
+    /// at the run's first segment and replayed from segment state afterwards.
+    child_max_attempts: std::num::NonZeroU32,
     /// The engine's cancellation token, read by the VM's cooperative
     /// cancellation probe so a cancelled process terminates as an uncatchable
     /// host terminal instead of running to completion inside a guest handler.
@@ -824,6 +851,7 @@ impl LashlangProcessHost<'_> {
                     lash_core::OnParentEnd::Abandon,
                 ),
                 lash_core::RecoveryContract::Rerunnable,
+                self.child_max_attempts,
             )
             .await
             .map_err(|error| LashlangHostError::PrepareProcessStart {
