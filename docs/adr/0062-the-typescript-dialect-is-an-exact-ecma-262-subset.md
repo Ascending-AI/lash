@@ -125,6 +125,30 @@ TypeScript program. The keys of `start`'s second argument are the `run`
 function's own parameter names rather than a fixed input field, and
 `registerTrigger`'s inputs work the same way.
 
+**Amendment (FIG-2986, 2026-09-13): the fired trigger event is a parameter, not
+a global.** `registerTrigger` used to bind it through `trigger.event`, an
+identifier bound nowhere in the program — the one place the dialect stopped
+being TypeScript, and the place a model's natural guess (`source.event`, on the
+descriptor it just built) failed with a diagnostic that only said what was
+forbidden. It is now the parameter of an `inputs` arrow,
+`inputs: (event) => ({ tick: event })`, on `triggers.register`, `update` and
+`revive` as well. The arrow is a *template erased at lowering*, not a callback:
+exactly one plain identifier parameter, synchronous, an object-expression body
+with static unique keys, and the parameter admitted only as a whole, direct
+property value. It lowers to the same `$lash.trigger.event` IR marker the
+record form produced, so an artifact, semantic hash, process identity, bytecode
+and registration payload built from the arrow are byte-identical to the ones
+built from the record it replaces; no callback exists to run at fire time, and
+replay is untouched. Every other `inputs` value keeps its old contract: an
+ordinary expression, evaluated in the enclosing scope when the registration
+runs and frozen as a fixed input. `inputs` may be omitted when the target's
+authoritative signature ([ADR 0090](0090-named-process-signatures-are-authoritative.md))
+has exactly one parameter and the event type is assignable to it; a
+zero-parameter target stays refused and is told to take an event parameter,
+because no `inputs` record could make it valid. The retired spelling, `.event`
+on a source descriptor, and an object-valued `inputs` are three named
+diagnostics rather than a binding error.
+
 Static extractability is the point of the shape, not a stylistic preference: the
 host registers a process definition from the artifact without executing it, so
 the name, the declared signals and the `run` literal must be readable from the

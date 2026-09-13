@@ -181,13 +181,18 @@ impl<'module> Linker<'module> {
         let params = self.trigger_target_params(&target_ty, scope.span)?;
         let process = trigger_target_process_label(call.target);
 
-        let inputs = self.lower_trigger_input_record(
-            process.as_str(),
-            &params,
-            &event_ty,
-            call.inputs,
-            scope,
-        )?;
+        let inputs = match call.inputs {
+            Some(inputs) => self.lower_trigger_input_record(
+                process.as_str(),
+                &params,
+                &event_ty,
+                inputs,
+                scope,
+            )?,
+            None => {
+                self.default_trigger_input_record(process.as_str(), &params, &event_ty, scope.span)?
+            }
+        };
         let mut entries = vec![
             ("source".into(), source),
             ("target".into(), target),
@@ -215,6 +220,52 @@ impl<'module> Linker<'module> {
             ));
         }
         Ok((vec![Expr::Record(entries)], operation.output_ty()))
+    }
+
+    /// The record an omitted `inputs` stands for.
+    ///
+    /// Legal only when the target's authoritative signature (ADR 0090) has
+    /// exactly one parameter and the source's event type is assignable to it:
+    /// then there is one place the event can go and no fixed input to supply,
+    /// so the mapping carries no information the signature does not already
+    /// have. Every other arity is refused by name rather than defaulted,
+    /// because guessing which of several parameters receives the event is the
+    /// mistake the explicit form exists to prevent. A zero-parameter target is
+    /// told to grow an event parameter, not to write an `inputs` record that
+    /// could never be valid.
+    pub(super) fn default_trigger_input_record(
+        &self,
+        process: &str,
+        params: &[ProcessParam],
+        event_ty: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<Expr, LinkError> {
+        let [param] = params else {
+            return Err(if params.is_empty() {
+                LinkError::TriggerTargetTakesNoEvent {
+                    process: process.to_string(),
+                    span,
+                }
+            } else {
+                LinkError::AmbiguousOmittedTriggerInputs {
+                    process: process.to_string(),
+                    params: params.len(),
+                    span,
+                }
+            });
+        };
+        if !self.is_type_assignable(event_ty, &param.ty) {
+            return Err(LinkError::TriggerEventMismatch {
+                event: format_type_expr(&self.resolve_type_aliases(event_ty)),
+                input_name: param.name.to_string(),
+                input: format_type_expr(&self.resolve_type_aliases(&param.ty)),
+                span,
+            });
+        }
+        Ok(Expr::Record(vec![(
+            param.name.clone(),
+            crate::trigger_event_placeholder_expr(),
+        )]))
     }
 
     pub(super) fn lower_trigger_input_record(

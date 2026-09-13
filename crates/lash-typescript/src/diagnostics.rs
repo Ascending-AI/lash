@@ -63,6 +63,9 @@ pub enum DiagnosticCode {
     ProcessRunLiteralRequired,
     ProcessCaptureUnsupported,
     ProcessTargetStaticRequired,
+    TriggerSourceEventAccess,
+    TriggerEventRemoved,
+    TriggerInputsLiteralRequired,
     MethodUnsupported,
     ReturnOutsideFunction,
     LoopControlOutsideLoop,
@@ -141,6 +144,9 @@ impl DiagnosticCode {
         Self::ProcessRunLiteralRequired,
         Self::ProcessCaptureUnsupported,
         Self::ProcessTargetStaticRequired,
+        Self::TriggerSourceEventAccess,
+        Self::TriggerEventRemoved,
+        Self::TriggerInputsLiteralRequired,
         Self::MethodUnsupported,
         Self::ReturnOutsideFunction,
         Self::LoopControlOutsideLoop,
@@ -283,6 +289,11 @@ impl DiagnosticCode {
             Self::ProcessTargetStaticRequired => {
                 "name a top-level `defineProcess` binding directly"
             }
+            Self::TriggerSourceEventAccess
+            | Self::TriggerEventRemoved
+            | Self::TriggerInputsLiteralRequired => {
+                "bind the fired event through the `inputs` arrow: `inputs: (event) => ({ tick: event })`"
+            }
             _ => return None,
         })
     }
@@ -362,7 +373,10 @@ impl DiagnosticCode {
             | Self::ProcessNameLiteralRequired
             | Self::ProcessSignalsLiteralRequired
             | Self::ProcessRunLiteralRequired
-            | Self::ProcessTargetStaticRequired => CodeClassification::AlwaysRefusal,
+            | Self::ProcessTargetStaticRequired
+            | Self::TriggerSourceEventAccess
+            | Self::TriggerEventRemoved
+            | Self::TriggerInputsLiteralRequired => CodeClassification::AlwaysRefusal,
 
             // Both families, decided per site.
             Self::MethodUnsupported
@@ -449,6 +463,9 @@ impl DiagnosticCode {
             Self::ProcessRunLiteralRequired => "TS_PROCESS_RUN_LITERAL_REQUIRED",
             Self::ProcessCaptureUnsupported => "TS_PROCESS_CAPTURE_UNSUPPORTED",
             Self::ProcessTargetStaticRequired => "TS_PROCESS_TARGET_STATIC_REQUIRED",
+            Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",
+            Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",
+            Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
             Self::ReturnOutsideFunction => "TS_RETURN_OUTSIDE_FUNCTION",
             Self::LoopControlOutsideLoop => "TS_LOOP_CONTROL_OUTSIDE_LOOP",
@@ -770,6 +787,7 @@ mod tests {
             ),
             ("lower/stdlib.rs", include_str!("lower/stdlib.rs")),
             ("lower/graph.rs", include_str!("lower/graph.rs")),
+            ("lower/triggers.rs", include_str!("lower/triggers.rs")),
             (
                 "adapter/rejections.rs",
                 include_str!("adapter/rejections.rs"),

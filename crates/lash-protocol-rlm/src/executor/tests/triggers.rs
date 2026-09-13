@@ -157,7 +157,7 @@ fn deferred_trigger_constructor_and_event_schema_link_for_both_frontends() {
                     });
                     const source = calendar.Changed({});
                     finish(await registerTrigger({
-                      source, target: remember, inputs: { change: trigger.event }
+                      source, target: remember, inputs: (event) => ({ change: event })
                     }));
                 "#,
             ),
@@ -263,7 +263,7 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
                     });
                     finish(await registerTrigger({
                       source: calendar.Changed(sourceInput()), target: remember,
-                      inputs: { change: trigger.event }
+                      inputs: (event) => ({ change: event })
                     }));
                 "#,
             ),
@@ -468,6 +468,23 @@ impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
 }
 
 impl CapturingTriggerEffectController {
+    /// The registration drafts the runtime sent, in order.
+    fn register_drafts(&self) -> Vec<lash_core::TriggerSubscriptionDraft> {
+        self.envelopes
+            .lock_recover()
+            .iter()
+            .filter_map(|envelope| {
+                let lash_core::RuntimeEffectCommand::Trigger { command } = &envelope.command else {
+                    return None;
+                };
+                match command.as_ref() {
+                    lash_core::TriggerCommand::Register { draft, .. } => Some(draft.clone()),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
     fn trigger_effects(&self) -> Vec<(String, &'static str)> {
         self.envelopes
             .lock_recover()
@@ -578,7 +595,7 @@ pub(super) fn typescript_register_trigger_executes_end_to_end() {
                 const handle = await registerTrigger({
                   source,
                   target: remember,
-                  inputs: { tick: trigger.event },
+                  inputs: (event) => ({ tick: event }),
                   name: "remembered"
                 });
                 finish(handle);
@@ -1876,4 +1893,150 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
             );
         }
     });
+}
+
+/// The `inputs` arrow is erased, so it must leave no trace anywhere downstream.
+///
+/// `inputs: (event) => ({ tick: event, label: "daily" })` replaced
+/// `inputs: { tick: trigger.event, label: "daily" }` (FIG-2986, GitHub #1350).
+/// The fixture beside this file was captured on the commit before the old
+/// spelling was deleted, with the command recorded in that PR's body, so this
+/// cannot pass by comparing the new implementation against itself: it pins the
+/// canonical artifact bytes, the module and host-requirement hashes, the
+/// exports, the process definition identity the trigger targets, the compiled
+/// program, and the registration draft the runtime actually sends.
+///
+/// Artifact-byte identity is what the hashes and the bytecode are derived
+/// from, so a drift in any of them is a drift in the first assertion too; the
+/// rest are pinned because they are what other systems durably hold.
+#[test]
+fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/trigger_inputs_retired_record_form.json"
+    ))
+    .expect("the captured fixture is valid JSON");
+
+    block_on(async {
+        let controller = CapturingTriggerEffectController::default();
+        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
+            r#"
+const remember = defineProcess({
+  name: "remember",
+  signals: {},
+  run: async (tick: timer.Tick, label: string) => {
+    return true;
+  }
+});
+const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+const handle = await registerTrigger({
+  source,
+  target: remember,
+  inputs: (event) => ({ tick: event, label: "daily" }),
+  name: "remembered",
+  subscription_key: "remembered-key"
+});
+finish(handle);
+"#,
+            controller.clone(),
+            store.clone(),
+        ))
+        .await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+
+        let drafts = controller.register_drafts();
+        let [draft] = drafts.as_slice() else {
+            panic!("exactly one registration, got {}", drafts.len());
+        };
+        let identity = draft
+            .target_identity
+            .definition
+            .clone()
+            .expect("the target carries a process definition identity");
+        let identity: lashlang::ProcessDefinitionIdentity =
+            serde_json::from_value(identity).expect("a process definition identity");
+
+        let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
+            store.as_ref(),
+            &identity.module_ref,
+        )
+        .await
+        .expect("the store is readable")
+        .expect("the registered module was stored");
+
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &artifact.to_store_bytes().expect("artifact serializes")
+            )
+            .expect("artifact bytes are JSON"),
+            fixture["artifact"],
+            "the arrow form must produce byte-identical canonical artifacts"
+        );
+        assert_eq!(
+            serde_json::json!(artifact.module_ref.to_string()),
+            fixture["module_ref"]
+        );
+        assert_eq!(
+            serde_json::json!(artifact.host_requirements_ref.to_string()),
+            fixture["host_requirements_ref"]
+        );
+        assert_eq!(
+            serde_json::to_value(&artifact.exports).expect("exports serialize"),
+            fixture["exports"]
+        );
+        assert_eq!(
+            serde_json::to_value(&identity).expect("identity serializes"),
+            fixture["process_definition_identity"]
+        );
+
+        let compiled = lashlang::compile_ast_with_dialect(
+            &artifact.canonical_ir,
+            lashlang::CompilationDialect::Typescript,
+        )
+        .expect("the canonical IR compiles");
+        assert_eq!(
+            serde_json::json!(format!("{compiled:?}")),
+            fixture["compiled_program_debug"]
+        );
+
+        assert_eq!(
+            serde_json::to_value(draft).expect("the draft serializes"),
+            fixture["registration_draft"],
+            "the registration payload the runtime sends must be unchanged"
+        );
+    });
+}
+
+async fn execute_typescript_with_capturing_trigger_effects(
+    code: &str,
+    controller: CapturingTriggerEffectController,
+    store: Arc<lashlang::InMemoryLashlangArtifactStore>,
+) -> ExecResponse {
+    let mut state = RlmExecutionState::for_engine("typescript");
+    execute_code_with_dialect_and_bounds(
+        &mut state,
+        lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
+            Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            Arc::new(controller),
+        ),
+        ExecRequest {
+            language: "typescript".to_string(),
+            code: code.to_string(),
+        },
+        store,
+        LashlangSurface::new(
+            lashlang::LashlangAbilities::default()
+                .with_processes()
+                .with_triggers(),
+            lashlang::LashlangLanguageFeatures::default(),
+            timer_trigger_resources(),
+        ),
+        None,
+        RlmProjectedBindings::default(),
+        Arc::new(ProjectionRegistry::new()),
+        RlmLashlangExecutionTraceConfig::default(),
+        lashlang::ExecutionBounds::unbounded(),
+        RlmSourceContext::cell(SourceDialect::Typescript),
+    )
+    .await
 }

@@ -67,6 +67,21 @@ process only after all enclosing `finally` blocks execute; an uncaught throw
 fails it. Dynamic process definitions and targets reject with dedicated
 `TS_PROCESS_*` diagnostics.
 
+A trigger registration binds the fired event through the `inputs` arrow:
+`inputs: (event) => ({ tick: event })`, on `registerTrigger` and on
+`triggers.register` / `update` / `revive` alike. The arrow is a template the
+compiler erases, not a callback: exactly one plain parameter, no `async`, an
+object-expression body with static unique keys, and the parameter usable only
+as a whole, direct property value — never projected, nested, called or
+captured. Every other value is an ordinary expression evaluated once, in the
+enclosing scope, when the registration runs. `inputs` may be omitted when the
+target's signature has exactly one parameter and the event type is assignable
+to it; a zero-parameter target is refused and told to take an event parameter.
+Writing `.event` on a source descriptor, the retired `trigger.event` global, or
+an object-valued `inputs` each reject by name with
+`TS_TRIGGER_SOURCE_EVENT_ACCESS`, `TS_TRIGGER_EVENT_REMOVED` and
+`TS_TRIGGER_INPUTS_LITERAL_REQUIRED`.
+
 `Promise.all` and `Promise.allSettled` evaluate any array-valued expression and
 aggregate its pending tool handles and already-settled values through the shared
 batch machine. Unawaited tool calls create handles; abandoning one at cell end

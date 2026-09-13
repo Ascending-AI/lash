@@ -183,7 +183,10 @@ fn optional_field(name: &'static str, ty: TypeExpr) -> TypeField {
 pub struct TriggerRegistrationCall<'expr> {
     pub source: &'expr Expr,
     pub target: &'expr Expr,
-    pub inputs: &'expr Expr,
+    /// Absent when the registration leaves the event binding to the target's
+    /// authoritative signature. A one-parameter target has exactly one place
+    /// the event can go, so naming it adds nothing an author can get wrong.
+    pub inputs: Option<&'expr Expr>,
     pub name: Option<&'expr Expr>,
     pub subscription_key: Option<&'expr Expr>,
 }
@@ -199,7 +202,7 @@ pub fn register_call_args(
     Ok(TriggerRegistrationCall {
         source: required_entry(entries, "source").ok_or(TriggerCallShapeError::Registration)?,
         target: required_entry(entries, "target").ok_or(TriggerCallShapeError::Registration)?,
-        inputs: required_entry(entries, "inputs").ok_or(TriggerCallShapeError::Registration)?,
+        inputs: required_entry(entries, "inputs"),
         name: required_entry(entries, "name"),
         subscription_key: required_entry(entries, "subscription_key"),
     })

@@ -271,7 +271,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         const registration = await registerTrigger({
           source,
           target: remember,
-          inputs: { tick: trigger.event },
+          inputs: (event) => ({ tick: event }),
           name: "fluency-trigger"
         });
         finish(registration.enabled);

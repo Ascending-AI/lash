@@ -439,7 +439,7 @@ impl Lowerer {
                         "triggers".into(),
                     ]))),
                     operation: "register".into(),
-                    args: vec![self.lower_expr(config)?],
+                    args: vec![self.lower_trigger_config(config)?],
                 })
             }
             (AgentPrimitive::DefineProcess, _) => Err(Diagnostic::new(
@@ -1038,13 +1038,25 @@ impl Lowerer {
         } else {
             self.lower_expr(object)?
         };
+        // `registerTrigger` is the convenience spelling of `triggers.register`
+        // and `update`/`revive` take the same registration record, so the
+        // `inputs` template is erased on all four paths. Retiring the event
+        // binding for one of them would strand the other three.
+        let lowered_args = if receiver_is_module_authority
+            && matches!(object, Expr::Ident(root) if root == "triggers")
+            && is_trigger_registration_operation(method)
+            && let [config] = args
+        {
+            vec![self.lower_trigger_config(config)?]
+        } else {
+            args.iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<Result<_, _>>()?
+        };
         let call = LashExpr::ReceiverCall {
             receiver: Box::new(receiver),
             operation: method.into(),
-            args: args
-                .iter()
-                .map(|arg| self.lower_expr(arg))
-                .collect::<Result<_, _>>()?,
+            args: lowered_args,
         };
         Ok(if self.position.await_depth == 0 {
             LashExpr::BuiltinCall {

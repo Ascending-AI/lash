@@ -288,8 +288,8 @@ Signals: {go:null}; waitSignal is run-only."#,
             );
         }
         if abilities.triggers {
-            lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs: Record<string, unknown>; name?: string}): Promise<unknown>;
-Literal target; inputs match params."#);
+            lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs?: (event: unknown) => Record<string, unknown>; name?: string}): Promise<unknown>;
+Literal target; the `inputs` arrow is an erased template, not a callback: its parameter is the fired event. Omit it for a one-parameter target."#);
         }
     }
     if abilities.sleep {
@@ -862,10 +862,32 @@ mod tests {
     /// must not name a Lashlang-only spelling.
     #[test]
     fn no_diagnostic_from_a_prompt_primitive_names_a_lashlang_identifier() {
-        let host = lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::default(),
-            lashlang::LashlangAbilities::all(),
-        );
+        // The catalog carries a real trigger source so the registration misuse
+        // below reaches the target: with no declared source, every trigger
+        // registration fails on its `source` first and the fixture proves
+        // nothing about dynamic targets.
+        let mut resources = lashlang::LashlangHostCatalog::default();
+        resources
+            .add_trigger_source_constructor(
+                ["timer", "Schedule"],
+                lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                    name: "expr".into(),
+                    ty: lashlang::TypeExpr::Str,
+                    optional: false,
+                }]),
+                lashlang::NamedDataType::object(
+                    "timer.Tick",
+                    vec![lashlang::TypeField {
+                        name: "fired_at".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("valid timer tick type"),
+            )
+            .expect("valid timer trigger source");
+        let host =
+            lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all());
         // Identifiers that exist only in Lashlang's surface. A model reading
         // the TypeScript prompt has never seen any of them.
         let lashlang_only = [
@@ -897,7 +919,7 @@ mod tests {
             ),
             (
                 "registerTrigger with a non-literal target",
-                "const p = defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); const t = p; finish(await registerTrigger({ source: 1, target: t, inputs: {} }));",
+                "const p = defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); const t = p; finish(await registerTrigger({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: t, inputs: (event) => ({ a: event }) }));",
             ),
             (
                 "an unknown binding",
