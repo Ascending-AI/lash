@@ -515,7 +515,8 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
     );
     let env_ref = spec.stable_ref().context("stable process env ref")?;
     env_store
-        .put_process_execution_env(
+        .publish_process_execution_env(
+            &lash_core::ArtifactOwner::host(format!("version-bump:{tag}")),
             &env_ref,
             &spec.to_store_bytes().context("encode process env spec")?,
         )

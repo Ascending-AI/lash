@@ -47,7 +47,7 @@ def cargo_metadata() -> dict:
     ):
         metadata_env[variable] = ""
     result = subprocess.run(
-        [os.environ.get("ORB_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
+        [os.environ.get("KILN_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
         cwd=ROOT,
         env=metadata_env,
         check=True,
@@ -330,7 +330,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 extra_compile_data.append("//crates/lash-core:cold_process_drivers")
             if target["name"] == "conformance":
                 extra_compile_data.extend([
-                    "//crates/lash-core:cold_process_turn_parent",
                     "//crates/lash-core:queued_claim_atomicity",
                 ])
             if target["name"] == "durable_read_fixture":
@@ -438,12 +437,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "    name = \"cold_process_drivers\",\n"
             "    srcs = [\n"
             "        \"tests/support/cold_process_effect_driver.rs\",\n"
-            "        \"tests/support/cold_process_turn_driver.rs\",\n"
             "    ],\n"
-            ")\n\n"
-            "filegroup(\n"
-            "    name = \"cold_process_turn_parent\",\n"
-            "    srcs = [\"tests/support/cold_process_turn_parent.rs\"],\n"
             ")\n\n"
             "filegroup(\n"
             "    name = \"durable_read_fixture_source\",\n"

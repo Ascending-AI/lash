@@ -149,7 +149,6 @@ fn one_capture_program() -> CompiledProgram {
 fn root_continuation(program: &CompiledProgram, heap: Heap, root: Option<Value>) -> VmContinuation {
     let mut continuation = empty_continuation(heap);
     continuation.slots = vec![None; program.chunk.slot_names.len()];
-    continuation.projected_slots = vec![false; program.chunk.slot_names.len()];
     if let Some(root) = root {
         continuation.slots[0] = Some(root);
     }
@@ -234,7 +233,6 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
     frame.active_function = Some(0);
     frame.instruction_pointer = function.entry_ip;
     frame.slots = vec![None; function.slot_names.len()];
-    frame.projected_slots = vec![false; function.slot_names.len()];
     let mut caller_slots = vec![None; program.chunk.slot_names.len()];
     caller_slots[0] = Some(frame_closure);
     frame.frame_stack.push(VmFrameContinuation {
@@ -242,7 +240,6 @@ fn resume_validates_closures_in_active_frames_globals_and_nested_containers() {
         function: None,
         operand_stack_base: 0,
         slots: caller_slots,
-        projected_slots: vec![false; program.chunk.slot_names.len()],
         globals: Record::new(),
         iterator_stack: Vec::new(),
         return_target: VmFrameReturnContinuation::Direct,

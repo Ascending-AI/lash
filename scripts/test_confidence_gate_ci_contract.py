@@ -755,6 +755,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             3,
         )
         self.assertIn("store-contract-soak cases='256':", justfile)
+        for leaf in (
+            "store_contract_state_machine",
+            "runtime_persistence_state_machine",
+            "session_graph_state_machine",
+        ):
+            self.assertIn(f"::tests::{leaf}", scenario_harnesses)
+            self.assertIn(
+                f"cargo test -p lash-internal-conformance --locked ::tests::{leaf}",
+                justfile,
+            )
+            for package in (
+                "lash-internal-sqlite-store",
+                "lash-internal-postgres-store",
+            ):
+                self.assertIn(
+                    f"cargo test -p {package} --locked --test conformance {leaf}",
+                    justfile,
+                )
+            self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
         self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
         self.assertEqual(
@@ -1753,11 +1772,11 @@ derive_mutation_jobs() {{
             "run_cargo_tests -p lash-internal-llm-transport --locked --test property",
             "run_cargo_tests -p lash-internal-provider-anthropic --locked --test property",
             "run_cargo_tests -p lash-internal-provider-google --locked --test property",
-            # Durable-wait session-cancel evidence: the inline effect-host
-            # conformance test that exercises
+            # Durable-wait session-cancel evidence: the generated native
+            # effect-host laws, including the await-event law that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
             'step "Native effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-conformance --locked native_effect_host_satisfies_conformance",
+            "run_cargo_tests -p lash-internal-conformance --locked ::tests::effect_host",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)

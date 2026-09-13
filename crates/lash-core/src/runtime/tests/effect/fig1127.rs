@@ -43,6 +43,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     let store = Arc::new(crate::InMemoryTriggerStore::default());
     let registry: Arc<dyn crate::ProcessRegistry> =
         Arc::new(crate::TestLocalProcessRegistry::default());
+    let (process_env_store, process_env_ref) = crate::testing::process_execution_env_fixture();
     let source_key =
         crate::empty_trigger_source_key("ui.button.pressed").expect("empty trigger source key");
     let registration = crate::TriggerStore::execute_command(
@@ -53,14 +54,14 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
             actor: crate::ProcessOriginator::session(crate::SessionScope::new("root")),
             draft: crate::TriggerSubscriptionDraft::for_process(
                 "fig806/non-tool",
-                crate::ProcessExecutionEnvRef::new("process-env:fig806-non-tool"),
+                process_env_ref,
                 "ui.button.pressed",
                 source_key.clone(),
                 crate::ProcessInput::Engine {
-                    kind: "fig806-non-tool-engine".to_string(),
+                    kind: "testing-fixture".to_string(),
                     payload: serde_json::json!({}),
                 },
-                crate::ProcessIdentity::new("fig806-non-tool-engine"),
+                crate::ProcessIdentity::new("testing-fixture"),
             )
             .with_payload_schema(crate::LashSchema::any()),
         },
@@ -76,7 +77,8 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     let router = crate::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
         crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
-    );
+    )
+    .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
     let controller = ControllerOwnedTriggerEmitter::default();
     let occurrence = || {
         crate::TriggerOccurrenceRequest::new(

@@ -1,6 +1,6 @@
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{CancelOrigin, CancelRequest};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -15,6 +15,10 @@ use super::validation::prepare_process_registration;
 
 mod execution;
 pub use execution::*;
+mod artifact_cleanup;
+pub use artifact_cleanup::*;
+mod lifecycle;
+pub use lifecycle::*;
 
 pub use lash_sansio::{ProcessId, SessionId};
 pub type ProcessOutcome = ProcessAwaitOutput;
@@ -116,7 +120,7 @@ impl ProcessChangeCursor {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionScopeId(String);
 
@@ -286,11 +290,82 @@ impl ProcessExecutionEnvRef {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Verify that this reference addresses exactly one valid encoded
+    /// process-execution environment.
+    pub fn matches_store_bytes(&self, bytes: &[u8]) -> bool {
+        ProcessExecutionEnvSpec::from_store_bytes(bytes).is_ok()
+            && process_execution_env_ref_for_bytes(bytes) == *self
+    }
 }
 
 impl fmt::Display for ProcessExecutionEnvRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
+    }
+}
+
+/// Exact authority retaining immutable module or process-environment bytes.
+///
+/// Artifact stores persist one edge per owner and content address. Owners are
+/// deliberately identities rather than reference counts: releasing one edge
+/// cannot disturb another owner's use of the same bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ArtifactOwner {
+    /// Host-managed publication retained until that host explicitly releases it.
+    Host(String),
+    /// One incarnation of a durable process record retaining the bytes it
+    /// references. A reusable process name alone is not an owner identity.
+    Process(ProcessRef),
+    /// A publication staged by replayable execution before ownership transfers
+    /// to a registered process.
+    Execution(crate::ExecutionScope),
+}
+
+impl ArtifactOwner {
+    /// Construct an explicit, indefinitely retained host owner.
+    pub fn host(id: impl Into<String>) -> Self {
+        Self::Host(id.into())
+    }
+
+    /// Construct the owner represented by one durable process record.
+    pub fn process(process_ref: ProcessRef) -> Self {
+        Self::Process(process_ref)
+    }
+
+    /// Construct the staging owner for one replayable execution scope.
+    pub fn execution(scope: crate::ExecutionScope) -> Self {
+        Self::Execution(scope)
+    }
+
+    /// Construct the stable staging owner for one replayable process start.
+    pub fn process_start(process_id: &ProcessId) -> Self {
+        Self::execution(crate::ExecutionScope::RuntimeOperation {
+            operation_id: format!("process-start:{process_id}"),
+        })
+    }
+
+    /// Stable columns used by first-party artifact stores.
+    pub fn storage_parts(&self) -> Result<(&'static str, String), crate::PluginError> {
+        let (kind, id) = match self {
+            Self::Host(id) => ("host", id.clone()),
+            Self::Process(process_ref) => ("process", process_ref.to_string()),
+            Self::Execution(scope) => (
+                "execution",
+                scope
+                    .journal_identity()
+                    .map_err(|error| crate::PluginError::Session(error.to_string()))?
+                    .key()
+                    .to_string(),
+            ),
+        };
+        if !crate::store::namespace::is_valid_opaque_key(&id) {
+            return Err(crate::PluginError::Invoke(format!(
+                "invalid {kind} artifact owner"
+            )));
+        }
+        Ok((kind, id))
     }
 }
 
@@ -345,10 +420,36 @@ fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
 
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
-    async fn put_process_execution_env(
+    /// Publish immutable bytes and retain them for one exact owner.
+    async fn publish_process_execution_env(
         &self,
+        owner: &ArtifactOwner,
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
+    ) -> Result<(), crate::PluginError>;
+
+    /// Atomically transfer one retained environment from a staging owner to a
+    /// registered process owner, adding the destination before severing the
+    /// source edge.
+    async fn transfer_process_execution_env(
+        &self,
+        from: &ArtifactOwner,
+        to: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError>;
+
+    /// Sever one exact owner edge and reclaim the bytes when it was the last.
+    async fn release_process_execution_env(
+        &self,
+        owner: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError>;
+
+    /// Permanently fence an execution owner against late publication and sever
+    /// every process-environment edge it still owns.
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &ArtifactOwner,
     ) -> Result<(), crate::PluginError>;
 
     async fn get_process_execution_env(
@@ -359,7 +460,14 @@ pub trait ProcessExecutionEnvStore: Send + Sync {
 
 #[derive(Default)]
 pub struct InMemoryProcessExecutionEnvStore {
-    envs: Mutex<BTreeMap<String, Vec<u8>>>,
+    envs: Mutex<InMemoryProcessExecutionEnvState>,
+}
+
+#[derive(Default)]
+struct InMemoryProcessExecutionEnvState {
+    bytes: BTreeMap<String, Vec<u8>>,
+    owners: HashSet<(String, ArtifactOwner)>,
+    retired_owners: HashSet<ArtifactOwner>,
 }
 
 impl InMemoryProcessExecutionEnvStore {
@@ -368,10 +476,14 @@ impl InMemoryProcessExecutionEnvStore {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+mod testing;
+
 #[async_trait::async_trait]
 impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
-    async fn put_process_execution_env(
+    async fn publish_process_execution_env(
         &self,
+        owner: &ArtifactOwner,
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
     ) -> Result<(), crate::PluginError> {
@@ -380,9 +492,110 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
                 "invalid process execution environment reference".into(),
             ));
         }
-        self.envs
-            .lock_recover()
-            .insert(env_ref.as_str().to_string(), bytes.to_vec());
+        if !env_ref.matches_store_bytes(bytes) {
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment bytes do not match `{env_ref}`"
+            )));
+        }
+        let mut state = self.envs.lock_recover();
+        if state.retired_owners.contains(owner) {
+            return Err(crate::PluginError::Session(
+                "artifact owner has been permanently retired".to_string(),
+            ));
+        }
+        if let Some(existing) = state.bytes.get(env_ref.as_str())
+            && existing != bytes
+        {
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment `{env_ref}` is immutable"
+            )));
+        }
+        state
+            .bytes
+            .entry(env_ref.as_str().to_string())
+            .or_insert_with(|| bytes.to_vec());
+        state
+            .owners
+            .insert((env_ref.as_str().to_string(), owner.clone()));
+        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        from: &ArtifactOwner,
+        to: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        let mut state = self.envs.lock_recover();
+        let edge = (env_ref.as_str().to_string(), from.clone());
+        if !state.owners.contains(&edge) || !state.bytes.contains_key(env_ref.as_str()) {
+            if state
+                .owners
+                .contains(&(env_ref.as_str().to_string(), to.clone()))
+            {
+                return Ok(());
+            }
+            return Err(crate::PluginError::Session(format!(
+                "process execution environment `{env_ref}` is not retained by the staging owner"
+            )));
+        }
+        if state.retired_owners.contains(to) {
+            return Err(crate::PluginError::Session(
+                "artifact destination owner has been permanently retired".to_string(),
+            ));
+        }
+        state
+            .owners
+            .insert((env_ref.as_str().to_string(), to.clone()));
+        state.owners.remove(&edge);
+        Ok(())
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        owner: &ArtifactOwner,
+        env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        let mut state = self.envs.lock_recover();
+        state
+            .owners
+            .remove(&(env_ref.as_str().to_string(), owner.clone()));
+        if !state
+            .owners
+            .iter()
+            .any(|(candidate, _)| candidate == env_ref.as_str())
+        {
+            state.bytes.remove(env_ref.as_str());
+        }
+        Ok(())
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        owner: &ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        if !matches!(owner, ArtifactOwner::Execution(_)) {
+            return Err(crate::PluginError::Invoke(
+                "only execution artifact owners can be retired".to_string(),
+            ));
+        }
+        let mut state = self.envs.lock_recover();
+        state.retired_owners.insert(owner.clone());
+        let affected = state
+            .owners
+            .iter()
+            .filter_map(|(env_ref, candidate)| (candidate == owner).then_some(env_ref.clone()))
+            .collect::<Vec<_>>();
+        state.owners.retain(|(_, candidate)| candidate != owner);
+        for env_ref in affected {
+            if !state
+                .owners
+                .iter()
+                .any(|(candidate, _)| candidate == &env_ref)
+            {
+                state.bytes.remove(&env_ref);
+            }
+        }
         Ok(())
     }
 
@@ -395,12 +608,18 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
                 "invalid process execution environment reference".into(),
             ));
         }
-        Ok(self.envs.lock_recover().get(env_ref.as_str()).cloned())
+        Ok(self
+            .envs
+            .lock_recover()
+            .bytes
+            .get(env_ref.as_str())
+            .cloned())
     }
 }
 
-pub async fn persist_process_execution_env(
+pub async fn publish_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
+    owner: &ArtifactOwner,
     spec: &ProcessExecutionEnvSpec,
 ) -> Result<ProcessExecutionEnvRef, crate::PluginError> {
     let bytes = spec.to_store_bytes().map_err(|err| {
@@ -408,7 +627,7 @@ pub async fn persist_process_execution_env(
     })?;
     let env_ref = process_execution_env_ref_for_bytes(&bytes);
     env_store
-        .put_process_execution_env(&env_ref, &bytes)
+        .publish_process_execution_env(owner, &env_ref, &bytes)
         .await?;
     Ok(env_ref)
 }
@@ -447,6 +666,10 @@ pub struct ProcessStartOptions {
     /// options — not the request — so in-session callers cannot forge
     /// provenance through the session surface.
     pub spawn_provenance: Option<ProcessSpawnProvenance>,
+    /// Request-carried environment bytes handed to the replayable start
+    /// command. Kept in options so the service contract does not prepublish a
+    /// staging edge ahead of its journal.
+    pub env_spec: Option<ProcessExecutionEnvSpec>,
 }
 
 /// Provenance a process-run context hands to its children: the chain's
@@ -488,6 +711,11 @@ impl ProcessStartOptions {
         self
     }
 
+    pub fn with_env_spec(mut self, env_spec: Option<ProcessExecutionEnvSpec>) -> Self {
+        self.env_spec = env_spec;
+        self
+    }
+
     /// Exposes execution context to store and durable-substrate implementors while persisting and
     /// coordinating durable process execution.
     pub fn execution_context(&self, scope: &ProcessOpScope<'_>) -> ProcessExecutionContext {
@@ -495,192 +723,6 @@ impl ProcessStartOptions {
             causal_invocation: scope.parent_invocation.clone(),
             execution_write_authority: None,
         }
-    }
-}
-
-/// The host-selected action when a process's parent scope ends.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum OnParentEnd {
-    Abandon,
-    Cancel,
-}
-
-/// Durable scope whose end controls a child's lifecycle.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ParentScope {
-    Turn {
-        session_id: SessionId,
-        turn_id: crate::TurnId,
-    },
-    Process {
-        process_id: ProcessId,
-        incarnation: ProcessIncarnation,
-    },
-    Host,
-}
-
-/// Required lifecycle facts selected by the process's author or host.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ProcessLifecyclePolicy {
-    pub parent: ParentScope,
-    pub on_parent_end: OnParentEnd,
-}
-
-impl ProcessLifecyclePolicy {
-    /// Declare the parent and its end action for a process start.
-    pub fn new(parent: ParentScope, on_parent_end: OnParentEnd) -> Self {
-        Self {
-            parent,
-            on_parent_end,
-        }
-    }
-}
-
-/// Public host-facing request for starting a visible process handle.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ProcessStartRequest {
-    pub id: ProcessId,
-    pub input: ProcessInput,
-    pub disposition: RecoveryContract,
-    pub lifecycle: ProcessLifecyclePolicy,
-    /// Maximum execution attempts. `None` delegates pacing indefinitely to the
-    /// engine; deterministic failures then require host cancellation or
-    /// abandonment to resolve awaiters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_spec: Option<ProcessExecutionEnvSpec>,
-    pub originator: ProcessOriginator,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<ProcessIdentity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_session_id: Option<SessionId>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observers: Vec<SessionId>,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
-}
-
-impl ProcessStartRequest {
-    /// Constructs a `ProcessStartRequest` for store and durable-substrate implementors while
-    /// persisting and coordinating durable process execution.
-    pub fn new(
-        id: impl Into<ProcessId>,
-        input: ProcessInput,
-        disposition: RecoveryContract,
-        originator: ProcessOriginator,
-        lifecycle: ProcessLifecyclePolicy,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            input,
-            disposition,
-            lifecycle,
-            max_attempts: None,
-            env_spec: None,
-            originator,
-            identity: None,
-            wake_session_id: None,
-            observers: Vec::new(),
-            event_types: default_process_event_types(),
-        }
-    }
-
-    /// External placeholder start: `ProcessInput::External` is always
-    /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
-    pub fn external(
-        id: impl Into<ProcessId>,
-        originator: ProcessOriginator,
-        metadata: serde_json::Value,
-        lifecycle: ProcessLifecyclePolicy,
-    ) -> Self {
-        Self::new(
-            id,
-            ProcessInput::External { metadata },
-            RecoveryContract::ExternallyOwned,
-            originator,
-            lifecycle,
-        )
-    }
-
-    /// Sets the env spec carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_env_spec(mut self, env_spec: ProcessExecutionEnvSpec) -> Self {
-        self.env_spec = Some(env_spec);
-        self
-    }
-
-    /// Sets the max attempts carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
-        self.max_attempts = max_attempts;
-        self
-    }
-
-    /// Sets the identity carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
-        self.identity = Some(identity);
-        self
-    }
-
-    /// Sets the wake session id carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
-        self.wake_session_id = wake_session_id;
-        self
-    }
-
-    /// Sets the observers carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_observers(
-        mut self,
-        observers: impl IntoIterator<Item = impl Into<SessionId>>,
-    ) -> Self {
-        self.observers = observers.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Sets the event types carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types = event_types.into_iter().collect();
-        self
-    }
-
-    /// Sets the extra event types carried by a `ProcessStartRequest` for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn with_extra_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types.extend(event_types);
-        self
-    }
-
-    /// Extracts the registration outcome for store and durable-substrate implementors while
-    /// persisting and coordinating durable process execution.
-    pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
-        let mut registration = ProcessRegistration::new(
-            self.id,
-            self.input,
-            self.disposition,
-            ProcessProvenance::new(self.originator),
-            self.lifecycle,
-        )
-        .with_max_attempts(self.max_attempts)
-        .with_event_types(self.event_types)
-        .with_execution_env_ref(env_ref)
-        .with_wake_session_id(self.wake_session_id);
-        if let Some(identity) = self.identity {
-            registration = registration.with_identity(identity);
-        }
-        registration
     }
 }
 

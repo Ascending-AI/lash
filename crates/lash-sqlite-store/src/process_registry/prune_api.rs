@@ -95,6 +95,83 @@ pub(super) async fn prune_terminal_processes(
 
 #[async_trait::async_trait]
 impl lash_core::ProcessRetention for SqliteProcessRegistry {
+    async fn pending_process_artifact_cleanup(
+        &self,
+    ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, lash_core::PluginError> {
+        self.conn
+            .call(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT cleanup_json FROM process_artifact_cleanup
+                     ORDER BY process_id, incarnation",
+                )?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .map(|row| {
+                        let json = row?;
+                        serde_json::from_str(&json).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
+    async fn complete_process_artifact_cleanup(
+        &self,
+        process_id: &ProcessId,
+        incarnation: lash_core::ProcessIncarnation,
+    ) -> Result<lash_core::ProcessArtifactCleanupAck, lash_core::PluginError> {
+        let process_id = process_id.clone();
+        self.conn
+            .write(move |tx| {
+                let current_incarnation = tx
+                    .query_row(
+                        "SELECT incarnation FROM processes WHERE process_id = ?1",
+                        params![process_id.as_str()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?;
+                let removed = tx.execute(
+                    "DELETE FROM process_artifact_cleanup
+                     WHERE process_id = ?1 AND incarnation = ?2",
+                    params![
+                        process_id.as_str(),
+                        incarnation.registration_sequence() as i64
+                    ],
+                )?;
+                let process_ref = lash_core::ProcessRef::new(process_id.clone(), incarnation);
+                Ok(match current_incarnation {
+                    Some(found) => {
+                        let found = lash_core::ProcessIncarnation::from_registration_sequence(
+                            u64_from_sql("ProcessRecord", "incarnation", found)?,
+                        );
+                        if found != incarnation {
+                            lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+                                expected: process_ref,
+                                found: lash_core::ProcessRef::new(process_id, found),
+                            }
+                        } else if removed == 1 {
+                            lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+                        } else {
+                            lash_core::ProcessArtifactCleanupAck::Unknown { process_ref }
+                        }
+                    }
+                    None if removed == 1 => {
+                        lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+                    }
+                    None => lash_core::ProcessArtifactCleanupAck::Unknown { process_ref },
+                })
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,

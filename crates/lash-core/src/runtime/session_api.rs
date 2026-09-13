@@ -57,7 +57,7 @@ impl LashRuntime {
         Ok(session.plugins().tool_registry().export_state())
     }
     /// The durable protocol turn options recorded on the session.
-    pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
+    pub(crate) fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         self.state.effective_protocol_turn_options()
     }
 

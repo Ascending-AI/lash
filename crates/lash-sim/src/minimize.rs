@@ -1214,29 +1214,64 @@ mod tests {
         );
     }
 
+    async fn assert_named_contract_fixture(fixture_body: &str) {
+        let fixture: FailingTraceFixture = serde_json::from_str(fixture_body).expect("fixture");
+        let workload = generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)
+            .expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        apply_fixture_mutation(&mut trace, &fixture.mutation).expect("mutation");
+        select_fixture_target_oracle(&mut trace, &fixture).expect("target oracle");
+        assert_minimized_fixture_preserves_failure(&fixture, trace);
+    }
+
     #[tokio::test]
-    async fn minimizer_preserves_named_contract_execution_fixture_reasons() {
-        for fixture_body in [
-            include_str!("../failure-fixtures/standard-max-turn-stop-missing.json"),
-            include_str!("../failure-fixtures/rlm-typed-finish-terminal-event-missing.json"),
-            include_str!("../failure-fixtures/rlm-empty-options-default-mode-broken.json"),
-            include_str!("../failure-fixtures/agent-tuple-json-array-shape-broken.json"),
-            include_str!(
-                "../failure-fixtures/agent-started-process-subagent-child-graph-missing.json"
-            ),
-            include_str!("../failure-fixtures/agent-failed-child-task-fail-evidence-missing.json"),
-        ] {
-            let fixture: FailingTraceFixture = serde_json::from_str(fixture_body).expect("fixture");
-            let workload =
-                generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)
-                    .expect("workload");
-            let mut trace = run_generated_workload_for_fixture(workload, "bundle")
-                .await
-                .expect("trace");
-            apply_fixture_mutation(&mut trace, &fixture.mutation).expect("mutation");
-            select_fixture_target_oracle(&mut trace, &fixture).expect("target oracle");
-            assert_minimized_fixture_preserves_failure(&fixture, trace);
-        }
+    async fn minimizer_preserves_standard_max_turn_stop_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/standard-max-turn-stop-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_rlm_typed_finish_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/rlm-typed-finish-terminal-event-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_rlm_default_mode_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/rlm-empty-options-default-mode-broken.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_agent_tuple_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/agent-tuple-json-array-shape-broken.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_agent_subagent_child_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/agent-started-process-subagent-child-graph-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_agent_failed_child_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/agent-failed-child-task-fail-evidence-missing.json"
+        ))
+        .await;
     }
 
     #[tokio::test]

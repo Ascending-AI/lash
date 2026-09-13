@@ -406,7 +406,6 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
         .expect("function start beyond the accepted root end")
         .entry_ip;
     root_to_function.slots = nested.frame_stack[0].slots.clone();
-    root_to_function.projected_slots = nested.frame_stack[0].projected_slots.clone();
     root_to_function.globals = nested.frame_stack[0].globals.clone();
     root_to_function.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
     assert_resume_rejects_program_counter(&program, root_to_function);
@@ -416,7 +415,6 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
     root_exact_end.active_function = None;
     root_exact_end.instruction_pointer = program.chunk.root_code_len;
     root_exact_end.slots = nested.frame_stack[0].slots.clone();
-    root_exact_end.projected_slots = nested.frame_stack[0].projected_slots.clone();
     root_exact_end.globals = nested.frame_stack[0].globals.clone();
     root_exact_end.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
     assert_eq!(

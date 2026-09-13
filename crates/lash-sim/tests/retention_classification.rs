@@ -1,4 +1,5 @@
-//! The ratified 2026-09-08 retention census (FIG-2503): 41 SQLite / 42 PostgreSQL.
+//! The ratified 2026-09-08 retention census (FIG-2503), extended by FIG-677:
+//! 45 SQLite / 46 PostgreSQL.
 //! Like schema_congruence.rs, this ordinary integration test is discovered by
 //! the workspace nextest CI shards. Every new durable table needs a declaration.
 use std::collections::BTreeSet;
@@ -157,6 +158,18 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "artifact_owners",
+        LifecycleOwned {
+            scope: "exact host, process, or execution owner release",
+        },
+    ),
+    (
+        "artifact_owner_retirements",
+        PermanentlyExempt {
+            reason: "non-reusable execution-owner identities and permanent late-publication fences",
+        },
+    ),
+    (
         "processes",
         Bounded {
             lever: "prune_terminal_processes; projection watermark and no outstanding deliveries/plans",
@@ -196,6 +209,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         "process_tombstones",
         Bounded {
             lever: "compact_process_tombstones; cutoff, projector watermark and delivery exclusions",
+        },
+    ),
+    (
+        "process_artifact_cleanup",
+        LifecycleOwned {
+            scope: "terminal process prune evidence; acknowledged only after exact artifact release",
         },
     ),
     ("process_leases", LifecycleOwned { scope: "process" }),
@@ -323,7 +342,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 42, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 45, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

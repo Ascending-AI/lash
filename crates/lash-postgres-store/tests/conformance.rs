@@ -20,6 +20,8 @@ lash_conformance::attachment_adoption_tests!({
 });
 
 use std::future::Future;
+#[path = "conformance/artifact_races.rs"]
+mod artifact_races;
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
 #[path = "conformance/attachment_recovery.rs"]
@@ -53,8 +55,7 @@ use lash_postgres_store::{
 
 mod support;
 
-#[path = "../../lash-core/tests/support/cold_process_turn_parent.rs"]
-mod cold_process_turn_parent;
+use lash_conformance::cold_process_turn_parent;
 #[path = "conformance/scope_retirement.rs"]
 mod scope_retirement;
 #[path = "conformance/session_delete_blob_reclaim.rs"]

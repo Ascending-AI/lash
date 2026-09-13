@@ -42,10 +42,36 @@ fn encode_remote_tool_call_output(
             ("payload".to_string(), payload),
         ])),
     )]);
+    // Observation and turn-result wire surfaces are intentionally lossy:
+    // `RemoteTurnEvent::ToolCallCompleted.output.control` projects frame switches to kind,
+    // frame_key, seed_count, and task; `RemoteTurnOutcome::AgentFrameSwitch` keeps frame_key and
+    // task; `RemoteToolCallOutcome` drops control. The directed `RemoteProcessAwaitOutput` reply
+    // is the sole lossless carrier of `ToolControl`, including frame-switch seed bodies.
     if let Some(control) = control {
         let projected = match control {
-            lash_core::ToolControl::SwitchAgentFrame { .. } => {
-                encode_remote_json(control, "RemoteTurnEvent", "output.control")?
+            lash_core::ToolControl::SwitchAgentFrame {
+                frame_key,
+                initial_nodes,
+                task,
+            } => {
+                let mut projected = serde_json::Map::from_iter([
+                    (
+                        "type".to_string(),
+                        serde_json::Value::String("switch_agent_frame".to_string()),
+                    ),
+                    (
+                        "frame_key".to_string(),
+                        serde_json::Value::String(frame_key.as_str().to_string()),
+                    ),
+                    (
+                        "seed_count".to_string(),
+                        serde_json::Value::from(initial_nodes.len()),
+                    ),
+                ]);
+                if let Some(task) = task {
+                    projected.insert("task".to_string(), serde_json::Value::String(task));
+                }
+                serde_json::Value::Object(projected)
             }
             lash_core::ToolControl::Finish { value } => {
                 serde_json::Value::Object(serde_json::Map::from_iter([

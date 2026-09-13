@@ -19,17 +19,21 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-67-02339d79/postgres-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/postgres-expected.json",
+];
+const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-6a89236a/postgres-expected.json",
 ];
-const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-41ad1609/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-25d7281b/postgres-expected.json",
 ];
-const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+const EARLIER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/postgres-expected.json",
@@ -113,7 +117,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 88);
+    assert_eq!(PostgresStorage::schema_version(), 89);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -218,10 +222,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the usage-delta table from the authoritative DDL");
+    sqlx::query("DROP TABLE IF EXISTS lash_effect_scope_retirements")
+        .execute(&pool)
+        .await
+        .expect("discard the pre-cleanup-evidence effect-scope retirement table");
     sqlx::raw_sql(schema_table_ddl("lash_effect_scope_retirements"))
         .execute(&pool)
         .await
-        .expect("create the effect-scope retirement fence from the authoritative DDL");
+        .expect("recreate the effect-scope retirement fence from the authoritative DDL");
     sqlx::query("DROP TABLE lash_attachment_condemnations")
         .execute(&pool)
         .await
@@ -231,7 +239,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("recreate the attachment condemnation table from the authoritative DDL");
     sqlx::raw_sql(
-        "DROP TABLE lash_process_parent_end_plans;
+        "DROP TABLE IF EXISTS lash_process_artifact_cleanup;
+         DROP TABLE lash_process_parent_end_plans;
          DROP TABLE lash_process_segment_handovers;
          DROP TABLE lash_process_leases;
          DROP TABLE lash_process_observers;
@@ -249,6 +258,10 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the process registry from the authoritative DDL");
+    sqlx::raw_sql(schema_artifact_owner_ddl())
+        .execute(&pool)
+        .await
+        .expect("create exact artifact ownership from the authoritative DDL");
     sqlx::raw_sql(
         "ALTER TABLE lash_pending_turn_inputs
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
@@ -271,14 +284,20 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                  CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
                      AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL));
          ALTER TABLE lash_turn_cancel_requests
-             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';
-         UPDATE lash_schema_versions
-            SET version = 88
-          WHERE component = 'lash-postgres-store';",
+             ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate';",
     )
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
+    sqlx::query(
+        "UPDATE lash_schema_versions
+            SET version = $1
+          WHERE component = 'lash-postgres-store'",
+    )
+    .bind(PostgresStorage::schema_version())
+    .execute(&pool)
+    .await
+    .expect("stamp the refusal fixture with the current component generation");
     upgrade_prior_fixture_frame_identity(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
         .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())
@@ -390,6 +409,18 @@ fn schema_process_registry_ddl() -> &'static str {
         .find("CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (")
         .map(|offset| start + offset)
         .expect("process registry DDL must precede tool-intent submissions");
+    &ddl[start..end]
+}
+
+fn schema_artifact_owner_ddl() -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let start = ddl
+        .find("CREATE TABLE IF NOT EXISTS lash_artifact_owners (")
+        .expect("schema DDL must declare exact artifact ownership");
+    let end = ddl[start..]
+        .find("\n\n-- Seed rows.")
+        .map(|offset| start + offset)
+        .expect("artifact-owner DDL must precede schema seed rows");
     &ddl[start..end]
 }
 

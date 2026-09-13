@@ -814,8 +814,7 @@ impl SurfaceRunner {
                                 "replay_key": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"
                             },
                             "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
-                            "policy": "cancel",
-                            "reason": "differential parent ended"
+                            "policy": "cancel"
                         }
                     }),
                     serde_json::json!({
@@ -831,8 +830,7 @@ impl SurfaceRunner {
                                 "replay_key": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"
                             },
                             "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
-                            "policy": "cancel",
-                            "reason": "differential parent ended"
+                            "policy": "cancel"
                         }
                     }),
                     serde_json::json!({
@@ -848,8 +846,7 @@ impl SurfaceRunner {
                                 "replay_key": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"
                             },
                             "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
-                            "policy": "cancel",
-                            "reason": "differential parent ended"
+                            "policy": "cancel"
                         }
                     }),
                 ];
@@ -920,12 +917,20 @@ impl SurfaceRunner {
                             serde_json::json!({
                                 "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                                 "event_type": "process.cancel_requested",
-                                "payload": {"reason": "differential parent ended"}
+                                "payload": {
+                                    "origin": "parent_ended",
+                                    "requester": r#"{"kind":"turn","session_id":"surface-session","turn_id":"surface-turn"}"#,
+                                    "requested_at_ms": 1000
+                                }
                             }),
                             serde_json::json!({
                                 "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                                 "event_type": "process.cancel_requested",
-                                "payload": {"reason": "differential parent ended"}
+                                "payload": {
+                                    "origin": "parent_ended",
+                                    "requester": r#"{"kind":"turn","session_id":"surface-session","turn_id":"surface-turn"}"#,
+                                    "requested_at_ms": 1000
+                                }
                             }),
                         ]
                 {

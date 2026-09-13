@@ -25,6 +25,42 @@ kept releasable.
 4. Keep the branch current and merge only after required CI is green.
 5. Delete the branch after merge.
 
+### Local build and test loop
+
+On the shared development box, use one Kiln fork per concurrent change. Kiln
+creates a warm copy-on-write checkout and prints a path ending in `/merged`:
+
+```sh
+fork="$(kiln fork lash my-change)"
+cd "$fork"
+. ./env.sh
+kiln build
+kiln test
+```
+
+Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
+private target directory and applies the shared machine's build and test
+budgets. `kiln build` and `kiln test` use the warm shared Bazel cache; `kiln
+test` intentionally runs only the cacheable partition described below. When
+the change has merged, remove the fork with `kiln rm lash <name>`. Never write
+under a `golden-*` directory, remove a fork with `rm -rf`, or set `CARGO_*`
+variables by hand.
+
+On machines without Kiln, plain Cargo is the portable fallback. Preserve the
+workspace feature graph and lockfile with `--workspace --all-targets --locked`;
+use `--no-fail-fast` when claiming a full `cargo test` run. Use the repository's
+named Cargo, `just`, or script recipes for contracts that need more than the
+portable default-feature run.
+
+| Command | Coverage |
+| --- | --- |
+| `kiln test` | 87 deterministic, default-feature binaries in the cacheable Bazel partition. |
+| Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
+
+The Cargo-owned set comprises PostgreSQL and S3 stores; Restate and
+`lash-runtime` unit tests; nested and heavy suites; trybuild; TypeScript and
+frontend assets; doctests; feature matrices; Clippy; and formatting.
+
 Install the repository's commit hook in each regular checkout with
 `prek install --hook-type pre-commit`; new warm forks install it automatically.
 The hook formats Rust source, including the enrolled `include!` files. When it
@@ -85,15 +121,18 @@ check that can never report.
 ## Concurrent local gates
 
 `just push-gate`, the `just confidence*` batteries, and their container-backed
-E2E recipes are isolated by worktree. They derive a stable slug by lowercasing
-the basename of the script's physical worktree root, replacing non-alphanumeric
-runs with `-`, trimming leading or trailing `-`, and appending the first eight
-hex digits of a stable checksum of the absolute worktree path. Thus two
-checkouts with the same basename still have distinct identities. Container
-names, fixed Compose projects, persistent external network names, default
-evidence paths, and default host ports all include or derive from that slug.
+E2E recipes are isolated by checkout root. On the shared box that root is a
+Kiln fork's `/merged` checkout; the scripts retain `WORKTREE` in internal
+variable and command names for compatibility with ordinary Git worktrees. They
+derive a stable slug by lowercasing the basename of the physical checkout root,
+replacing non-alphanumeric runs with `-`, trimming leading or trailing `-`, and
+appending the first eight hex digits of a stable checksum of the absolute
+checkout path. Thus two checkouts with the same basename still have distinct
+identities. Container names, fixed Compose projects, persistent external
+network names, default evidence paths, and default host ports all include or
+derive from that slug.
 
-Each absolute worktree path hashes with `cksum` into one of 90 disjoint 50-port
+Each absolute checkout path hashes with `cksum` into one of 90 disjoint 50-port
 blocks spanning 61000–65499, above Linux's default ephemeral range. The lane
 offsets are stable:
 
@@ -111,7 +150,7 @@ offsets are stable:
 Explicit existing environment overrides such as `LASH_PUSH_GATE_PORT_BASE`,
 `LASH_PUSH_GATE_POSTGRES_PORT`, `LASH_CONFIDENCE_OUT_DIR`, and each recipe's
 named port/container/artifact variables remain authoritative escape hatches.
-If two concurrently active worktrees select the same block, set
+If two concurrently active checkouts select the same block, set
 `LASH_GATE_SLOT_OVERRIDE` to an unused integer from `0` through `89` for one
 gate; this changes its derived port base while preserving its path-qualified
 ownership identity. The refusal prints this override and the occupied lock
@@ -121,13 +160,13 @@ The default confidence evidence root is
 `LASH_CONFIDENCE_OUT_DIR` to `target/confidence` so its established artifact
 upload and summary paths are unchanged.
 
-Every worktree uses a fixed external network named `lash-e2e-<worktree-slug>`.
+Every checkout uses a fixed external network named `lash-e2e-<worktree-slug>`.
 Scripts create it idempotently and never delete it, because host network
 watchers treat Docker network add/remove as interface churn. Compose projects
-are fixed per worktree rather than per run. Their repeated `postgres`, `minio`,
+are fixed per checkout rather than per run. Their repeated `postgres`, `minio`,
 and `restate` aliases are safe only because the worktree lock and labeled
 leftover check prevent two lane projects from sharing this network at once. A
-nonblocking worktree lock rejects a second same-worktree battery with exit 73.
+nonblocking worktree lock rejects a second same-checkout battery with exit 73.
 The refusal names the owner PID, lock path, and exact orphan remedy. Compose
 leftovers produce a project-qualified `docker compose ... down -v
 --remove-orphans` remedy; direct containers use `docker rm -fv`. Lock state is
@@ -159,17 +198,18 @@ To prove the live contract against another checkout containing the same
 change, run:
 
 ```sh
-just gate-worktree-concurrency-check /path/to/peer-worktree
+just gate-worktree-concurrency-check /path/to/peer-kiln-fork/merged
 ```
 
-The check runs PostgreSQL, MinIO, and Restate smokes concurrently in both
-worktrees, then proves a second same-worktree run refuses cleanly. Evidence is
-written below `target/gate-concurrency-proof/<worktree-slug>/` unless
+For two Kiln forks, pass the peer's `/merged` path. The check runs PostgreSQL,
+MinIO, and Restate smokes concurrently in both checkouts, then proves a second
+same-checkout run refuses cleanly. Evidence is written below
+`target/gate-concurrency-proof/<worktree-slug>/` unless
 `LASH_GATE_PROOF_OUT_DIR` overrides it.
 
 ### Machine load, as distinct from gate isolation
 
-Worktree isolation makes concurrent gates *correct*; it does nothing about the
+Checkout isolation makes concurrent gates *correct*; it does nothing about the
 machine they share. Every concurrent `just push-gate` compiles the whole
 workspace, and an unbudgeted build sizes itself from `nproc`, so several gates
 at once oversubscribe the box and each one finishes later than it would have by
@@ -177,8 +217,8 @@ waiting. Two limits, both feature-detected and both absent on CI runners, which
 get a runner per job and have nothing to share:
 
 - **How wide one gate goes.** The build width comes from the environment —
-  `CARGO_BUILD_JOBS` and `NEXTEST_TEST_THREADS`, exported by whatever prepares
-  the checkout — not from `nproc`.
+  `CARGO_BUILD_JOBS=8` and `NEXTEST_TEST_THREADS=4`, exported by the Kiln fork's
+  `env.sh` — not from `nproc`.
 - **How many gates run at once.** `push-gate.sh` runs its build-heavy legs
   (workspace check, clippy, the workspace test build, the doc passes) through
   `heavy-slot` when that tool is on `PATH`: a box-wide semaphore that caps how
