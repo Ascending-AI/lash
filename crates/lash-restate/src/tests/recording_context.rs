@@ -1326,6 +1326,55 @@ pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with
     }
 }
 
+#[tokio::test]
+pub(super) async fn checked_in_v2_mid_drain_journal_refuses_v1_tool_intent_without_duplicate_effect()
+ {
+    let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/tool_intent_journals/v2-mid-drain.json"
+    ))
+    .expect("decode the v2 mid-drain endpoint corpus fixture");
+    assert!(
+        fixture.captured_from_endpoint_interruption,
+        "{} must name its real endpoint-interruption provenance",
+        fixture.crash_point
+    );
+
+    let (command_frames, output, signal_events) = replay_tool_intent_corpus_fixture(&fixture).await;
+    assert_eq!(
+        command_frames,
+        Vec::<u16>::new(),
+        "{} response command frames",
+        fixture.crash_point
+    );
+    assert_eq!(
+        output,
+        Some(serde_json::json!([{
+            "identity": {
+                "execution_scope_id": "tool-intent-corpus-turn",
+                "intent_index": 0,
+                "minting_emission_replay_key": "tool-intent-drain:tool-intent-corpus-call",
+                "replay_key": "tool-intent:v2:blake3:b9d8ee83094dc1094ae4feff142c51941d4a07b150b5cf6f1ff6998a16883201",
+                "session_id": "tool-intent-corpus-session",
+                "tool_call_id": "tool-intent-corpus-call"
+            },
+            "intent_index": 0,
+            "kind": "signal_process",
+            "refusal": {
+                "reason": "unsupported_protocol_version",
+                "recorded": 1
+            },
+            "status": "refused"
+        }])),
+        "{} output",
+        fixture.crash_point
+    );
+    assert_eq!(
+        signal_events, 0,
+        "{} must refuse before reconstructing the signal effect",
+        fixture.crash_point
+    );
+}
+
 /// The untouched pre-cutover endpoint artifacts now encounter the earlier
 /// effect-envelope shape fence. That refusal happens before their recorded
 /// signal effect is reconstructed, so a fresh registry stays empty.
