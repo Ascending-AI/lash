@@ -758,7 +758,7 @@ jobs:
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
             --repository_cache="$RUNNER_TEMP/bazel-repository" \
             --disk_cache= --spawn_strategy=local \
-            --remote_cache=grpcs://51.15.75.60:8443 --remote_instance_name=orb \
+            --remote_cache=grpcs://178.105.21.6:8443 --remote_instance_name=orb \
             --tls_certificate="$RUNNER_TEMP/build-cache/ca.crt" \
             --tls_client_certificate="$RUNNER_TEMP/build-cache/client.crt" \
             --tls_client_key="$RUNNER_TEMP/build-cache/client.key" \
