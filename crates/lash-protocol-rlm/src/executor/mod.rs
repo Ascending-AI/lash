@@ -123,6 +123,38 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
     execution_bounds: lashlang::ExecutionBounds,
     source: RlmSourceContext,
 ) -> ExecResponse {
+    execute_code_with_dialect_and_bounds_with_trigger_resolver(
+        state,
+        ctx,
+        request,
+        artifact_store,
+        lashlang_surface,
+        deferred_tool_resolver,
+        None,
+        session_projected_bindings,
+        projection_resolver,
+        lashlang_execution_trace_config,
+        execution_bounds,
+        source,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn execute_code_with_dialect_and_bounds_with_trigger_resolver(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    request: ExecRequest,
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    lashlang_surface: LashlangSurface,
+    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
+    session_projected_bindings: RlmProjectedBindings,
+    projection_resolver: Arc<dyn ProjectionResolver>,
+    lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
+    execution_bounds: lashlang::ExecutionBounds,
+    source: RlmSourceContext,
+) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
     Box::pin(execute_code_inner(
@@ -133,6 +165,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
         artifact_store,
         lashlang_surface,
         deferred_tool_resolver,
+        deferred_trigger_resolver,
         session_projected_bindings,
         projection_resolver,
         lashlang_execution_trace_config,
@@ -251,6 +284,7 @@ async fn execute_code_inner(
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
@@ -273,14 +307,48 @@ async fn execute_code_inner(
     // ambient Tool Catalog is built, before its collision validation can
     // preempt recorded authority. Unrelated catalog errors remain ordinary host
     // failures.
-    let mut host_environment = if let Some(program) = parsed_program
+    let mut effective_surface = lashlang_surface;
+    let referenced = parsed_program
+        .as_ref()
+        .map(lashlang::referenced_receiver_call_paths)
+        .unwrap_or_default();
+    if !referenced.is_empty() && state.deferred_trigger_resolutions.link_key.is_some() {
+        let _phase = ctx.named_phase("rlm_lashlang.deferred_trigger_resolve");
+        match lash_lashlang_runtime::resolve_and_fold_deferred_triggers(
+            &referenced,
+            effective_surface,
+            deferred_trigger_resolver.as_ref(),
+            &state.deferred_trigger_resolutions,
+            &ctx,
+        )
+        .await
+        {
+            Ok((surface, record)) => {
+                effective_surface = surface;
+                state.deferred_trigger_resolutions = record;
+            }
+            Err(error) => {
+                ctx.record_nested_runtime_effect_error(error.runtime_effect_error());
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailureKind::Host,
+                    error.to_string(),
+                    start,
+                    Vec::new(),
+                );
+            }
+        }
+    }
+
+    let mut host_environment = if let Some(_program) = parsed_program
         .as_ref()
         .filter(|_| state.deferred_resolutions.link_key.is_some())
     {
         let _phase = ctx.named_phase("rlm_lashlang.deferred_resolve");
-        match lash_lashlang_runtime::resolve_and_build_deferred_environment(
-            program,
-            &lashlang_surface,
+        match lash_lashlang_runtime::resolve_and_build_deferred_environment_from_references(
+            &referenced,
+            &effective_surface,
             ctx.tool_catalog().as_ref(),
             deferred_tool_resolver.as_ref(),
             &mut state.deferred_resolutions,
@@ -302,7 +370,7 @@ async fn execute_code_inner(
             }
         }
     } else {
-        match lashlang_surface.host_environment(ctx.tool_catalog().as_ref()) {
+        match effective_surface.host_environment(ctx.tool_catalog().as_ref()) {
             Ok(environment) => environment,
             Err(error) => {
                 emit_step_trace(
@@ -766,16 +834,19 @@ fn select_deferred_resolution_link(
 ) {
     let Some(invocation) = ctx.parent_invocation() else {
         state.deferred_resolutions.clear_link();
+        state.deferred_trigger_resolutions.clear_link();
         return;
     };
     let Some(link_key) =
         lash_lashlang_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
     else {
         state.deferred_resolutions.clear_link();
+        state.deferred_trigger_resolutions.clear_link();
         return;
     };
 
-    state.deferred_resolutions.select_link(link_key);
+    state.deferred_resolutions.select_link(link_key.clone());
+    state.deferred_trigger_resolutions.select_link(link_key);
 }
 
 fn deferred_execution_grants(

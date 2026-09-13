@@ -2028,27 +2028,30 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
     assert_eq!(turn_n.terminal_finish, Some(serde_json::json!("started")));
 
-    let (turn_n_plus_one, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        tokio::join!(
-            execute_code_with_dialect_and_bounds(
-                &mut state,
-                ctx,
-                ExecRequest {
-                    language: "typescript".to_string(),
-                    code: "finish(await handle);".to_string(),
-                },
-                artifact_store,
-                surface,
-                None,
-                RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
-                RlmLashlangExecutionTraceConfig::default(),
-                lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(SourceDialect::Typescript),
-            ),
-            worker.drive_pending_processes()
-        )
-    })
+    let (turn_n_plus_one, _) = Box::pin(tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        async {
+            tokio::join!(
+                execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    ctx,
+                    ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "finish(await handle);".to_string(),
+                    },
+                    artifact_store,
+                    surface,
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    RlmSourceContext::cell(SourceDialect::Typescript),
+                ),
+                worker.drive_pending_processes()
+            )
+        },
+    ))
     .await
     .expect("turn N+1 process-handle await must not hang");
     assert!(

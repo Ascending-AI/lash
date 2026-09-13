@@ -245,13 +245,15 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
             let prefix = fixture.point.prefix();
             let work_collector = lash_core::perf_witness::Collector::install()?;
-            let (snapshot, capture_phase) =
-                measure_runtime_perf_async_phase("checkpoint_curve.capture", async {
+            let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
+                "checkpoint_curve.capture",
+                async {
                     fixture.fixture.assign_one(sample, sample).await?;
                     fixture.fixture.absorb_dirty_assignments();
                     fixture.fixture.capture().map_err(anyhow::Error::from)
-                })
-                .await?;
+                },
+            ))
+            .await?;
             let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot);
             let (serialized, serialize_phase) = measure_runtime_perf_phase(
                 "checkpoint_curve.serialize",
