@@ -60,9 +60,12 @@ runs:
         echo "::add-mask::${endpoint}"
         echo "::add-mask::${instance}"
         echo "::add-mask::${runtime}"
+        # Lengths are not secrets, and one failing run should tell whoever
+        # writes these whether all three are wrong, not just the first.
+        shape="endpoint ${#endpoint}, instance ${#instance}, runtime"
+        shape="${shape} ${#runtime} characters after trimming whitespace"
         if ! [[ "${endpoint}" =~ ^grpcs?://[A-Za-z0-9.-]+:[0-9]+$ ]]; then
-          echo "::error::CACHE_ENDPOINT is not grpc[s]://host:port" \
-            "(${#endpoint} characters after trimming whitespace)" >&2
+          echo "::error::CACHE_ENDPOINT is not grpc[s]://host:port (${shape})" >&2
           exit 1
         fi
         for pair in "CACHE_INSTANCE:${instance}" "KILN_EXECUTOR_RUNTIME:${runtime}"; do
