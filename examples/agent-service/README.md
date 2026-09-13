@@ -180,8 +180,12 @@ Content-Type: application/json
 }
 ```
 
-The response reports `requested`, `already_requested`,
-`completion_won_race`, or `unknown_or_revoked`. In Restate mode the cancel
+The response reports `requested`, `already_requested`, `escalated`,
+`policy_conflict`, `completion_won_race`, or `unknown_or_revoked`. The first
+request the gate accepts owns the undelivered-input policy for the rest of the
+turn: a repeat asking for the same disposition is idempotent, and one asking
+for a different disposition gets `policy_conflict` naming both the requested
+and the accepted policy and changes nothing. In Restate mode the cancel
 request and terminal attachment use `RestateTurnDeployment` and
 `LashDurableWaitWorkflow`, so the request survives an Axum/web-process restart
 and is observed by a replayed turn owner. Cancellation is cooperative and does

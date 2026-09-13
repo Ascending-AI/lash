@@ -1098,7 +1098,12 @@ pub trait TurnInputStore: Send + Sync {
     /// Persist cancellation intent for one turn.
     ///
     /// Repeating the address returns the original request unless the incoming
-    /// mode is stronger. This row is provisional evidence until
+    /// one is a timing escalation of it
+    /// ([`TurnCancelRequest::escalates`](crate::TurnCancelRequest::escalates)):
+    /// same undelivered-input disposition, stronger mode. A repeat that
+    /// disagrees about the disposition is a conflict the authoritative gate
+    /// refuses, and leaves both the row and its intent revision untouched.
+    /// This row is provisional evidence until
     /// [`Self::reconcile_turn_cancel_winner`] projects the keyed-gate winner.
     /// If the turn's final receipt is already durable, implementations perform
     /// no write and may return the incoming request with no outcome rather than

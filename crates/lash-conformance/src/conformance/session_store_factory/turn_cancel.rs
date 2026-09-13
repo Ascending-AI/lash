@@ -1322,7 +1322,9 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
         Some("conformance-operator".to_string()),
     )
     .with_reason("escalated to abort")
-    .undelivered(crate::TurnCancelDisposition::Defer);
+    // A timing escalation agrees with the accepted disposition; one that
+    // disagrees is a policy conflict and never advances the durable intent.
+    .undelivered(crate::TurnCancelDisposition::Drop);
     store
         .record_turn_cancel_request(abort.clone())
         .await
@@ -1765,8 +1767,13 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         ))
         .await
         .expect("enqueue active-turn input");
+    // The escalating request below must agree with this one about the
+    // undelivered-input disposition: a repeat that disagrees is a policy
+    // conflict the gate refuses, and refusing it durably is exactly what keeps
+    // it from moving the closure-CAS predicate.
     let after_step =
         crate::TurnCancelRequest::new(address.clone(), "turn-cancel-final-cas:after-step", None)
+            .undelivered(crate::TurnCancelDisposition::Drop)
             .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(after_step.clone())
@@ -1914,4 +1921,136 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .await
         .expect("replay refreshed final commit");
     assert_eq!(replay.turn_cancel_input_outcome.len(), 1);
+}
+
+/// A repeat that disagrees about the undelivered-input disposition is a
+/// conflict, not an escalation. On every backend the durable row keeps the
+/// first acceptor verbatim and its intent revision — the predicate the live
+/// owner's closure CAS is pinned to — does not move, while a genuine
+/// same-disposition escalation still advances it. Both survive reopen, and a
+/// committed turn absorbs either repeat without a write.
+pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-conflicting-repeat"),
+        "turn-cancel-conflicting-repeat-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-conflicting-repeat:turn");
+    let address = crate::TurnAddress::new(&request.session_id, &turn_id);
+
+    let accepted = crate::TurnCancelRequest::new(address.clone(), "accepted-drop", None)
+        .undelivered(crate::TurnCancelDisposition::Drop)
+        .mode(crate::TurnCancelMode::AfterStep);
+    assert_eq!(
+        store
+            .record_turn_cancel_request(accepted.clone())
+            .await
+            .expect("persist the accepted policy")
+            .request,
+        accepted,
+    );
+    let after_accept = store
+        .turn_cancel_request_intent(&address)
+        .await
+        .expect("snapshot the accepted intent");
+    assert!(matches!(
+        &after_accept,
+        crate::TurnCancelIntentSnapshot::Present { request, revision: 1 } if request == &accepted
+    ));
+
+    // A conflicting repeat, in the strongest mode it could ask for: neither
+    // the row nor the CAS predicate may move.
+    let conflicting = crate::TurnCancelRequest::new(address.clone(), "conflicting-defer", None)
+        .undelivered(crate::TurnCancelDisposition::Defer)
+        .mode(crate::TurnCancelMode::Immediate);
+    assert_eq!(
+        store
+            .record_turn_cancel_request(conflicting.clone())
+            .await
+            .expect("absorb the conflicting repeat")
+            .request,
+        accepted,
+        "a conflicting repeat must read back the accepted policy",
+    );
+    assert_eq!(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("snapshot intent after the conflicting repeat"),
+        after_accept,
+        "a conflicting repeat must not advance the closure-CAS predicate",
+    );
+
+    // The same-disposition escalation is unaffected by that refusal.
+    let escalation = crate::TurnCancelRequest::new(address.clone(), "escalating-drop", None)
+        .undelivered(crate::TurnCancelDisposition::Drop)
+        .mode(crate::TurnCancelMode::Immediate);
+    assert_eq!(
+        store
+            .record_turn_cancel_request(escalation)
+            .await
+            .expect("record the genuine escalation")
+            .request,
+        accepted,
+    );
+    assert!(matches!(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("snapshot escalated intent"),
+        crate::TurnCancelIntentSnapshot::Present { ref request, revision: 2 }
+            if request == &accepted
+    ));
+
+    // The projection of the gate winner is the accepted request, and replaying
+    // it is idempotent rather than a fresh revision.
+    assert!(
+        store
+            .reconcile_turn_cancel_winner(
+                &address,
+                &store
+                    .turn_cancel_request_intent(&address)
+                    .await
+                    .expect("snapshot before reconcile"),
+                &cancel_evidence(&accepted),
+            )
+            .await
+            .expect("project the accepted winner"),
+    );
+    assert!(matches!(
+        store
+            .turn_cancel_request_intent(&address)
+            .await
+            .expect("snapshot after reconcile"),
+        crate::TurnCancelIntentSnapshot::Present { ref request, revision: 2 }
+            if request == &accepted
+    ));
+
+    drop(store);
+    let reopened = factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen the conflict store")
+        .expect("the conflict store exists");
+    assert_eq!(
+        reopened
+            .turn_cancel_request(&address)
+            .await
+            .expect("read the accepted policy after reopen")
+            .expect("the accepted policy survives reopen")
+            .request,
+        accepted,
+    );
+    assert_eq!(
+        reopened
+            .record_turn_cancel_request(conflicting)
+            .await
+            .expect("absorb the conflicting repeat after reopen")
+            .request,
+        accepted,
+        "reopen does not reopen the policy decision",
+    );
 }

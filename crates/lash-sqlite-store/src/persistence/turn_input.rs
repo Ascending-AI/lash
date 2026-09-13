@@ -331,11 +331,14 @@ impl TurnInputStore for Store {
                     }
                     // The first policy acceptor is immutable. A stronger
                     // same-policy request advances only the closure-CAS
-                    // revision; effective timing is recorded by the gate.
+                    // revision; effective timing is recorded by the gate. A
+                    // request that disagrees about the undelivered-input
+                    // disposition is not an escalation: the gate refuses it, so
+                    // it leaves the row and its revision untouched.
                     if let Some(existing) =
                         load_turn_cancel_request_conn(tx, &session_id, &turn_id)?
                     {
-                        if request.mode.is_stronger_than(existing.request.mode) {
+                        if request.escalates(&existing.request) {
                             let revision = match load_turn_cancel_intent_snapshot_conn(
                                 tx,
                                 &session_id,

@@ -398,6 +398,269 @@ async fn same_policy_escalation_preserves_original_policy_acceptor() {
 }
 
 #[tokio::test]
+async fn accepted_drop_policy_refuses_a_later_defer_repeat() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-conflict-reverse");
+    let store = native_fixture_store(&host);
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let accepted = request(address.clone(), "accepted-drop")
+        .undelivered(TurnCancelDisposition::Drop)
+        .mode(TurnCancelMode::Immediate);
+    assert!(matches!(
+        driver
+            .request_cancel(accepted.clone())
+            .await
+            .unwrap()
+            .outcome,
+        TurnCancelOutcome::Requested(_)
+    ));
+
+    // The weaker timing mode is irrelevant: the disposition decides.
+    let conflict = driver
+        .request_cancel(
+            request(address.clone(), "conflicting-defer")
+                .undelivered(TurnCancelDisposition::Defer)
+                .mode(TurnCancelMode::AfterStep),
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            conflict.outcome,
+            TurnCancelOutcome::PolicyConflict {
+                requested: TurnCancelDisposition::Defer,
+                ref accepted,
+            } if accepted.request_id == "accepted-drop"
+                && accepted.undelivered == TurnCancelDisposition::Drop
+        ),
+        "expected a typed conflict naming both policies, got {:?}",
+        conflict.outcome
+    );
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .unwrap()
+            .unwrap()
+            .request,
+        accepted,
+        "the conflicting repeat must not touch the durable policy projection",
+    );
+}
+
+#[tokio::test]
+async fn concurrent_opposing_requests_converge_on_one_accepted_policy() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-conflict-concurrent");
+    let store = native_fixture_store(&host);
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+
+    let mut callers = Vec::new();
+    for index in 0..8 {
+        let driver = driver.clone();
+        let address = address.clone();
+        let disposition = if index % 2 == 0 {
+            TurnCancelDisposition::Defer
+        } else {
+            TurnCancelDisposition::Drop
+        };
+        callers.push(crate::task::spawn(async move {
+            driver
+                .request_cancel(
+                    request(address, &format!("racer-{index}")).undelivered(disposition),
+                )
+                .await
+                .expect("concurrent cancellation request")
+        }));
+    }
+    let mut winners = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut idempotent = Vec::new();
+    for caller in callers {
+        match caller.await.expect("join concurrent caller").outcome {
+            TurnCancelOutcome::Requested(evidence) => winners.push(evidence),
+            TurnCancelOutcome::AlreadyRequested(evidence) => idempotent.push(evidence),
+            TurnCancelOutcome::PolicyConflict {
+                requested,
+                accepted,
+            } => conflicts.push((requested, accepted)),
+            other => panic!("unexpected concurrent outcome {other:?}"),
+        }
+    }
+    assert_eq!(winners.len(), 1, "exactly one caller may accept the policy");
+    let winner = winners.remove(0);
+    assert_eq!(
+        idempotent.len() + conflicts.len(),
+        7,
+        "every other caller must receive a typed repeat outcome"
+    );
+    for evidence in &idempotent {
+        assert_eq!(
+            evidence.undelivered, winner.undelivered,
+            "an idempotent repeat agreed with the accepted policy"
+        );
+        assert_eq!(evidence.request_id, winner.request_id);
+    }
+    for (requested, accepted) in &conflicts {
+        assert_ne!(
+            *requested, winner.undelivered,
+            "only a differing disposition may report a conflict"
+        );
+        assert_eq!(
+            *accepted, winner,
+            "every conflict names the one accepted request"
+        );
+    }
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .unwrap()
+            .unwrap()
+            .request
+            .request_id,
+        winner.request_id,
+        "the durable projection converges on the gate winner",
+    );
+}
+
+#[tokio::test]
+async fn sealed_turn_refuses_a_conflicting_repeat_without_durable_effect() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-conflict-post-terminal");
+    let store = native_fixture_store(&host);
+    store
+        .admit_and_bind_session(&crate::SessionBinding::root(&address.session_id))
+        .await
+        .expect("bind cancellation store");
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+    assert_eq!(
+        active
+            .settle_before_commit(host.as_ref(), false, None)
+            .await
+            .expect("seal the completing turn"),
+        None,
+    );
+
+    for disposition in [TurnCancelDisposition::Defer, TurnCancelDisposition::Drop] {
+        let late = driver
+            .request_cancel(request(address.clone(), "late-after-seal").undelivered(disposition))
+            .await
+            .expect("late cancellation request");
+        assert!(
+            matches!(late.outcome, TurnCancelOutcome::CompletionWonRace),
+            "a request after the gate sealed is a typed no-op, got {:?}",
+            late.outcome
+        );
+        assert!(
+            late.record.is_none(),
+            "a typed no-op must not return a cancellation record"
+        );
+        assert_eq!(
+            store
+                .turn_cancel_request(&address)
+                .await
+                .expect("read durable cancellation row"),
+            None,
+            "a request the sealed gate refused must leave no durable row",
+        );
+    }
+}
+
+#[tokio::test]
+async fn escalation_cannot_substitute_the_accepted_undelivered_policy() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("policy-escalation-substitution");
+    let store = native_fixture_store(&host);
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    let accepted = request(address.clone(), "accepted-drop-after-step")
+        .undelivered(TurnCancelDisposition::Drop)
+        .mode(TurnCancelMode::AfterStep);
+    assert!(matches!(
+        driver.request_cancel(accepted).await.unwrap().outcome,
+        TurnCancelOutcome::Requested(_)
+    ));
+
+    // The escalation promise is durable and shared. Write a well-formed
+    // escalation that carries the opposite disposition straight onto it, the
+    // way a peer binary or a replayed row could, and require every reader to
+    // keep honouring the accepted policy.
+    let escalation = escalation_key(host.as_ref(), &address).await.unwrap();
+    let substituted = TurnCancellationEvidence {
+        request_id: "substituting-escalation".to_string(),
+        origin: Some("peer".to_string()),
+        reason: None,
+        undelivered: TurnCancelDisposition::Defer,
+        mode: TurnCancelMode::Immediate,
+        honoured_after_step: None,
+    };
+    assert!(matches!(
+        host.resolve_await_event(
+            &escalation,
+            gate_resolution(TurnGateTerminal::CancelRequested(substituted)).unwrap(),
+        )
+        .await
+        .unwrap(),
+        crate::ResolveOutcome::Accepted
+    ));
+
+    let repeated = driver
+        .request_cancel(
+            request(address.clone(), "matching-repeat").undelivered(TurnCancelDisposition::Drop),
+        )
+        .await
+        .unwrap();
+    match repeated.outcome {
+        TurnCancelOutcome::AlreadyRequested(evidence) => {
+            assert_eq!(evidence.request_id, "substituting-escalation");
+            assert_eq!(evidence.mode, TurnCancelMode::Immediate);
+            assert_eq!(
+                evidence.undelivered,
+                TurnCancelDisposition::Drop,
+                "escalation may change the honoured timing, never the accepted policy"
+            );
+        }
+        other => panic!("expected the escalation to be reported, got {other:?}"),
+    }
+
+    let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+        .await
+        .expect("active control");
+    let observed = active
+        .observe_pending_cancel(
+            &scoped_turn_controller(host.as_ref(), &address),
+            TurnCancelPeekIdentity::AfterLlm {
+                protocol_iteration: 0,
+            },
+        )
+        .await
+        .expect("peek the escalated gate pair")
+        .expect("the escalation makes the turn stop here");
+    assert_eq!(
+        observed.undelivered,
+        TurnCancelDisposition::Drop,
+        "the owner honours the accepted policy, not the escalation's copy"
+    );
+    let settled = active
+        .settle_before_commit(host.as_ref(), false, None)
+        .await
+        .expect("settle the cancelled turn")
+        .expect("the gate holds a cancellation");
+    assert_eq!(
+        settled.undelivered,
+        TurnCancelDisposition::Drop,
+        "the committed evidence carries the accepted policy"
+    );
+}
+
+#[tokio::test]
 async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
     let host = Arc::new(NativeEffectHost::default());
     let cancel_address = address("orphan-cancel-winner");

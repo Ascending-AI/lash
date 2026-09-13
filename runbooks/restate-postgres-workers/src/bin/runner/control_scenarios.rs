@@ -157,6 +157,16 @@ pub(super) async fn drive_turn_control_scenarios(
         .await
         .context("request cancellation before turn start")?;
     assert_requested(&before_outcome.outcome, before_evidence_id)?;
+    // The gate is accepted and the workflow has not been submitted, so the
+    // repeated-request contract can be gated deterministically against real
+    // Postgres before anything else touches this address.
+    assert_repeat_requests_preserve_the_accepted_policy(
+        storage,
+        &driver,
+        &turn_address(&before).await?,
+        before_evidence_id,
+    )
+    .await?;
     submit_workflow(ingress_url, &before).await?;
     let before_terminal = driver
         .await_terminal(&turn_address(&before).await?)
@@ -286,7 +296,90 @@ pub(super) async fn drive_turn_control_scenarios(
     assert_recovered_turn_converged(storage.pool(), &TurnId::from(recovery.workflow_id)).await?;
 
     println!(
-        "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence; exact-address-late-noop"
+        "turn-control gates passed: cross-process; cancel-before-start; seal-vs-cancel; owner-crash-recovery; terminal-attach-evidence; exact-address-late-noop; repeated-request-policy"
+    );
+    Ok(())
+}
+
+/// The first accepted request owns the undelivered-input policy. A matching
+/// repeat is idempotent and a conflicting one is a typed conflict that changes
+/// nothing durable: same request row, same intent revision, same affected
+/// inputs.
+async fn assert_repeat_requests_preserve_the_accepted_policy(
+    storage: &PostgresStorage,
+    driver: &TurnWorkDriver,
+    address: &TurnAddress,
+    accepted_request_id: &str,
+) -> Result<()> {
+    use lash_core::SessionStoreFactory as _;
+
+    let store = storage
+        .session_store_factory()
+        .open_existing_store_by_id(&address.session_id)
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("open exact session for repeated-request proof")?
+        .context("repeated-request session disappeared")?;
+    let record_before = store
+        .turn_cancel_request(address)
+        .await
+        .context("read cancellation record before the repeats")?;
+    let intent_before = store
+        .turn_cancel_request_intent(address)
+        .await
+        .context("snapshot cancellation intent before the repeats")?;
+
+    let matching = driver
+        .request_cancel(cancel_request(
+            address.clone(),
+            "e2e-cancel-repeat-matching",
+        ))
+        .await
+        .context("repeat the accepted policy")?;
+    match &matching.outcome {
+        TurnCancelOutcome::AlreadyRequested(evidence) => anyhow::ensure!(
+            evidence.request_id == accepted_request_id
+                && evidence.undelivered == TurnCancelDisposition::Defer,
+            "matching repeat lost the accepted evidence: {evidence:?}"
+        ),
+        other => anyhow::bail!("matching repeat was not idempotent: {other:?}"),
+    }
+
+    let conflicting = driver
+        .request_cancel(
+            cancel_request(address.clone(), "e2e-cancel-repeat-conflicting")
+                .undelivered(TurnCancelDisposition::Drop),
+        )
+        .await
+        .context("repeat with a conflicting policy")?;
+    match &conflicting.outcome {
+        TurnCancelOutcome::PolicyConflict {
+            requested,
+            accepted,
+        } => anyhow::ensure!(
+            *requested == TurnCancelDisposition::Drop
+                && accepted.request_id == accepted_request_id
+                && accepted.undelivered == TurnCancelDisposition::Defer,
+            "policy conflict did not name both policies: requested={requested:?} accepted={accepted:?}"
+        ),
+        other => anyhow::bail!("conflicting repeat did not report a conflict: {other:?}"),
+    }
+
+    anyhow::ensure!(
+        store
+            .turn_cancel_request(address)
+            .await
+            .context("read cancellation record after the repeats")?
+            == record_before,
+        "a repeated request changed the durable cancellation policy"
+    );
+    anyhow::ensure!(
+        store
+            .turn_cancel_request_intent(address)
+            .await
+            .context("snapshot cancellation intent after the repeats")?
+            == intent_before,
+        "a repeated request advanced the closure-CAS intent revision"
     );
     Ok(())
 }

@@ -343,9 +343,11 @@ impl TurnInputStore for PostgresSessionStore {
         }
         // The first policy acceptor is immutable. A stronger same-policy
         // request advances only the closure-CAS revision; effective timing is
-        // recorded by the gate.
+        // recorded by the gate. A request that disagrees about the
+        // undelivered-input disposition is not an escalation: the gate refuses
+        // it, so it leaves the row and its revision untouched.
         match load_turn_cancel_request_tx(&mut tx, session_id, turn_id).await? {
-            Some(existing) if request.mode.is_stronger_than(existing.request.mode) => {
+            Some(existing) if request.escalates(&existing.request) => {
                 let revision = match load_turn_cancel_intent_snapshot_tx(
                     &mut tx, session_id, turn_id,
                 )
