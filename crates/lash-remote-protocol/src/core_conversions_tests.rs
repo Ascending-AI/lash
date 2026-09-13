@@ -608,17 +608,25 @@ fn trigger_subscription_dtos_round_trip_core_values() {
         serde_json::to_value(&record).expect("record json")
     );
 
-    let filter = lash_core::TriggerSubscriptionFilter {
-        registrant_scope_id: Some("session:session-a".to_string()),
-        session_id: None,
-        subscription_key: Some("button-watcher".to_string()),
-        name: Some("button watcher".to_string()),
-        source_type: Some("ui.button.pressed".to_string()),
-        source_key: Some("source-key".to_string()),
-        target: Some(trigger_target_identity()),
-        enabled: Some(true),
-    };
+    let mut filter = lash_core::TriggerSubscriptionFilter::for_session("session-a");
+    filter.subscription_key = Some("button-watcher".to_string());
+    filter.name = Some("button watcher".to_string());
+    filter.source_type = Some("ui.button.pressed".to_string());
+    filter.source_key = Some("source-key".to_string());
+    filter.target = Some(trigger_target_identity());
+    filter.enabled = Some(true);
     let remote = RemoteTriggerSubscriptionFilter::from(filter.clone());
+    assert_eq!(
+        remote.registrant_scope_id.as_deref(),
+        Some("session:session-a")
+    );
+    assert!(
+        serde_json::to_value(&remote)
+            .expect("remote filter json")
+            .get("session_id")
+            .is_none(),
+        "the remote mirror must not emit the removed session spelling"
+    );
     assert!(remote.target.is_some());
     let core = lash_core::TriggerSubscriptionFilter::try_from(remote).expect("core filter");
     assert_eq!(

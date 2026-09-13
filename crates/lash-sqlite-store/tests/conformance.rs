@@ -1166,6 +1166,10 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
 
 #[tokio::test]
 async fn sqlite_trigger_store_satisfies_conformance() {
+    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
+        "SQLite",
+        lash_sqlite_store::testing::trigger_subscription_list_sql,
+    );
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_conformance::trigger_store_reopenable(|| {
         let path = fresh_db_path(&dirs, "triggers.db");

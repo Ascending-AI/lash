@@ -23,18 +23,18 @@ fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolErro
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
-/// Refusal witness (FIG-1123): the generation-62 decoder rejects its immediate
+/// Refusal witness (FIG-2886): the generation-63 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_61_is_refused() {
-    const PREDECESSOR: u32 = 61;
+fn immediate_predecessor_remote_protocol_generation_62_is_refused() {
+    const PREDECESSOR: u32 = 62;
     assert_eq!(
         PREDECESSOR + 1,
         REMOTE_PROTOCOL_VERSION,
         "remote-protocol generation adjacency pin"
     );
     let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-61 remote envelope must be refused");
+        .expect_err("generation-62 remote envelope must be refused");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
@@ -1228,6 +1228,72 @@ fn remote_trigger_dtos_json_round_trip() {
     assert_eq!(value["occurrence_id"], "occurrence:1");
 }
 
+/// Frozen from `RemoteTriggerSubscriptionFilter` at origin/main `11f6b0eb40`,
+/// the immediate pre-v62 protocol source.
+#[derive(serde::Serialize)]
+struct Protocol61TriggerSubscriptionFilterEnvelope {
+    protocol_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    registrant_scope_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subscription_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target: Option<RemoteProcessDefinitionIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+}
+
+#[test]
+fn protocol_61_session_filter_is_refused_before_removed_field_decode() {
+    let predecessor = Protocol61TriggerSubscriptionFilterEnvelope {
+        protocol_version: 61,
+        registrant_scope_id: None,
+        session_id: Some(SessionId::from("session-blue")),
+        subscription_key: None,
+        name: None,
+        source_type: None,
+        source_key: None,
+        target: None,
+        enabled: None,
+    };
+    let wire = serde_json::to_vec(&predecessor).expect("serialize frozen version-61 filter");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect predecessor filter"),
+        serde_json::json!({
+            "protocol_version": 61,
+            "session_id": "session-blue",
+        })
+    );
+    let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(&wire)
+        .expect_err("version-61 session spelling must be refused");
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 61,
+            expected: 62,
+        }
+    ));
+
+    assert_eq!(
+        serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
+            "session-blue",
+        )))
+        .expect("serialize canonical version-62 filter"),
+        serde_json::json!({
+            "protocol_version": 62,
+            "registrant_scope_id": "session:session-blue",
+        })
+    );
+}
+
 #[test]
 fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
     let request = RemoteTriggerOccurrenceRequest::new(
@@ -1481,7 +1547,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 62, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 63, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
