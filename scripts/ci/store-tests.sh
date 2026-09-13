@@ -75,6 +75,10 @@ bazel_test() {
     --test_env=LASH_REQUIRE_POSTGRES \
     --test_env=LASH_REQUIRE_MINIO \
     --test_env=LASH_MINIO_ENDPOINT \
+    --test_env=LASH_MINIO_REGION \
+    --test_env=LASH_MINIO_BUCKET \
+    --test_env=LASH_MINIO_ACCESS_KEY \
+    --test_env=LASH_MINIO_SECRET_KEY \
     --test_env=LASH_CROSS_BACKEND_CASES \
     "$@"
 }
