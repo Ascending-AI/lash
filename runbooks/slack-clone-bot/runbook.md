@@ -424,16 +424,20 @@ Restart the bot (`bash scripts/slack-clone-dev.sh up --port <p>` is idempotent a
 the missing process; launch it non-blocking) and poll the bot's `/healthz`. Boot recovery
 walks the unfinished ledger rows.
 
-**The answer is not immediate, and a deferral is not a failure.** A boot that restarts inside
-the previous boot's session-execution lease TTL cannot take that lease, so the interrupted
-turn's admission is still fenced and recovery reports
-`Deferred { reason: "drain_did_not_reach_admission" }` while leaving the ledger row
-**non-terminal**. A background retry then re-attempts on an interval until the lease lapses.
-So gate on the *settled* outcome, and allow at least one lease TTL (30s by default) plus the
-retry interval before declaring anything — a render gate of a few seconds fails a correct bot.
-Do not gate on a tight wall-clock band: require the ordered sequence kill → bot down with no row
-→ restart and `/healthz` → any `Deferred` retry(s) → one settled `Replied`. Under load, a correct
-recovery took 66.6s from kill to answer; allow that lease/retry sequence and load-related delay.
+**The answer is not immediate, and a deferral is not a failure.** The bot's session-execution
+lease TTL is **15 s** (`examples/slack-clone/src/bot.rs`). Two recovery paths are both
+correct:
+
+- **Fast path** (restart inside the dead boot's TTL): recovery cannot take the lease, logs
+  `Deferred { reason: "drain_did_not_reach_admission" }` / `execution_lane_busy`, leaves the
+  ledger row non-terminal, then a retry settles `settled deferred event … Replied { source: Turn }`.
+- **Slow path** (restart after the 15 s TTL): the lease has lapsed, so the new boot replies
+  directly (`handled … Replied`). The ledger `reply_ts` is at or after the captured
+  `lease_expires_at_ms`.
+
+Gate on outcome facts (exactly one reply in DOM, platform, ledger, and bot log; new
+`lease_fencing_token` > the dead generation; one replacement turn), then classify the path
+from those durable facts. Do not assert a wall-clock latency band.
 
 **Read the final disposition from the settle line.** Three log shapes carry a disposition, and
 a deferred event's outcome only appears in the third:
@@ -446,8 +450,9 @@ phase exists to prove. Require:
   (`Turn` if the queued input was still undrained or was re-drained after the lease lapsed,
   `Transcript` if the pre-kill turn had committed, `Ledger` if the text had been recorded) and
   state why that is consistent with the kill point;
-- record the **deferral evidence**: the `Deferred` disposition, how many retry attempts ran,
-  and the kill-to-answer latency, so the deferral is shown to be bounded rather than lucky;
+- record **which path ran** in the extract (`recovery_path`: `fast` or `slow`) and the
+  matching log evidence (deferral then settle-from-Turn, or direct handled-Replied after
+  expiry);
 - **exactly one** bot row for this mention in both tabs, in `messages`, and in the in-page
   recorder's full history — no duplicate at any instant, which is the recorder's whole purpose;
 - `handled_events` for it at `replied` with a `reply_ts` matching that row;

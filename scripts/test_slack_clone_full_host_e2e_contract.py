@@ -76,6 +76,10 @@ class SlackCloneFullHostE2eContractTest(unittest.TestCase):
         self.assertEqual(layers, ("dom", "platform", "bot", "trace"))
         self.assertEqual(gate_layers, set(layers))
         self.assertNotIn("--mutation", parser_options)
+        source = driver_path.read_text(encoding="utf-8")
+        self.assertNotIn("4.0 <= recovery_latency", source)
+        self.assertIn("recovery_path", source)
+        self.assertIn("kill_lease_expires_at_ms", source)
         self.assertTrue(
             {
                 "checkpoint_ambient",
