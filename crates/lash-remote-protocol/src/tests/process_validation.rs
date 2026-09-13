@@ -62,3 +62,76 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
             .contains("contradicts its outcome")
     );
 }
+
+fn settled_success() -> RemoteProcessAwaitOutput {
+    RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
+            control: None,
+        },
+    }
+}
+
+fn settled_cancelled() -> RemoteProcessAwaitOutput {
+    RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                message: "cancelled".to_string(),
+                source: RemoteProcessToolFailureSource::Cancellation,
+                raw: None,
+            }),
+            control: None,
+        },
+    }
+}
+
+#[test]
+fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
+    let mismatched = RemoteProcessEventSemantics {
+        terminal: Some(RemoteProcessTerminalSemantics {
+            status: RemoteProcessStatus::Completed,
+            outcome: settled_cancelled(),
+        }),
+        wake: None,
+    };
+    assert!(
+        mismatched
+            .validate("RemoteProcessEventSemantics")
+            .expect_err("mismatched terminal status and outcome must be rejected")
+            .to_string()
+            .contains("contradicts its outcome")
+    );
+
+    let nonterminal = RemoteProcessEventSemantics {
+        terminal: Some(RemoteProcessTerminalSemantics {
+            status: RemoteProcessStatus::Running,
+            outcome: settled_success(),
+        }),
+        wake: None,
+    };
+    assert!(
+        nonterminal
+            .validate("RemoteProcessEventSemantics")
+            .expect_err("nonterminal status in the terminal slot must be rejected")
+            .to_string()
+            .contains("must not carry an outcome")
+    );
+
+    let no_longer_retained = RemoteProcessEventSemantics {
+        terminal: Some(RemoteProcessTerminalSemantics {
+            status: RemoteProcessStatus::Completed,
+            outcome: RemoteProcessAwaitOutput::NoLongerRetained {
+                terminal_label: "completed".to_string(),
+                pruned_at_ms: 1,
+            },
+        }),
+        wake: None,
+    };
+    assert!(
+        no_longer_retained
+            .validate("RemoteProcessEventSemantics")
+            .expect_err("NoLongerRetained must not be a terminal event outcome")
+            .to_string()
+            .contains("contradicts its outcome")
+    );
+}

@@ -577,6 +577,31 @@ pub struct RemoteProcessRecord {
     pub outcome: Option<RemoteProcessAwaitOutput>,
 }
 
+fn validate_status_and_outcome(
+    type_name: &'static str,
+    status: RemoteProcessStatus,
+    outcome: Option<&RemoteProcessAwaitOutput>,
+) -> Result<(), RemoteProtocolError> {
+    match (status.is_terminal(), outcome) {
+        (false, None) => Ok(()),
+        (false, Some(_)) => Err(RemoteProtocolError::InvalidEnvelope {
+            type_name,
+            message: format!("non-terminal process status `{status:?}` must not carry an outcome"),
+        }),
+        (true, None) => Err(RemoteProtocolError::InvalidEnvelope {
+            type_name,
+            message: format!("terminal process status `{status:?}` must carry an outcome"),
+        }),
+        (true, Some(outcome)) if outcome.terminal_status() != Some(status) => {
+            Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!("process status `{status:?}` contradicts its outcome"),
+            })
+        }
+        (true, Some(_)) => Ok(()),
+    }
+}
+
 impl RemoteProcessRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
@@ -608,35 +633,7 @@ impl RemoteProcessRecord {
         if let Some(outcome) = &self.outcome {
             outcome.validate(type_name)?;
         }
-        match (self.status.is_terminal(), self.outcome.as_ref()) {
-            (false, None) => {}
-            (false, Some(_)) => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: format!(
-                        "non-terminal process status `{:?}` must not carry an outcome",
-                        self.status
-                    ),
-                });
-            }
-            (true, None) => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: format!(
-                        "terminal process status `{:?}` must carry an outcome",
-                        self.status
-                    ),
-                });
-            }
-            (true, Some(outcome)) if outcome.terminal_status() != Some(self.status) => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: format!("process status `{:?}` contradicts its outcome", self.status),
-                });
-            }
-            (true, Some(_)) => {}
-        }
-        Ok(())
+        validate_status_and_outcome(type_name, self.status, self.outcome.as_ref())
     }
 }
 
@@ -993,6 +990,7 @@ impl RemoteProcessEventSemantics {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         if let Some(terminal) = &self.terminal {
             terminal.outcome.validate(type_name)?;
+            validate_status_and_outcome(type_name, terminal.status, Some(&terminal.outcome))?;
         }
         if let Some(wake) = &self.wake {
             wake.validate(type_name)?;
