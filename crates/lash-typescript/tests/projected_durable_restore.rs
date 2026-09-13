@@ -207,3 +207,47 @@ fn restored_state_with_a_nested_placeholder() -> State {
     let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
     State::from_snapshot(decoded)
 }
+
+/// `cause` and `errors` are ordinary values on a heap `Error`, persisted by the
+/// heap encoders, so a projection reaches a restore through them as surely as
+/// through a list. The refresh walk covers them (FIG-2865).
+#[tokio::test(flavor = "current_thread")]
+async fn a_projection_inside_an_error_refreshes_across_a_park() {
+    let program = compile(
+        r#"
+        const failure = new Error("boom", { cause: report });
+        const group = new AggregateError([report], "all failed");
+        await tools.ping({});
+        finish(failure.cause + "/" + group.errors[0]);
+        "#,
+    );
+
+    let host = RestoreHost::live();
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&program, &mut state, &host).expect("vm should build");
+    assert!(matches!(
+        vm.run_process_until_effect().await,
+        Ok(VmRunOutcome::EffectCompleted)
+    ));
+    let continuation = vm
+        .suspend()
+        .expect("a turn holding a projection in an error must be capturable");
+    drop(vm);
+
+    let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
+    let restored: VmContinuation =
+        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+
+    let host = RestoreHost::live();
+    let mut resumed =
+        Vm::resume_from(restored, &program, &host).expect("continuation should resume");
+    assert_eq!(
+        resumed
+            .run_process_until_effect()
+            .await
+            .expect("the resumed turn should finish"),
+        VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::String(
+            "live/live".into()
+        )))
+    );
+}

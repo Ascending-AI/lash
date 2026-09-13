@@ -88,9 +88,18 @@ pub(crate) fn refresh_heap(heap: &mut Heap, bindings: &ProjectedBindings) {
                 refresh_value(&mut object.input, bindings);
                 refresh_value(&mut object.groups, bindings);
             }
+            // `cause` and `errors` are ordinary values the heap encoders
+            // persist, so a projection reaches a restore through them too.
+            HeapObject::Error(object) => {
+                if let Some(cause) = object.cause.as_mut() {
+                    refresh_value(cause, bindings);
+                }
+                if let Some(errors) = object.errors.as_mut() {
+                    refresh_value(errors, bindings);
+                }
+            }
             HeapObject::RegExp(_)
             | HeapObject::Date(_)
-            | HeapObject::Error(_)
             | HeapObject::Url(_)
             | HeapObject::UrlSearchParams(_) => {}
         }
