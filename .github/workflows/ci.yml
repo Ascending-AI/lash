@@ -441,6 +441,7 @@ jobs:
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py
+          python3 scripts/test_kiln_service_manifest.py
           python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py
           python3 scripts/test_publish_workspace.py

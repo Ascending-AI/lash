@@ -56,12 +56,19 @@ portable default-feature run.
 | Command | Coverage |
 | --- | --- |
 | `kiln test` | Deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `kiln test --service <pg14\|pg16\|pg18\|s3\|all>` | The PostgreSQL and MinIO suites, against a container this command starts and removes. |
 | `scripts/dev-test.sh` | Classifies the diff like CI and runs only those local families. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
-The Cargo-owned set comprises PostgreSQL and S3 stores; Restate and
-`lash-runtime` unit tests; nested and heavy suites; trybuild; TypeScript and
-frontend assets; feature matrices; Clippy; and formatting.
+`kiln test --service` runs the same `scripts/ci/store-tests.sh` suites the
+`Test Postgres store` and `Test S3 store` jobs run, on binaries built from the
+shared pool, and closes by printing the service-shaped cases it did **not**
+cover with the exact Cargo recipe for each. See
+[`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md).
+
+The remaining Cargo-owned set comprises Restate and `lash-runtime` unit tests;
+nested and heavy suites; trybuild; TypeScript and frontend assets; feature
+matrices; Clippy; and formatting.
 
 Install the repository's commit hook in each regular checkout with
 `prek install --hook-type pre-commit`; new warm forks install it automatically.

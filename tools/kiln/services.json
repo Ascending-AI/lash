@@ -1,0 +1,188 @@
+{
+  "_comment": [
+    "Service-backed test suites for `kiln test --service <name>`.",
+    "",
+    "Each service mirrors one CI job: the same image and image settings, the",
+    "same environment variable NAMES, and the same `scripts/ci/store-tests.sh`",
+    "suites in the same order. The host port is chosen by Kiln at run time, so",
+    "every URL here interpolates {port}; nothing may hardcode 5432 or 9000.",
+    "",
+    "Local runs take the trusted path (BAZEL_TRUSTED=true): the binaries are",
+    "built from the shared Bazel pool and executed here against the container,",
+    "never from a cached test result. The untrusted Cargo fallback exists for",
+    "fork pull requests and is not reachable from here.",
+    "",
+    "The steps are the union of what the PG16 primary lane and the S3 job run",
+    "on a push to main -- the full trunk set, not the reduced pull-request set.",
+    "scripts/test_kiln_service_manifest.py holds this file to ci.yml.",
+    "",
+    "`not_covered` is the closing report: the service-shaped work that stays on",
+    "Cargo, sourced from docs/agents/hermetic-build.md, so a green run here is",
+    "never mistaken for full service coverage."
+  ],
+  "services": {
+    "pg14": {
+      "description": "PostgreSQL 14 compatibility lane (catalog artifact + version stamp)",
+      "image": "postgres:14-alpine",
+      "command": ["-c", "shared_preload_libraries=pg_stat_statements"],
+      "port": 5432,
+      "env": {
+        "POSTGRES_USER": "lash",
+        "POSTGRES_PASSWORD": "lash",
+        "POSTGRES_DB": "lash"
+      },
+      "ready": {
+        "exec": ["pg_isready", "-U", "lash", "-d", "lash"],
+        "attempts": 60,
+        "interval_seconds": 2
+      },
+      "test_env": {
+        "BAZEL_TRUSTED": "true",
+        "LASH_POSTGRES_DATABASE_URL": "postgres://lash:lash@127.0.0.1:{port}/lash",
+        "LASH_REQUIRE_POSTGRES": "1"
+      },
+      "steps": [
+        {
+          "name": "Test PostgreSQL catalog compatibility",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-catalog-compatibility"]
+        }
+      ]
+    },
+    "pg16": {
+      "description": "PostgreSQL 16 primary lane (conformance, pool-wait, agent scenario, cross-backend)",
+      "image": "postgres:16-alpine",
+      "command": ["-c", "shared_preload_libraries=pg_stat_statements"],
+      "port": 5432,
+      "env": {
+        "POSTGRES_USER": "lash",
+        "POSTGRES_PASSWORD": "lash",
+        "POSTGRES_DB": "lash"
+      },
+      "ready": {
+        "exec": ["pg_isready", "-U", "lash", "-d", "lash"],
+        "attempts": 60,
+        "interval_seconds": 2
+      },
+      "test_env": {
+        "BAZEL_TRUSTED": "true",
+        "LASH_POSTGRES_DATABASE_URL": "postgres://lash:lash@127.0.0.1:{port}/lash",
+        "LASH_REQUIRE_POSTGRES": "1"
+      },
+      "steps": [
+        {
+          "name": "Test Postgres store (conformance and attempt atomicity)",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-store"]
+        },
+        {
+          "name": "Test runtime pool-wait binding",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-pool-wait"]
+        },
+        {
+          "name": "Test runtime Postgres agent scenarios",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-agent-scenario"]
+        },
+        {
+          "name": "Test cross-backend store differential",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-cross-backend"],
+          "env": { "LASH_CROSS_BACKEND_CASES": "4" }
+        }
+      ]
+    },
+    "pg18": {
+      "description": "PostgreSQL 18 compatibility lane (catalog artifact + version stamp)",
+      "image": "postgres:18-alpine",
+      "command": ["-c", "shared_preload_libraries=pg_stat_statements"],
+      "port": 5432,
+      "env": {
+        "POSTGRES_USER": "lash",
+        "POSTGRES_PASSWORD": "lash",
+        "POSTGRES_DB": "lash"
+      },
+      "ready": {
+        "exec": ["pg_isready", "-U", "lash", "-d", "lash"],
+        "attempts": 60,
+        "interval_seconds": 2
+      },
+      "test_env": {
+        "BAZEL_TRUSTED": "true",
+        "LASH_POSTGRES_DATABASE_URL": "postgres://lash:lash@127.0.0.1:{port}/lash",
+        "LASH_REQUIRE_POSTGRES": "1"
+      },
+      "steps": [
+        {
+          "name": "Test PostgreSQL catalog compatibility",
+          "run": ["bash", "scripts/ci/store-tests.sh", "pg-catalog-compatibility"]
+        }
+      ]
+    },
+    "s3": {
+      "description": "MinIO object store (S3 conformance + attachment blob-store differential)",
+      "image": "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z",
+      "command": ["server", "/data"],
+      "port": 9000,
+      "env": {
+        "MINIO_ROOT_USER": "minioadmin",
+        "MINIO_ROOT_PASSWORD": "minioadmin"
+      },
+      "ready": {
+        "host": [
+          "docker", "run", "--rm", "--network", "host",
+          "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z",
+          "alias", "set", "kiln", "http://127.0.0.1:{port}", "minioadmin", "minioadmin"
+        ],
+        "attempts": 60,
+        "interval_seconds": 1
+      },
+      "setup": [
+        [
+          "docker", "run", "--rm", "--network", "host",
+          "--entrypoint", "/bin/sh",
+          "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z", "-c",
+          "mc alias set kiln http://127.0.0.1:{port} minioadmin minioadmin >/dev/null && mc mb --ignore-existing kiln/lash-attachments"
+        ]
+      ],
+      "test_env": {
+        "BAZEL_TRUSTED": "true",
+        "LASH_REQUIRE_MINIO": "1",
+        "LASH_MINIO_ENDPOINT": "http://127.0.0.1:{port}"
+      },
+      "steps": [
+        {
+          "name": "Test S3 store conformance",
+          "run": ["bash", "scripts/ci/store-tests.sh", "s3-store"]
+        },
+        {
+          "name": "Test attachment blob-store differential",
+          "run": ["bash", "scripts/ci/store-tests.sh", "s3-attachment-differential"]
+        }
+      ]
+    }
+  },
+  "not_covered": [
+    {
+      "case": "Test heavy suites",
+      "reason": "the fault-matrix chunks fork real cargo test invocations of their own, so neither Bazel nor a container owns them",
+      "recipe": "cargo nextest run --profile ci-heavy --workspace --locked --no-fail-fast"
+    },
+    {
+      "case": "Build worker release artifacts",
+      "reason": "--release is a Cargo-owned artifact contract (thin LTO, stripping) outside the generated development graph",
+      "recipe": "cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins"
+    },
+    {
+      "case": "Restate + Postgres + MinIO Workers",
+      "reason": "shell E2E drivers over release binaries rather than any Cargo or Bazel test label",
+      "recipe": "just restate-postgres-workers-e2e"
+    },
+    {
+      "case": "slack-clone e2e feature",
+      "reason": "the e2e feature is outside the resolved default workspace graph, so it has no Bazel label",
+      "recipe": "cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings"
+    },
+    {
+      "case": "Functional E2E process operations",
+      "reason": "a shell driver that stands up its own MinIO on a non-9000 port",
+      "recipe": "bash scripts/process-operations-e2e.sh"
+    }
+  ]
+}

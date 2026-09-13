@@ -35,6 +35,22 @@ set -euo pipefail
 
 suite="${1:?usage: store-tests.sh <suite>}"
 trusted="${BAZEL_TRUSTED:?BAZEL_TRUSTED must be 'true' or 'false'}"
+# CI exports both of these from .github/actions/bazel-shared-cache, and there
+# they must stay required: an unset value would mean the credentials step did
+# not run and the build would silently miss the shared cache. Outside CI --
+# `kiln test --service`, which starts a container and then runs these same
+# suites -- the shared cache is configured by the checkout's .bazelrc and
+# .kiln.bazelrc instead, so the defaults below name exactly what `kiln build`
+# uses and the output base the .bazelrc `startup` line already pins.
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  : "${BAZEL_SHARED_CACHE_FLAGS:?BAZEL_SHARED_CACHE_FLAGS must be set in CI}"
+  : "${BAZEL_OUTPUT_USER_ROOT:?BAZEL_OUTPUT_USER_ROOT must be set in CI}"
+fi
+# `--config=shared` is the same pool configuration `kiln build` uses, so the
+# compiles below are shared-cache hits and pool actions. The test spawn itself
+# must stay on this machine: the service container publishes its port on this
+# host's loopback, and a TestRunner action on a pool worker would reach nothing.
+: "${BAZEL_SHARED_CACHE_FLAGS=--config=shared --strategy=TestRunner=local}"
 case "${trusted}" in
   true | false) ;;
   *)
@@ -47,9 +63,13 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
 bazel_test() {
+  local startup=()
+  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
+    startup=(--output_user_root="${BAZEL_OUTPUT_USER_ROOT}")
+  fi
   # shellcheck disable=SC2086
-  bazel --output_user_root="${BAZEL_OUTPUT_USER_ROOT:?}" test \
-    ${BAZEL_SHARED_CACHE_FLAGS:?} \
+  bazel "${startup[@]}" test \
+    ${BAZEL_SHARED_CACHE_FLAGS} \
     --nocache_test_results \
     --modify_execution_info=TestRunner=+no-cache,TestRunner=+no-remote-cache,TestRunner=+no-remote-exec \
     --local_test_jobs=1 \
@@ -59,6 +79,10 @@ bazel_test() {
     --test_env=LASH_REQUIRE_POSTGRES \
     --test_env=LASH_REQUIRE_MINIO \
     --test_env=LASH_MINIO_ENDPOINT \
+    --test_env=LASH_MINIO_REGION \
+    --test_env=LASH_MINIO_BUCKET \
+    --test_env=LASH_MINIO_ACCESS_KEY \
+    --test_env=LASH_MINIO_SECRET_KEY \
     --test_env=LASH_CROSS_BACKEND_CASES \
     "$@"
 }
