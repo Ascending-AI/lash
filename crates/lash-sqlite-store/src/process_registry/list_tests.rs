@@ -7,7 +7,8 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
         .expect("install process schema");
     let mut stmt = conn
         .prepare(&format!(
-            "EXPLAIN QUERY PLAN {LIST_PROCESSES_RECENT_RETIRED_SQL}"
+            "EXPLAIN QUERY PLAN {}",
+            LIST_PROCESSES_RECENT_RETIRED_SQL.as_str()
         ))
         .expect("prepare recently retired query plan");
     let plan = stmt
@@ -55,7 +56,8 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
         .expect("install process schema");
     let mut stmt = conn
         .prepare(&format!(
-            "EXPLAIN QUERY PLAN {LIST_OBSERVED_RECENT_RETIRED_SQL}"
+            "EXPLAIN QUERY PLAN {}",
+            LIST_OBSERVED_RECENT_RETIRED_SQL.as_str()
         ))
         .expect("prepare observed query plan");
     let plan = stmt

@@ -315,9 +315,7 @@ impl SqliteProcessRegistry {
                     .map_err(process_sqlite_error)?;
                     if let Some(previous) = previous {
                         tx.execute(
-                            "UPDATE process_wake_deliveries
-                             SET state = 'discarded', discard_reason = 'retargeted'
-                             WHERE process_id = ?1 AND target_session_id = ?2 AND state = 'pending'",
+                            crate::process_registry::DISCARD_RETARGETED_WAKES_SQL.as_str(),
                             params![process_id.as_str(), previous],
                         )
                         .map_err(process_sqlite_error)?;
@@ -652,11 +650,7 @@ impl SqliteProcessRegistry {
         };
         let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
         conn.execute(
-            "INSERT OR IGNORE INTO process_wake_deliveries (
-                delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
-                claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
-                discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, 0, NULL, ?6, ?7, NULL, ?8)",
+            crate::process_registry::INSERT_WAKE_DELIVERY_SQL.as_str(),
             params![
                 delivery.delivery_id.as_str(),
                 delivery.wake.process_id.as_str(),

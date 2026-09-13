@@ -3,23 +3,31 @@ use lash_sansio::ProcessId;
 
 /// The prune eligibility predicate. The prune appends `FOR UPDATE`; the
 /// survey reads it as is.
-const PRUNABLE_TERMINAL_SELECT: &str = "SELECT process_id, record_json FROM lash_processes
-         WHERE status NOT IN ('running', 'waiting')
+pub(crate) static PRUNABLE_TERMINAL_SELECT: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| {
+        format!(
+            "SELECT process_id, record_json FROM lash_processes
+         WHERE {retired}
            AND updated_at_ms < $1
            AND ($2::BIGINT IS NULL OR change_seq <= $2)
            AND NOT EXISTS (
                SELECT 1 FROM lash_process_wake_deliveries AS delivery
                WHERE delivery.process_id = lash_processes.process_id
-                 AND delivery.state IN ('pending', 'enqueuing')
+                 AND {undelivered}
            )
            AND NOT EXISTS (
                SELECT 1 FROM lash_process_parent_end_plans AS plan
                WHERE plan.process_id = lash_processes.process_id
            )
-         ORDER BY process_id ASC";
+         ORDER BY process_id ASC",
+            retired = crate::process_lifecycle_sql::retired_process_status("status"),
+            undelivered =
+                crate::process_lifecycle_sql::undelivered_wake_delivery_state("delivery.state"),
+        )
+    });
 
 fn prune_terminal_sql() -> String {
-    format!("{PRUNABLE_TERMINAL_SELECT}\n         FOR UPDATE")
+    format!("{}\n         FOR UPDATE", PRUNABLE_TERMINAL_SELECT.as_str())
 }
 
 fn watermark_change_seq(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
@@ -66,7 +74,7 @@ pub(super) async fn prunable_terminal_processes(
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     select_prunable(
         &registry.pool,
-        PRUNABLE_TERMINAL_SELECT,
+        PRUNABLE_TERMINAL_SELECT.as_str(),
         cutoff,
         watermark_change_seq(watermark),
         filter.as_ref(),

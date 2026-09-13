@@ -58,10 +58,18 @@ pub mod store_backend_support {
     use lash_sansio::SessionId;
 
     mod append_identity;
+    mod process_lifecycle_sql;
     pub mod required_constraints;
     mod session_meta;
 
     pub use append_identity::decode_append_request_identity;
+    pub use process_lifecycle_sql::{
+        live_process_status_predicate_sql, live_process_statuses_sql, process_status_sql_literal,
+        process_status_sql_literal_list, retired_process_status_predicate_sql,
+        retired_process_statuses_sql, undelivered_wake_delivery_state_predicate_sql,
+        undelivered_wake_delivery_states_sql, wake_delivery_state_sql_literal,
+        wake_delivery_state_sql_literal_list,
+    };
     pub use session_meta::{
         CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
     };
