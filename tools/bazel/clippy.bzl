@@ -53,7 +53,10 @@ def _lash_clippy_aspect_impl(target, ctx):
 
     crate_info = rust_clippy_action.get_clippy_ready_crate_info(target, ctx)
     if not crate_info:
-        return []
+        # Report the empty group rather than no provider at all: the rule below
+        # turns a target that contributes no marker into an analysis failure,
+        # and a silently absent provider would look the same as a skipped dep.
+        return [OutputGroupInfo(clippy_checks = depset())]
 
     marker = ctx.actions.declare_file(
         ctx.label.name + ".lash-clippy.ok",
@@ -130,11 +133,24 @@ lash_clippy_aspect = aspect(
 )
 
 def _lash_rust_clippy_impl(ctx):
-    return [DefaultInfo(files = depset(transitive = [
-        dep[OutputGroupInfo].clippy_checks
-        for dep in ctx.attr.deps
-        if "clippy_checks" in dir(dep[OutputGroupInfo])
-    ]))]
+    # Fail closed. A dep that contributes no marker was not linted, and dropping
+    # it here would leave this target green while its lints went unasserted --
+    # exactly what a future rule kind with no `CrateInfo` would do. The only
+    # targets allowed out of the partition are the ones the generator never puts
+    # in `deps`, and each of those carries a `clippy_exempt` reason in
+    # `tools/bazel/target-inventory.json`.
+    markers = []
+    unlinted = []
+    for dep in ctx.attr.deps:
+        group = dep[OutputGroupInfo]
+        checks = group.clippy_checks if "clippy_checks" in dir(group) else depset()
+        if not checks.to_list():
+            unlinted.append(str(dep.label))
+            continue
+        markers.append(checks)
+    if unlinted:
+        fail("clippy produced no marker for: {}".format(", ".join(sorted(unlinted))))
+    return [DefaultInfo(files = depset(transitive = markers))]
 
 lash_rust_clippy = rule(
     doc = "Runs clippy over the listed first-party crate targets.",
