@@ -148,8 +148,9 @@ pub use usage_activity::*;
 // refuses peers that cannot preserve the retention contract.
 // Window 61: FIG-2960 requires an explicit lifecycle policy on process starts and records.
 // Window 62: FIG-2961 adds typed cancellation requests and cancellation origins.
-// Window 63: FIG-2875 carries durable turn-cancellation control envelopes.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 63;
+// Window 63: FIG-2886 removes the duplicate session spelling from trigger-subscription filters.
+// Window 64: FIG-2875 carries durable turn-cancellation control envelopes.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 64;
 
 /// One versioned remote-protocol message.
 ///
@@ -184,6 +185,88 @@ impl<T> Envelope<T> {
     }
 }
 
+struct EnvelopeBody<T>(T);
+
+impl<'de, T> serde::Deserialize<'de> for EnvelopeBody<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor<T>(std::marker::PhantomData<fn() -> T>);
+
+        impl<'de, T> serde::de::Visitor<'de> for Visitor<T>
+        where
+            T: serde::Deserialize<'de>,
+        {
+            type Value = EnvelopeBody<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a remote protocol envelope object")
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(
+                    ProtocolVersionSkippingMapAccess {
+                        inner: map,
+                        seen: std::collections::BTreeSet::new(),
+                    },
+                ))
+                .map(EnvelopeBody)
+            }
+        }
+
+        deserializer.deserialize_map(Visitor(std::marker::PhantomData))
+    }
+}
+
+struct ProtocolVersionSkippingMapAccess<A> {
+    inner: A,
+    seen: std::collections::BTreeSet<String>,
+}
+
+impl<'de, A> serde::de::MapAccess<'de> for ProtocolVersionSkippingMapAccess<A>
+where
+    A: serde::de::MapAccess<'de>,
+{
+    type Error = A::Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        loop {
+            let Some(name) = self.inner.next_key::<String>()? else {
+                return Ok(None);
+            };
+            if !self.seen.insert(name.clone()) {
+                return Err(<A::Error as serde::de::Error>::custom(format_args!(
+                    "duplicate field `{name}`"
+                )));
+            }
+            if name == "protocol_version" {
+                self.inner.next_value::<serde::de::IgnoredAny>()?;
+                continue;
+            }
+            return seed
+                .deserialize(serde::de::value::StringDeserializer::<A::Error>::new(name))
+                .map(Some);
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        self.inner.next_value_seed(seed)
+    }
+}
+
 impl<T> Envelope<T>
 where
     T: serde::de::DeserializeOwned,
@@ -211,7 +294,13 @@ where
                 expected: expected_version,
             });
         }
-        serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)
+
+        let EnvelopeBody(body) =
+            serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
+        Ok(Self {
+            protocol_version: probe.protocol_version,
+            body,
+        })
     }
 }
 

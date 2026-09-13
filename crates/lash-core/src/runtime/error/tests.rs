@@ -187,6 +187,7 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode
         | RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant
         | RuntimeErrorCode::RuntimeEffectEnvelopeHash
+        | RuntimeErrorCode::RuntimeEffectEnvelopeVersion
         | RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled
         | RuntimeErrorCode::RuntimeEffectGroupChildCancelled
         | RuntimeErrorCode::RuntimeEffectGroupShape
@@ -371,6 +372,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalDecode,
         RuntimeErrorCode::RuntimeEffectEnvelopeCanonicalHashInvariant,
         RuntimeErrorCode::RuntimeEffectEnvelopeHash,
+        RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
         RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
         RuntimeErrorCode::RuntimeEffectGroupChildCancelled,
         RuntimeErrorCode::RuntimeEffectGroupDrainDeferred,

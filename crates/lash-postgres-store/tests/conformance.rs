@@ -2217,6 +2217,10 @@ async fn postgres_process_continuation_store_satisfies_conformance_when_configur
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_trigger_store_satisfies_conformance_when_configured() {
+    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
+        "PostgreSQL",
+        lash_postgres_store::testing::trigger_subscription_list_sql,
+    );
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres trigger conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;

@@ -1508,8 +1508,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 recorded_envelope_json,
                 stored_envelope_hash,
             } => {
-                let recorded_envelope = serde_json::from_str(&recorded_envelope_json)
-                    .map_err(|err| vocabulary.decode_error(err))?;
+                let recorded_envelope =
+                    CanonicalRuntimeEffectEnvelope::decode(&recorded_envelope_json)?;
                 Ok(PreparedEffect::ReplayMismatch {
                     recorded_envelope: Box::new(recorded_envelope),
                     stored_envelope_hash,

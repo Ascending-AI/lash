@@ -1220,6 +1220,63 @@ pub(super) fn restate_handler_controller_disallows_concurrent_effect_calls() {
 }
 
 #[test]
+pub(super) fn restate_replay_refuses_pre_effect_19_session_list_envelope() {
+    const PREDECESSOR_SESSION_LIST_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"trigger:list\"},\"effect_id\":\"trigger:list\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"trigger\",\"command\":{\"op\":\"list\",\"owner_scope\":{\"type\":\"session\",\"session_id\":\"session-blue\"},\"filter\":{\"session_id\":\"session-blue\"}}}}","hash":"51ba8b5ff2d3fe2ff5f5009d4f8fc42946b11e86575901a64393b3e01c912db1"}"#;
+
+    let recorded_envelope: lash_core::facade_support::CanonicalRuntimeEffectEnvelope =
+        serde_json::from_str(PREDECESSOR_SESSION_LIST_ENVELOPE)
+            .expect("deserialize the Restate journal's predecessor envelope directly");
+    let recorded_json: serde_json::Value =
+        serde_json::from_str(recorded_envelope.json()).expect("inspect predecessor envelope");
+    assert_eq!(
+        recorded_json.pointer("/command/command/filter/session_id"),
+        Some(&serde_json::json!("session-blue")),
+        "the Restate fixture must carry the retired shape"
+    );
+
+    let reconstructed = RuntimeEffectEnvelope::new(
+        RuntimeEffectInvocation::new(
+            EffectAddress::new(
+                ExecutionScope::turn("session-blue", "turn-blue"),
+                "trigger:list",
+            )
+            .expect("valid trigger-list address"),
+            RuntimeAttribution::for_session("session-blue"),
+            "trigger:list",
+        ),
+        RuntimeEffectCommand::Trigger {
+            command: Box::new(lash_core::TriggerCommand::List {
+                owner_scope: lash_core::TriggerOwnerScope::session("session-blue"),
+                filter: lash_core::TriggerSubscriptionFilter::for_session("session-blue"),
+            }),
+        },
+    )
+    .canonical_form()
+    .expect("canonical current trigger-list envelope");
+    let journal_wire = serde_json::to_vec(&RecordedRuntimeEffect {
+        envelope: Arc::new(recorded_envelope),
+        outcome: Ok(RuntimeEffectOutcome::Sleep),
+    })
+    .expect("encode predecessor Restate journal entry");
+    let JournaledEffectRecord::Recorded(recorded) = serde_json::from_slice(&journal_wire)
+        .expect("replay predecessor through JournaledEffectRecord deserialization")
+    else {
+        panic!("predecessor effect must decode as a recorded journal entry");
+    };
+
+    let error = validate_recorded_effect_envelope(recorded, &reconstructed, None)
+        .expect_err("Restate replay must refuse the pre-effect-19 envelope before comparison");
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
+    );
+    assert_ne!(
+        error.code,
+        lash_core::RuntimeErrorCode::WorkerReplacementAbort
+    );
+}
+
+#[test]
 pub(super) fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
     let recorded_envelope = test_sleep_envelope(1)
         .canonical_form()

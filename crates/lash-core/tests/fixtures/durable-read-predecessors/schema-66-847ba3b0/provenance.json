@@ -2,9 +2,9 @@
   "schema": "lash.durable-read.predecessor-provenance.v1",
   "fixture_schema_version": 66,
   "source_commit": "847ba3b0b3428e8c81c4459ec9ee2d7d870ea1a4",
-  "relationship": "main immediately before the FIG-2875 durable cancellation authority cutover",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2886 schema-67 effect-envelope cutover",
   "artifacts": {
-    "sqlite-expected.json": "8bad528c8ee94a4d564f483d4accf385458f585c805b9f1d8dcc8c2c7b8dc2f3",
-    "postgres-expected.json": "d10c31f36393cc7dd313e2fc45361a25e62d5ad106a740a3e04431e1117d5092"
+    "postgres-expected.json": "d10c31f36393cc7dd313e2fc45361a25e62d5ad106a740a3e04431e1117d5092",
+    "sqlite-expected.json": "8bad528c8ee94a4d564f483d4accf385458f585c805b9f1d8dcc8c2c7b8dc2f3"
   }
 }

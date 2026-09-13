@@ -1147,6 +1147,10 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
 
 #[tokio::test]
 async fn sqlite_trigger_store_satisfies_conformance() {
+    lash_conformance::trigger_subscription_owner_filter_is_pushed_down(
+        "SQLite",
+        lash_sqlite_store::testing::trigger_subscription_list_sql,
+    );
     let dirs = Arc::new(Mutex::new(Vec::new()));
     lash_conformance::trigger_store_reopenable(|| {
         let path = fresh_db_path(&dirs, "triggers.db");
@@ -1185,7 +1189,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
+    assert!(message.contains("supports schema version 20"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1193,12 +1197,12 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_retained_generation_18_schema_before_serving() {
-    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 18;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 19);
+async fn sqlite_effect_controller_rejects_retained_generation_19_schema_before_serving() {
+    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 19;
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 20);
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retained-generation-18-effects.db");
+    let path = dir.path().join("retained-generation-19-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
     conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
         .expect("stamp retained prior effect schema");
@@ -1213,8 +1217,8 @@ async fn sqlite_effect_controller_rejects_retained_generation_18_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 19"));
-    assert!(message.contains("database reports version 18"));
+    assert!(message.contains("supports schema version 20"));
+    assert!(message.contains("database reports version 19"));
 }
 
 #[tokio::test]

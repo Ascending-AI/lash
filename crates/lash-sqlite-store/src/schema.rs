@@ -1119,13 +1119,15 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 // children, groups, and await-event promises in one transaction and leaves a
 // tombstone every admission path refuses. Pre-17 effect databases are
 // rejected at open; there is no migration arm.
-// Version 18 adds owner-side cancellation-closure participants. This makes
+// Version 18 persists the admitted execution scope with every replay key.
+// Pre-18 journals are rejected because their keys cannot identify the scope
+// whose authority admitted the effect.
+// Version 19 rejects the retired trigger-list envelope shape. Older journals
+// are recreated rather than replayed across this encoding cutover.
+// Version 20 adds owner-side cancellation-closure participants. This makes
 // scope retirement serialize with authorization held in separate session
-// catalogs; pre-18 effect databases are rejected and recreated.
-// The other version-18 parent persists the admitted execution scope with every
-// replay key. Version 19 composes both incompatible version-18 shapes, so either
-// parent journal is rejected and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 19;
+// catalogs; pre-20 effect databases are rejected and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 20;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

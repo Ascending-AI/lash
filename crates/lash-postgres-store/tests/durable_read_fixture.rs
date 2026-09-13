@@ -19,24 +19,28 @@ mod fixture;
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
 const PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-67-02339d79/postgres-expected.json",
 ];
 const PREVIOUS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-11f6b0eb/postgres-expected.json",
-    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-66-847ba3b0/postgres-expected.json",
 ];
 const HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-11f6b0eb/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-2bc03f0b/postgres-expected.json",
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-65-6a89236a/postgres-expected.json",
+];
+const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-dba005a2/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-64-25d7281b/postgres-expected.json",
 ];
-const OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-fe2964c7/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-037d9999/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-1b2b8afc/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-75082e3d/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-63-8bbd7b94/postgres-expected.json",
 ];
-const ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+const EARLIEST_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-7861e438/postgres-expected.json",
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-62-ee717fab/postgres-expected.json",
 ];
