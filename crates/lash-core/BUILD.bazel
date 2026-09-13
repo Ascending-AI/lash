@@ -50,6 +50,7 @@ lash_rust_unit_test(
         "perf-witness",
         "testing",
     ],
+    exec_properties = {"memory_kb": "8388608"},
     extra_compile_data = [],
     extra_data = [
         "//:confidence_gate_scripts",

@@ -195,6 +195,11 @@ rather than exempted:
   how CI's Bazel job executes tests, so the tag pins placement rather than
   softening what the test proves.
 
+`//crates/lash-core:lash-core__unit_test` declares
+`exec_properties = {"memory_kb": "8388608"}`. Rustc for the workspace's largest
+single compile is killed without a diagnostic at the pool's 4 GiB default
+per-action budget; the budget is raised rather than splitting the binary.
+
 `//crates/lash-sim:lash-sim__unit_test` declares `timeout = "long"`. It carries
 the generated-simulation and minimizer fixture replays and ran 227-300 s on the
 pool, which straddles Bazel's default `medium` 300 s bound.
