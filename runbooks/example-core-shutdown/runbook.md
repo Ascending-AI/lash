@@ -12,11 +12,11 @@ process-reap evidence.
 
 ## Deterministic companion
 
-Run from a warm Lash orb through its integration gate:
+Run from a warm Lash Kiln through its integration gate:
 
 ```sh
 . ./env.sh
-orb gate lash mcp-host-shutdown-1165 -- \
+kiln gate lash mcp-host-shutdown-1165 -- \
   bash scripts/example-core-shutdown-e2e.sh
 ```
 

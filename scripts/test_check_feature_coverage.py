@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test the feature coverage gate.
 
-When ``ORB_REAL_CARGO`` is set, fixture workspaces resolve Cargo to that real
+When ``KILN_REAL_CARGO`` is set, fixture workspaces resolve Cargo to that real
 binary so their single-crate checks do not enter the host's heavy-slot queue.
 CI does not set the variable, so its Cargo resolution is unchanged.
 """
@@ -118,9 +118,9 @@ class FeatureCoverageContractTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.fixture_env = os.environ.copy()
-        if real_cargo := self.fixture_env.get("ORB_REAL_CARGO"):
+        if real_cargo := self.fixture_env.get("KILN_REAL_CARGO"):
             if not os.access(real_cargo, os.X_OK):
-                self.fail(f"ORB_REAL_CARGO is not executable: {real_cargo}")
+                self.fail(f"KILN_REAL_CARGO is not executable: {real_cargo}")
             fixture_bin = self.root / ".fixture-bin"
             fixture_bin.mkdir()
             (fixture_bin / "cargo").symlink_to(real_cargo)
