@@ -787,13 +787,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::PushNumber(value) => format!("push_number {value}"),
         Instruction::LoadName(slot) => format!("load_name {slot}:{}", slot_name(chunk, slot)),
         Instruction::Duplicate => "duplicate".to_string(),
-        Instruction::DeepCopy => "deep_copy".to_string(),
         Instruction::StoreName(slot) => format!("store_name {slot}:{}", slot_name(chunk, slot)),
-        Instruction::StoreConst { slot, constant } => format!(
-            "store_const {slot}:{} c{constant} {}",
-            slot_name(chunk, slot),
-            compact_json(&chunk.constants[constant])
-        ),
         Instruction::BuildTuple(count) => format!("build_tuple {count}"),
         Instruction::BuildList(count) => format!("build_list {count}"),
         Instruction::BuildHeapList(count) => format!("build_heap_list {count}"),
@@ -959,7 +953,6 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             )
         }
         Instruction::IterNext { jump_to } => format!("iter_next {jump_to}"),
-        Instruction::DeepCopyLoopBinding(slot) => format!("deep_copy_loop_binding ${slot}"),
         Instruction::EndIter => "end_iter".to_string(),
         Instruction::ResolveTypeRef(slot) => {
             format!("resolve_type_ref {slot}:{}", slot_name(chunk, slot))
@@ -1216,13 +1209,9 @@ async fn compiler_propagates_safe_straight_line_constants() {
     .expect("program should parse");
     let compiled = compile_program(&program);
 
-    assert!(
-        !compiled.chunk.code.iter().any(|instruction| matches!(
-            instruction,
-            Instruction::Intrinsic(IntrinsicOp::Len | IntrinsicOp::Range(_) | IntrinsicOp::Push)
-        )),
-        "straight-line constant builtins should fold out of the runtime instruction stream"
-    );
+    // ADR 0096: the straight-line constant folder was part of Lashlang's
+    // value-isolating semantics and went with the dialect, so these builtins now
+    // run. What the test still pins is the result they must produce.
 
     let mut state = State::new();
     let outcome = execute_compiled(&compiled, &mut state, &Host)

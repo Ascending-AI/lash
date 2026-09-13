@@ -461,15 +461,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         instruction: super::Instruction,
     ) -> Result<(), RuntimeError> {
-        if self.reference_semantics
-            && matches!(
-                instruction,
-                super::Instruction::LoadField { .. }
-                    | super::Instruction::LoadFieldUnwrap { .. }
-                    | super::Instruction::Field(_)
-                    | super::Instruction::Index
-            )
-        {
+        if matches!(
+            instruction,
+            super::Instruction::LoadField { .. }
+                | super::Instruction::LoadFieldUnwrap { .. }
+                | super::Instruction::Field(_)
+                | super::Instruction::Index
+        ) {
             return Ok(());
         }
         let plan = instruction_heap_plan(instruction, self.chunk)?;
@@ -477,21 +475,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
             StackExport::Top(window) => {
                 let start = self.stack.len().saturating_sub(window);
                 for index in start..self.stack.len() {
-                    let exported = if self.reference_semantics
-                        && matches!(
-                            instruction,
-                            super::Instruction::Pop
-                                | super::Instruction::ToBool
-                                | super::Instruction::JumpIfFalse(_)
-                                | super::Instruction::JumpIfTrue(_)
-                                | super::Instruction::Unary(_)
-                                | super::Instruction::Binary(_)
-                                | super::Instruction::BeginIter(_)
-                        )
-                        && matches!(
-                            &self.stack[index],
-                            Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
-                        ) {
+                    let exported = if matches!(
+                        instruction,
+                        super::Instruction::Pop
+                            | super::Instruction::ToBool
+                            | super::Instruction::JumpIfFalse(_)
+                            | super::Instruction::JumpIfTrue(_)
+                            | super::Instruction::Unary(_)
+                            | super::Instruction::Binary(_)
+                            | super::Instruction::BeginIter(_)
+                    ) && matches!(
+                        &self.stack[index],
+                        Value::Ref(id) if self.heap.is_javascript_vm_object(*id)?
+                    ) {
                         self.stack[index].clone()
                     } else {
                         self.heap.export_for_instruction(&self.stack[index])?

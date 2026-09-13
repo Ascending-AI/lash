@@ -11,7 +11,6 @@ use std::collections::BTreeSet;
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn is_truthy_for_dialect(&self, value: &Value) -> Result<bool, RuntimeError> {
         if let Value::Ref(id) = value
-            && self.reference_semantics
             && self.heap.is_javascript_vm_object(*id)?
         {
             return Ok(true);
@@ -25,17 +24,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            if self.reference_semantics {
-                return read_javascript_heap_field(&self.heap, id, field);
-            }
-            let target = self.heap.export_for_instruction(&Value::Ref(id))?;
-            return read_field_direct(target, field);
+            return read_javascript_heap_field(&self.heap, id, field);
         }
-        if self.reference_semantics {
-            read_javascript_field_direct(target, field)
-        } else {
-            read_field_direct(target, field)
-        }
+        read_javascript_field_direct(target, field)
     }
 
     pub(super) fn read_dialect_index(
@@ -44,18 +35,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: Value,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
-            if self.reference_semantics {
-                return read_javascript_heap_index(&self.heap, id, &index);
-            }
-            let target = self.heap.export_for_instruction(&Value::Ref(id))?;
-            return read_index_direct(target, index);
+            return read_javascript_heap_index(&self.heap, id, &index);
         }
-        if self.reference_semantics {
-            let key = self.heap.javascript_to_string(&index)?;
-            read_javascript_index_direct_with_key(target, &key)
-        } else {
-            read_index_direct(target, index)
-        }
+        let key = self.heap.javascript_to_string(&index)?;
+        read_javascript_index_direct_with_key(target, &key)
     }
 
     pub(super) async fn iterable_values_for_dialect(
@@ -63,7 +46,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         iterable: Value,
     ) -> Result<ListValue, RuntimeError> {
         match iterable {
-            Value::Ref(id) if self.reference_semantics => match self.heap.get(id)? {
+            Value::Ref(id) => match self.heap.get(id)? {
                 HeapObject::Map(map) => Ok(map
                     .entries
                     .iter()

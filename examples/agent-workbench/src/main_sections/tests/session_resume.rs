@@ -37,8 +37,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             async move {
                 let index = first_response.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(match index {
-                    0 => text_response("<lashlang>\nfinish \"resume answer one\"\n</lashlang>"),
-                    1 => text_response("<lashlang>\nfinish \"resume answer two\"\n</lashlang>"),
+                    0 => {
+                        text_response("<typescript>\nfinish(\"resume answer one\");\n</typescript>")
+                    }
+                    1 => {
+                        text_response("<typescript>\nfinish(\"resume answer two\");\n</typescript>")
+                    }
                     other => panic!("unexpected first-process provider call {other}"),
                 })
             }
@@ -206,7 +210,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
                     .lock_recover()
                     .push(serde_json::to_string(&request).expect("serialize resumed request"));
                 Ok(text_response(
-                    "<lashlang>\nfinish \"resume answer three\"\n</lashlang>",
+                    "<typescript>\nfinish(\"resume answer three\");\n</typescript>",
                 ))
             }
         })
@@ -240,7 +244,6 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .expect("process observer configured");
     let state = AppState {
         core: resumed_core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&resumed_store_factory),
         trigger_store: in_memory_trigger_store(),

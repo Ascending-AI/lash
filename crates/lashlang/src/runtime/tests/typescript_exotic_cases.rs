@@ -41,8 +41,7 @@ pub(crate) fn field(target: &str, name: &str) -> Expr {
 }
 
 async fn run_typescript_ast_across_every_effect(program: Program) -> ExecutionOutcome {
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-        .expect("compile TypeScript substrate AST");
+    let compiled = compile_ast(&program).expect("compile TypeScript substrate AST");
     let mut state = State::new();
     let mut vm = Vm::from_state(&compiled, &mut state, &Host).expect("install VM state");
     loop {
@@ -153,8 +152,7 @@ async fn url_search_params_live_link_survives_state_snapshot_round_trip() {
         ),
         Expr::Finish(Box::new(Expr::Null)),
     ]);
-    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
-        .expect("compile URL snapshot setup");
+    let setup = compile_ast(&setup).expect("compile URL snapshot setup");
     let mut state = State::new();
     execute(&setup, &mut state, &Host)
         .await
@@ -174,8 +172,7 @@ async fn url_search_params_live_link_survives_state_snapshot_round_trip() {
             right: Box::new(field("url", "searchParams")),
         },
     ])))]);
-    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
-        .expect("compile URL snapshot query");
+    let query = compile_ast(&query).expect("compile URL snapshot query");
     assert_eq!(
         execute(&query, &mut state, &Host)
             .await
@@ -383,8 +380,7 @@ async fn reference_object_key_nested_array_write_returns_a_deterministic_error()
             expr: Box::new(Expr::Number(2.0)),
         },
     ]);
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-        .expect("compile object index-key assignment regression");
+    let compiled = compile_ast(&program).expect("compile object index-key assignment regression");
     assert_eq!(
         execute(&compiled, &mut State::new(), &Host)
             .await
@@ -405,8 +401,7 @@ async fn date_reference_index_key_uses_the_pending_string_coercion_error() {
             index: Box::new(Expr::Variable("date_key".into())),
         })),
     ]);
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-        .expect("compile Date index-key coercion regression");
+    let compiled = compile_ast(&program).expect("compile Date index-key coercion regression");
     let error = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect_err("Date index-key coercion remains a loud deviation");
@@ -536,8 +531,7 @@ async fn date_to_string_uses_the_pending_string_coercion_error() {
         ts_assign("date", heap_new("Date", vec![Expr::Number(42.0)])),
         Expr::Finish(Box::new(heap_method("toString", "date", Vec::new()))),
     ]);
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-        .expect("compile Date toString regression");
+    let compiled = compile_ast(&program).expect("compile Date toString regression");
     let error = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect_err("Date toString remains a loud deviation");
@@ -791,8 +785,7 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             right: Box::new(Expr::String("x".into())),
         })),
     ]);
-    let compiled = compile_ast_with_dialect(&unsupported_date_add, CompilationDialect::Typescript)
-        .expect("compile Date addition regression");
+    let compiled = compile_ast(&unsupported_date_add).expect("compile Date addition regression");
     let error = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect_err("Date addition needs pending string semantics");
@@ -830,22 +823,10 @@ async fn set_normalizes_negative_zero_before_iteration() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn lashlang_dialect_cannot_execute_javascript_heap_constructor_intrinsic() {
-    let program = Program::block(vec![Expr::Finish(Box::new(heap_new("Map", Vec::new())))]);
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Lashlang)
-        .expect("private intrinsic compiles for gate regression");
-    let error = execute(&compiled, &mut State::new(), &Host)
-        .await
-        .expect_err("Lashlang must not mint a JavaScript exotic");
-    assert!(
-        error
-            .to_string()
-            .contains("TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED"),
-        "{error}"
-    );
-}
-
+// `lashlang_dialect_cannot_execute_javascript_heap_constructor_intrinsic` was
+// deleted with the second dialect (ADR 0096). Every compiled program now runs
+// with reference semantics, so the TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED gate
+// has no non-reference caller left to refuse.
 #[tokio::test(flavor = "current_thread")]
 async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
@@ -1422,8 +1403,7 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
         ts_assign("removed", Expr::Number(1.0)),
         Expr::Finish(Box::new(Expr::Null)),
     ]);
-    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
-        .expect("compile global setup");
+    let setup = compile_ast(&setup).expect("compile global setup");
     let mut state = State::new();
     execute(&setup, &mut state, &Host)
         .await
@@ -1441,8 +1421,7 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
         ),
         Expr::Finish(Box::new(Expr::Null)),
     ]);
-    let deletion = compile_ast_with_dialect(&deletion, CompilationDialect::Typescript)
-        .expect("compile persisted-global deletion");
+    let deletion = compile_ast(&deletion).expect("compile persisted-global deletion");
     execute(&deletion, &mut state, &Host)
         .await
         .expect("delete previously persisted global");
@@ -1459,8 +1438,7 @@ async fn global_delete_and_presence_preserve_absent_vs_undefined_across_restart(
             vec![Expr::String("removed".into())],
         ),
     ])))]);
-    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
-        .expect("compile rehydration query");
+    let query = compile_ast(&query).expect("compile rehydration query");
     assert_eq!(
         execute(&query, &mut state, &Host)
             .await
@@ -1499,8 +1477,7 @@ async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
         run_typescript_ast_across_every_effect(setup.clone()).await,
         ExecutionOutcome::Finished(Value::Number(42.0))
     );
-    let setup = compile_ast_with_dialect(&setup, CompilationDialect::Typescript)
-        .expect("compile nested global setter");
+    let setup = compile_ast(&setup).expect("compile nested global setter");
     let mut state = State::new();
     assert_eq!(
         execute(&setup, &mut state, &Host)
@@ -1515,8 +1492,7 @@ async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
     let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("decode global-set snapshot");
     let mut restored = State::from_snapshot(snapshot);
     let query = Program::block(vec![Expr::Finish(Box::new(field("answer", "value")))]);
-    let query = compile_ast_with_dialect(&query, CompilationDialect::Typescript)
-        .expect("compile global-set query");
+    let query = compile_ast(&query).expect("compile global-set query");
     assert_eq!(
         execute(&query, &mut restored, &Host)
             .await
@@ -1540,8 +1516,7 @@ async fn global_set_does_not_weaken_closure_session_persistence_policy() {
         ),
         Expr::Finish(Box::new(Expr::Null)),
     ]);
-    let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-        .expect("compile closure global-set policy probe");
+    let compiled = compile_ast(&program).expect("compile closure global-set policy probe");
     let mut state = State::new();
     assert_eq!(
         execute(&compiled, &mut state, &Host)
@@ -1607,8 +1582,7 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
             vec![Expr::Variable("array".into()), Expr::Number(0.0)],
         ))),
     ]);
-    let compiled = compile_ast_with_dialect(&array_delete, CompilationDialect::Typescript)
-        .expect("compile dense-array deletion probe");
+    let compiled = compile_ast(&array_delete).expect("compile dense-array deletion probe");
     let error = execute(&compiled, &mut State::new(), &Host)
         .await
         .expect_err("deleting a present dense-array index must reject");
@@ -1629,8 +1603,7 @@ async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
                 intrinsic,
                 vec![Expr::String(name.into())],
             )))]);
-            let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-                .expect("compile reserved-name probe");
+            let compiled = compile_ast(&program).expect("compile reserved-name probe");
             let error = execute(&compiled, &mut State::new(), &Host)
                 .await
                 .expect_err("reserved global name must reject");
@@ -1645,8 +1618,7 @@ async fn reserved_global_names_are_rejected_by_all_root_intrinsics() {
             "__typescript_global_set",
             vec![Expr::String(name.into()), Expr::Number(1.0)],
         )))]);
-        let compiled = compile_ast_with_dialect(&program, CompilationDialect::Typescript)
-            .expect("compile reserved global set probe");
+        let compiled = compile_ast(&program).expect("compile reserved global set probe");
         let error = execute(&compiled, &mut State::new(), &Host)
             .await
             .expect_err("reserved global set must reject");

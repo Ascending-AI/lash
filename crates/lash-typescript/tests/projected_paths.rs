@@ -132,9 +132,8 @@ async fn execute_with_view(
     let globals = BTreeSet::from_iter(names);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program =
-        lashlang::compile_ast_with_dialect(&program, lashlang::CompilationDialect::Typescript)
-            .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
+    let program = lashlang::compile_ast(&program)
+        .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
     lashlang::execute(&program, &mut state, &Host { view }).await
 }

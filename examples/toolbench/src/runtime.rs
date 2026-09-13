@@ -12,11 +12,10 @@ use crate::grading::RunEvidence;
 use crate::tasks::Task;
 use crate::world::{SharedWorld, World};
 
-#[tracing::instrument(name = "task", skip_all, fields(model = model, task = task.id, repetition = run, channel = channel.name(), dialect = if channel == crate::ChannelSelection::Standard { "none" } else { dialect.language_id() }))]
+#[tracing::instrument(name = "task", skip_all, fields(model = model, task = task.id, repetition = run, channel = channel.name(), dialect = if channel == crate::ChannelSelection::Standard { "none" } else { "typescript" }))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_task(
     task: &Task,
-    dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     run: usize,
@@ -28,7 +27,6 @@ pub(crate) async fn run_task(
 ) -> (World, RunEvidence) {
     run_task_with_shutdown_witness(
         task,
-        dialect,
         model,
         api_key,
         run,
@@ -47,7 +45,6 @@ pub(crate) async fn run_task(
 #[allow(clippy::too_many_arguments)]
 async fn run_task_with_shutdown_witness(
     task: &Task,
-    dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     run: usize,
@@ -83,7 +80,7 @@ async fn run_task_with_shutdown_witness(
             if channel == crate::ChannelSelection::Standard {
                 "none"
             } else {
-                dialect.language_id()
+                "typescript"
             }
         ))
     }));
@@ -103,7 +100,6 @@ async fn run_task_with_shutdown_witness(
         .context("start request recorder")?;
         let core = build_turn_core(
             task,
-            dialect,
             model,
             api_key,
             run,
@@ -123,7 +119,7 @@ async fn run_task_with_shutdown_witness(
         Ok((core, recorder)) => {
             let result = tokio::time::timeout(
                 std::time::Duration::from_secs(turn_wall_limit_secs),
-                run_turn(&core, task, dialect, run, channel, &telemetry),
+                run_turn(&core, task, run, channel, &telemetry),
             )
             .await;
             if let Err(shutdown_error) = core.shutdown().await.context("shut down toolbench core") {
@@ -262,23 +258,18 @@ fn apply_cleanup_failure(
 async fn run_turn(
     core: &LashCore,
     task: &Task,
-    dialect: lash::rlm::RlmDialect,
     run: usize,
     channel: crate::ChannelSelection,
     telemetry: &Arc<crate::telemetry::Telemetry>,
 ) -> Result<(lash::TurnOutput, Vec<String>)> {
-    let session_id = SessionId::from(format!(
-        "toolbench-{run}-{}-{}",
-        dialect.language_id(),
-        task.id
-    ));
+    let session_id = SessionId::from(format!("toolbench-{run}-typescript-{}", task.id));
     let session_builder = core.session(session_id);
     let session_builder = if channel == crate::ChannelSelection::Standard {
         session_builder
     } else {
         session_builder
-            .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options(dialect))
-            .context("encode dialect session option")?
+            .plugin_option(lash::rlm::RLM_PROTOCOL_PLUGIN_ID, session_options())
+            .context("encode RLM session option")?
     };
     let session = session_builder
         .open()
@@ -331,7 +322,6 @@ async fn run_turn(
 #[allow(clippy::too_many_arguments)]
 fn build_turn_core(
     task: &Task,
-    dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     run: usize,
@@ -428,7 +418,7 @@ fn build_turn_core(
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "toolbench",
-            format!("run-{run}-{}-{}", dialect.language_id(), task.id),
+            format!("run-{run}-typescript-{}", task.id),
         ))
         .context("build Lash core")?;
     Ok(core)
@@ -442,7 +432,6 @@ const PREFLIGHT_ATTEMPTS: usize = 2;
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn preflight(
     task: &Task,
-    dialect: lash::rlm::RlmDialect,
     model: &str,
     api_key: &str,
     channel: crate::ChannelSelection,
@@ -465,7 +454,6 @@ pub(crate) async fn preflight(
     for attempt in 0..PREFLIGHT_ATTEMPTS {
         let (_, evidence) = run_task(
             &probe,
-            dialect,
             model,
             api_key,
             attempt,
@@ -521,9 +509,8 @@ fn model_spec(model: &str, effort: crate::ReasoningEffort) -> Result<lash::Model
         .context("build model metadata")
 }
 
-fn session_options(dialect: lash::rlm::RlmDialect) -> lash::rlm::RlmCreateExtras {
+fn session_options() -> lash::rlm::RlmCreateExtras {
     lash::rlm::RlmCreateExtras {
-        dialect: Some(dialect),
         final_answer_format: Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
         ..lash::rlm::RlmCreateExtras::default()
     }
@@ -602,7 +589,6 @@ mod tests {
             .expect("easy task");
         let (_world, evidence) = super::run_task_with_shutdown_witness(
             &task,
-            lash::rlm::RlmDialect::Lashlang,
             "test/toolbench-timeout",
             "unused-no-network-key",
             0,
@@ -687,15 +673,14 @@ mod tests {
         );
     }
 
+    // TypeScript is the sole RLM language (ADR 0096), so the per-dialect loop
+    // and the dialect assertion it carried are gone.
     #[test]
-    fn benchmark_sessions_use_raw_finish_values_for_every_dialect() {
-        for dialect in lash::rlm::RlmDialect::ALL {
-            let options = super::session_options(dialect);
-            assert_eq!(options.dialect, Some(dialect));
-            assert_eq!(
-                options.final_answer_format,
-                Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
-            );
-        }
+    fn benchmark_sessions_use_raw_finish_values() {
+        let options = super::session_options();
+        assert_eq!(
+            options.final_answer_format,
+            Some(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+        );
     }
 }

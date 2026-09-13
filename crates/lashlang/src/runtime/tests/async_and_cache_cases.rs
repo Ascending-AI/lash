@@ -225,55 +225,6 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
     assert_eq!(cache.stats().misses, 1);
 }
 
-#[test]
-fn compiled_process_cache_separates_source_dialects() {
-    let program =
-        crate::parse("process scan() { value = [1] alias = value alias[0] = 2 finish value[0] }")
-            .expect("parse module");
-    let lashlang = crate::LinkedModule::link_with_dialect(
-        program.clone(),
-        runtime_test_environment(),
-        crate::CompilationDialect::Lashlang,
-    )
-    .expect("link Lashlang module");
-    let typescript = crate::LinkedModule::link_with_dialect(
-        program,
-        runtime_test_environment(),
-        crate::CompilationDialect::Typescript,
-    )
-    .expect("link TypeScript module");
-    assert_ne!(lashlang.module_ref, typescript.module_ref);
-    let process_ref = lashlang
-        .artifact
-        .process_ref("scan")
-        .expect("scan process ref");
-    assert_eq!(
-        Some(process_ref),
-        typescript.artifact.process_ref("scan"),
-        "process identity intentionally remains source-dialect independent"
-    );
-
-    let mut cache = CompiledProcessCache::with_capacity(2);
-    let lashlang_compiled = cache
-        .get_or_compile(
-            &lashlang.artifact,
-            process_ref,
-            &lashlang.host_requirements_ref,
-        )
-        .expect("compile Lashlang process");
-    let typescript_compiled = cache
-        .get_or_compile(
-            &typescript.artifact,
-            process_ref,
-            &typescript.host_requirements_ref,
-        )
-        .expect("compile TypeScript process");
-
-    assert!(!Arc::ptr_eq(&lashlang_compiled, &typescript_compiled));
-    assert_eq!(cache.stats().hits, 0);
-    assert_eq!(cache.stats().misses, 2);
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn receiver_module_operation_unwraps_result() {
     let value = exec(r#"finish (await tools.echo({ value: "ok" })?)"#)
@@ -752,8 +703,12 @@ async fn await_list_preserves_per_item_errors() {
     assert_eq!(err["error"], Value::String("process failed: fail".into()));
 }
 
+/// A record is neither a thenable nor an aggregate-await container, so `await`
+/// hands it back untouched and its fields are still handles: settlement is
+/// shallow over element positions (ADR 0096). The recursive walk that used to
+/// reach into a bound record belonged to the retired surface dialect.
 #[tokio::test(flavor = "current_thread")]
-async fn await_record_of_handles_returns_record_of_wrappers() {
+async fn await_of_a_record_leaves_its_handle_fields_unsettled() {
     let program = crate::parse(
         r#"
         process echo(value: str) { finish value }
@@ -762,20 +717,19 @@ async fn await_record_of_handles_returns_record_of_wrappers() {
           second: start echo(value: "two"),
         }
         results = await handles
-        finish [results.first?, results.second?]
+        finish results.first?
         "#,
     )
     .expect("program should parse");
     let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
+    let error = execute_program(&program, &mut state, &AsyncHost)
         .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
+        .expect_err("an unsettled handle is not a result record");
     assert_eq!(
-        value,
-        Value::List(vec![Value::String("one".into()), Value::String("two".into())].into())
+        error,
+        RuntimeError::ToolResultExpected {
+            actual: "heap_ref".to_string()
+        }
     );
 }
 
@@ -1101,12 +1055,16 @@ async fn compile_stats_count_const_folded_and_dynamic_literals() {
     let compiled = compile_source(src).expect("should compile");
     let stats = compiled.compile_stats();
     assert_eq!(stats.type_literals_total, 3);
+    // ADR 0096: the compile-time folder was Lashlang's value-semantics
+    // optimization and went with the dialect, so a type literal that names an
+    // earlier binding is emitted rather than folded. `Inner` and `A` still fold
+    // because they close over nothing.
     assert_eq!(
-        stats.type_literals_const_folded, 3,
-        "Inner, A, and B are constant"
+        stats.type_literals_const_folded, 2,
+        "Inner and A are constant"
     );
-    assert_eq!(stats.type_literals_dynamic, 0);
-    assert_eq!(stats.type_ref_sites, 0);
+    assert_eq!(stats.type_literals_dynamic, 1);
+    assert_eq!(stats.type_ref_sites, 1);
 }
 
 #[tokio::test(flavor = "current_thread")]

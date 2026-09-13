@@ -327,11 +327,9 @@ async fn commit_one_turn(
     tag: &str,
 ) -> Result<String> {
     let attachments = tempfile::tempdir().context("attachment dir for version-bump turn")?;
-    // The row's dialect decides the scripted cell *and* the session's pin: a
-    // TypeScript row that commits a Lashlang cell cannot execute it, and the
-    // turn never reaches a terminal state.
-    let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()?;
-    let scripted = lash_restate_postgres_workers_e2e::scripted_finish_cell(dialect, "\"ok\"");
+    // A cell the session cannot execute never reaches a terminal state, so the
+    // scripted reply is a real cell of the language the session runs.
+    let scripted = lash_restate_postgres_workers_e2e::scripted_finish_cell("\"ok\"");
     let provider =
         lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
             .kind("version-bump-recreation")
@@ -392,14 +390,6 @@ async fn commit_one_turn(
 
     let session = {
         core.session(session_id)
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(dialect),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )
-            .context("state the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))?
@@ -558,7 +548,6 @@ async fn seed(database_url: &str) -> Result<()> {
         .context("create the pre-bump store")?;
     let pool = storage.pool().clone();
     let expected_version = recorded_version(&pool).await?;
-    let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()?;
 
     create_sessions(&storage).await?;
     let mut turn_ids = Vec::new();
@@ -636,7 +625,7 @@ async fn seed(database_url: &str) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_older_deployment",
-        "dialect": dialect.language_id(),
+        "dialect": "typescript",
         "probe_before_rewind": probe_before_rewind,
         "probe_after_rewind": probe_after_rewind,
         "expected_version": expected_version,

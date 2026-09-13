@@ -50,9 +50,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
     state.restate_ingress_url = restate_ingress_url;
 
     let scoped_session_id = "scoped-session-test";
-    state
-        .sessions
-        .ensure(&SessionId::from(scoped_session_id), state.rlm_dialect);
+    state.sessions.ensure(&SessionId::from(scoped_session_id));
 
     let environment = lash::rlm::LashlangHostEnvironment::new(
         workbench_lashlang_resources(),

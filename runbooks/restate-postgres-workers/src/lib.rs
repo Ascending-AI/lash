@@ -3,7 +3,7 @@ use lash::SessionId;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use lash::durability::EffectHost;
 use lash::persistence::{
     AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity, ProcessExecutionEnvStore,
@@ -1398,26 +1398,14 @@ pub fn current_epoch_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// The dialect a judged runbook row is running, from `LASH_RUNBOOK_DIALECT`.
+/// One scripted cell that finishes with `value`.
 ///
-/// A harness that scripts a cell has to script it in the session's dialect: a
+/// A harness that scripts a cell has to script it in the session's language: a
 /// cell the session cannot execute never commits, so the row hangs rather than
-/// failing. `runbooks/RULES.md` requires the host to pass this value on every
-/// session open, and these harnesses are hosts.
-pub fn runbook_rlm_dialect() -> Result<lash::rlm::RlmDialect> {
-    let stated = lash::rlm::RlmDialect::from_env().map_err(|refusal| anyhow!(refusal))?;
-    // Unset is the Lashlang default, stated like any named id.
-    Ok(stated.unwrap_or_default())
-}
-
-/// One scripted cell that finishes with `value`, spelled for `dialect`.
-pub fn scripted_finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> String {
-    let finish = match dialect {
-        lash::rlm::RlmDialect::Typescript => format!("finish({value});"),
-        lash::rlm::RlmDialect::Lashlang => format!("finish {value}"),
-    };
-    let tag = dialect.language_id();
-    format!("<{tag}>\n{finish}\n</{tag}>")
+/// failing. TypeScript is the sole RLM language (ADR 0096), so there is one
+/// spelling and nothing for a host to state.
+pub fn scripted_finish_cell(value: &str) -> String {
+    format!("<typescript>\nfinish({value});\n</typescript>")
 }
 
 #[cfg(test)]
@@ -1461,26 +1449,16 @@ mod deferral_declaration_tests {
 }
 
 #[cfg(test)]
-mod dialect_tests {
+mod scripted_cell_tests {
     use super::*;
 
-    /// Both spellings are real cells of their own dialect, round-trip through
-    /// `language_id()`, and neither carries the other's words (ADR 0063).
+    /// The scripted finish is a real TypeScript cell and carries none of the
+    /// retired dialect's words (ADR 0063, ADR 0096).
     #[test]
-    fn a_scripted_finish_is_a_cell_of_its_own_dialect() {
-        for dialect in lash::rlm::RlmDialect::ALL {
-            let cell = scripted_finish_cell(dialect, "\"ok\"");
-            let tag = dialect.language_id();
-            assert!(
-                cell.starts_with(&format!("<{tag}>"))
-                    && cell.trim_end().ends_with(&format!("</{tag}>"))
-            );
-            assert_eq!(lash::rlm::RlmDialect::from_language_id(tag), Some(dialect));
-        }
-        let lashlang = scripted_finish_cell(lash::rlm::RlmDialect::Lashlang, "\"ok\"");
-        assert_eq!(lashlang, "<lashlang>\nfinish \"ok\"\n</lashlang>");
-        let typescript = scripted_finish_cell(lash::rlm::RlmDialect::Typescript, "\"ok\"");
-        assert_eq!(typescript, "<typescript>\nfinish(\"ok\");\n</typescript>");
-        assert!(!typescript.contains("lashlang"));
+    fn a_scripted_finish_is_a_typescript_cell() {
+        let cell = scripted_finish_cell("\"ok\"");
+        assert_eq!(cell, "<typescript>\nfinish(\"ok\");\n</typescript>");
+        assert!(cell.starts_with("<typescript>") && cell.trim_end().ends_with("</typescript>"));
+        assert!(!cell.contains("lashlang"));
     }
 }

@@ -21,17 +21,6 @@ pub(crate) struct AppStateData {
     default_model_variant: Option<String>,
     #[cfg_attr(not(feature = "restate"), allow(dead_code))]
     durability: AgentServiceDurability,
-    /// The dialect this service runs chats in.
-    ///
-    /// There is no "said nothing" state: an unset `LASH_RUNBOOK_DIALECT` is the
-    /// Lashlang default, and the service states it on every session open like
-    /// any named id. A service that stated nothing would serve each chat in
-    /// whatever it happened to record while the operator read one dialect off
-    /// the environment — the mislabeled evidence the parity matrix exists to
-    /// catch. Read once at construction rather than from the environment on
-    /// every session open, so the value is injectable and a chat's dialect
-    /// cannot change under it mid-process.
-    rlm_dialect: lash::rlm::RlmDialect,
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
     #[cfg(feature = "restate")]
@@ -53,7 +42,6 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: lash::rlm::RlmDialect,
         restate_ingress_url: Option<String>,
         restate_authority_id: Option<lash_restate::RestateAuthorityId>,
     ) -> Self {
@@ -64,7 +52,6 @@ impl AppStateData {
             default_model,
             default_model_variant,
             durability,
-            rlm_dialect,
             restate_ingress_url,
             restate_authority_id,
             restate_http: reqwest::Client::new(),
@@ -79,7 +66,6 @@ impl AppStateData {
         default_model: String,
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
-        rlm_dialect: lash::rlm::RlmDialect,
     ) -> Self {
         Self {
             core,
@@ -88,7 +74,6 @@ impl AppStateData {
             default_model,
             default_model_variant,
             durability,
-            rlm_dialect,
         }
     }
 
@@ -134,26 +119,17 @@ impl AppStateData {
         chat_id: &str,
         model: ModelSpec,
     ) -> AppResult<LashSession> {
-        // A durable fact is stated, not requested (ADR 0066). The statement is
-        // a guarded set-if-unset write: it lands on a chat that recorded
-        // nothing, is a no-op on a chat that recorded the same dialect, and
-        // refuses on one that recorded another. The refusal reaches the
-        // operator; there is no reopen path that quietly runs the chat in its
-        // old dialect. Every open states a dialect, the default included.
+        // TypeScript is the sole RLM language (ADR 0096), so a chat states no
+        // language at its open: there is nothing left to pin, and a bag that
+        // still records the retired `dialect` field is refused by the protocol
+        // as an incompatible format rather than served under another language.
         let builder = self
             .core
             .session(chat_id)
             .session_spec(lash::SessionSpec::inherit().model(model))
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
-            })
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(self.rlm_dialect),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )?;
+            });
         Ok(builder.open().await?)
     }
 
@@ -297,47 +273,8 @@ pub(crate) mod anyhow_like {
     pub(crate) type Result<T> = std::result::Result<T, String>;
 }
 
-/// The dialect new chat sessions are created with, from `LASH_RUNBOOK_DIALECT`.
-///
-/// An unset variable is the Lashlang default, stated on every session open like
-/// any named id — the same answer every other shipped host gives, so one
-/// environment produces one dialect everywhere. A chat that recorded another
-/// dialect therefore fails its open loudly instead of being served in its
-/// recorded dialect under a service that believes it is running Lashlang. Read
-/// once at startup so the value is injected into the state rather than
-/// consulted on every session open.
-pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
-    // The host's whole unset policy, in one line.
-    Ok(lash::rlm::RlmDialect::from_env()?.unwrap_or_default())
-}
-
-/// The dialect this session will run, for prompt copy that has to be written in
-/// one language.
-///
-/// ADR 0063: host copy follows the session's own dialect. This is resolved at
-/// plugin build from the session's durable bag plus its create options — the
-/// same resolution the RLM plugin build performs — so a store that outlived a
-/// configuration change is described in the dialect it is running rather than
-/// the one this process was started with, and the host's copy can never name a
-/// different language from the execution section.
-///
-/// It is deliberately not read from a prompt hook's effective options: those
-/// are the session bag with the host's per-turn override shallow-merged over
-/// it, so a raw `{"dialect": ...}` key on a turn would win there (FIG-1979).
-///
-/// The decode is strict. A malformed or unknown language id is a refusal, not
-/// the default: silently substituting Lashlang is the very substitution
-/// `RlmDialect::from_language_id` refuses by design, and it would word the
-/// board prompt in one dialect while the cells executed the other.
-pub(crate) fn rlm_session_dialect(
-    ctx: &lash::plugins::PluginSessionContext,
-) -> Result<lash::rlm::RlmDialect, lash::plugins::PluginError> {
-    lash::rlm::rlm_plugin_session_dialect(ctx)
-        .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))
-}
-
 #[cfg(test)]
-mod dialect_pin_tests {
+mod session_language_tests {
     use super::*;
 
     fn system_text(request: &lash::provider::LlmRequest) -> String {
@@ -357,7 +294,7 @@ mod dialect_pin_tests {
 
     async fn test_core(data_dir: &std::path::Path) -> LashCore {
         let provider = lash::testing::TestProvider::builder()
-            .kind("agent-service-dialect-pin")
+            .kind("agent-service-session-language")
             .build()
             .into_handle();
         test_core_with_provider(data_dir, provider).await
@@ -407,17 +344,13 @@ mod dialect_pin_tests {
                 data_dir.join("attachments"),
             )))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-service-dialect-pin",
+                "agent-service-session-language",
                 "test",
             ))
             .expect("core")
     }
 
-    fn state_with_dialect(
-        core: &LashCore,
-        db: AppDb,
-        rlm_dialect: lash::rlm::RlmDialect,
-    ) -> AppStateData {
+    fn test_state(core: &LashCore, db: AppDb) -> AppStateData {
         #[cfg(feature = "restate")]
         {
             AppStateData::from_shared_db(
@@ -428,7 +361,6 @@ mod dialect_pin_tests {
                 "mock-model".to_string(),
                 None,
                 AgentServiceDurability::Local,
-                rlm_dialect,
                 None,
                 None,
             )
@@ -443,7 +375,6 @@ mod dialect_pin_tests {
                 "mock-model".to_string(),
                 None,
                 AgentServiceDurability::Local,
-                rlm_dialect,
             )
         }
     }
@@ -453,10 +384,10 @@ mod dialect_pin_tests {
     /// The typed per-turn options bag has no dialect field, but the merge
     /// underneath it is an untyped shallow key-extend of the host's per-turn
     /// override over the session bag, so a raw `{"dialect": ...}` key *does*
-    /// reach the prompt hook's effective options. A host that read its dialect
-    /// there would word the board in Lashlang for a turn whose cells execute
-    /// TypeScript — the exact disagreement this ticket removes. The host reads
-    /// the durable session bag once, at plugin build, instead.
+    /// reach the prompt hook's effective options. Under TypeScript-only RLM
+    /// (ADR 0096) there is no second language to switch to, and the host's
+    /// board copy must stay unmoved by such a key rather than being re-worded
+    /// by whatever a turn asserts.
     #[tokio::test]
     async fn a_per_turn_dialect_key_cannot_re_word_the_board_prompt() {
         use lash::rlm::RlmTurnBuilderExt as _;
@@ -487,15 +418,14 @@ mod dialect_pin_tests {
             .into_handle();
         let core = test_core_with_provider(data_dir, provider).await;
 
-        let typescript = state_with_dialect(
+        let service = test_state(
             &core,
             AppDb::open(&data_dir.join("app-smuggle.db")).expect("app db"),
-            lash::rlm::RlmDialect::Typescript,
         );
-        let session = typescript
+        let session = service
             .open_session("smuggled-chat", mock_model_spec())
             .await
-            .expect("the open pins the chat to TypeScript");
+            .expect("the chat opens");
 
         session
             .turn(lash::TurnInput::text("play"))
@@ -505,7 +435,7 @@ mod dialect_pin_tests {
             .await
             .expect("the honest turn runs");
 
-        // The attack: a raw per-turn override naming the other dialect.
+        // The attack: a raw per-turn override naming the retired language.
         let attack = lash::runtime::ProtocolTurnOptions::from_payload(
             serde_json::json!({ "dialect": "lashlang" }),
         );
@@ -520,7 +450,7 @@ mod dialect_pin_tests {
         // That the key really does survive to the prompt hook is not assumed:
         // it is what makes this test red against a host that reads the hook's
         // effective options, and the same seam is asserted directly on the
-        // public builder in the facade's own `rlm_dialect` suite.
+        // public builder in the facade's own RLM session-config suite.
         attacked.run().await.expect("the attacked turn runs");
         drop(session);
 
@@ -533,7 +463,7 @@ mod dialect_pin_tests {
         for prompt in &prompts {
             assert!(
                 prompt.contains("outside the typescript cell"),
-                "the board prompt must stay in the session's dialect: {prompt}"
+                "the board prompt must stay in TypeScript: {prompt}"
             );
             assert!(
                 !prompt.contains("outside the lashlang block"),
@@ -542,65 +472,23 @@ mod dialect_pin_tests {
         }
     }
 
-    /// A chat that recorded one dialect refuses to reopen under another, and
-    /// the refusal reaches the caller instead of a quiet fallback.
+    // `a_recorded_chat_refuses_to_reopen_under_another_dialect` is deleted:
+    // TypeScript-only RLM retired the session language pin, so there is no
+    // second language a reopen could disagree about (ADR 0096).
+
+    /// A chat the service opens keeps opening.
     ///
-    /// The second service here is the *unconfigured* one: `LASH_RUNBOOK_DIALECT`
-    /// unset now means the Lashlang default, stated on every open like a named
-    /// id. So a store carried over from a TypeScript run fails the open loudly
-    /// rather than being served in its recorded dialect under a service that
-    /// believes it is running Lashlang.
+    /// A reopen states no durable language of its own (ADR 0096), so a chat
+    /// this service created is served again without a reopen tax.
     #[tokio::test]
-    async fn a_recorded_chat_refuses_to_reopen_under_another_dialect() {
+    async fn a_chat_reopens_under_the_config_it_recorded() {
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
         let core = test_core(data_dir).await;
 
-        let typescript = state_with_dialect(
-            &core,
-            AppDb::open(&data_dir.join("app-typescript.db")).expect("app db"),
-            lash::rlm::RlmDialect::Typescript,
-        );
-        let session = typescript
-            .open_session("carried-over-chat", mock_model_spec())
-            .await
-            .expect("the first open pins the chat to TypeScript");
-        session.close().await.expect("close the pinned session");
-
-        let unconfigured = state_with_dialect(
-            &core,
-            AppDb::open(&data_dir.join("app-default.db")).expect("app db"),
-            lash::rlm::RlmDialect::default(),
-        );
-        let Err(error) = unconfigured
-            .open_session("carried-over-chat", mock_model_spec())
-            .await
-        else {
-            panic!("a recorded dialect cannot be reopened as another one");
-        };
-        assert!(
-            error.message.contains(
-                "RLM session dialect is durably pinned to `typescript` and cannot be set to `lashlang`"
-            ),
-            "the refusal must name both dialects: {error}"
-        );
-    }
-
-    /// A chat the service opens under its own dialect keeps opening.
-    ///
-    /// The guarded write is a no-op on agreement, so the default-stating
-    /// service reopens the chats it created without a second thought — the
-    /// refusal above is a disagreement, not a reopen tax.
-    #[tokio::test]
-    async fn a_chat_reopens_under_the_dialect_it_recorded() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let data_dir = temp.path();
-        let core = test_core(data_dir).await;
-
-        let service = state_with_dialect(
+        let service = test_state(
             &core,
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
-            lash::rlm::RlmDialect::default(),
         );
         let session = service
             .open_session("own-chat", mock_model_spec())
@@ -611,7 +499,7 @@ mod dialect_pin_tests {
         let reopened = service
             .open_session("own-chat", mock_model_spec())
             .await
-            .expect("a chat reopens under the dialect it recorded");
+            .expect("a chat reopens under the config it recorded");
         reopened.close().await.expect("close the reopened session");
     }
 }

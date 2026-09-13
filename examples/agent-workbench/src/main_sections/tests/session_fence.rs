@@ -14,7 +14,7 @@ use super::recoverable_chat_tests::{
 fn reset_session_rotation_replaces_workbench_session_id() {
     let ids = WorkbenchSessions::fresh();
     let original = ids.current();
-    let (new, replaced_current) = ids.replace(&original, lash::rlm::RlmDialect::Lashlang);
+    let (new, replaced_current) = ids.replace(&original);
     assert!(replaced_current);
     assert_eq!(ids.current(), new);
     assert_ne!(original, new);
@@ -26,17 +26,16 @@ fn reset_session_rotation_replaces_workbench_session_id() {
 fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
     let ids = WorkbenchSessions::fresh();
     let retired = ids.current();
-    ids.ensure(&retired, lash::rlm::RlmDialect::Lashlang);
+    ids.ensure(&retired);
     let selected = "workbench-selected-during-delete";
     ids.record(
         SessionId::from(selected.to_string()),
         "selected".to_string(),
-        lash::rlm::RlmDialect::Lashlang,
     );
     ids.select(&SessionId::from(selected))
         .expect("select competing session");
 
-    let (replacement, replaced_current) = ids.replace(&retired, lash::rlm::RlmDialect::Lashlang);
+    let (replacement, replaced_current) = ids.replace(&retired);
 
     assert!(!replaced_current);
     assert_eq!(ids.current(), selected);
@@ -54,15 +53,13 @@ fn replacing_an_unrostered_session_records_its_replacement() {
     let ids = WorkbenchSessions::fresh();
     let retired = "workbench-external-session";
 
-    let (replacement, replaced_current) =
-        ids.replace(&SessionId::from(retired), lash::rlm::RlmDialect::Typescript);
+    let (replacement, replaced_current) = ids.replace(&SessionId::from(retired));
 
     assert!(!replaced_current);
     let entry = ids
         .entry(&replacement)
         .expect("replacement joins the roster");
     assert_eq!(entry.name, retired);
-    assert_eq!(entry.dialect, lash::rlm::RlmDialect::Typescript);
 }
 
 #[test]
@@ -310,14 +307,18 @@ async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring_inner
         .kind("workbench-running-turn-delete")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-process hold_for_delete() {
-  sleep for "10m"
-  finish "unreachable"
-}
-handle = start hold_for_delete()
-finish (await handle)?
-</lashlang>"#,
+                r#"<typescript>
+const hold_for_delete = defineProcess({
+  name: "hold_for_delete",
+  signals: {},
+  run: async () => {
+    await sleep(600000);
+    return "unreachable";
+  }
+});
+const handle = start(hold_for_delete, {});
+finish(await handle);
+</typescript>"#,
             ))
         })
         .build()

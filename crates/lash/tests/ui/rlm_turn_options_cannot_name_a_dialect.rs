@@ -1,15 +1,15 @@
-// FIG-1979: the dialect has one carrier.
+// FIG-1979 / ADR 0096: a turn cannot name a language.
 //
-// It is resolved once at session materialization and the executor never reads a
-// per-turn value, so the per-turn options type has no dialect field at all. A
-// turn that named a dialect its cells would ignore is a compile error, not a
-// silently discarded field.
+// TypeScript is the sole RLM language, so nothing in the RLM option types
+// carries one -- not the per-turn bag, and not the create contract. A turn that
+// named a language its cells would ignore is a compile error, not a silently
+// discarded field.
 
-use lash::rlm::{RlmDialect, RlmTermination, RlmTurnOptions};
+use lash::rlm::{RlmTermination, RlmTurnOptions};
 
 fn a_turn_cannot_name_a_dialect() {
     let _ = RlmTurnOptions {
-        dialect: Some(RlmDialect::Typescript),
+        dialect: Some("typescript"),
         termination: Some(RlmTermination::Natural),
         final_answer_format: None,
     };

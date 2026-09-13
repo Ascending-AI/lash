@@ -1440,9 +1440,13 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
         .await
         .expect("read stored artifact")
         .expect("artifact exists");
-        assert_eq!(
-            artifact.compilation_dialect,
-            lashlang::CompilationDialect::Typescript
+        // TypeScript is the only language a module can be compiled from
+        // (ADR 0096), so a stored artifact names no dialect at all; one that
+        // still does is refused as an incompatible format.
+        let encoded = serde_json::to_value(artifact.as_ref()).expect("encode stored artifact");
+        assert!(
+            encoded.get("compilation_dialect").is_none(),
+            "a stored artifact names no dialect: {encoded}"
         );
     });
 }

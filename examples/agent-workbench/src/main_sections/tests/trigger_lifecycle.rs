@@ -202,7 +202,6 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store,

@@ -143,7 +143,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
             async move {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(text_response(
-                    "<lashlang>\nfinish \"fixture B completed\"\n</lashlang>",
+                    "<typescript>\nfinish(\"fixture B completed\");\n</typescript>",
                 ))
             }
         })
@@ -337,21 +337,25 @@ fn immutable_deployment_fixture_a_provider(
                 );
                 match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => Ok(text_response(
-                        r#"<lashlang>
-process immutable_deployment_probe() {
-  sleep for "15s"
-  finish "fixture A process completed"
-}
-handle = start immutable_deployment_probe()
-"fixture A journal prefix committed"
-</lashlang>"#,
+                        r#"<typescript>
+const immutable_deployment_probe = defineProcess({
+  name: "immutable_deployment_probe",
+  signals: {},
+  run: async () => {
+    await sleep(15000);
+    return "fixture A process completed";
+  }
+});
+const handle = start(immutable_deployment_probe, {});
+finish("fixture A journal prefix committed");
+</typescript>"#,
                     )),
                     1 => {
                         let _ = retry_entered.send(());
                         std::future::pending().await
                     }
                     _ => Ok(text_response(
-                        "<lashlang>\nfinish \"fixture A completed\"\n</lashlang>",
+                        "<typescript>\nfinish(\"fixture A completed\");\n</typescript>",
                     )),
                 }
             }

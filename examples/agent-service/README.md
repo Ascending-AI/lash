@@ -107,7 +107,7 @@ and register `http://host.docker.internal:9080` (or add
 
 For the live E2E, use the one-command recipe. It starts the agent-service
 Restate endpoint in-process, registers it through the Restate Admin API, submits
-a turn through Restate ingress, runs a named Lashlang background process against
+a turn through Restate ingress, runs a named background process against
 the tic-tac-toe board through `LashProcessWorkflow`, verifies app
 outbox/message persistence, and removes the container on exit:
 
@@ -219,7 +219,7 @@ the public `TurnBuilder::model(...)` API.
 The example opts into provider-level thinking exposure for demonstration,
 attaches a trace sink to `LashCore`, and writes JSONL trace records to stderr
 and `AGENT_SERVICE_TRACE` so provider payloads, RLM response, extracted
-lashlang, terminal output, and tool calls are visible while you run it.
+TypeScript, terminal output, and tool calls are visible while you run it.
 
 The app builds a `LashCore` via `LashCore::rlm_builder`, activates `DemoPlugin` per chat session with
 `SessionBuilder::plugin::<DemoPlugin>(...)`, and lets the plugin provide
@@ -252,21 +252,21 @@ The plugin demonstrates:
 
 This example opts into `.require_finish()`, so the assistant's final user-facing
 text should be placed in `finish`. RLM also supports `.allow_prose_or_finish()`
-for turns where direct prose may finish without a lashlang block.
+for turns where direct prose may finish without a TypeScript cell.
 `FinalValue` appears when a turn finishes through `finish`; `ToolValue`
 appears when a tool terminal control finishes the turn. Prose-only completion is
 already visible through assistant prose deltas.
 
-In lashlang, the model calls the demo tools through their host-declared module
+In TypeScript, the model calls the demo tools through their host-declared module
 surface. `DemoPlugin` maps the underlying `read_board` tool to `board.read`
 and `play_move` to `board.play` with `ToolBinding`:
 
 ```text
-<lashlang>
-board = await board.read({})?
-move = await board.play({ cell: 4 })?
-finish "I played the center."
-</lashlang>
+<typescript>
+const state = await board.read({});
+const move = await board.play({ cell: 4 });
+finish("I played the center.");
+</typescript>
 ```
 
 The browser also listens for submitted/tool value stream events and renders

@@ -428,10 +428,9 @@ impl Backend {
         });
         let initial = RuntimeSessionState {
             session_id: session_id.clone(),
-            protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-                dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
-                ..Default::default()
-            })
+            protocol_turn_options: ProtocolTurnOptions::typed(
+                lash_rlm_types::RlmCreateExtras::default(),
+            )
             .expect("rlm options"),
             ..RuntimeSessionState::new(policy())
         };
@@ -1097,10 +1096,9 @@ async fn storeless_runtime(
             "fig2521-storeless-{}",
             uuid::Uuid::new_v4().simple()
         )),
-        protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-            dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
-            ..Default::default()
-        })
+        protocol_turn_options: ProtocolTurnOptions::typed(
+            lash_rlm_types::RlmCreateExtras::default(),
+        )
         .expect("rlm options"),
         ..RuntimeSessionState::new(policy())
     };

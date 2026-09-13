@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::lexer::Span;
-use crate::runtime::CompilationDialect;
 use crate::{
     LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
     ProcessBranchSelection,
@@ -69,9 +68,9 @@ use super::{
     execute_compiled_format_one_number_compact_direct, execute_intrinsic,
     execute_push_builtin_async, is_truthy, is_truthy_async, iterable_values, javascript_join,
     javascript_split, materialize_projected_async, materialize_value, range_bounds,
-    range_bounds_async, read_field_direct, read_index_direct, read_javascript_field_direct,
-    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct_with_key,
-    regexp_string, unwrap_tool_result, unwrap_type_value,
+    range_bounds_async, read_javascript_field_direct, read_javascript_heap_field,
+    read_javascript_heap_index, read_javascript_index_direct_with_key, regexp_string,
+    unwrap_tool_result, unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -258,7 +257,6 @@ pub struct Vm<'a, H> {
     /// Whether the extra-globals record has been imported into the heap. It is
     /// written once, when the VM is built or restored, and only read after that.
     extras_heapified: bool,
-    pub(crate) reference_semantics: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     pending_tools: Vec<Option<Value>>,
     /// Identity of this execution, stamped into every pending-tool handle it
@@ -341,10 +339,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     .ok_or(RuntimeError::VmStackUnderflow)?;
                 self.stack.push(value);
             }
-            Instruction::DeepCopy => {
-                let value = self.pop_stack()?;
-                self.stack.push(self.heap.isolate_value(&value)?);
-            }
             Instruction::StoreName(name) => {
                 let value = self.pop_stack()?;
                 self.slots.assign(
@@ -353,16 +347,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     slot_names_for(self.chunk, self.active_function),
                 )?;
                 self.record_assignment(name);
-                self.last_value = Some(value);
-            }
-            Instruction::StoreConst { slot, constant } => {
-                let value = self.chunk.constants[constant].clone();
-                self.slots.assign(
-                    slot,
-                    value.clone(),
-                    slot_names_for(self.chunk, self.active_function),
-                )?;
-                self.record_assignment(slot);
                 self.last_value = Some(value);
             }
             Instruction::BuildTuple(len) => {
@@ -480,7 +464,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let function = self.pop_stack()?;
                 let items = self.pop_stack()?;
                 let items = match &items {
-                    Value::Ref(id) if self.reference_semantics => match self.heap.get(*id)? {
+                    Value::Ref(id) => match self.heap.get(*id)? {
                         HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
                         HeapObject::RegExpMatch(result) => result.items.clone(),
                         object => {
@@ -930,7 +914,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 };
                 self.slots.assign_loop_binding(iter_state.binding, value)?;
             }
-            Instruction::DeepCopyLoopBinding(binding) => self.deep_copy_loop_binding(binding)?,
             Instruction::EndIter => {
                 if let Some(iter_state) = self.iter_stack.pop() {
                     self.slots
@@ -1313,9 +1296,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::PushNumber(_)
             | Instruction::LoadName(_)
             | Instruction::Duplicate
-            | Instruction::DeepCopy
             | Instruction::StoreName(_)
-            | Instruction::StoreConst { .. }
             | Instruction::BuildTuple(_)
             | Instruction::BuildList(_)
             | Instruction::BuildHeapList(_)
@@ -1340,7 +1321,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::Pop
             | Instruction::Jump(_)
             | Instruction::IterNext { .. }
-            | Instruction::DeepCopyLoopBinding(_)
             | Instruction::EndIter
             | Instruction::MakeClosure { .. }
             | Instruction::Call { .. }

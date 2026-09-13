@@ -59,13 +59,14 @@ harness direct-turn 2>&1 | tee "$artifact_dir/08-direct-turn-recovery.jsonl" | t
 
 python3 - "$artifact_dir" "$backends" <<'PY'
 import json
-import os
 import sys
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
 backends = sys.argv[2].split(",")
-expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
+# TypeScript is the sole RLM language (ADR 0096): the harness records it
+# unconditionally, so the gate pins the literal rather than an environment read.
+expected_dialect = "typescript"
 
 LEASE_EVENTS = (
     "session_execution_lease.acquired",

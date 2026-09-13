@@ -84,12 +84,13 @@ harness health 2>&1 | tee "$artifact_dir/04-health.jsonl" | tee -a "$test_output
 
 python3 - "$artifact_dir" <<'PY'
 import json
-import os
 import sys
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
-expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
+# TypeScript is the sole RLM language (ADR 0096): the harness records it
+# unconditionally, so the gate pins the literal rather than an environment read.
+expected_dialect = "typescript"
 
 
 def checkpoint(name, filename):

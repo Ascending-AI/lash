@@ -36,6 +36,9 @@ sandbox_image="${RLM_SMOKE_SANDBOX_IMAGE:-alpine:3.22}"
 docker pull "$sandbox_image" >"$artifact_root/sandbox-image.log" 2>&1
 
 scenarios=(file-edit-bugfix missing-helper-file config-contract-edit)
+# TypeScript is the sole RLM language (ADR 0096): one row per scenario. The
+# `dialect` path segment stays so the artifact layout the matrix declares is
+# unchanged.
 dialects=(typescript)
 model="${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}"
 run_nonce="$(date +%s)-$$"
@@ -56,8 +59,7 @@ for scenario in "${scenarios[@]}"; do
     cp -a "$scenario_dir/workspace/." "$workspace/"
     chmod -R u+rwX "$workspace"
 
-    LASH_RUNBOOK_DIALECT="$dialect" \
-      "$CARGO_TARGET_DIR/debug/rlm-smoke-host" \
+    "$CARGO_TARGET_DIR/debug/rlm-smoke-host" \
         --scenario "$scenario" \
         --scenario-dir "$scenario_dir" \
         --workspace "$workspace" \

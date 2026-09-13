@@ -83,7 +83,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
 }
 
 fn workbench_control_response(source: &'static str) -> lash::provider::LlmResponse {
-    text_response(&format!("<lashlang>\n{source}\n</lashlang>"))
+    text_response(&format!("<typescript>\n{source}\n</typescript>"))
 }
 
 #[test]
@@ -96,10 +96,10 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         std::fs::create_dir_all(&data_dir).expect("create tool control data dir");
         let responses = Arc::new(Mutex::new(std::collections::VecDeque::from([
             workbench_control_response(
-                "cancelled = await workbench_control.cancel({})\nfinish \"cancellation observed\"",
+                "try {\n  await workbench_control.cancel({});\n} catch (error) {\n}\nfinish(\"cancellation observed\");",
             ),
-            workbench_control_response("await workbench_control.finish({})?"),
-            workbench_control_response("await workbench_control.fail({})?"),
+            workbench_control_response("await workbench_control.finish({});"),
+            workbench_control_response("await workbench_control.fail({});"),
         ])));
         let provider_responses = Arc::clone(&responses);
         let provider = lash::testing::TestProvider::builder()

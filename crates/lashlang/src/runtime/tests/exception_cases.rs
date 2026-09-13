@@ -61,7 +61,10 @@ async fn runtime_errors_are_caught_as_heap_backed_error_records() {
                 (
                     "code".into(),
                     Expr::Field {
-                        target: Box::new(Expr::Variable("error".into())),
+                        target: Box::new(Expr::Field {
+                            target: Box::new(Expr::Variable("error".into())),
+                            field: "cause".into(),
+                        }),
                         field: "code".into(),
                     },
                 ),
@@ -90,9 +93,15 @@ async fn effect_failure_is_a_throw_with_structured_operation_metadata() {
         operation: "err".into(),
         args: Vec::new(),
     }));
+    // ADR 0096: a caught error is an ECMA `Error` object, so the typed payload
+    // rides on `cause` rather than sitting flat on the record Lashlang handed a
+    // catch clause.
     let operation = Expr::Field {
         target: Box::new(Expr::Field {
-            target: Box::new(Expr::Variable("error".into())),
+            target: Box::new(Expr::Field {
+                target: Box::new(Expr::Variable("error".into())),
+                field: "cause".into(),
+            }),
             field: "details".into(),
         }),
         field: "operation".into(),
@@ -127,8 +136,20 @@ impl ExecutionHost for StructuredToolFailureHost {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn lashlang_catch_reads_structured_tool_failure_fields_directly() {
+async fn a_catch_reads_structured_tool_failure_fields_from_the_error_cause() {
+    // ADR 0096: a caught error is an ECMA `Error` object. `message` is the
+    // error's own, and every typed tool-failure field rides on `cause`.
     fn error_field(field: &str) -> Expr {
+        Expr::Field {
+            target: Box::new(Expr::Field {
+                target: Box::new(Expr::Variable("error".into())),
+                field: "cause".into(),
+            }),
+            field: field.into(),
+        }
+    }
+
+    fn own_error_field(field: &str) -> Expr {
         Expr::Field {
             target: Box::new(Expr::Variable("error".into())),
             field: field.into(),
@@ -154,7 +175,7 @@ async fn lashlang_catch_reads_structured_tool_failure_fields_directly() {
     };
     let caught = Expr::Record(vec![
         ("code".into(), error_field("code")),
-        ("message".into(), error_field("message")),
+        ("message".into(), own_error_field("message")),
         ("class".into(), error_field("class")),
         ("source".into(), error_field("source")),
         ("retry".into(), retry_type),

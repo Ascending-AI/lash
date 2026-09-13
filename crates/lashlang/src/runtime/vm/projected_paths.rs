@@ -1,37 +1,33 @@
 //! Field and index reads whose source is a projected host value.
 //!
-//! Split from the dialect read helpers because the question here is a different
-//! one: not *what does this dialect call this property*, but *who answers the
-//! read*. A custom projection is a lazy host view and the descriptor answers it;
-//! a scalar projection is a value already in memory behind a handle, so it reads
-//! through the dialect exactly as the same value does unprojected. Deciding that
-//! by projection kind, in one place, is what keeps `text.length` from depending
-//! on whether `text` came from the host (FIG-1482).
+//! Split from the property read helpers because the question here is a different
+//! one: not *what does this property mean*, but *who answers the read*. A custom
+//! projection is a lazy host view and the descriptor answers it; a scalar
+//! projection is a value already in memory behind a handle, so it reads exactly
+//! as the same value does unprojected. Deciding that by projection kind, in one
+//! place, is what keeps `text.length` from depending on whether `text` came from
+//! the host (FIG-1482).
 
 use super::*;
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    /// The value this dialect reads for a key that is not there: `undefined`
-    /// under TypeScript, `null` under the lashlang surface. A custom descriptor
-    /// answers reads without knowing which dialect is asking, so the
-    /// substitution for an unanswered field or index belongs here rather than
-    /// hardcoded in the descriptor seam (FIG-2863).
-    fn dialect_absent_value(&self) -> Value {
-        if self.reference_semantics {
-            Value::Undefined
-        } else {
-            Value::Null
-        }
+    /// The value a read of an absent key produces: `undefined`, the one ECMA
+    /// answer now that TypeScript is the only RLM language (ADR 0096). A custom
+    /// descriptor answers reads without knowing what substitution its caller
+    /// expects, so the substitution for an unanswered field or index belongs
+    /// here rather than hardcoded in the descriptor seam (FIG-2863).
+    fn absent_value(&self) -> Value {
+        Value::Undefined
     }
 
     /// Field access on a projected source.
     ///
-    /// `ProjectedValue::get_field` can only fall back to the dialect-blind
+    /// `ProjectedValue::get_field` can only fall back to the reference-blind
     /// `access.rs` read, which reports `.length` on a projected string as
-    /// unreadable and answers `null` where the TypeScript dialect says
-    /// `undefined`. A scalar projection therefore reads through
-    /// `read_dialect_field` instead; a custom one still asks its descriptor, so
-    /// nothing is dragged across to serve one property.
+    /// unreadable and answers `null` where ECMA says `undefined`. A scalar
+    /// projection therefore reads through `read_dialect_field` instead; a custom
+    /// one still asks its descriptor, so nothing is dragged across to serve one
+    /// property.
     ///
     /// The result keeps the projected wrapper either way, so a path expression
     /// still carries "this came from a projected source".
@@ -45,7 +41,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             None => projected
                 .get_field(field)
                 .await?
-                .unwrap_or_else(|| self.dialect_absent_value()),
+                .unwrap_or_else(|| self.absent_value()),
         };
         Ok(ProjectedValue::propagate_field(
             projected.name(),
@@ -56,8 +52,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     /// Index access on a projected source, split by projection kind for the same
     /// reason as `read_projected_field`: a scalar projection indexes exactly as
-    /// the value behind it does, which for the TypeScript dialect is UTF-16 units
-    /// and `undefined` for an absent key.
+    /// the value behind it does, which under ECMA is UTF-16 units and
+    /// `undefined` for an absent key.
     pub(super) async fn read_projected_index(
         &mut self,
         projected: &ProjectedValue,
@@ -68,7 +64,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             None => projected
                 .get_index(index)
                 .await?
-                .unwrap_or_else(|| self.dialect_absent_value()),
+                .unwrap_or_else(|| self.absent_value()),
         };
         Ok(ProjectedValue::propagate_index(
             projected.name(),

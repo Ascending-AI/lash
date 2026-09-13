@@ -87,15 +87,8 @@ impl PluginFactory for WorkbenchPluginFactory {
         ]
     }
 
-    fn build(&self, ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        // Resolved once here, by the same rule the RLM plugin build uses. The
-        // prompt hook is given the session bag with the host's per-turn
-        // override shallow-merged over it, so a raw per-turn
-        // `{"dialect": ...}` key would win there and hand a TypeScript session
-        // three complete Lashlang programs (FIG-1979).
-        let dialect = tutorial_dialect(ctx)?;
+    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(WorkbenchSessionPlugin {
-            dialect,
             mail_world: self.mail_world.clone(),
             derived_notes: self.derived_notes.clone(),
             config_changes: self.config_changes.clone(),
@@ -107,7 +100,6 @@ impl PluginFactory for WorkbenchPluginFactory {
 }
 
 pub(crate) struct WorkbenchSessionPlugin {
-    pub(crate) dialect: lash::rlm::RlmDialect,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) derived_notes: WorkbenchDerivedNotes,
     pub(crate) config_changes: WorkbenchConfigChanges,
@@ -124,11 +116,9 @@ impl SessionPlugin for WorkbenchSessionPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         let mail_world = self.mail_world.clone();
         let deferred_preview = self.deferred_tools.clone();
-        // ADR 0063: the host's worked examples are written in the dialect the
-        // session recorded, not this process's configuration and not anything a
-        // turn asked for. The value was resolved at plugin build from the
-        // durable session options.
-        let prompt = workbench_prompt(self.dialect);
+        // ADR 0063: the host's worked examples are written in the session's own
+        // language. TypeScript is the sole RLM language (ADR 0096).
+        let prompt = workbench_prompt();
         reg.prompt().contribute(Arc::new(move |_ctx| {
             let mail_world = mail_world.clone();
             let deferred_preview = deferred_preview.clone();

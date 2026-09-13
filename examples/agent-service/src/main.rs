@@ -438,10 +438,6 @@ async fn async_main() -> anyhow_like::Result<()> {
             model,
             Some(model_variant),
             durability,
-            // The Restate deployment is the one the judged parity battery drives,
-            // so it reads the ambient dialect exactly like the in-process path. A
-            // literal here would serve Lashlang under a TypeScript label.
-            crate::state::rlm_dialect_from_env()?,
             restate_ingress_url,
             restate_authority_id,
         );
@@ -453,7 +449,6 @@ async fn async_main() -> anyhow_like::Result<()> {
             model,
             Some(model_variant),
             durability,
-            crate::state::rlm_dialect_from_env()?,
         );
         state
             .recover_pending_chat_forks()

@@ -44,8 +44,8 @@ async fn explicit_start_and_await_merges_distinct_results() {
         process sleep_echo(value: str) { finish value }
         left = start sleep_echo(value: "a")
         right = start sleep_echo(value: "b")
-        results = await { left: left, right: right }
-        finish { left: results.left?, right: results.right? }
+        results = await [left, right]
+        finish { left: results[0]?, right: results[1]? }
         "#,
             &mut state,
             &host,
@@ -98,7 +98,7 @@ async fn await_list_returns_branch_results_in_order() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_record_returns_record_results() {
+async fn await_list_returns_results_in_written_order() {
     let host = TestHost::default();
     let mut state = State::new();
 
@@ -106,13 +106,13 @@ async fn await_record_returns_record_results() {
         execute(
             r#"
         process sleep_echo(value: str) { finish value }
-        results = await {
-          first: start sleep_echo(value: "a"),
-          second: start sleep_echo(value: "b")
-        }
+        results = await [
+          start sleep_echo(value: "a"),
+          start sleep_echo(value: "b")
+        ]
         finish {
-          first: results.first?,
-          second: results.second?
+          first: results[0]?,
+          second: results[1]?
         }
         "#,
             &mut state,
@@ -187,7 +187,7 @@ async fn slice_null_bounds_default_to_start_or_end() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn negative_indices_and_record_contains_are_supported() {
+async fn out_of_range_index_reads_are_undefined_and_record_contains_is_supported() {
     let host = TestHost::default();
     let mut state = State::new();
 
@@ -215,10 +215,12 @@ async fn negative_indices_and_record_contains_are_supported() {
     let Value::Record(record) = value else {
         panic!("expected record");
     };
-    assert_eq!(record["tail"], Value::Number(30.0));
-    assert_eq!(record["before_tail"], Value::Number(20.0));
-    assert_eq!(record["oob"], Value::Null);
-    assert_eq!(record["last_char"], Value::String("c".to_string().into()));
+    // A negative index is an ordinary property name, not an offset from the
+    // end, so every one of these reads is `undefined` (ADR 0096).
+    assert_eq!(record["tail"], Value::Undefined);
+    assert_eq!(record["before_tail"], Value::Undefined);
+    assert_eq!(record["oob"], Value::Undefined);
+    assert_eq!(record["last_char"], Value::Undefined);
     assert_eq!(record["record_has_key"], Value::Bool(true));
     assert_eq!(record["record_missing_key"], Value::Bool(false));
 }
@@ -372,7 +374,8 @@ async fn dynamic_record_indexing_reads_fields() {
         panic!("expected record");
     };
     assert_eq!(record["found"], Value::Number(42.0));
-    assert_eq!(record["missing"], Value::Null);
+    // An absent key reads as `undefined`, not `null` (ADR 0096).
+    assert_eq!(record["missing"], Value::Undefined);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -390,7 +393,7 @@ async fn indexed_and_field_assignment_update_collections() {
         record.extra = "ok"
         items = [1, 2, 3]
         items[1] = 20
-        items[-1] = 30
+        items[2] = 30
         finish { record: record, items: items }
         "#,
             &mut state,
@@ -458,7 +461,7 @@ async fn nested_path_assignment_and_histogram_loops_work() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn path_assignment_preserves_alias_isolation() {
+async fn path_assignment_is_visible_through_every_alias() {
     let host = TestHost::default();
     let mut state = State::new();
 
@@ -495,19 +498,21 @@ async fn path_assignment_preserves_alias_isolation() {
         updated["items"],
         Value::List(vec![Value::Number(9.0), Value::Number(2.0)].into())
     );
-    assert_eq!(alias["x"], Value::Number(1.0));
+    // `alias` names the same record, so every write above is visible through
+    // it (ADR 0096).
+    assert_eq!(alias["x"], Value::Number(2.0));
     assert_eq!(
         alias["nested"].as_record().unwrap()["y"],
-        Value::Number(1.0)
+        Value::Number(3.0)
     );
     assert_eq!(
         alias["items"],
-        Value::List(vec![Value::Number(1.0), Value::Number(2.0)].into())
+        Value::List(vec![Value::Number(9.0), Value::Number(2.0)].into())
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn path_assignment_rhs_matches_pre_heap_value_semantics() {
+async fn path_assignment_rhs_shares_the_assigned_object_across_a_snapshot() {
     let host = TestHost::default();
     let mut state = State::new();
     execute(
@@ -535,11 +540,11 @@ async fn path_assignment_rhs_matches_pre_heap_value_semantics() {
             .expect("restored execution should succeed"),
     );
 
-    assert_eq!(value, Value::List(Vec::new().into()));
+    assert_eq!(value, Value::List(vec![Value::Number(1.0)].into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn iterator_binding_matches_pre_heap_value_semantics() {
+async fn iterator_binding_aliases_the_iterated_element() {
     let host = TestHost::default();
     let mut state = State::new();
     execute(
@@ -569,12 +574,17 @@ async fn iterator_binding_matches_pre_heap_value_semantics() {
 
     assert_eq!(
         value,
-        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+        Value::List(
+            vec![Value::List(
+                vec![Value::Number(1.0), Value::Number(2.0)].into()
+            )]
+            .into()
+        )
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn push_insertion_matches_pre_heap_value_semantics() {
+async fn push_insertion_shares_the_inserted_object() {
     let value = finished(
         execute(
             r#"
@@ -597,9 +607,9 @@ async fn push_insertion_matches_pre_heap_value_semantics() {
         value,
         Value::List(
             vec![
-                Value::List(vec![Value::Number(0.0)].into()),
-                Value::List(vec![Value::Number(1.0)].into()),
-                Value::List(vec![Value::Number(2.0)].into()),
+                Value::List(vec![Value::Number(0.0), Value::Number(99.0)].into()),
+                Value::List(vec![Value::Number(1.0), Value::Number(99.0)].into()),
+                Value::List(vec![Value::Number(2.0), Value::Number(99.0)].into()),
             ]
             .into()
         )
@@ -607,7 +617,7 @@ async fn push_insertion_matches_pre_heap_value_semantics() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn iterator_value_pushed_into_container_matches_pre_heap_semantics() {
+async fn iterator_value_pushed_into_a_container_stays_shared() {
     let value = finished(
         execute(
             r#"
@@ -628,12 +638,17 @@ async fn iterator_value_pushed_into_container_matches_pre_heap_semantics() {
 
     assert_eq!(
         value,
-        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+        Value::List(
+            vec![Value::List(
+                vec![Value::Number(1.0), Value::Number(9.0)].into()
+            )]
+            .into()
+        )
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_field_index_and_comprehension_inserts_keep_value_semantics() {
+async fn nested_field_index_and_comprehension_inserts_stay_shared() {
     let value = finished(
         execute(
             r#"
@@ -657,15 +672,20 @@ async fn nested_field_index_and_comprehension_inserts_keep_value_semantics() {
         record["flattened"],
         Value::List(
             vec![
-                Value::List(vec![Value::Number(1.0)].into()),
-                Value::List(vec![Value::Number(2.0)].into()),
+                Value::List(vec![Value::Number(1.0), Value::Number(9.0)].into()),
+                Value::List(vec![Value::Number(2.0), Value::Number(8.0)].into()),
             ]
             .into()
         )
     );
     assert_eq!(
         record["held"],
-        Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into())
+        Value::List(
+            vec![Value::List(
+                vec![Value::Number(1.0), Value::Number(9.0)].into()
+            )]
+            .into()
+        )
     );
     assert_eq!(
         record["source"],
@@ -673,8 +693,18 @@ async fn nested_field_index_and_comprehension_inserts_keep_value_semantics() {
             "rows".to_string(),
             Value::List(
                 vec![
-                    Value::List(vec![Value::List(vec![Value::Number(1.0)].into())].into()),
-                    Value::List(vec![Value::List(vec![Value::Number(2.0)].into())].into()),
+                    Value::List(
+                        vec![Value::List(
+                            vec![Value::Number(1.0), Value::Number(9.0)].into()
+                        )]
+                        .into()
+                    ),
+                    Value::List(
+                        vec![Value::List(
+                            vec![Value::Number(2.0), Value::Number(8.0)].into()
+                        )]
+                        .into()
+                    ),
                 ]
                 .into()
             ),
@@ -766,18 +796,10 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn path_assignment_reports_invalid_targets() {
-    assert!(matches!(
-        runtime_error("items = [1]\nitems[2] = 2").await,
-        RuntimeError::ListAssignmentIndexOutOfBounds
-    ));
-    assert!(matches!(
-        runtime_error("items = [1]\nitems[0.5] = 2").await,
-        RuntimeError::InvalidListAssignmentIndex
-    ));
-    assert!(matches!(
-        runtime_error("items = [1]\nitems[\"0\"] = 2").await,
-        RuntimeError::InvalidListAssignmentIndex
-    ));
+    // Array index assignment is ECMA's (ADR 0096): an index past the end
+    // grows the array, a numeric string is the same index as the number, and a
+    // non-index key is a property write. None of those is an error any more,
+    // so what remains here are the targets that still have no slot to write.
     assert!(matches!(
         runtime_error("text = \"abc\"\ntext[0] = \"x\"").await,
         RuntimeError::CannotAssignIndex { actual } if actual == "string"
@@ -998,7 +1020,7 @@ async fn for_loop_assignments_carry_across_iterations() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_record_accepts_commas_and_keyword_record_keys_execute() {
+async fn record_literals_accept_commas_and_quoted_keys_around_awaited_results() {
     let host = TestHost::default();
     let mut state = State::new();
 
@@ -1006,13 +1028,17 @@ async fn await_record_accepts_commas_and_keyword_record_keys_execute() {
         execute(
             r#"
         process sleep_echo(value: str) { finish value }
-        result = await {
-          fanout: start sleep_echo(value: "ok"),
-          "with space": start sleep_echo(value: "quoted"),
+        settled = await [
+          start sleep_echo(value: "ok"),
+          start sleep_echo(value: "quoted"),
+        ]
+        result = {
+          fanout: settled[0]?,
+          "with space": settled[1]?,
         }
         finish {
-          branch: result.fanout?,
-          quoted_value: result["with space"]?
+          branch: result.fanout,
+          quoted_value: result["with space"]
         }
         "#,
             &mut state,

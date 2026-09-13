@@ -14,24 +14,17 @@ pub(crate) fn default_board() -> BoardState {
     }
 }
 
-/// The board context, written in the dialect this turn resolved.
+/// The board context, written in the TypeScript surface the session runs.
 ///
-/// ADR 0063: host prompt copy follows the session's own dialect. The finish
-/// form and the noun for a unit of code are the two words in here that a
-/// TypeScript reader has never seen; `board.play(...)` is the same call path in
-/// both, because one tool binding serves both dialects.
-pub(crate) fn board_prompt(board: &BoardState, dialect: lash::rlm::RlmDialect) -> String {
+/// ADR 0063: host prompt copy follows the session's language. TypeScript is the
+/// sole RLM language (ADR 0096), so the finish form and the noun for a unit of
+/// code are fixed rather than resolved per session.
+pub(crate) fn board_prompt(board: &BoardState) -> String {
     let status = board_status(board);
-    let (finish_form, cell_noun) = match dialect {
-        lash::rlm::RlmDialect::Typescript => (
-            "finish(\"<one short user-facing sentence>\")",
-            "typescript cell",
-        ),
-        _ => (
-            "finish \"<one short user-facing sentence>\"",
-            "lashlang block",
-        ),
-    };
+    let (finish_form, cell_noun) = (
+        "finish(\"<one short user-facing sentence>\")",
+        "typescript cell",
+    );
     format!(
         "You are O. The human is X.\nCurrent turn: {}.\nIndex map:\n0 top-left | 1 top-middle | 2 top-right\n3 middle-left | 4 center | 5 middle-right\n6 bottom-left | 7 bottom-middle | 8 bottom-right\nCurrent marks by index:\n{}\nVisual board:\n{}\nLegal moves: {:?}\nStatus: {}.\nIf it is O's turn and the game is not over, call `board.play(...)` exactly once before answering. Only choose one of the legal move indexes. Use `board.read(...)` only when needed. Finish with `{finish_form}`; do not repeat that sentence as prose outside the {cell_noun}. If your move ended the game, clearly say that you won or that the game ended in a draw; otherwise say it is the human's turn. Do not explain your strategy, do not describe threats, do not print an ASCII board, do not narrate every cell, and do not return JSON to the user.",
         board.turn,
@@ -174,73 +167,42 @@ fn winner(cells: &[Option<String>]) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-mod dialect_tests {
+mod prompt_language_tests {
     use super::*;
 
     /// ADR 0063, host side: the board context names a finish form and a unit of
-    /// code, and both are dialect words. The pair is asserted in both
-    /// directions so neither can silently become the other's.
+    /// code, and both are language words. TypeScript is the sole RLM language
+    /// (ADR 0096), so the pair is asserted positively and the retired surface's
+    /// wording is asserted absent.
     #[test]
-    fn the_board_prompt_speaks_the_sessions_dialect() {
-        let lashlang = board_prompt(&default_board(), lash::rlm::RlmDialect::Lashlang);
-        assert!(lashlang.contains("finish \"<one short user-facing sentence>\""));
-        assert!(lashlang.contains("outside the lashlang block"));
-        assert!(!lashlang.contains("finish("));
-        assert!(!lashlang.contains("typescript"));
-
-        let typescript = board_prompt(&default_board(), lash::rlm::RlmDialect::Typescript);
-        assert!(typescript.contains("finish(\"<one short user-facing sentence>\")"));
-        assert!(typescript.contains("outside the typescript cell"));
-        assert!(!typescript.contains("lashlang"));
+    fn the_board_prompt_speaks_typescript() {
+        let prompt = board_prompt(&default_board());
+        assert!(prompt.contains("finish(\"<one short user-facing sentence>\")"));
+        assert!(prompt.contains("outside the typescript cell"));
+        assert!(!prompt.contains("lashlang"));
     }
 
-    /// The session's recorded config decides, so a session that recorded the
-    /// other dialect is described in the one it is running. (The end-to-end
-    /// witness that a per-turn key cannot re-word this prompt lives in
-    /// `state::dialect_pin_tests`.)
+    /// ADR 0096: a session bag that still records the retired `dialect` field is
+    /// refused as an incompatible format, not read as absence. Reading it as
+    /// absence would run a session recorded under the retired language against
+    /// TypeScript semantics.
     #[test]
-    fn the_dialect_comes_from_the_sessions_recorded_config() {
-        let recorded = lash::runtime::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-            dialect: Some(lash::rlm::RlmDialect::Typescript),
-            ..Default::default()
-        })
-        .expect("typed options");
-        assert_eq!(
-            lash::rlm::rlm_session_dialect(&recorded).expect("recorded dialect decodes"),
-            lash::rlm::RlmDialect::Typescript
+    fn a_recorded_dialect_field_is_refused_as_incompatible() {
+        let recorded = lash::runtime::ProtocolTurnOptions::from_payload(
+            serde_json::json!({ "dialect": "typescript" }),
         );
         assert_eq!(
-            lash::rlm::rlm_session_dialect(&lash::runtime::ProtocolTurnOptions::default())
-                .expect("an empty bag is a session running the default"),
-            lash::rlm::RlmDialect::Lashlang
+            lash_protocol_rlm::rlm_session_config(&recorded)
+                .expect_err("a recorded dialect field must refuse"),
+            lash::rlm::RlmSessionConfigDecodeError::RetiredDialectField,
         );
+
+        // A bag that records nothing still reads as an empty config.
+        lash_protocol_rlm::rlm_session_config(&lash::runtime::ProtocolTurnOptions::default())
+            .expect("an empty bag is a session that recorded nothing");
     }
 
-    /// FIG-1979: the read under the host's resolution is strict. A recorded bag
-    /// naming a language the registry does not know is an error the operator
-    /// sees, never the default dialect quietly wording the board prompt in the
-    /// wrong vocabulary.
-    #[test]
-    fn a_malformed_recorded_dialect_is_an_error_not_the_default() {
-        let tampered = lash::runtime::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "dialect": "python" }),
-        );
-        let error = lash::rlm::rlm_session_dialect(&tampered)
-            .expect_err("an unknown language id must refuse");
-        assert!(
-            error.to_string().contains("invalid RLM session config"),
-            "the refusal names the config it could not read: {error}"
-        );
-
-        // An explicit `null` is the one tamper shape serde cannot tell from an
-        // absent key by default; it refuses too.
-        let nulled = lash::runtime::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "dialect": serde_json::Value::Null }),
-        );
-        lash::rlm::rlm_session_dialect(&nulled).expect_err("an explicit null dialect must refuse");
-    }
-
-    /// The turn bag cannot carry a dialect at all: the per-turn options type
+    /// The turn bag cannot carry a language at all: the per-turn options type
     /// has no such field, so a turn naming a language the executor ignores is
     /// unrepresentable rather than merely unused (FIG-1979).
     #[test]
@@ -254,29 +216,5 @@ mod dialect_tests {
             encoded.get("dialect").is_none(),
             "the per-turn bag has no dialect: {encoded}"
         );
-    }
-
-    /// FIG-1555: a refused pin is a typed value, not a message to match on.
-    ///
-    /// The message-string test this replaces existed because the host had to
-    /// tell a pin conflict from every other protocol failure by reading prose.
-    /// The typed refusal carries both dialects, so the host reads the values it
-    /// needs and the message is only ever rendered for the operator.
-    #[test]
-    fn a_refused_pin_is_typed_and_carries_both_dialects() {
-        let conflict = lash::rlm::RlmSessionConfigConflict::Dialect {
-            recorded: lash::rlm::RlmDialect::Typescript,
-            requested: lash::rlm::RlmDialect::Lashlang,
-        };
-        let lash::rlm::RlmSessionConfigConflict::Dialect {
-            recorded,
-            requested,
-        } = &conflict
-        else {
-            panic!("a dialect refusal must be the dialect variant");
-        };
-        assert_eq!(*recorded, lash::rlm::RlmDialect::Typescript);
-        assert_eq!(*requested, lash::rlm::RlmDialect::Lashlang);
-        assert_eq!(conflict.field(), "dialect");
     }
 }

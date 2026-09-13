@@ -93,18 +93,11 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
     let linked = lash_typescript::link(source, &environment)
         .expect("all TypeScript agent primitives should link to shared effects");
     assert_eq!(linked.artifact.exports.processes.len(), 1);
-    assert_eq!(
-        linked.artifact.compilation_dialect,
-        lashlang::CompilationDialect::Typescript
-    );
     let artifact: lashlang::ModuleArtifact = serde_json::from_slice(
         &serde_json::to_vec(&linked.artifact).expect("encode TypeScript artifact"),
     )
     .expect("decode TypeScript artifact");
-    assert_eq!(
-        artifact.compilation_dialect,
-        lashlang::CompilationDialect::Typescript
-    );
+    assert_eq!(artifact.module_ref, linked.artifact.module_ref);
 }
 
 #[test]
@@ -123,17 +116,8 @@ fn production_link_cache_preserves_typescript_artifact_identity() {
     let program = lash_typescript::parse(source).expect("TypeScript should lower");
     let mut cache = lashlang::LinkedProgramCache::new();
     let linked = cache
-        .get_or_compile_ast(
-            source,
-            program,
-            &environment,
-            lashlang::CompilationDialect::Typescript,
-        )
+        .get_or_compile_ast(source, program, &environment)
         .expect("production cache should link TypeScript");
-    assert_eq!(
-        linked.linked_module().artifact.compilation_dialect,
-        lashlang::CompilationDialect::Typescript
-    );
     assert!(
         linked
             .linked_module()
@@ -1731,32 +1715,8 @@ fn the_selected_rejection_is_replay_deterministic() {
     );
 }
 
-/// Lashlang's own aggregates keep selecting in input order: the settlement
-/// metadata is present but the dialect never asked to be ordered by it.
-#[test]
-fn lashlang_aggregates_still_select_in_input_order() {
-    let environment = two_leaf_web_environment();
-    let program = lashlang::parse(
-        "let results = await [web.fetch({ url: 'a' })?, web.fetch({ url: 'b' })?]\nfinish results",
-    );
-    let program = program.expect("PROBE: lashlang aggregate parses");
-    let linked = lashlang::LinkedModule::link(program, &environment)
-        .expect("PROBE: lashlang aggregate links");
-    let compiled =
-        lashlang::compile_linked_with_dialect(&linked, lashlang::CompilationDialect::Lashlang);
-    let error = futures::executor::block_on(lashlang::execute(
-        &compiled,
-        &mut State::new(),
-        &FirstSettledRejectionHost,
-    ))
-    .expect_err("a rejected aggregate fails the program");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("late-A"),
-        "lashlang keeps input-order selection: {rendered}"
-    );
-}
-
+// `lashlang_aggregates_still_select_in_input_order` was deleted with the second
+// dialect (ADR 0096): aggregates now always select by settlement order.
 /// Settlement order is consumed inside a single `perform` and never persisted.
 /// Snapshot v7 is independently required by the substrate-minted error brands;
 /// the aggregate rule still does not move the VM ABI.
@@ -1774,30 +1734,32 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
 }
 
-/// A stored artifact that does not name its dialect must not decode at all.
+/// A stored artifact that still names a dialect must not decode at all.
 ///
-/// The salvaged review probe: with a serde default, an artifact whose JSON
-/// predates the dialect field decoded as Lashlang and verified, which is the
-/// one route by which a TypeScript artifact could be compiled with Lashlang
-/// semantics — including input-order rejection selection.
+/// The field was the session-lifetime pin of a second value semantics. An
+/// artifact that carries it was published before TypeScript became the sole
+/// RLM dialect (ADR 0096), so it is refused as an incompatible format rather
+/// than read with the field ignored -- which is what a plain Serde derive
+/// would do, and would compile a pre-cutover program under ECMA semantics.
 #[test]
-fn an_artifact_without_a_dialect_does_not_decode() {
+fn an_artifact_that_still_names_a_dialect_does_not_decode() {
     let environment = two_leaf_web_environment();
     let linked = lash_typescript::link("finish(1);", &environment).expect("links");
-    let artifact = linked.artifact.clone();
-    let mut json = serde_json::to_value(&artifact).expect("artifact encodes");
+    let mut json = serde_json::to_value(&linked.artifact).expect("artifact encodes");
     assert!(
-        json.get("compilation_dialect").is_some(),
-        "the dialect is always written"
+        json.get("compilation_dialect").is_none(),
+        "a current artifact names no dialect"
     );
-    json.as_object_mut()
-        .expect("artifact object")
-        .remove("compilation_dialect");
-    let decoded = serde_json::from_value::<lashlang::ModuleArtifact>(json);
-    let error = decoded.expect_err("a dialect-less artifact must not decode");
+    json.as_object_mut().expect("artifact object").insert(
+        "compilation_dialect".to_string(),
+        serde_json::json!("lashlang"),
+    );
+    let bytes = serde_json::to_vec(&json).expect("encode tampered artifact");
+    let error = lashlang::ModuleArtifact::from_store_bytes(&bytes)
+        .expect_err("a dialect-bearing artifact must not decode");
     assert!(
         error.to_string().contains("compilation_dialect"),
-        "the refusal names the missing dialect: {error}"
+        "the refusal names the retired field: {error}"
     );
 }
 

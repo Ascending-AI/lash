@@ -418,7 +418,6 @@ fn attachment_usage_gate_state(
         .expect("gate process observer configured");
     AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store,
         session_store_factory: store_factory,
         trigger_store: in_memory_trigger_store(),
@@ -446,7 +445,8 @@ fn attachment_usage_gate_state(
 }
 
 fn usage_gate_response() -> lash::provider::LlmResponse {
-    let mut response = text_response("<lashlang>\nfinish \"attachment accounted\"\n</lashlang>");
+    let mut response =
+        text_response("<typescript>\nfinish(\"attachment accounted\");\n</typescript>");
     response.usage = lash::direct::LlmUsage {
         input_tokens: 21,
         output_tokens: 8,

@@ -1303,18 +1303,7 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("rlm-process-definition-filter")
-        .plugin_option(
-            crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            crate::rlm::RlmCreateExtras {
-                dialect: Some(lash_rlm_types::RlmDialect::Typescript),
-                ..crate::rlm::RlmCreateExtras::default()
-            },
-        )
-        .expect("the typed RLM session options must serialize")
-        .open()
-        .await?;
+    let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
     let turn = tokio::spawn(async move {

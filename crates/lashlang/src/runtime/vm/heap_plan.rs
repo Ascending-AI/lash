@@ -90,9 +90,7 @@ pub(super) fn instruction_heap_plan(
         // Isolation and in-place container mutation consume heap references as
         // they are: exporting them would be the copy these opcodes exist to
         // avoid.
-        I::DeepCopy
-        | I::DeepCopyLoopBinding(_)
-        | I::AppendAssign(_)
+        I::AppendAssign(_)
         | I::ListAppend
         | I::Intrinsic(IntrinsicOp::PushAssign(_))
         | I::MakeClosure { .. }
@@ -141,7 +139,6 @@ pub(super) fn instruction_heap_plan(
         | I::PushBool(_)
         | I::PushNumber(_)
         | I::LoadName(_)
-        | I::StoreConst { .. }
         | I::Jump(_)
         | I::IterNext { .. }
         | I::EndIter

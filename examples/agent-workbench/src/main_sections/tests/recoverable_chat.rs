@@ -11,7 +11,7 @@ pub(crate) async fn recoverable_chat_test_state(
         .kind("recoverable-chat-workbench-test")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
             ))
         })
         .build()
@@ -41,7 +41,7 @@ pub(crate) async fn recoverable_chat_test_state_with_trigger_store(
         .kind("recoverable-chat-trigger-store-test")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
             ))
         })
         .build()
@@ -137,7 +137,6 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
         .expect("process observer configured");
     AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store,
@@ -433,7 +432,7 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
             .kind("retired-session-reset-cron-close-test")
             .complete(|_| async {
                 Ok(text_response(
-                    "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                    "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
                 ))
             })
             .build()
@@ -476,7 +475,7 @@ fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
             .kind("retired-session-tool-refresh-close-test")
             .complete(|_| async {
                 Ok(text_response(
-                    "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                    "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
                 ))
             })
             .build()
@@ -1595,9 +1594,9 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             async move {
                 Ok(match call {
                     0 => text_response(
-                        "<lashlang>\nawait control.continue_as({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } })?\n</lashlang>",
+                        "<typescript>\nawait control.continue_as({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });\n</typescript>",
                     ),
-                    1 => text_response("<lashlang>\nfinish \"follow frame answer\"\n</lashlang>"),
+                    1 => text_response("<typescript>\nfinish(\"follow frame answer\");\n</typescript>"),
                     other => panic!("unexpected continue_as provider call {other}"),
                 })
             }
@@ -2128,7 +2127,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                 Ok(match call {
                     0 => {
                         let mut response = text_response(
-                            "<lashlang>\nprint(\"durable execution disclosure\")\n</lashlang>",
+                            "<typescript>\nprint(\"durable execution disclosure\");\n</typescript>",
                         );
                         response.parts.insert(
                             0,
@@ -2139,7 +2138,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                         );
                         response
                     }
-                    1 => text_response("<lashlang>\nfinish \"settled answer\"\n</lashlang>"),
+                    1 => text_response("<typescript>\nfinish(\"settled answer\");\n</typescript>"),
                     other => panic!("unexpected provider call {other}"),
                 })
             }
@@ -2469,7 +2468,7 @@ pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_s
         .kind("recoverable-chat-store-factory-test")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"canonical answer\"\n</lashlang>",
+                "<typescript>\nfinish(\"canonical answer\");\n</typescript>",
             ))
         })
         .build()

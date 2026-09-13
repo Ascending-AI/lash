@@ -20,20 +20,7 @@ use super::*;
 pub(super) const CONSOLE_OBSERVATION_TEXT: &str = "__consoleObservationText";
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    pub(super) fn require_typescript_intrinsic(&self, operation: &str) -> Result<(), RuntimeError> {
-        if self.reference_semantics {
-            Ok(())
-        } else {
-            Err(RuntimeError::ValidationFailed {
-                reason: format!(
-                    "TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED: {operation} is unavailable in Lashlang"
-                ),
-            })
-        }
-    }
-
     pub(super) fn execute_dynamic_call(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("dynamic calls")?;
         let arguments = self.pop_stack()?;
         let function = self.pop_stack()?;
         let arguments = match arguments {
@@ -58,7 +45,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_async_map(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("async map")?;
         let function = self.pop_stack()?;
         let receiver = self.pop_stack()?;
         let items = match &receiver {
@@ -92,7 +78,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("JavaScript heap constructors")?;
         let mut values = Vec::with_capacity(argc);
         for _ in 0..argc {
             values.push(self.pop_stack()?);
@@ -189,7 +174,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_instanceof(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("JavaScript instanceof")?;
         let constructor = self.pop_stack()?;
         let value = self.pop_stack()?;
         let Value::String(constructor) = constructor else {
@@ -204,7 +188,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_heap_delete_member(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("JavaScript member deletion")?;
         let key = self.pop_stack()?;
         let receiver = self.pop_stack()?;
         let deleted = self.heap.delete_javascript_member(&receiver, &key)?;
@@ -213,7 +196,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_global_delete(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("global deletion")?;
         let name = self.pop_stack()?;
         let Value::String(name) = name else {
             return Err(js_stdlib_error("global deletion name must be a string"));
@@ -245,7 +227,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_global_has(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("global presence query")?;
         let name = self.pop_stack()?;
         let Value::String(name) = name else {
             return Err(js_stdlib_error("global presence name must be a string"));
@@ -274,7 +255,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_global_set(&mut self) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("global assignment")?;
         let value = self.pop_stack()?;
         let name = self.pop_stack()?;
         let Value::String(name) = name else {

@@ -56,12 +56,6 @@ pub(super) struct Linker<'module> {
     pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
     pub(super) collect_trigger_keys: Cell<bool>,
     pub(super) derived_trigger_registrations: RefCell<BTreeSet<(String, String, String)>>,
-    /// The surface dialect the linked source was written in.
-    ///
-    /// Linking is dialect-independent — TypeScript is lowered to the same AST —
-    /// but link *errors* are model-facing text, and a diagnostic that names a
-    /// primitive has to name it in the vocabulary the author actually wrote.
-    pub(super) dialect: crate::CompilationDialect,
 }
 
 impl<'module> Linker<'module> {
@@ -72,7 +66,6 @@ impl<'module> Linker<'module> {
         Self {
             program,
             surface,
-            dialect: crate::CompilationDialect::Lashlang,
             process_types: BTreeMap::new(),
             function_signatures: BTreeMap::new(),
             type_defs: BTreeMap::new(),
@@ -88,17 +81,10 @@ impl<'module> Linker<'module> {
         }
     }
 
-    pub(super) fn with_dialect(mut self, dialect: crate::CompilationDialect) -> Self {
-        self.dialect = dialect;
-        self
-    }
-
-    /// The active dialect's spelling of the process-only signal receiver.
+    /// The RLM language's spelling of the process-only signal receiver, for
+    /// link diagnostics, which are model-facing text.
     pub(super) fn wait_signal_keyword(&self) -> &'static str {
-        match self.dialect {
-            crate::CompilationDialect::Lashlang => "wait_signal",
-            crate::CompilationDialect::Typescript => "waitSignal",
-        }
+        "waitSignal"
     }
 
     pub(super) fn with_expected_type_facts(mut self) -> Self {

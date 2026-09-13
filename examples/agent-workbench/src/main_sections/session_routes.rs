@@ -1,16 +1,14 @@
 use super::*;
 
-// The session-management routes: the roster the selector renders, the
-// create-with-a-dialect flow, and the durable selection a query-less `/api/`
-// call resolves through. They live beside the chat routes rather than in them
-// because they are about *which* session is served, not about serving one.
+// The session-management routes: the roster the selector renders, the create
+// flow, and the durable selection a query-less `/api/` call resolves through.
+// They live beside the chat routes rather than in them because they are about
+// *which* session is served, not about serving one.
 
-/// The workbench's sessions, each labelled with the dialect it recorded.
+/// The workbench's sessions.
 ///
-/// The roster is the durable list; the recorded dialect is read back from each
-/// session, because the roster row says what was *asked* for and only the
-/// session says what it runs. A session the roster has not seen — the boot id
-/// of a data directory that predates the roster, or an ad-hoc `?session_id=`
+/// The roster is the durable list. A session the roster has not seen — the boot
+/// id of a data directory that predates the roster, or an ad-hoc `?session_id=`
 /// tab — is still listed while it is the current one, so the selector never
 /// renders a workbench that is serving a session it does not show.
 pub(crate) async fn list_sessions(
@@ -24,18 +22,14 @@ pub(crate) async fn list_sessions(
     {
         rostered.insert(
             0,
-            state.sessions.unrostered_entry(
-                current_session_id.clone(),
-                state.requested_dialect(&current_session_id),
-            ),
+            state.sessions.unrostered_entry(current_session_id.clone()),
         );
     }
     let mut sessions = Vec::with_capacity(rostered.len());
     for entry in rostered {
-        let dialect = state.recorded_dialect(&entry.session_id).await?;
         sessions.push(SessionSummary {
             current: entry.session_id == current_session_id,
-            dialect: dialect.language_id(),
+            dialect: RLM_LANGUAGE_ID,
             session_id: entry.session_id,
             name: entry.name,
             created_at_ms: entry.created_at_ms,
@@ -45,34 +39,30 @@ pub(crate) async fn list_sessions(
     Ok(Json(SessionListResponse {
         sessions,
         current_session_id: current_session_id.clone(),
-        dialects: lash::rlm::RlmDialect::ALL
-            .iter()
-            .map(|dialect| dialect.language_id())
-            .collect(),
-        default_dialect: state.rlm_dialect.language_id(),
+        dialects: vec![RLM_LANGUAGE_ID],
+        default_dialect: RLM_LANGUAGE_ID,
     }))
 }
 
-/// Add a session, pinned to the dialect the operator picked.
+/// Add a session.
 ///
 /// The roster row is written before the session is opened, because the row is
-/// where every later open reads the dialect to ask for: the pin only becomes
-/// durable at the first commit, and the handle this route opens does not commit.
+/// what the selector lists.
+///
+/// TypeScript is the sole RLM language (ADR 0096). A request naming any other
+/// language id is refused rather than quietly served TypeScript.
 pub(crate) async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<SessionCreateRequest>,
 ) -> Result<Json<SessionSummary>, AppError> {
-    let dialect = match request.dialect.as_deref().map(str::trim) {
-        None | Some("") => state.rlm_dialect,
-        Some(language_id) => lash::rlm::RlmDialect::from_language_id(language_id).ok_or_else(
-            || {
-                AppError::bad_request(format!(
-                    "`{language_id}` is not a registered RLM dialect; the registered language ids are {}",
-                    lash::rlm::RlmDialect::registered_language_ids()
-                ))
-            },
-        )?,
-    };
+    match request.dialect.as_deref().map(str::trim) {
+        None | Some("") | Some(RLM_LANGUAGE_ID) => {}
+        Some(language_id) => {
+            return Err(AppError::bad_request(format!(
+                "`{language_id}` is not a registered RLM language; the registered language ids are {RLM_LANGUAGE_ID}"
+            )));
+        }
+    }
     let session_id = new_session_id();
     let name = match request.name.as_deref().map(str::trim) {
         None | Some("") => session_id.to_string(),
@@ -90,7 +80,7 @@ pub(crate) async fn create_session(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
-    let entry = state.sessions.record(session_id.clone(), name, dialect);
+    let entry = state.sessions.record(session_id.clone(), name);
     // Open once so the session exists for the selector and the first `/api/state`
     // poll, through the same builder every route uses.
     drop(
@@ -105,12 +95,12 @@ pub(crate) async fn create_session(
         json!({
             "session_id": session_id,
             "name": entry.name,
-            "dialect": dialect.language_id(),
+            "dialect": RLM_LANGUAGE_ID,
         }),
     );
     Ok(Json(SessionSummary {
         current: session_id == state.current_session_id(),
-        dialect: state.recorded_dialect(&session_id).await?.language_id(),
+        dialect: RLM_LANGUAGE_ID,
         session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,
@@ -150,7 +140,7 @@ pub(crate) async fn select_session(
     );
     Ok(Json(SessionSummary {
         current: true,
-        dialect: state.recorded_dialect(&session_id).await?.language_id(),
+        dialect: RLM_LANGUAGE_ID,
         session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,

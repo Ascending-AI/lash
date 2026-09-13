@@ -39,20 +39,11 @@ pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseErro
 /// nests them. The depth cap is applied here instead, so an over-deep tree is a
 /// typed error rather than a stack overflow in a later AST walk.
 pub fn compile_ast(program: &Program) -> Result<CompiledProgram, crate::ast::InvalidAst> {
-    compile_ast_with_dialect(program, super::CompilationDialect::Lashlang)
-}
-
-/// Compiles an AST using the source dialect's value-semantics contract.
-pub fn compile_ast_with_dialect(
-    program: &Program,
-    dialect: super::CompilationDialect,
-) -> Result<CompiledProgram, crate::ast::InvalidAst> {
     crate::ast::validate_ast(program)?;
-    let (chunk, compile_stats) = Compiler::compile_program_with_dialect(program, dialect);
+    let (chunk, compile_stats) = Compiler::compile_program(program);
     Ok(CompiledProgram {
         chunk,
         compile_stats,
-        dialect,
     })
 }
 
@@ -61,43 +52,24 @@ pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
     CompiledProgram {
         chunk,
         compile_stats,
-        dialect: super::CompilationDialect::Lashlang,
     }
 }
 
 pub fn compile_linked(linked: &LinkedModule) -> CompiledProgram {
-    compile_linked_with_dialect(linked, super::CompilationDialect::Lashlang)
-}
-
-/// Compiles a linked shared-AST module using the requested language dialect.
-pub fn compile_linked_with_dialect(
-    linked: &LinkedModule,
-    dialect: super::CompilationDialect,
-) -> CompiledProgram {
-    let (chunk, compile_stats) = Compiler::compile_linked_program_with_dialect(
+    let (chunk, compile_stats) = Compiler::compile_linked_program(
         linked.program(),
         (&linked.artifact).into(),
         LashlangExecutionContext::main(linked.artifact.module_ref.clone()),
-        dialect,
     );
     CompiledProgram {
         chunk,
         compile_stats,
-        dialect,
     }
 }
 
 pub fn compile_process(
     program: &Program,
     process_name: &str,
-) -> Result<CompiledProgram, RuntimeError> {
-    compile_process_with_dialect(program, process_name, super::CompilationDialect::Lashlang)
-}
-
-pub fn compile_process_with_dialect(
-    program: &Program,
-    process_name: &str,
-    dialect: super::CompilationDialect,
 ) -> Result<CompiledProgram, RuntimeError> {
     crate::ast::check_ast_nesting_depth(program).map_err(|error| {
         RuntimeError::ValidationFailed {
@@ -116,10 +88,8 @@ pub fn compile_process_with_dialect(
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     };
-    compile_ast_with_dialect(&process_program, dialect).map_err(|error| {
-        RuntimeError::ValidationFailed {
-            reason: error.to_string(),
-        }
+    compile_ast(&process_program).map_err(|error| RuntimeError::ValidationFailed {
+        reason: error.to_string(),
     })
 }
 
@@ -156,12 +126,10 @@ pub fn compile_linked_process(
             process_ref,
             process_name,
         ),
-        linked.artifact.compilation_dialect,
     );
     Ok(CompiledProgram {
         chunk,
         compile_stats,
-        dialect: linked.artifact.compilation_dialect,
     })
 }
 
@@ -196,12 +164,10 @@ pub fn compile_module_artifact_process(
             process_ref.clone(),
             process_name,
         ),
-        artifact.compilation_dialect,
     );
     Ok(CompiledProgram {
         chunk,
         compile_stats,
-        dialect: artifact.compilation_dialect,
     })
 }
 
@@ -269,8 +235,6 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
     projected: &ProjectedBindings,
     scratch: Option<&mut ExecutionScratch>,
 ) -> Result<ExecutionOutcome, RuntimeError> {
-    let reference_semantics = program.dialect == super::CompilationDialect::Typescript;
-    state.reference_semantics = reference_semantics;
     if let Some(scratch) = scratch {
         let (mut globals, mut heap) = state.take_runtime();
         // A snapshot restore leaves placeholders wherever a projection was
@@ -291,7 +255,6 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
             scratch,
             host.execution_mode(),
         );
-        vm.reference_semantics = reference_semantics;
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.recycle_into_state_parts(scratch)?;
@@ -303,7 +266,6 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
         let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
-        vm.reference_semantics = reference_semantics;
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;

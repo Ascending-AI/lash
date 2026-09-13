@@ -261,13 +261,10 @@ mod ui_contract_tests;
 fn mail_received_account_contract_uses_slugs() {
     const ACCOUNT_SLUG_CONTRACT: &str = "`mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
 
-    for dialect in lash::rlm::RlmDialect::ALL {
-        assert!(
-            workbench_prompt(dialect).contains(ACCOUNT_SLUG_CONTRACT),
-            "{} workbench prompt must state the mail account slug contract",
-            dialect.language_id()
-        );
-    }
+    assert!(
+        workbench_prompt().contains(ACCOUNT_SLUG_CONTRACT),
+        "the workbench prompt must state the mail account slug contract"
+    );
 }
 
 #[cfg(test)]
@@ -439,7 +436,6 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -520,7 +516,6 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -593,9 +588,9 @@ async fn event_stream_forwards_session_observation_live_replay_inner() {
         .kind("workbench-observation-stream-test")
         .complete(|_request| async {
             Ok(text_response(
-                r#"<lashlang>
-finish "observed through live replay"
-</lashlang>"#,
+                r#"<typescript>
+finish("observed through live replay");
+</typescript>"#,
             ))
         })
         .build()
@@ -686,9 +681,9 @@ async fn event_stream_forwards_session_observation_replay_gap_inner() {
         .kind("workbench-observation-gap-test")
         .complete(|_request| async {
             Ok(text_response(
-                r#"<lashlang>
-finish "gap source"
-</lashlang>"#,
+                r#"<typescript>
+finish("gap source");
+</typescript>"#,
             ))
         })
         .build()
@@ -799,7 +794,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -1003,13 +997,10 @@ async fn parallel_inbox_lists_complete_in_durable_workbench_turn_inner() {
         .kind("workbench-test")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-initial = await {
-  test: inbox.test.list({})?,
-  test2: inbox.test2.list({})?
-}
-finish initial
-</lashlang>"#,
+                r#"<typescript>
+const boxes = await Promise.all([inbox.test.list({}), inbox.test2.list({})]);
+finish({ test: boxes[0], test2: boxes[1] });
+</typescript>"#,
             ))
         })
         .build()
@@ -1097,7 +1088,6 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -1306,7 +1296,6 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -1791,7 +1780,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .expect("open durable product events");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store,
@@ -2111,7 +2099,7 @@ pub(super) fn text_response(text: &str) -> lash::provider::LlmResponse {
 
 fn trigger_registration_response() -> lash::provider::LlmResponse {
     text_response(&format!(
-        "<lashlang>\n{}\n</lashlang>",
+        "<typescript>\n{}\n</typescript>",
         test_button_trigger_source().trim()
     ))
 }
@@ -2196,18 +2184,22 @@ fn trigger_registration_provider() -> ProviderHandle {
 
 fn test_button_trigger_source() -> &'static str {
     r#"
-        process remember(event: ui.button.Pressed) {
-          wake { kind: "button_pressed", button: event.button, message: event.message }
-          finish { button: event.button, ok: true }
-        }
+        const remember = defineProcess({
+          name: "remember",
+          signals: {},
+          run: async (event: unknown) => {
+            wake({ kind: "button_pressed", button: event.button, message: event.message });
+            return { button: event.button, ok: true };
+          }
+        });
 
-        handle = await triggers.register({
+        const handle = await registerTrigger({
           source: ui.button.pressed({}),
           target: remember,
           inputs: { event: trigger.event },
           name: "remembered"
-        })?
-        finish "registered"
+        });
+        finish("registered");
         "#
 }
 

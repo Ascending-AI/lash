@@ -185,7 +185,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                 .kind("workbench-selected-drain-refusal-test")
                 .complete(|_| async {
                     Ok(text_response(
-                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                        "<typescript>\nfinish(\"processed selected row\");\n</typescript>",
                     ))
                 })
                 .build()
@@ -305,7 +305,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .kind("workbench-targeted-wake-test")
                 .complete(|_| async {
                     Ok(text_response(
-                        "<lashlang>\nfinish \"processed wake\"\n</lashlang>",
+                        "<typescript>\nfinish(\"processed wake\");\n</typescript>",
                     ))
                 })
                 .build()
@@ -1046,7 +1046,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
                 .kind("workbench-selected-drain-outcome-test")
                 .complete(|_| async {
                     Ok(text_response(
-                        "<lashlang>\nfinish \"processed selected row\"\n</lashlang>",
+                        "<typescript>\nfinish(\"processed selected row\");\n</typescript>",
                     ))
                 })
                 .build()

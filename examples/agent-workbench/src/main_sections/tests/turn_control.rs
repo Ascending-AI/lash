@@ -131,7 +131,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -376,7 +375,6 @@ async fn turn_cancel_test_state(data_dir: &std::path::Path, admin_url: String) -
         .expect("process observer configured");
     AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -580,14 +578,18 @@ async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
         .kind("workbench-stop-over-process-await")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-process hold_for_stop() {
-  sleep for "10m"
-  finish "unreachable"
-}
-handle = start hold_for_stop()
-finish (await handle)?
-</lashlang>"#,
+                r#"<typescript>
+const hold_for_stop = defineProcess({
+  name: "hold_for_stop",
+  signals: {},
+  run: async () => {
+    await sleep(600000);
+    return "unreachable";
+  }
+});
+const handle = start(hold_for_stop, {});
+finish(await handle);
+</typescript>"#,
             ))
         })
         .build()
@@ -610,7 +612,6 @@ finish (await handle)?
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store: in_memory_trigger_store(),

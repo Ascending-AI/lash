@@ -269,12 +269,7 @@ pub(crate) enum Instruction {
     PushNumber(f64),
     LoadName(usize),
     Duplicate,
-    DeepCopy,
     StoreName(usize),
-    StoreConst {
-        slot: usize,
-        constant: usize,
-    },
     BuildTuple(usize),
     BuildList(usize),
     BuildHeapList(usize),
@@ -447,7 +442,6 @@ pub(crate) enum Instruction {
     IterNext {
         jump_to: usize,
     },
-    DeepCopyLoopBinding(usize),
     EndIter,
     ResolveTypeRef(usize),
     WrapTypeLiteral,
@@ -542,11 +536,7 @@ impl Instruction {
             | Instruction::PushBool(_)
             | Instruction::PushNumber(_) => InstructionProfileTag::PushConst,
             Instruction::LoadName(_) | Instruction::Duplicate => InstructionProfileTag::LoadName,
-            Instruction::DeepCopy | Instruction::DeepCopyLoopBinding(_) => {
-                InstructionProfileTag::StoreName
-            }
             Instruction::StoreName(_)
-            | Instruction::StoreConst { .. }
             | Instruction::PathAssign { .. }
             | Instruction::HeapPathAssign { .. } => InstructionProfileTag::StoreName,
             Instruction::BuildTuple(_) => InstructionProfileTag::BuildTuple,

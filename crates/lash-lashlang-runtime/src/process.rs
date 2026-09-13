@@ -44,6 +44,9 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v8 drops the dialect from the segment envelope: TypeScript is the only RLM
+/// language (ADR 0096), so a segment parked by a build that recorded one is
+/// refused as an incompatible format rather than decoded with a default.
 /// v7 pins the attempt bound this segment stamps onto the children it starts,
 /// so a redrive after a host config change re-registers the recorded bound
 /// instead of conflicting with the fingerprint the first attempt wrote.
@@ -51,7 +54,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 7;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 8;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

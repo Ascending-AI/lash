@@ -30,7 +30,7 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
         .kind("workbench-derived-notes")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"answered\"\n</lashlang>",
+                "<typescript>\nfinish(\"answered\");\n</typescript>",
             ))
         })
         .build()

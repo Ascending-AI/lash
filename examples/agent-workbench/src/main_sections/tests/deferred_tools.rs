@@ -85,20 +85,20 @@ fn deferred_search_observation_enables_next_block_call() {
                     let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     match call {
                         0 => Ok(text_response(
-                            r#"<lashlang>
-matches = await tools.search({ query: "text checksum", limit: 1 })?
-print(matches)
-</lashlang>"#,
+                            r#"<typescript>
+const matches = await tools.search({ query: "text checksum", limit: 1 });
+print(matches);
+</typescript>"#,
                         )),
                         1 => {
                             let request = serde_json::to_string(&request.messages)
                                 .expect("serialize provider request");
                             assert!(request.contains("text.sha256"), "{request}");
                             Ok(text_response(
-                                r#"<lashlang>
-result = await text.sha256({ text: "restart proof" })?
-finish result.digest
-</lashlang>"#,
+                                r#"<typescript>
+const result = await text.sha256({ text: "restart proof" });
+finish(result.digest);
+</typescript>"#,
                             ))
                         }
                         other => panic!("unexpected deferred round-trip provider call {other}"),
@@ -153,11 +153,11 @@ fn same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors() {
                     let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     match call {
                         0 => Ok(text_response(
-                            r#"<lashlang>
-matches = await tools.search({ query: "text checksum", limit: 1 })?
-result = await text.sha256({ text: "too soon" })?
-finish result.digest
-</lashlang>"#,
+                            r#"<typescript>
+const matches = await tools.search({ query: "text checksum", limit: 1 });
+const result = await text.sha256({ text: "too soon" });
+finish(result.digest);
+</typescript>"#,
                         )),
                         1 => {
                             let request = serde_json::to_string(&request.messages)
@@ -165,10 +165,10 @@ finish result.digest
                             assert!(request.contains("text.sha256"), "{request}");
                             assert!(request.contains("link"), "{request}");
                             Ok(text_response(
-                                r#"<lashlang>
-result = await mystery.not_real({})?
-finish result
-</lashlang>"#,
+                                r#"<typescript>
+const result = await mystery.not_real({});
+finish(result);
+</typescript>"#,
                             ))
                         }
                         2 => {
@@ -177,9 +177,9 @@ finish result
                             assert!(request.contains("mystery.not_real"), "{request}");
                             assert!(request.contains("link"), "{request}");
                             Ok(text_response(
-                                r#"<lashlang>
-finish "typed link failures observed"
-</lashlang>"#,
+                                r#"<typescript>
+finish("typed link failures observed");
+</typescript>"#,
                             ))
                         }
                         other => panic!("unexpected deferred link-error provider call {other}"),

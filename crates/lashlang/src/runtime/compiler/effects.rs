@@ -59,7 +59,6 @@ impl Compiler {
             if !self.compile_expr_with_forced_effect_site(expr, site) {
                 return false;
             }
-            self.emit_isolation();
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, None);
             self.push_null_if(leave_value);
@@ -75,7 +74,6 @@ impl Compiler {
         if !self.compile_expr_with_forced_effect_site(expr, site) {
             return false;
         }
-        self.emit_isolation();
         let path = self.push_assign_path(&target.steps);
         self.code.push(Instruction::PathAssign { slot, path });
         self.set_const_slot(slot, None);
@@ -227,8 +225,7 @@ impl Compiler {
         // settlement order. `allSettled` reports every leaf as a record and
         // never unwraps one, so it must not validate — let alone die on —
         // metadata it does not read.
-        let selects_by_settlement_order =
-            self.dialect == CompilationDialect::Typescript && leaves.iter().any(|leaf| leaf.unwrap);
+        let selects_by_settlement_order = leaves.iter().any(|leaf| leaf.unwrap);
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
@@ -264,7 +261,6 @@ impl Compiler {
                         compiler
                             .code
                             .push(Instruction::BuildTuple(element_value_count));
-                        compiler.emit_isolation();
                     },
                     clauses,
                 );

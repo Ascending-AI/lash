@@ -605,7 +605,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn execute_javascript_regexp(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        self.require_typescript_intrinsic("JavaScript RegExp")?;
         let values = self.pop_n(argc)?;
         let Some(Value::String(operation)) = values.first() else {
             return Err(js_stdlib_error("missing RegExp operation discriminator"));

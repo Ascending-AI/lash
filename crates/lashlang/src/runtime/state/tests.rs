@@ -36,7 +36,6 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             globals: Record::new(),
             runtime_globals,
             heap,
-            reference_semantics: false,
         };
         let bytes = snapshot
             .to_canonical_bytes()
@@ -67,7 +66,6 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         globals: Record::new(),
         runtime_globals,
         heap,
-        reference_semantics: false,
     }
     .to_canonical_bytes()
     .expect("program-independent snapshot encoding accepts function metadata");
@@ -745,7 +743,6 @@ fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_misma
         globals: Record::new(),
         runtime_globals: roots,
         heap,
-        reference_semantics: true,
     };
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
     let mut future_bytes = bytes.clone();
@@ -813,7 +810,6 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
         globals: Record::new(),
         runtime_globals: roots,
         heap,
-        reference_semantics: true,
     };
 
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
@@ -1261,7 +1257,6 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
         globals: Record::new(),
         runtime_globals: roots,
         heap,
-        reference_semantics: true,
     };
 
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");

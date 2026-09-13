@@ -253,7 +253,7 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
                 let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let mut response = match call {
                     0 => text_response(&format!(
-                        "{MID_TURN_PROSE}\n<lashlang>\nprint(\"step\")\n</lashlang>"
+                        "{MID_TURN_PROSE}\n<typescript>\nprint(\"step\");\n</typescript>"
                     )),
                     _ => text_response(FINAL_REPLY),
                 };

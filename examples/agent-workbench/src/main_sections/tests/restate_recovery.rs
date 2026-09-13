@@ -37,18 +37,21 @@ async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() {
             async move {
                 match call {
                     0 => Ok(text_response(
-                        r#"<lashlang>
-process enrich(event: { email: str }) {
-  enriched = await llm.query({
-    task: "Classify the supplied email",
-    inputs: { event: event },
-    output: Type { category: str, confidence: float }
-  })?
-  finish enriched
-}
-handle = start enrich(event: { email: "hello@example.com" })
-finish (await handle)?
-</lashlang>"#,
+                        r#"<typescript>
+const enrich = defineProcess({
+  name: "enrich",
+  signals: {},
+  run: async (event: unknown) => {
+    return await llm.query({
+      task: "Classify the supplied email",
+      inputs: { event: event },
+      output: { category: "str", confidence: "float" }
+    });
+  }
+});
+const handle = start(enrich, { event: { email: "hello@example.com" } });
+finish(await handle);
+</typescript>"#,
                     )),
                     1 => {
                         assert!(request.stream_events.is_none());
@@ -198,7 +201,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .kind("workbench-suspended-sleep-cancel-e2e")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nsleep for \"300s\"\nfinish \"unreachable\"\n</lashlang>",
+                "<typescript>\nawait sleep(300000);\nfinish(\"unreachable\");\n</typescript>",
             ))
         })
         .build()
@@ -329,18 +332,22 @@ async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evid
         .kind("workbench-stop-over-process-await-e2e")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-process hold_for_stop() {
-  elapsed_seconds = 0
-  while elapsed_seconds < 300 {
-    sleep for "1s"
-    elapsed_seconds = elapsed_seconds + 1
+                r#"<typescript>
+const hold_for_stop = defineProcess({
+  name: "hold_for_stop",
+  signals: {},
+  run: async () => {
+    let elapsed_seconds = 0;
+    while (elapsed_seconds < 300) {
+      await sleep(1000);
+      elapsed_seconds = elapsed_seconds + 1;
+    }
+    return "unreachable";
   }
-  finish "unreachable"
-}
-handle = start hold_for_stop()
-finish (await handle)?
-</lashlang>"#,
+});
+const handle = start(hold_for_stop, {});
+finish(await handle);
+</typescript>"#,
             ))
         })
         .build()
@@ -884,11 +891,7 @@ async fn live_failure_path_harness(
     label: &str,
     scenario: failure_provider::DevProviderScenario,
 ) -> (LiveFailurePathHarness, PathBuf) {
-    live_failure_path_harness_with_provider(
-        label,
-        scenario.provider(lash::rlm::RlmDialect::Lashlang),
-    )
-    .await
+    live_failure_path_harness_with_provider(label, scenario.provider()).await
 }
 
 async fn live_failure_path_harness_with_provider(
@@ -1076,14 +1079,18 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
         .kind("workbench-revoked-process-await-e2e")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-process survive_revocation() {
-  sleep for "90s"
-  finish "survived session deletion"
-}
-handle = start survive_revocation()
-finish (await handle)?
-</lashlang>"#,
+                r#"<typescript>
+const survive_revocation = defineProcess({
+  name: "survive_revocation",
+  signals: {},
+  run: async () => {
+    await sleep(90000);
+    return "survived session deletion";
+  }
+});
+const handle = start(survive_revocation, {});
+finish(await handle);
+</typescript>"#,
             ))
         })
         .build()
@@ -1252,19 +1259,27 @@ async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner
         .kind("workbench-process-lifecycle-e2e")
         .complete(|_| async {
             Ok(text_response(
-                r#"<lashlang>
-process survivor() {
-  sleep for "8s"
-  finish "survived session deletion"
-}
-process cancellable() {
-  sleep for "60s"
-  finish "cancellation failed"
-}
-survivor_handle = start survivor()
-cancellable_handle = start cancellable()
-finish "started lifecycle gates"
-</lashlang>"#,
+                r#"<typescript>
+const survivor = defineProcess({
+  name: "survivor",
+  signals: {},
+  run: async () => {
+    await sleep(8000);
+    return "survived session deletion";
+  }
+});
+const cancellable = defineProcess({
+  name: "cancellable",
+  signals: {},
+  run: async () => {
+    await sleep(60000);
+    return "cancellation failed";
+  }
+});
+const survivor_handle = start(survivor, {});
+const cancellable_handle = start(cancellable, {});
+finish("started lifecycle gates");
+</typescript>"#,
             ))
         })
         .build()
@@ -1538,9 +1553,13 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
                     release_first_provider_call.notified().await;
                 }
                 Ok(match call_index {
-                    0 => text_response("<lashlang>\nsleep for \"2s\"\n</lashlang>"),
-                    1 => text_response("<lashlang>\nfinish \"current turn settled\"\n</lashlang>"),
-                    2 => text_response("<lashlang>\nfinish \"queued turn settled\"\n</lashlang>"),
+                    0 => text_response("<typescript>\nawait sleep(2000);\n</typescript>"),
+                    1 => text_response(
+                        "<typescript>\nfinish(\"current turn settled\");\n</typescript>",
+                    ),
+                    2 => text_response(
+                        "<typescript>\nfinish(\"queued turn settled\");\n</typescript>",
+                    ),
                     other => panic!("unexpected provider call {other}"),
                 })
             }
@@ -2157,7 +2176,7 @@ async fn live_restate_recovery_child() {
                 std::fs::write(provider_owner_path, std::process::id().to_string())
                     .expect("record provider owner pid");
                 Ok(text_response(
-                    "<lashlang>\nsleep for \"60s\"\nfinish \"unreachable\"\n</lashlang>",
+                    "<typescript>\nawait sleep(60000);\nfinish(\"unreachable\");\n</typescript>",
                 ))
             }
         })

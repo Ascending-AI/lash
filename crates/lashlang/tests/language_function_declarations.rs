@@ -119,9 +119,10 @@ async fn functions_may_call_each_other_in_either_direction() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn arguments_are_isolated_from_the_caller() {
-    // Lashlang is a value-semantics dialect: mutating a parameter inside a
-    // function must not reach the caller's binding.
+async fn arguments_alias_the_caller_binding() {
+    // Arguments are passed by reference (ADR 0096): mutating the object a
+    // parameter names is visible at the caller's binding, exactly as it is in
+    // TypeScript.
     let value = finish_value(
         r#"
         fn extend(items: list[int]) -> list[int] {
@@ -140,7 +141,9 @@ async fn arguments_are_isolated_from_the_caller() {
         value,
         Value::List(
             vec![
-                Value::List(vec![Value::Number(1.0), Value::Number(2.0)].into()),
+                Value::List(
+                    vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)].into()
+                ),
                 Value::List(
                     vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)].into()
                 ),

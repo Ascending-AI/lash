@@ -100,7 +100,7 @@ pub fn validate(source: &str) -> Result<(), Diagnostic> {
 /// Parses, lowers, validates, and compiles a standalone TypeScript program.
 pub fn compile(source: &str) -> Result<lashlang::CompiledProgram, Diagnostic> {
     let program = parse(source)?;
-    lashlang::compile_ast_with_dialect(&program, lashlang::CompilationDialect::Typescript)
+    lashlang::compile_ast(&program)
         .map_err(|error| Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None))
 }
 
@@ -123,17 +123,13 @@ pub fn link(
         &host.process_handles,
         &module_authority_roots,
     )?;
-    lashlang::LinkedModule::link_with_dialect(
-        program,
-        host,
-        lashlang::CompilationDialect::Typescript,
-    )
-    .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
+    lashlang::LinkedModule::link(program, host)
+        .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
 }
 
 /// Compiles an already-linked TypeScript module with reference semantics.
 pub fn compile_linked(linked: &lashlang::LinkedModule) -> lashlang::CompiledProgram {
-    lashlang::compile_linked_with_dialect(linked, lashlang::CompilationDialect::Typescript)
+    lashlang::compile_linked(linked)
 }
 
 /// Compiles one process from a lowered TypeScript module with reference semantics.
@@ -141,9 +137,5 @@ pub fn compile_process(
     program: &lashlang::Program,
     process_name: &str,
 ) -> Result<lashlang::CompiledProgram, lashlang::RuntimeError> {
-    lashlang::compile_process_with_dialect(
-        program,
-        process_name,
-        lashlang::CompilationDialect::Typescript,
-    )
+    lashlang::compile_process(program, process_name)
 }

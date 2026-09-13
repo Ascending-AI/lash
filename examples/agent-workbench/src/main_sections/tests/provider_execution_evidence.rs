@@ -157,7 +157,7 @@ pub(crate) async fn provider_execution_evidence_scenarios() -> serde_json::Value
         ),
     ] {
         let answer =
-            format!("<lashlang>\nfinish \"{provider_kind} execution evidence\"\n</lashlang>");
+            format!("<typescript>\nfinish(\"{provider_kind} execution evidence\");\n</typescript>");
         let script = if provider_kind == lash_sim::runtime_providers::GOOGLE_OAUTH {
             lash_sim::runtime_providers::google_runtime_script_for_text_with_explicit_zero_reasoning(
                 &answer,

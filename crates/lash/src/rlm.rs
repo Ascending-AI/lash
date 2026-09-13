@@ -41,7 +41,7 @@ impl RlmTurnBuilderExt for TurnBuilder {
 /// which is a different answer from the value the default resolves to. Anything
 /// a host labels with a language — a rendered transcript, an API payload, an
 /// evidence bundle — reads the recorded value rather than repeating its own
-/// configuration, or it labels the wrong dialect precisely in the case the label
+/// configuration, or it labels the wrong value precisely in the case the label
 /// exists to disambiguate.
 ///
 /// The write half of the pair is
@@ -109,16 +109,14 @@ impl From<EmbedError> for RlmSessionConfigError {
 /// Both are one line of host code, and neither can smooth a mismatch away by
 /// accident.
 ///
-/// The one fact this surface cannot *introduce* is the dialect: the protocol
-/// plugin selects its dialect implementation when the session's plugins are
-/// built, which is before any post-open write can reach it. A session states
-/// its dialect through the plugin-agnostic
+/// There is no language among these facts: TypeScript is the sole RLM dialect
+/// (ADR 0096), so a session neither states nor records one, and a session that
+/// still carries a recorded `dialect` is refused as an incompatible format
+/// rather than read. Create-time facts that the protocol plugin needs before
+/// any post-open write can reach it are stated through the plugin-agnostic
 /// [`SessionBuilder::plugin_option`](crate::SessionBuilder::plugin_option) seam
-/// keyed by [`RLM_PROTOCOL_PLUGIN_ID`] — the same seam `lash-subagents` writes a
-/// parent's dialect forward through — and that statement is applied by the same
-/// guarded set-if-unset engine, refusing with the same typed conflict. Calling
-/// this method with the dialect the session already resolved is a no-op;
-/// calling it with a different one is refused. Reading the recorded dialect
+/// keyed by [`RLM_PROTOCOL_PLUGIN_ID`], and applied by the same guarded
+/// set-if-unset engine with the same typed conflict. Reading the recorded facts
 /// *before* opening is FIG-1556's preflight surface, not this one.
 #[cfg(feature = "rlm")]
 #[async_trait::async_trait]
@@ -135,13 +133,6 @@ pub trait RlmSessionExt {
     /// safe to call on every open. Stating a *different* value is refused with
     /// [`RlmSessionConfigError::Conflict`] — the write never lands and the
     /// session keeps what it recorded.
-    ///
-    /// A stated dialect is only ever *compared*, never written. An open session
-    /// is already running one dialect implementation, and a session that
-    /// recorded no dialect resolved the default one, so the comparison is
-    /// against the dialect the session is running rather than against the
-    /// recorded `Option` — writing a dialect here would leave the recorded fact
-    /// disagreeing with the running plugin.
     ///
     /// The write settles through the commanded durable session-config path
     /// (FIG-2479): a successful return means the head accepted the stated
@@ -174,7 +165,7 @@ impl RlmSessionExt for crate::LashSession {
                     err.to_string(),
                 )))
             })?;
-            let next = lash_protocol_rlm::apply_rlm_session_config_post_open(&recorded, &requested)
+            let next = lash_protocol_rlm::apply_rlm_session_config_if_unset(&recorded, &requested)
                 .map_err(RlmSessionConfigError::Conflict)?;
             let mut options = lash_protocol_rlm::rlm_session_config_options(&next)
                 .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))?;
@@ -204,7 +195,6 @@ pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
     RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, WallClockBound, format_type_expr,
-    rlm_plugin_session_dialect, rlm_session_dialect,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`] or bind projected values to the active session via
@@ -214,7 +204,7 @@ pub use lash_protocol_rlm::{
     ProjectionRegistry, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
 };
 pub use lash_rlm_types::{
-    RlmCreateExtras, RlmDialect, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
+    RlmCreateExtras, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
     RlmTermination, RlmTurnOptions,
 };
 pub use lashlang::{LinkedModule, parse};

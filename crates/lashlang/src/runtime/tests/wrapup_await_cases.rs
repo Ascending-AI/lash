@@ -66,8 +66,8 @@ impl ExecutionHost for ComprehensionBatchHost {
                 self.batches
                     .lock_recover()
                     .push(batch.operations.iter().map(Self::describe).collect());
-                // Deliberately settle in reverse order: Lashlang must still
-                // select its rejection in written order.
+                // Deliberately settle in reverse order, so a test can tell
+                // settlement order from written order.
                 let mut results =
                     vec![ResourceOperationResult::Value(Value::Null); batch.operations.len()];
                 let mut settlement_order = Vec::with_capacity(results.len());
@@ -189,38 +189,65 @@ async fn aggregate_process_finish(host: &AggregateProcessHost, source: &str) -> 
     }
 }
 
+/// A handle written at an element position of an awaited literal settles
+/// through the durable process-await seam, however deeply the literal nests.
 #[tokio::test(flavor = "current_thread")]
-async fn bound_process_containers_use_process_await_seam() {
+async fn literal_process_containers_use_process_await_seam() {
+    for (source, expected) in [(
+        "process echo() { finish null }; h=start echo(); finish await [[h], tools.echo({})?]",
+        r#"[[{"ok":true,"value":42}],7]"#,
+    )] {
+        let host = AggregateProcessHost::default();
+        let value = aggregate_process_finish(&host, source).await;
+        assert_eq!(value.to_string(), expected, "{source}");
+        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{source}");
+    }
+}
+
+/// Awaiting a bound list directly still settles its elements: that is the
+/// `Promise.all` shape, one level deep, through the durable process-await
+/// seam. Only the elements settle (ADR 0096), never what they contain.
+#[tokio::test(flavor = "current_thread")]
+async fn awaiting_a_bound_list_settles_its_handle_elements() {
+    let host = AggregateProcessHost::default();
+    let value = aggregate_process_finish(
+        &host,
+        "process echo() { finish null }; h=start echo(); hs=[h]; finish await hs",
+    )
+    .await;
+    assert_eq!(value.to_string(), r#"[{"ok":true,"value":42}]"#);
+    assert_eq!(host.awaits.load(Ordering::SeqCst), 1);
+}
+
+/// A container bound to a name is a plain value in an awaited aggregate: only
+/// element positions settle, so the handles inside it are carried through
+/// untouched. This is Promise's shallow element semantics, the only ones this
+/// runtime has (ADR 0096); the recursive walk it replaces was the retired
+/// surface dialect's.
+#[tokio::test(flavor = "current_thread")]
+async fn bound_process_containers_are_carried_through_unsettled() {
     for (source, expected) in [
         (
-            "process echo() { finish null }; h=start echo(); finish await [[h], tools.echo({})?]",
-            r#"[[{"ok":true,"value":42}],7]"#,
-        ),
-        (
             "process echo() { finish null }; h=start echo(); hs=[h]; finish await [hs, tools.echo({})?]",
-            r#"[[{"ok":true,"value":42}],7]"#,
+            r#"[[{"handle":"h"}],7]"#,
         ),
         (
             "process echo() { finish null }; h=start echo(); hr={child:h}; finish await [hr, tools.echo({})?]",
-            r#"[{"child":{"ok":true,"value":42}},7]"#,
+            r#"[{"child":{"handle":"h"}},7]"#,
         ),
         (
             "process echo() { finish null }; h=start echo(); hs=[[[h]]]; finish await [hs, tools.echo({})?]",
-            r#"[[[[{"ok":true,"value":42}]]],7]"#,
+            r#"[[[[{"handle":"h"}]]],7]"#,
         ),
         (
             r#"process echo() { finish null }; h=start echo(); hs=[1,h,{note:"kept"}]; finish await [hs, tools.echo({})?]"#,
-            r#"[[1,{"ok":true,"value":42},{"note":"kept"}],7]"#,
-        ),
-        (
-            "process echo() { finish null }; h=start echo(); hs=[h]; finish await hs",
-            r#"[{"ok":true,"value":42}]"#,
+            r#"[[1,{"handle":"h"},{"note":"kept"}],7]"#,
         ),
     ] {
         let host = AggregateProcessHost::default();
         let value = aggregate_process_finish(&host, source).await;
         assert_eq!(value.to_string(), expected, "{source}");
-        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{source}");
+        assert_eq!(host.awaits.load(Ordering::SeqCst), 0, "{source}");
     }
 }
 
@@ -310,7 +337,7 @@ async fn nested_comprehension_aggregates_match_literal_expansion() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_comprehension_rejections_follow_written_order_after_settlement() {
+async fn nested_comprehension_rejections_follow_settlement_order() {
     let host = ComprehensionBatchHost::default();
     let compiled = comprehension_compile(
         r#"finish await { orders: [[tools.err({ value: x })? for x in row] for row in [["first", "second"]]], last: tools.echo({ value: "last" })? }"#,
@@ -318,7 +345,9 @@ async fn nested_comprehension_rejections_follow_written_order_after_settlement()
     let error = execute_compiled(&compiled, &mut State::new(), &host)
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("first"), "{error}");
+    // `Promise.all` reports the rejection that settled first (ADR 0096), and
+    // this host settles in reverse: the last-written leaf wins.
+    assert!(error.to_string().contains("second"), "{error}");
     assert_eq!(
         host.batches(),
         vec![vec![

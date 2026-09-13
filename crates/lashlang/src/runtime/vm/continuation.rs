@@ -32,7 +32,7 @@ use super::exceptions::PendingErrorOrigin;
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 13;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 14;
 
 /// The execution identity pending-tool handles carry.
 ///
@@ -946,7 +946,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
-            reference_semantics: false,
             pending_tools: Vec::new(),
             execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
@@ -984,7 +983,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
-            reference_semantics: false,
             pending_tools: Vec::new(),
             execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
@@ -1156,10 +1154,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: self.active_execution_elapsed,
             heap: VmHeapContinuation::new(self.heap.clone()),
         };
-        if let Err(error) = validate_continuation(&continuation) {
-            if !self.reference_semantics {
-                return Err(error);
-            }
+        if validate_continuation(&continuation).is_err() {
+            // The forest form could not hold this heap, so record the shared
+            // graph form and re-validate under it. Reference semantics make a
+            // shared heap ordinary (ADR 0096), not a dialect fact.
             continuation.reference_semantics = true;
             validate_continuation(&continuation)?;
         }
@@ -1179,10 +1177,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 found: continuation.format_version,
             });
         }
-        let reference_semantics = program.dialect == CompilationDialect::Typescript;
-        if continuation.reference_semantics && !reference_semantics {
-            return Err(ContinuationError::ReferenceSemanticsDialectMismatch);
-        }
+        // `reference_semantics` records whether this continuation's heap is a
+        // shared graph rather than a forest, not which language wrote it: every
+        // program this build compiles runs ECMA reference semantics (ADR 0096),
+        // and a forest-shaped heap is still the common case. A continuation
+        // written by a pre-cutover build is refused by the format-version fence
+        // above, so there is nothing left to compare here.
         validate_continuation(&continuation)?;
         validate_program_continuation(&continuation, &program.chunk)?;
         let active_function = continuation.active_function.map(|index| index as usize);
@@ -1381,7 +1381,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             },
             heap_initialized: true,
             extras_heapified: false,
-            reference_semantics,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are

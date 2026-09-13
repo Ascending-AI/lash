@@ -194,12 +194,8 @@ fn typescript_lowering_intrinsics_link_through_the_production_registry_path() {
         ),
     ];
     for (shape, program) in cases {
-        LinkedModule::link_with_dialect(
-            program,
-            full_host_environment(),
-            crate::CompilationDialect::Typescript,
-        )
-        .unwrap_or_else(|error| panic!("{shape} must link: {error}"));
+        LinkedModule::link(program, full_host_environment())
+            .unwrap_or_else(|error| panic!("{shape} must link: {error}"));
     }
 }
 
@@ -587,7 +583,9 @@ fn linked_module_rejects_process_lifecycle_outside_process_body() {
         matches!(
             err,
             LinkError::ProcessLifecycleOutsideProcess {
-                keyword: "wait_signal",
+                // Link diagnostics speak one vocabulary now that TypeScript is
+                // the only surface language (ADR 0096).
+                keyword: "waitSignal",
                 ..
             }
         ),

@@ -16,19 +16,11 @@ pub(super) enum ListComprehensionElement<'a> {
 
 impl Compiler {
     pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
-        Self::compile_program_with_dialect(program, CompilationDialect::Lashlang)
-    }
-
-    pub(crate) fn compile_program_with_dialect(
-        program: &Program,
-        dialect: CompilationDialect,
-    ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             None,
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
-            dialect,
         );
         compiler.expression_source_spans = expression_source_spans(program);
         compiler.compile_program_block(program);
@@ -37,18 +29,16 @@ impl Compiler {
         (chunk, compile_stats)
     }
 
-    pub(crate) fn compile_linked_program_with_dialect(
+    pub(crate) fn compile_linked_program(
         program: &Program,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
-        dialect: CompilationDialect,
     ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
-            dialect,
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -66,14 +56,12 @@ impl Compiler {
         program: &Program,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
-        dialect: CompilationDialect,
     ) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
             Some(module_context),
             Rc::new(RefCell::new(SlotTable::default())),
             stats.clone(),
-            dialect,
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
@@ -91,10 +79,8 @@ impl Compiler {
         module_context: Option<CompiledModuleContext>,
         slots: Rc<RefCell<SlotTable>>,
         compile_stats: Rc<RefCell<CompileStats>>,
-        dialect: CompilationDialect,
     ) -> Self {
         Self {
-            dialect,
             module_context,
             lashlang_execution: None,
             expression_source_spans: FxHashMap::default(),
@@ -120,18 +106,6 @@ impl Compiler {
             functions: Vec::new(),
             pending_functions: Vec::new(),
             declared_functions: FxHashMap::default(),
-        }
-    }
-
-    pub(super) fn emit_isolation(&mut self) {
-        if self.dialect == CompilationDialect::Lashlang {
-            self.code.push(Instruction::DeepCopy);
-        }
-    }
-
-    fn emit_loop_binding_isolation(&mut self, binding: usize) {
-        if self.dialect == CompilationDialect::Lashlang {
-            self.code.push(Instruction::DeepCopyLoopBinding(binding));
         }
     }
 
@@ -662,16 +636,7 @@ impl Compiler {
         if target.is_simple() {
             let name = &target.root;
             let slot = self.push_slot(name);
-            let has_type_literal = contains_type_literal(expr);
-            let const_value = if self.dialect == CompilationDialect::Typescript {
-                None
-            } else if let Expr::TypeLiteral(ty) = expr {
-                self.fold_type_expr(ty).map(wrap_type_schema_value)
-            } else if has_type_literal {
-                None
-            } else {
-                self.fold_compile_time_expr(expr)
-            };
+
             if let Expr::Binary {
                 left,
                 op: BinaryOp::Add,
@@ -686,7 +651,6 @@ impl Compiler {
                     // other: the entering item is isolated before it joins the
                     // accumulator.
                     self.compile_expr(&items[0]);
-                    self.emit_isolation();
                     self.code.push(Instruction::AppendAssign(slot));
                     self.set_const_slot(slot, None);
                     self.push_null_if(leave_value);
@@ -723,29 +687,15 @@ impl Compiler {
                 && first_arg == name
             {
                 self.compile_expr(item);
-                self.emit_isolation();
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::PushAssign(slot)));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);
                 return;
             }
-            if let Some(value) = const_value.clone()
-                && !has_type_literal
-            {
-                let constant = self.push_const(value);
-                self.code.push(Instruction::StoreConst { slot, constant });
-                self.set_const_slot(slot, const_value);
-                self.push_null_if(leave_value);
-                return;
-            }
-
             self.compile_expr(expr);
-            if store_needs_isolation(expr) {
-                self.emit_isolation();
-            }
             self.code.push(Instruction::StoreName(slot));
-            self.set_const_slot(slot, const_value);
+            self.set_const_slot(slot, None);
             self.push_null_if(leave_value);
             return;
         }
@@ -785,12 +735,8 @@ impl Compiler {
             }
         }
         self.compile_expr(expr);
-        self.emit_isolation();
         let path = self.push_assign_path(&target.steps);
-        self.code.push(match self.dialect {
-            CompilationDialect::Lashlang => Instruction::PathAssign { slot, path },
-            CompilationDialect::Typescript => Instruction::HeapPathAssign { slot, path },
-        });
+        self.code.push(Instruction::HeapPathAssign { slot, path });
         self.set_const_slot(slot, None);
         self.push_null_if(leave_value);
     }
@@ -815,7 +761,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_for_loop_body(body, binding);
+            self.compile_for_loop_body(body);
             self.push_null_if(leave_value);
             return;
         }
@@ -824,17 +770,16 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_for_loop_body(body, binding);
+        self.compile_for_loop_body(body);
         self.push_null_if(leave_value);
     }
 
-    fn compile_for_loop_body(&mut self, body: &Expr, binding: usize) {
+    fn compile_for_loop_body(&mut self, body: &Expr) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.emit_loop_binding_isolation(binding);
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
@@ -861,18 +806,15 @@ impl Compiler {
         clauses: &[ListComprehensionClause],
     ) {
         self.compile_list_comprehension_with(
-            &mut |compiler| {
-                match element {
-                    ListComprehensionElement::Value(element) => compiler.compile_expr(element),
-                    ListComprehensionElement::DeferredCall { receiver, args } => {
-                        compiler.compile_expr(receiver);
-                        for arg in args {
-                            compiler.compile_expr(arg);
-                        }
-                        compiler.code.push(Instruction::BuildTuple(args.len() + 1));
+            &mut |compiler| match element {
+                ListComprehensionElement::Value(element) => compiler.compile_expr(element),
+                ListComprehensionElement::DeferredCall { receiver, args } => {
+                    compiler.compile_expr(receiver);
+                    for arg in args {
+                        compiler.compile_expr(arg);
                     }
+                    compiler.code.push(Instruction::BuildTuple(args.len() + 1));
                 }
-                compiler.emit_isolation();
             },
             clauses,
         );
@@ -935,7 +877,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_list_comprehension_for_body(element, clauses, next_clause, binding);
+            self.compile_list_comprehension_for_body(element, clauses, next_clause);
             return;
         }
 
@@ -943,7 +885,7 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_list_comprehension_for_body(element, clauses, next_clause, binding);
+        self.compile_list_comprehension_for_body(element, clauses, next_clause);
     }
 
     fn compile_list_comprehension_for_body(
@@ -951,14 +893,12 @@ impl Compiler {
         element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
-        binding: usize,
     ) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.emit_loop_binding_isolation(binding);
         self.compile_list_comprehension_clause(element, clauses, next_clause);
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();
@@ -1065,20 +1005,12 @@ impl Compiler {
             }
             Expr::Field { target, field } => {
                 let target = self.fold_compile_time_expr(target)?;
-                if self.dialect == CompilationDialect::Typescript {
-                    read_javascript_field_direct(target, &transient_name(field)).ok()
-                } else {
-                    read_field_direct(target, &transient_name(field)).ok()
-                }
+                read_javascript_field_direct(target, &transient_name(field)).ok()
             }
             Expr::Index { target, index } => {
                 let target = self.fold_compile_time_expr(target)?;
                 let index = self.fold_compile_time_expr(index)?;
-                if self.dialect == CompilationDialect::Typescript {
-                    read_javascript_index_direct(target, index).ok()
-                } else {
-                    read_index_direct(target, index).ok()
-                }
+                read_javascript_index_direct(target, index).ok()
             }
             Expr::Unary { op, expr } => {
                 let value = self.fold_compile_time_expr(expr)?;

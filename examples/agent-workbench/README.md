@@ -46,30 +46,24 @@ Durability scenarios that require state to survive a process replacement remain 
 separately verified immutable same-configuration host-restart mechanism exists. Do not use
 `agent-workbench-reset` for them; it deliberately deletes the evidence they assert survives.
 
-## Sessions and dialects
+## Sessions
 
 The workbench serves many sessions. The sidebar lists them, switches between
-them, and adds new ones; a new session is created with an explicit RLM dialect,
-picked from the dialects the substrate registers (`lashlang`, `typescript`) —
-the menu is served by `GET /api/sessions`, never written into the page.
+them, and adds new ones. TypeScript is the sole RLM language (ADR 0096); the
+language menu is still served by `GET /api/sessions`, never written into the
+page.
 
-- `GET /api/sessions` — the roster, each session's *recorded* dialect, the
-  current selection, the registered dialect ids, and the ambient default.
-- `POST /api/sessions` — `{"name": "…", "dialect": "typescript"}`. The dialect
-  is pinned for that session's durable lifetime; an unregistered language id is
-  refused at creation rather than defaulted.
+- `GET /api/sessions` — the roster, each session's RLM language, the current
+  selection, the registered language ids, and the default.
+- `POST /api/sessions` — `{"name": "…", "dialect": "typescript"}`. The language
+  field is optional; any id other than `typescript` is refused at creation
+  rather than quietly served TypeScript.
 - `POST /api/sessions/select` — `{"session_id": "…"}` makes a rostered session
   the one a query-less `/api/` call resolves to.
 
-`LASH_RUNBOOK_DIALECT` is unchanged: it is the ambient default for the boot
-session and for any session the roster does not know (an ad-hoc
-`?session_id=` tab, or a data directory that predates the roster). Two durable
-files carry this: `<data-dir>/session-id` is still the plain-text current
-selection the runbook drivers read and write, and `<data-dir>/sessions.json`
-beside it is the roster, one row per session with the dialect it was created
-with. The roster is what every later open reads its dialect request from — a
-session's pin only becomes durable at its first commit, so forgetting the
-choice would let the ambient default overwrite it on the first turn.
+Two durable files carry the selection: `<data-dir>/session-id` is the
+plain-text current selection the runbook drivers read and write, and
+`<data-dir>/sessions.json` beside it is the roster, one row per session.
 
 Validate the example build and unit tests:
 

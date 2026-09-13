@@ -95,13 +95,14 @@ DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
 
 python3 - "$scenario" "$artifact_dir" <<'PY'
 import json
-import os
 import sys
 from pathlib import Path
 
 scenario = sys.argv[1]
 artifacts = Path(sys.argv[2])
-expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
+# TypeScript is the sole RLM language (ADR 0096): the harness records it
+# unconditionally, so the gate pins the literal rather than an environment read.
+expected_dialect = "typescript"
 
 
 def fail(message):

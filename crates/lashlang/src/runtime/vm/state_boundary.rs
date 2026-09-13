@@ -11,8 +11,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         host: &'a H,
     ) -> Result<Self, RuntimeError> {
         state.validate_program(program)?;
-        let reference_semantics = program.dialect == CompilationDialect::Typescript;
-        state.reference_semantics = reference_semantics;
         let projected = host.projected_bindings();
         let (mut globals, mut heap) = state.take_runtime();
         // A snapshot restore leaves placeholders wherever a projection was
@@ -22,7 +20,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         crate::runtime::projected_refresh::refresh_heap(&mut heap, &projected);
         let slots = SlotState::from_globals(globals, &program.chunk.slot_names, &projected);
         let mut vm = Self::new_with_mode(&program.chunk, slots, host, host.execution_mode());
-        vm.reference_semantics = reference_semantics;
         vm.install_heap(heap);
         if host.profile_execution() {
             vm.enable_profile();

@@ -365,119 +365,14 @@ pub enum RlmFinalAnswerFormat {
     RawFinalValue,
 }
 
-/// Source language pinned to an RLM session for its entire durable lifetime.
-///
-/// The serialized names are the language ids registered by the first-party RLM
-/// dialect registry. Keeping this an enum makes an unknown language a typed
-/// create-contract error instead of a late execution failure.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RlmDialect {
-    /// The default RLM language when a host omits the field.
-    #[default]
-    Lashlang,
-    /// The ECMA-exact TypeScript dialect.
-    Typescript,
-}
-
-impl RlmDialect {
-    /// Every dialect the first-party registry can activate, in id order.
-    ///
-    /// A host that offers a dialect choice — a create form, a CLI flag, an
-    /// environment variable — must offer *these*, not a list it writes itself:
-    /// a hand-written list is a second source of truth that goes stale the day
-    /// a dialect is added, and the failure it produces is an operator being
-    /// unable to select a dialect the substrate runs.
-    /// `lash-protocol-rlm` checks this array against the registry's own
-    /// dialects, so adding one that is not listed here fails that crate's
-    /// tests rather than shipping a menu with a hole in it.
-    pub const ALL: [Self; 2] = [Self::Lashlang, Self::Typescript];
-
-    /// Return the registered code-execution language id for this dialect.
-    pub const fn language_id(self) -> &'static str {
-        match self {
-            Self::Lashlang => "lashlang",
-            Self::Typescript => "typescript",
-        }
-    }
-
-    /// Resolve a registered language id, refusing an unknown one.
-    ///
-    /// This is the typed create-contract refusal in the shape a host receives
-    /// the choice in: a string off a form, a flag, or an environment variable.
-    /// Returning `None` rather than defaulting is the whole point — a typo that
-    /// silently selected Lashlang would pin the wrong dialect for the session's
-    /// durable lifetime.
-    pub fn from_language_id(language_id: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|dialect| dialect.language_id() == language_id)
-    }
-
-    /// The registered language ids, comma-separated, for a refusal message.
-    pub fn registered_language_ids() -> String {
-        Self::ALL
-            .iter()
-            .map(|dialect| format!("`{}`", dialect.language_id()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Resolve the ambient dialect statement from `LASH_RUNBOOK_DIALECT`.
-    ///
-    /// Every shipped host reads the ambient dialect from the same variable, so
-    /// the parse and its refusal wording live here once: a host that spelled
-    /// its own copy would drift on the day a dialect is added, and the drift
-    /// shows up as one host accepting an id another refuses.
-    ///
-    /// `Ok(None)` is "the operator stated nothing". What that means is host
-    /// policy, spelled in one visible line at the call site, not a second copy
-    /// of this parse. An unregistered id is an `Err` carrying the operator-
-    /// facing refusal, never a silent substitution: the dialect is pinned for
-    /// the session's whole durable lifetime, so a typo that quietly selected a
-    /// dialect would pin the wrong one.
-    pub fn from_env() -> Result<Option<Self>, String> {
-        parse_dialect_env(std::env::var(DIALECT_ENV).ok().as_deref())
-    }
-}
-
-/// The environment variable every shipped host reads its ambient dialect from.
-const DIALECT_ENV: &str = "LASH_RUNBOOK_DIALECT";
-
-/// The parse behind [`RlmDialect::from_env`], split from the environment read
-/// so the table of answers is testable without mutating process state.
-fn parse_dialect_env(stated: Option<&str>) -> Result<Option<RlmDialect>, String> {
-    let Some(stated) = stated else {
-        return Ok(None);
-    };
-    RlmDialect::from_language_id(stated)
-        .map(Some)
-        .ok_or_else(|| {
-            format!(
-                "{DIALECT_ENV} must be a registered RLM language id ({}), got `{stated}`",
-                RlmDialect::registered_language_ids()
-            )
-        })
-}
-
 /// RLM protocol session config. Natural turns finish with prose-only model
-/// responses or the active dialect's explicit `finish` operation. Programmatic
+/// responses or the RLM language's explicit `finish` operation. Programmatic
 /// turns can require an explicit finish value, optionally validated against a schema.
 /// `final_answer_format` is a session presentation preference; schema-required
 /// turns ignore it.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
-    /// Session-wide language choice. Absence is the ratified Lashlang default.
-    ///
-    /// An *explicit* `null` is refused rather than read as absence: see
-    /// [`reject_explicit_null_dialect`].
-    #[serde(
-        default,
-        deserialize_with = "reject_explicit_null_dialect",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dialect: Option<RlmDialect>,
     /// Session-wide termination requirement. Absence is the `Natural` default.
     ///
     /// Absence is a distinct statement from an explicit `Natural`: options that
@@ -492,14 +387,8 @@ pub struct RlmCreateExtras {
 
 /// The RLM options a *single turn* may restate (FIG-1979).
 ///
-/// The dialect is deliberately absent. It is resolved once, at session
-/// materialization, from the session's own recorded config (ADR 0066), and the
-/// executor never consults a per-turn value. While the turn bag carried a
-/// `dialect` field, a turn could name one dialect while its cells ran another
-/// and a host reading the turn bag would print the wrong language's vocabulary;
-/// with the field gone that disagreement is unrepresentable rather than
-/// merely unused. Hosts that need the running language read it from the
-/// session config instead — `lash_protocol_rlm::rlm_session_dialect`.
+/// There is no language choice to restate: TypeScript is the sole RLM dialect
+/// and nothing — a turn bag, a session bag, a create contract — names one.
 ///
 /// Unstated fields are omitted from the wire, not written as `null`: the
 /// per-turn bag is merged over the session bag key by key, so a serialized
@@ -534,7 +423,6 @@ impl RlmTurnOptions {
 /// set-if-unset that refuses with [`RlmSessionConfigConflict`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {
-    pub dialect: Option<RlmDialect>,
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
     pub termination: Option<RlmTermination>,
 }
@@ -543,11 +431,6 @@ impl RlmSessionConfig {
     /// An empty request, stating nothing.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn dialect(mut self, dialect: RlmDialect) -> Self {
-        self.dialect = Some(dialect);
-        self
     }
 
     pub fn final_answer_format(mut self, format: RlmFinalAnswerFormat) -> Self {
@@ -562,14 +445,13 @@ impl RlmSessionConfig {
 
     /// Whether this states nothing at all.
     pub fn is_empty(&self) -> bool {
-        self.dialect.is_none() && self.final_answer_format.is_none() && self.termination.is_none()
+        self.final_answer_format.is_none() && self.termination.is_none()
     }
 }
 
 impl From<&RlmCreateExtras> for RlmSessionConfig {
     fn from(extras: &RlmCreateExtras) -> Self {
         Self {
-            dialect: extras.dialect,
             final_answer_format: extras.final_answer_format.clone(),
             termination: extras.termination.clone(),
         }
@@ -579,7 +461,6 @@ impl From<&RlmCreateExtras> for RlmSessionConfig {
 impl From<&RlmSessionConfig> for RlmCreateExtras {
     fn from(config: &RlmSessionConfig) -> Self {
         Self {
-            dialect: config.dialect,
             termination: config.termination.clone(),
             final_answer_format: config.final_answer_format.clone(),
         }
@@ -595,10 +476,6 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
 /// a string to tell a pin conflict from an unrelated failure.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RlmSessionConfigConflict {
-    Dialect {
-        recorded: RlmDialect,
-        requested: RlmDialect,
-    },
     FinalAnswerFormat {
         recorded: RlmFinalAnswerFormat,
         requested: RlmFinalAnswerFormat,
@@ -613,7 +490,6 @@ impl RlmSessionConfigConflict {
     /// The durable fact that was already pinned.
     pub fn field(&self) -> &'static str {
         match self {
-            Self::Dialect { .. } => "dialect",
             Self::FinalAnswerFormat { .. } => "final_answer_format",
             Self::Termination { .. } => "termination",
         }
@@ -623,13 +499,6 @@ impl RlmSessionConfigConflict {
 impl std::fmt::Display for RlmSessionConfigConflict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (recorded, requested) = match self {
-            Self::Dialect {
-                recorded,
-                requested,
-            } => (
-                recorded.language_id().to_string(),
-                requested.language_id().to_string(),
-            ),
             Self::FinalAnswerFormat {
                 recorded,
                 requested,
@@ -648,30 +517,6 @@ impl std::fmt::Display for RlmSessionConfigConflict {
 }
 
 impl std::error::Error for RlmSessionConfigConflict {}
-
-/// Reads a present `dialect` key, refusing an explicit `null`.
-///
-/// Absence and `null` are the same value to serde by default, and that made
-/// `null` the one tampered shape that did not fail closed: an unknown id, a
-/// case-drifted id and a junk extra key are all refused, but a `null` silently
-/// downgraded a recorded TypeScript session to the Lashlang default. Absence
-/// has to keep meaning Lashlang — that is how every pre-layer session decodes —
-/// so the two cases must be told apart rather than merged. Serde only calls
-/// this when the key is present, so absence still takes the `default`.
-fn reject_explicit_null_dialect<'de, D>(deserializer: D) -> Result<Option<RlmDialect>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize as _;
-    use serde::de::Error as _;
-
-    match Option::<RlmDialect>::deserialize(deserializer)? {
-        Some(dialect) => Ok(Some(dialect)),
-        None => Err(D::Error::custom(
-            "`dialect` is present but null; omit the key for the Lashlang default",
-        )),
-    }
-}
 
 /// Durable identity for a host projection that can be resolved in another
 /// process-local RLM runtime.
@@ -809,116 +654,11 @@ impl TurnProtocol for RlmTurnProtocol {
 }
 
 #[cfg(test)]
-mod dialect_env_tests {
-    use super::{DIALECT_ENV, RlmDialect, parse_dialect_env};
-
-    /// The whole answer table for the ambient variable, in one place.
-    ///
-    /// Absence is `None` — a statement of nothing that each host maps to its
-    /// own policy — every registered id resolves, and anything else refuses
-    /// with a message naming the variable and the ids that exist.
-    #[test]
-    fn the_ambient_variable_answers_one_table() {
-        assert_eq!(parse_dialect_env(None), Ok(None));
-        assert_eq!(
-            parse_dialect_env(Some("lashlang")),
-            Ok(Some(RlmDialect::Lashlang))
-        );
-        assert_eq!(
-            parse_dialect_env(Some("typescript")),
-            Ok(Some(RlmDialect::Typescript))
-        );
-        let refusal = parse_dialect_env(Some("lashscript")).expect_err("an unknown id refuses");
-        assert_eq!(
-            refusal,
-            "LASH_RUNBOOK_DIALECT must be a registered RLM language id \
-             (`lashlang`, `typescript`), got `lashscript`"
-        );
-    }
-
-    /// Every registered dialect is selectable by its own registered id: the
-    /// menu a host offers and the ids this parse accepts are one list.
-    #[test]
-    fn every_registered_dialect_resolves_from_its_language_id() {
-        for dialect in RlmDialect::ALL {
-            assert_eq!(
-                parse_dialect_env(Some(dialect.language_id())),
-                Ok(Some(dialect))
-            );
-        }
-    }
-
-    /// An empty variable is a value the operator set, not an absence, so it
-    /// refuses rather than resolving to the default.
-    #[test]
-    fn an_empty_ambient_value_refuses() {
-        let refusal = parse_dialect_env(Some("")).expect_err("an empty value refuses");
-        assert!(refusal.contains(DIALECT_ENV), "{refusal}");
-    }
-}
-
-#[cfg(test)]
-mod dialect_serde_tests {
-    use super::{RlmCreateExtras, RlmDialect};
-
-    /// Absence is the pre-layer compatibility answer and must stay Lashlang.
-    #[test]
-    fn an_absent_dialect_is_the_lashlang_default() {
-        let extras: RlmCreateExtras = serde_json::from_str("{}").expect("pre-layer state decodes");
-        assert_eq!(extras.dialect, None);
-    }
-
-    /// An explicit `null` is not the same statement as saying nothing.
-    ///
-    /// Every other tampered value fails closed: an unknown id, a case-drifted
-    /// id, a junk extra key. `null` was the one shape that silently downgraded
-    /// a recorded TypeScript session to Lashlang, because serde cannot tell it
-    /// from an absent key by default. The field is never written as `null` —
-    /// it is skipped when absent — so a `null` in durable state is a store that
-    /// has been edited, and failing closed is the same answer the other tamper
-    /// shapes already get.
-    #[test]
-    fn an_explicit_null_dialect_fails_closed() {
-        let error = serde_json::from_str::<RlmCreateExtras>(r#"{"dialect":null}"#)
-            .expect_err("an explicit null must be refused");
-        assert!(
-            error.to_string().contains("dialect"),
-            "the refusal names the field: {error}"
-        );
-    }
-
-    #[test]
-    fn a_named_dialect_decodes() {
-        let extras: RlmCreateExtras =
-            serde_json::from_str(r#"{"dialect":"typescript"}"#).expect("named dialect decodes");
-        assert_eq!(extras.dialect, Some(RlmDialect::Typescript));
-    }
-
-    #[test]
-    fn an_unknown_dialect_still_fails_closed() {
-        serde_json::from_str::<RlmCreateExtras>(r#"{"dialect":"python"}"#)
-            .expect_err("an unknown id must be refused");
-    }
-
-    /// The create path is unchanged: `None` still round-trips by being skipped,
-    /// so a session that asks for no dialect writes no key and stays decodable.
-    #[test]
-    fn none_round_trips_as_an_absent_key() {
-        let encoded = serde_json::to_string(&RlmCreateExtras::default()).expect("encode");
-        assert!(!encoded.contains("dialect"), "{encoded}");
-        let decoded: RlmCreateExtras = serde_json::from_str(&encoded).expect("decode");
-        assert_eq!(decoded.dialect, None);
-    }
-}
-
-#[cfg(test)]
 mod turn_options_tests {
-    use super::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
+    use super::{RlmTermination, RlmTurnOptions};
 
-    /// FIG-1979: a turn cannot name a dialect. The type has no field for it, so
-    /// the only way a `dialect` key reaches this bag is the session bag it is
-    /// merged over — and that key is read from the session config, never from
-    /// here.
+    /// No options bag writes a language key: there is one RLM dialect, so
+    /// there is nothing for a turn or a session to state.
     #[test]
     fn a_turn_bag_never_writes_a_dialect_key() {
         let encoded = serde_json::to_string(&RlmTurnOptions {
@@ -928,21 +668,6 @@ mod turn_options_tests {
         .expect("encode");
         assert!(!encoded.contains("dialect"), "{encoded}");
         assert!(!encoded.contains("final_answer_format"), "{encoded}");
-    }
-
-    /// The bag decodes off the *merged* session⊕turn payload, so a session's
-    /// recorded dialect key must be carried past rather than refused.
-    #[test]
-    fn a_merged_payload_with_a_session_dialect_still_decodes() {
-        let options: RlmTurnOptions = serde_json::from_str(
-            r#"{"dialect":"typescript","termination":{"kind":"natural"},"final_answer_format":{"kind":"markdown"}}"#,
-        )
-        .expect("merged payload decodes");
-        assert_eq!(options.effective_termination(), RlmTermination::Natural);
-        assert_eq!(
-            options.final_answer_format,
-            Some(RlmFinalAnswerFormat::Markdown)
-        );
     }
 
     #[test]

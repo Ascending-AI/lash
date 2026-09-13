@@ -143,39 +143,31 @@ pub struct ModuleArtifact {
     pub host_requirements_ref: HostRequirementsRef,
     pub host_requirements: HostRequirements,
     pub exports: ModuleExports,
-    /// Never defaulted: a defaulted dialect lets a TypeScript artifact verify as Lashlang.
-    pub compilation_dialect: crate::CompilationDialect,
     pub canonical_ir: Program,
 }
 
 impl ModuleArtifact {
-    /// Builds a raw Lashlang artifact from already-complete program IR.
+    /// Builds a raw module artifact from already-complete program IR.
     ///
     /// Source programs whose process output is inferred must go through the
     /// linker; this builder refuses an incomplete exported signature.
     pub fn from_program(program: Program) -> Result<Self, ModuleArtifactError> {
         let canonical_ir = canonical_program_ir(program);
         let requirements = host_requirements_for_program(&canonical_ir);
-        Self::from_canonical_ir_and_requirements(
-            canonical_ir,
-            requirements,
-            crate::CompilationDialect::Lashlang,
-        )
+        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
     }
 
-    pub(crate) fn from_program_with_requirements_and_dialect(
+    pub(crate) fn from_program_with_requirements(
         program: Program,
         requirements: HostRequirements,
-        compilation_dialect: crate::CompilationDialect,
     ) -> Result<Self, ModuleArtifactError> {
         let canonical_ir = canonical_program_ir(program);
-        Self::from_canonical_ir_and_requirements(canonical_ir, requirements, compilation_dialect)
+        Self::from_canonical_ir_and_requirements(canonical_ir, requirements)
     }
 
     fn from_canonical_ir_and_requirements(
         canonical_ir: Program,
         requirements: HostRequirements,
-        compilation_dialect: crate::CompilationDialect,
     ) -> Result<Self, ModuleArtifactError> {
         crate::ast::validate_ast(&canonical_ir)?;
         if let Some(process) = canonical_ir.declarations.iter().find_map(|declaration| {
@@ -190,18 +182,12 @@ impl ModuleArtifact {
         }
         let host_requirements_ref = host_requirements_ref(&requirements);
         let exports = module_exports(&canonical_ir);
-        let module_ref = module_ref(
-            &canonical_ir,
-            &host_requirements_ref,
-            &exports,
-            compilation_dialect,
-        );
+        let module_ref = module_ref(&canonical_ir, &host_requirements_ref, &exports);
         Ok(Self {
             module_ref,
             host_requirements_ref,
             host_requirements: requirements,
             exports,
-            compilation_dialect,
             canonical_ir,
         })
     }
@@ -298,10 +284,9 @@ impl ModuleArtifact {
     }
 
     pub fn verify(&self) -> Result<(), ModuleArtifactError> {
-        let rebuilt = Self::from_program_with_requirements_and_dialect(
+        let rebuilt = Self::from_program_with_requirements(
             self.canonical_ir.clone(),
             self.host_requirements.clone(),
-            self.compilation_dialect,
         )?;
         if rebuilt.module_ref != self.module_ref {
             return Err(ModuleArtifactError::HashMismatch {
@@ -335,15 +320,10 @@ impl ModuleArtifact {
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, ModuleArtifactError> {
         let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
-        let known_dialect = matches!(
-            raw.get("compilation_dialect")
-                .and_then(|value| value.as_str()),
-            Some("lashlang" | "typescript")
-        );
         reject_future_shape(&raw)?;
         let artifact: Self = serde_json::from_slice(bytes).map_err(|err| {
             let message = err.to_string();
-            if known_dialect && message.contains("unknown variant") {
+            if message.contains("unknown variant") {
                 ModuleArtifactError::FutureShape {
                     field: "artifact shape",
                     value: "nested enum variant".to_string(),
@@ -432,19 +412,10 @@ fn reject_future_shape(raw: &serde_json::Value) -> Result<(), ModuleArtifactErro
             value: "obsolete current-trigger manifest artifact field".to_string(),
         });
     }
-    let Some(dialect) = raw
-        .get("compilation_dialect")
-        .and_then(|value| value.as_str())
-    else {
-        return Ok(());
-    };
-    if matches!(dialect, "lashlang" | "typescript") {
-        return Ok(());
+    if raw.get("compilation_dialect").is_some() {
+        return Err(ModuleArtifactError::RetiredCompilationDialect);
     }
-    Err(ModuleArtifactError::FutureShape {
-        field: "compilation_dialect",
-        value: dialect.to_string(),
-    })
+    Ok(())
 }
 
 fn contains_obsolete_process_type(value: &serde_json::Value) -> bool {
@@ -478,6 +449,11 @@ pub enum ModuleArtifactError {
     IncompleteProcessSignature { process: String },
     #[error("failed to encode module artifact: {0}")]
     Codec(String),
+    #[error(
+        "module artifact records the retired `compilation_dialect` field; it was published \
+         before TypeScript became the sole RLM dialect and must be recompiled and republished"
+    )]
+    RetiredCompilationDialect,
     #[error(
         "module artifact uses unsupported future shape `{field}` = `{value}`; \
          recompile and republish the module"
@@ -515,6 +491,7 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
             }
             ModuleArtifactError::Codec(message) => Self::Decode(message),
             ModuleArtifactError::FutureShape { .. } => Self::Decode(value.to_string()),
+            ModuleArtifactError::RetiredCompilationDialect => Self::Decode(value.to_string()),
             ModuleArtifactError::HashMismatch { .. } => Self::Decode(value.to_string()),
         }
     }
@@ -1481,14 +1458,44 @@ mod tests {
         assert!(error.to_string().contains("trigger_key_manifest"));
     }
 
+    /// TypeScript is the sole RLM language (ADR 0096), so an artifact that
+    /// still records a compilation dialect was published by a pre-cutover build
+    /// and is refused as an incompatible format rather than read with a default.
     #[test]
-    fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
+    fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
         let mut raw: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
                 .expect("frozen fixture should be JSON");
         raw.as_object_mut()
             .expect("artifact is an object")
             .remove("trigger_key_manifest");
+        assert!(
+            raw.get("compilation_dialect").is_some(),
+            "the frozen fixture must still carry the retired field"
+        );
+        let error = ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
+        )
+        .expect_err("an artifact recording a dialect must be refused");
+        assert!(matches!(
+            error,
+            ModuleArtifactError::RetiredCompilationDialect
+        ));
+        assert!(error.to_string().contains("compilation_dialect"));
+    }
+
+    #[test]
+    fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/module-artifact-old.json"))
+                .expect("frozen fixture should be JSON");
+        let object = raw.as_object_mut().expect("artifact is an object");
+        object.remove("trigger_key_manifest");
+        // The frozen fixture predates ADR 0096 and still records a dialect,
+        // which is its own typed refusal (see
+        // `a_recorded_compilation_dialect_is_refused_as_a_retired_field`).
+        // Drop it so the subject here stays the identity fence.
+        object.remove("compilation_dialect");
         raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
         let error = ModuleArtifact::from_store_bytes(
             &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
