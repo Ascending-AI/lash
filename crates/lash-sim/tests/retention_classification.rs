@@ -366,7 +366,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 46, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 49, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()
