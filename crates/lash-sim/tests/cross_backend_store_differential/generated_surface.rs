@@ -2285,10 +2285,30 @@ async fn generated_cross_backend_surface_differential_agrees() {
             let (operation_results, observations) =
                 apply_and_observe(&mut runners, operation).await;
             if !operation_results_agree(&operation_results) || !states_agree(&observations) {
+                let observed = SurfaceDivergence {
+                    step: step + 1,
+                    operation: operation.clone(),
+                    operation_results,
+                    observations,
+                };
                 let minimal = minimize_diverging_prefix(&storage, &operations[..=step]).await;
-                let minimal_divergence = first_divergence(&storage, &minimal)
-                    .await
-                    .expect("minimized sequence must retain a divergence");
+                // A prefix that stops reproducing is a harness defect, not a
+                // clean run: say which divergence was observed and then lost,
+                // so the report never hides behind a bare expect.
+                let Some(minimal_divergence) = first_divergence(&storage, &minimal).await else {
+                    let path = persist_counterexample(seed, &operations[..=step], &observed);
+                    panic!(
+                        "cross-backend surface state diverged, but replaying the same prefix \
+                         stopped diverging: the differential harness is not replay-deterministic. \
+                         Observed divergence persisted to {}\nseed={seed} step={} \
+                         operation={:?} operation_results={:#?} rows={:#?}",
+                        path.display(),
+                        observed.step,
+                        observed.operation,
+                        observed.operation_results,
+                        observed.observations,
+                    );
+                };
                 let divergence = format!(
                     "seed={seed} step={} operation={:?} operation_results={:#?} rows={:#?}",
                     minimal_divergence.step,
