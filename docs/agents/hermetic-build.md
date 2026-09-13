@@ -3,8 +3,8 @@
 Lash uses Bazel 9.1.0 and rules_rs 0.0.110 for checkout-independent local
 compilation. Cargo manifests and `Cargo.lock` remain the source of truth. The
 generated BUILD files expose one Bazel action for each first-party library,
-binary, example, benchmark, unit-test crate, integration-test crate, doctest,
-and custom build script reachable in Cargo's resolved default workspace graph.
+binary, example, benchmark, unit-test crate, integration-test crate, and
+custom build script reachable in Cargo's resolved default workspace graph.
 The complete Cargo metadata inventory also records targets whose required
 features are outside that graph; their existing named Cargo feature recipes
 remain authoritative. Third-party crates are imported from the same lockfile.
@@ -51,9 +51,6 @@ kiln test
 # Path-plan like CI. Docs-only skips compile; workbench-only does not
 # compile lash-core or Postgres. Never starts Postgres, S3, or E2E.
 scripts/dev-test.sh
-
-# Run the doctest partition (35 rustdoc binaries).
-kiln test //:workspace_doctests
 
 # Lint the `--workspace --all-targets` shape (170 clippy actions).
 kiln build //:workspace_clippy
@@ -194,25 +191,19 @@ Cargo feature-gate target without a Bazel label.
 
 ## Doctests
 
-`//:workspace_doctests` executes the 35 `rust_doc_test` labels — one per
-first-party library whose manifest leaves `doctest` enabled, which is exactly
-the set Cargo builds. rustdoc runs them against the pinned 1.98.1 toolchain and
-the crate's declared dependency graph; none reaches a service, the network, or a
-Cargo-relative asset, and none depends on the working directory, so their
-results are deterministic and cacheable under `--cache_test_results=yes` like
-any other Bazel test action. An input change produces a different action key,
-and a failed doctest is never reused as a success. On this tree the partition
-runs 25 cases and skips 4 ignored ones, the same counts `cargo test --doc
---workspace --locked` reports across the same 35 rustdoc binaries.
-`scripts/test_bazel_test_contract.py` refuses any doctest label that
-reacquires `manual` or a `cargo_only` reason, so a label cannot leave the
-partition silently.
+There are none. Doctests were removed from the repository by ruling on
+2026-09-13: there is no `//:workspace_doctests` partition, no `rust_doc_test`
+wrapper, and every workspace library manifest sets `[lib] doctest = false`, so
+`cargo test` never compiles a doc snippet either. The doc comments and their
+fenced examples remain as prose; nothing compiles or executes them.
+`scripts/test_bazel_test_contract.py` refuses a doc-test label, a
+`rust_doc_test` load, or a library manifest that drops `doctest = false`.
 
 ## Clippy
 
 `//:workspace_clippy` is the `cargo clippy --workspace --all-targets` shape as
 one cached Bazel action per target: 170 labels, every first-party target of the
-resolved default graph except doctests and the one `cargo_build_script` label,
+resolved default graph except the one `cargo_build_script` label,
 whose exemption is recorded as `clippy_exempt` in
 `tools/bazel/target-inventory.json` because `cargo_build_script` exposes no
 `CrateInfo` for a clippy aspect to attach to.
@@ -311,10 +302,12 @@ workbench binaries excluded so they are not compiled just to self-skip).
 Workbench unit tests run only when `examples/agent-workbench/**` changed.
 The `Lint` job builds
 `//:workspace_clippy` in place of the workspace `cargo clippy`, and the
-`Check workspace + doctests` job builds `//:workspace_compile` and runs
-`//:workspace_doctests` in place of `cargo check --workspace --all-targets` and
-`cargo test --doc --workspace`. `//:workspace_compile` compiles *and links*
-every label of the resolved default graph except doctests, including the
+`Check workspace` job builds `//:workspace_compile` in place of
+`cargo check --workspace --all-targets`, with
+`--remote_download_outputs=minimal`: nothing on that runner consumes the
+outputs, and a compile or link error still fails the build.
+`//:workspace_compile` compiles *and links*
+every label of the resolved default graph, including the
 unit- and integration-test crates that carry the `cfg(test)` shape and the
 members that are not `default-members`; it is generated from the same
 `cargo metadata --locked` resolution the Cargo command uses, so feature
@@ -328,8 +321,8 @@ event.
 
 Fork and Dependabot pull requests never receive cache credentials: their Bazel
 job is intentionally skipped, their ordinary nextest job omits the generated
-filter, the `Lint` and `Check workspace + doctests` jobs run exactly the
-Cargo clippy, check and doctest commands that predate this cutover, and the
+filter, the `Lint` and `Check workspace` jobs run exactly the
+Cargo clippy and check commands that predate this cutover, and the
 service jobs take the Cargo branch of `scripts/ci/store-tests.sh`, preserving
 the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.

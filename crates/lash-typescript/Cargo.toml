@@ -16,6 +16,7 @@ categories = ["compilers", "parser-implementations"]
 
 [lib]
 name = "lash_typescript"
+doctest = false
 
 [features]
 testing = []

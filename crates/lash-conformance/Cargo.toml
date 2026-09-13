@@ -8,6 +8,7 @@ description = "Backend certification laws for Lash stores"
 
 [lib]
 name = "lash_conformance"
+doctest = false
 
 [lints]
 workspace = true

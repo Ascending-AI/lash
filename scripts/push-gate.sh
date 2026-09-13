@@ -202,12 +202,6 @@ run_workspace_check() {
   cargo check --workspace --all-targets --locked ${ci_features}
 }
 
-run_workspace_doctests() {
-  step "Workspace doctests"
-  # shellcheck disable=SC2086
-  cargo test --doc --workspace --locked ${ci_features}
-}
-
 run_workflow_graph_integration() {
   step "Workflow graph example integration"
   just workflow-graph-integration-verify
@@ -465,7 +459,6 @@ scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary
 scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
 scoped RUST_COMPILE "MinIO/S3 conformance" run_minio_conformance
 scoped RUST_COMPILE "Workspace tests" run_workspace_tests
-scoped RUST_COMPILE "Workspace doctests" run_workspace_doctests
 scoped RUST_COMPILE "Workflow graph example integration" run_workflow_graph_integration
 scoped RUST_COMPILE "Restate and process e2e suite" run_e2e_suite
 

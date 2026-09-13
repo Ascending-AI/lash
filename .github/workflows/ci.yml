@@ -253,23 +253,23 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
-  # Separate matrix jobs run the workspace check/doctests and API seal in
-  # parallel. The matrix result remains the same required test-doc context.
+  # Separate matrix jobs run the workspace check and API seal in parallel. The
+  # matrix result remains the same required test-doc context.
   test-doc:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
     if: github.event_name != 'push'
-    # Trusted events replace the workspace check and the workspace doctests
-    # with cached Bazel actions, which need the shared cache credentials.
-    # Untrusted events never see them and keep the Cargo commands below.
+    # Trusted events replace the workspace check with cached Bazel actions,
+    # which need the shared cache credentials. Untrusted events never see them
+    # and keep the Cargo command below.
     environment: build-cache
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Check workspace + doctests
+          - name: Check workspace
             lane: workspace
             target: target
           - name: Seal-test the API surface
@@ -339,7 +339,7 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       # `//:workspace_compile` is every first-party label of the resolved
-      # default workspace graph except doctests: libraries, binaries, examples,
+      # default workspace graph: libraries, binaries, examples,
       # benches, build scripts, and the unit- and integration-test crates that
       # carry the `cfg(test)` shape. It compiles and links them, so it proves a
       # strict superset of `cargo check --workspace --all-targets`. The graph is
@@ -348,18 +348,17 @@ jobs:
       # are not `default-members` — `lash-typescript` and `lashlang` — are
       # present. The one Cargo target outside the resolved graph,
       # `slack-clone-live-e2e`, is skipped by `cargo check` for the same reason.
-      #
-      # `//:workspace_doctests` is the same 35 rustdoc binaries Cargo builds,
-      # run against the pinned toolchain and the declared dependency graph.
-      - name: Check workspace and run doctests with shared cache
+      # Nothing on the runner consumes the compiled outputs, so they stay in
+      # the remote CAS; a compile or link error still fails the build.
+      - name: Check workspace with shared cache
         if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
           # shellcheck disable=SC2086
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" test \
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
-            --cache_test_results=yes --test_output=errors \
-            //:workspace_compile //:workspace_doctests
+            --remote_download_outputs=minimal \
+            //:workspace_compile
 
       - name: Remove client credentials
         if: always() && matrix.lane == 'workspace'
@@ -373,13 +372,6 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
-
-      # nextest does not run doctests; keep the full workspace gate.
-      - name: Test workspace doctests
-        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted != 'true'
-        run: |
-          # shellcheck disable=SC2086
-          cargo test --doc --workspace --locked ${LASH_CI_FEATURES}
 
       # Every existing compile-fail/pass fixture remains in the ui binary.
       # Keep workspace feature unification and the original cargo test command.

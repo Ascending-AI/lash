@@ -61,7 +61,7 @@ portable default-feature run.
 
 The Cargo-owned set comprises PostgreSQL and S3 stores; Restate and
 `lash-runtime` unit tests; nested and heavy suites; trybuild; TypeScript and
-frontend assets; doctests; feature matrices; Clippy; and formatting.
+frontend assets; feature matrices; Clippy; and formatting.
 
 Install the repository's commit hook in each regular checkout with
 `prek install --hook-type pre-commit`; new warm forks install it automatically.
@@ -86,7 +86,7 @@ For Rust compilation, target analysis, and focused unit or integration tests,
 use the checkout-independent Bazel workflow in
 [`docs/agents/hermetic-build.md`](docs/agents/hermetic-build.md). Its default
 entry point uses the shared local executor and cache; the named Cargo recipes
-retain feature-matrix, service, doctest, trybuild, fuzz, judged, packaging, and
+retain feature-matrix, service, trybuild, fuzz, judged, packaging, and
 release semantics.
 
 `just push-gate` and the `just confidence*` lanes remain available as explicit

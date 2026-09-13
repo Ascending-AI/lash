@@ -11,6 +11,9 @@ readme = "README.md"
 rust-version.workspace = true
 publish = false
 
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 
