@@ -337,7 +337,7 @@ impl Session {
         &self,
         session_id: &SessionId,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let tool_access = self.plugins().tool_access().clone();
+        let tool_access = self.plugins().tool_access();
         let subagent = self.plugins().subagent_context().cloned();
         let key = self.tool_catalog_cache_key(&tool_access, self.tool_registry.generation());
         let mut cache = self.tool_catalog_cache.lock_recover();
