@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 if [[ -f "$repo/env.sh" ]]; then
-  # Orb generates this file. Cargo metadata must see the same environment as
+  # Kiln generates this file. Cargo metadata must see the same environment as
   # every other Cargo command in the fork.
   # shellcheck source=/dev/null
   source "$repo/env.sh"

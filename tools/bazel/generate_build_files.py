@@ -47,7 +47,7 @@ def cargo_metadata() -> dict:
     ):
         metadata_env[variable] = ""
     result = subprocess.run(
-        [os.environ.get("ORB_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
+        [os.environ.get("KILN_REAL_CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"],
         cwd=ROOT,
         env=metadata_env,
         check=True,
