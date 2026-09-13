@@ -33,7 +33,7 @@ impl PluginSession {
             session_id: SessionId::from(session_id.to_string()),
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
-            tool_access: self.tool_access.clone(),
+            tool_access: self.tool_access(),
             subagent: self.subagent.clone(),
             extensions: self.extensions.clone(),
         })?;
