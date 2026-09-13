@@ -2,6 +2,13 @@
 
 Status: Accepted
 
+Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) keeps the authoritative signature rule
+and moves where it is read. A `Process` value carries its signature as a
+claim; the engine `resolve` for the pinned definition reference returns the
+authority, and every intent that would create a durable row checks the claim
+against it before the row exists. Process values reach tool contracts through
+the `x-lash` keyword rather than the hand-written catalogue.
+
 ## Context
 
 Lashlang process types previously stored a flattened input type beside an
