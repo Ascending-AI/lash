@@ -821,14 +821,15 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
                 enumerations: Default::default(),
             });
 
-        let controller =
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
             lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
                 .await
-                .expect("open SQLite effect controller");
+                .expect("open SQLite effect controller"),
+        );
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
             Arc::clone(&provider),
             collision.clone(),
-            lash_core::ScopedEffectController::shared(Arc::new(controller), scope.clone())
+            lash_core::ScopedEffectController::shared(Arc::clone(&controller), scope.clone())
                 .expect("admit SQLite controller scope"),
             invocation.clone(),
         );
@@ -854,6 +855,8 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
             other => panic!("live failure was not Ambient: {other:?}"),
         };
 
+        drop(ctx);
+        drop(controller);
         let reopened = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
             .await
             .expect("cold-reopen SQLite effect controller");
