@@ -664,6 +664,63 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
     Ok(())
 }
 
+/// A guarded write that agrees with a concurrently recorded fact performs no
+/// durable change, but reloading that fact must still refresh the facade view.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config() -> Result<()> {
+    use crate::rlm::RlmSessionExt as _;
+
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let build_core = || {
+        explicit_ephemeral_facets(rlm_core_builder())
+            .provider(mock_provider())
+            .model(mock_model_spec())
+            .store_factory(store_factory.clone())
+            .build(crate::testing::runtime_lease_owner())
+    };
+    let stale_core = build_core()?;
+    let concurrent_core = build_core()?;
+    let stale = stale_core
+        .session("rlm-stale-same-value-guarded-write")
+        .open()
+        .await?;
+    let concurrent = concurrent_core
+        .session("rlm-stale-same-value-guarded-write")
+        .open()
+        .await?;
+    let termination = crate::rlm::RlmTermination::FinishRequired { schema: None };
+    concurrent
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().termination(termination.clone()),
+        )
+        .await
+        .expect("the concurrent writer records the previously unset termination");
+
+    {
+        let writer = stale.runtime.writer();
+        let mut runtime = writer.lock().await;
+        lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
+    }
+
+    let resolved = stale
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().termination(termination.clone()),
+        )
+        .await
+        .expect("the stale writer agrees with the concurrently recorded termination");
+    assert_eq!(resolved.termination, Some(termination.clone()));
+    assert_eq!(
+        stale
+            .rlm_config()
+            .expect("the refreshed facade config decodes")
+            .termination,
+        Some(termination),
+        "a successful no-op guarded write must publish the reloaded config"
+    );
+    Ok(())
+}
+
 /// A host that states no dialect still gets one: the first open records the
 /// default, and that default is a pin like any other. A post-open statement is
 /// compared against the dialect the session is running and never written, so

@@ -168,7 +168,7 @@ impl RlmSessionExt for crate::LashSession {
         let writer = self.runtime.writer();
         let mut runtime = writer.lock().await;
         let mut resolved = None;
-        let changed = runtime
+        runtime
             .update_protocol_turn_options(|current| {
                 let recorded = lash_protocol_rlm::rlm_session_config(current).map_err(|err| {
                     RlmSessionConfigError::Session(EmbedError::Session(SessionError::Protocol(
@@ -188,9 +188,7 @@ impl RlmSessionExt for crate::LashSession {
             })
             .await
             .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))??;
-        if changed {
-            self.runtime.publish_from(&runtime);
-        }
+        self.runtime.publish_from(&runtime);
         Ok(resolved.expect("a successful protocol-options update resolves the RLM config"))
     }
 }
