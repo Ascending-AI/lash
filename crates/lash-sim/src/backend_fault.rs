@@ -45,6 +45,31 @@ impl BackendFaultKind {
             Self::Postgres => "lash_postgres_store::testing::PostgresFaultInjector",
         }
     }
+
+    /// Name of the JSON report this backend's profile writes.
+    pub const fn report_file_name(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite-faults.json",
+            Self::Postgres => "postgres-faults.json",
+        }
+    }
+
+    /// The `lash-sim backend-faults` argument that selects this backend.
+    pub const fn replay_backend_argument(self) -> &'static str {
+        match self {
+            Self::Sqlite => "--backend sqlite",
+            Self::Postgres => "--backend postgres",
+        }
+    }
+
+    /// Parse the `--backend` value accepted by `lash-sim backend-faults`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "sqlite" => Some(Self::Sqlite),
+            "postgres" => Some(Self::Postgres),
+            _ => None,
+        }
+    }
 }
 
 /// Transaction boundary at which one armed fault is injected, in either backend.
@@ -273,8 +298,8 @@ impl BackendFaultLane {
         &self,
         case_root: &std::path::Path,
     ) -> (Arc<dyn SessionStoreFactory>, BackendFaultInjector) {
-        match &self.postgres {
-            None => {
+        match self.kind {
+            BackendFaultKind::Sqlite => {
                 let injector = SqliteFaultInjector::default();
                 let factory: Arc<dyn SessionStoreFactory> = Arc::new(
                     lash_sqlite_store::SqliteSessionStoreFactory::new(case_root.join("store"))
@@ -282,7 +307,11 @@ impl BackendFaultLane {
                 );
                 (factory, BackendFaultInjector::Sqlite(injector))
             }
-            Some(lane) => {
+            BackendFaultKind::Postgres => {
+                let lane = self
+                    .postgres
+                    .as_ref()
+                    .expect("a PostgreSQL lane always opens its database");
                 let injector = PostgresFaultInjector::default();
                 let factory: Arc<dyn SessionStoreFactory> = Arc::new(
                     lash_postgres_store::PostgresSessionStoreFactory::new(&lane.storage)
