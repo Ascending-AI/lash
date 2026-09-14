@@ -779,7 +779,7 @@ impl ToolDefinition {
     }
 }
 
-mod schema_docs;
+pub(crate) mod schema_docs;
 pub use schema_docs::schema_for;
 use schema_docs::{
     ParameterDoc, compact_doc_line, compact_examples, compact_schema_label, return_field_metadata,
