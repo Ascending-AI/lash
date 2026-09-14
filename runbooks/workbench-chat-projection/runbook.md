@@ -94,14 +94,14 @@ This table is binding. Browser dispatch names come from the in-page
 | `reasoning_delta` | one `reasoning` disclosure | `/api/state.transcript.type == "reasoning"`; survives reload |
 | `code_block_started` | one `code-block` disclosure in running state | same element settles; never a second code row |
 | successful `code_block_completed` | the same `code-block`, summary `typescript completed` | `/api/state.transcript.type == "code_block"`; survives reload |
-| failing `code_block_completed` | the same `code-block fail`, with the exact code error | durable code block; survives reload |
+| failing `code_block_completed` | the same `code-block fail`; its collapsed summary is only `typescript failed` | the exact error text lives in the durable code block — `/api/state.transcript[].error` — not in the DOM summary; survives reload |
 | `tool_call_started` | one `tool pending` child **inside its code block** | completion updates it in place by `call_id`, or by the deterministic turn/name/arguments/graph/parent fallback when no id exists |
 | successful/failed `tool_call_completed` | the same nested child becomes `tool` / `tool fail` with `completed` / `failed` badge | reload has an honest source-operation/outcome summary for each retained call, not the live call identity or details |
 | `final_value` | terminal text/value is appended inside the current `message assistant`; no terminal-value row | committed assistant contains the same rendering; survives reload |
 | `tool_value` | intentionally the same rendering as `final_value`; `tool_name` does not create a DOM distinction | committed assistant contains the same value; survives reload |
-| committed failure message | one `message event`, role `event`, exact text `turn could not be completed`, no retry button | durable in `/api/state.messages`; same in sender, observer, and reload |
+| committed failure message | one `message event`, role `event`, exact text `turn could not be completed`, no retry button | durable in `/api/state.messages`; same in sender, observer, and reload. Emitted only when the **turn** ends failed. A failed code block the agent recovers from is not a failed turn, so the deterministic `code-failure` scenario produces no such row |
 | ordinary provider/turn `error` activity | no `.message.error` row and no retry control in either sender or observer | the later committed failure message is the only rendered failure row |
-| `postCommand` HTTP/fetch failure | transient `message error`, role `error`, with `retry turn` because the command recorded `lastRequest` | page-local and absent from backfill; do not confuse it with provider activity or the durable failure row |
+| `postCommand` HTTP/fetch failure | transient `message error`, role `error`, with `retry turn` because the command recorded `lastRequest` | page-local and absent from backfill; do not confuse it with provider activity or the durable failure row. It is **transient in the literal sense**: the next snapshot repaint of `#timeline` removes it, measured at ~1.9 s. A post-hoc DOM read sees nothing; witness it with a `MutationObserver` armed on `#timeline` before the send |
 | `model_attempt_reset` | removes only prose/reasoning chunks whose correlation ids are named | empty id arrays remove nothing; settled transcript contains no superseded text |
 | `retry_status` | transient, turn-owned `message event retry-status` with attempt/max/reason/wait | removed only by the same turn's next request or settlement; delayed completion of another turn cannot clear it |
 | committed message attachments | `message-attachments` inside the owning `message user` body | sourced from `message.attachments`, not a stream event; survives reload |
@@ -209,7 +209,10 @@ one `.tool.pending` child under the one running `.code-block`, zero top-level `.
 and capture `20-tool-start-live.png`. The deterministic terminal tool remains pending long enough
 for this objective poll; never replace the poll with a sleep.
 
-Poll for `tool_call_completed`, `code_block_completed`, and `tool_value`, then settled/idle.
+Poll to settled/idle. The terminal-tool stream tears down without dispatching `tool_call_completed`,
+`code_block_completed`, or `tool_value` to the in-page hook, so gate the completion on the DOM and
+durable state below rather than on those hook names; record the un-dispatched events as an
+observation, and do not weaken the settled requirements to compensate.
 Require the same nested element count to remain one, its badge to be `completed`, the code summary
 to report one tool, and the assistant row to contain `FIG-1350 deterministic tool value`. Record
 that `tool_value` and `final_value` are DOM-indistinguishable by the answer key: both render their
@@ -221,8 +224,13 @@ capture `22-tool-complete-value-reload.png`.
 ### Surface C — failing code and durable error
 
 Boot `code-failure`; submit any text and poll to settled/idle. Require one `code-block fail` whose
-error contains `FIG-1350 deterministic code failure`, one durable `message event` with exact text
-`turn could not be completed`, and no settled `.message.error` or retry button. Capture
+durable `/api/state.transcript[].error` contains `FIG-1350 deterministic code failure` (the DOM
+summary reads only `typescript failed`), and no settled `.message.error` or retry button. The
+scenario **recovers**: the agent follows the failed cell with a successful one and commits an
+assistant row reading `session recovered after code failure`, so the turn ends successfully and
+there is no `message event` / `turn could not be completed` row. Require that absence rather than
+the row, and require the settled histogram
+`{message user: 1, code-block fail: 1, code-block: 1, message assistant: 1}`. Capture
 `30-code-fail-error-settled.png` and the four `30-*` extracts. Reload and require the same failed
 code row and durable event row with the same histogram; capture `31-code-fail-error-reload.png`.
 An ordinary provider `error` activity before that message must add no row on either the sending
@@ -230,8 +238,11 @@ page (even though it has `lastRequest`) or a never-sent observer.
 
 Separately prove the client row without calling a provider: after a successful page hydration,
 abort or refuse a composer `POST /api/turn` in browser routing so `postCommand` has a
-`lastRequest`. Require one transient `message error` with a `retry turn` button, capture
-`32-client-error-retry-live.png`, then remove the route fault and reload. Require that transient
+`lastRequest`. Arm a `MutationObserver` on `#timeline` **before** the send and read its samples:
+the row survives only until the next snapshot repaint (~1.9 s), so a post-send DOM query is a false
+negative, not a missing row. Require one transient `message error` with a `retry turn` button in the
+observer samples, capture `32-client-error-retry-live.png` and the sample log
+`32-client-error-timeline-samples.json`, then remove the route fault and reload. Require that transient
 row to be absent and the durable transcript unchanged. This is the reachable client/network
 error path; it is not the provider-failure answer.
 
@@ -264,7 +275,7 @@ and capture `52-attachment-reload.png`.
 | Code success/failure | one in-place code row per turn with exact success/fail class | | `11-*`, `30-*`, reloads |
 | Tool start/complete | one nested child updates pending → completed with or without call id; reload exposes only retained source operation/outcome and explicit omission | | `20-*` through `22-*` |
 | Final/tool value | both exact values render inline in assistant; no separate row; intended indistinguishability recorded | | `11-*`, `21-*` |
-| Durable/client errors | durable event survives reload without retry; client error is transient and retryable when `lastRequest` exists | | `30-*` through `32-*` |
+| Durable/client errors | a failed turn's durable event survives reload without retry (absent when the scenario recovers); the client error is transient — observed by MutationObserver — and retryable when `lastRequest` exists | | `30-*` through `32-*` |
 | Retry/reset | named partial correlation retracted; retry status visible then removed; replacement single-copy | | `40-*` through `42-*` |
 | Attachment | row sourced from committed message and identical after reload | | `50-*` through `52-*` |
 | Usage | later-turn cumulative counters add to the settled session baseline monotonically; settled rail equals `/api/state.usage` | | every state/hook extract |
@@ -289,11 +300,18 @@ and capture `52-attachment-reload.png`.
 - **Layer 2 — durable state:** the session graph in
   `<data-dir>/lash-sessions/durable-core.db`, table `graph_nodes`, filtered to
   `session_id = <S> AND tombstoned = 0`, reading `node_json` for
-  `kind = "event"` nodes whose `event.Conversation.role` is `User` or `Assistant`; the app's
+  `kind = "event"` nodes whose `event.Conversation.role` is `User` or `Assistant`. Reconcile
+  **per-role counts, never id sets**: the store holds the RLM protocol's own
+  `m_rlm_<turn>_<n>_assistant_response|content|prose` rows in addition to the committed
+  `workbench-assistant:<turn>` one, so raw `Assistant` rows legitimately exceed the projected
+  assistant count, and the API relabels the committed user id as `workbench-user:<turn>` while the
+  store keeps `m_ingress_ti:<hash>`. Record the id namespaces observed; gate on counts. Then the app's
   projection `GET /api/state?session_id=<S>.messages` (roles `user` / `assistant`); and the
   product-event log `<data-dir>/product-events.json`, keyed by `<S>`, whose `event_ids`
   carry the projected message ids.
-- **Layer 3 — logs:** `<data-dir>/trace.jsonl`, records with
+- **Layer 3 — logs:** the trace file, which is `$AGENT_WORKBENCH_TRACE` whenever that variable
+  is set and only otherwise `<data-dir>/trace.jsonl`; reading the wrong one yields empty record
+  lists that look like a product failure. Records with
   `context.session_id == <S>`. Count `type == "turn_completed"`; `context.turn_id` names the
   execution and distinguishes a composer turn (`workbench-turn-…`) from a wake
   (`workbench-queued-…`).
