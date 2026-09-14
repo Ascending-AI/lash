@@ -8,6 +8,11 @@ name: Performance
 
 on:
   workflow_dispatch:
+  # Nightly at 03:41 UTC: the guard is otherwise release-only, and a
+  # release-only profile can drift unmeasured for weeks. A full 2500-iteration
+  # profile costs ~2 runner hours, so it stays off the per-merge path.
+  schedule:
+    - cron: "41 3 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -83,15 +88,30 @@ jobs:
         with:
           tool: protoc
 
+      # Two steps, not two commands in one step: a failure in the runtime
+      # profile used to abort before the lashlang profile ran at all, so its
+      # rows never reached the log and a single dispatch could only ever
+      # report one of the two guards.
       - name: Run full runtime performance checks
         run: |
           python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json
+
+      - name: Run full lashlang performance checks
+        if: '!cancelled()'
+        run: |
           python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json
 
       - name: Publish performance summaries
+        if: '!cancelled()'
         run: |
-          python3 scripts/perfreport.py .benchmarks/perf-guard/runtime.json >> "$GITHUB_STEP_SUMMARY"
-          python3 scripts/perfreport.py .benchmarks/perf-guard/lashlang.json >> "$GITHUB_STEP_SUMMARY"
+          for report in runtime lashlang; do
+            path=".benchmarks/perf-guard/${report}.json"
+            if [ -f "${path}" ]; then
+              python3 scripts/perfreport.py "${path}" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "No ${report} performance report was produced." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Upload performance guard artifacts
         if: always()

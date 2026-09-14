@@ -290,7 +290,7 @@ for (let i = 0; i < 16; i++) {
   });
 }
 
-payload = {
+const payload = {
   status: "ok",
   error: null,
   exit_code: 0,
