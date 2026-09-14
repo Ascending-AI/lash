@@ -16,8 +16,9 @@ structure rather than exact assistant wording.
 
 ## Scenario-specific golden rules
 
-1. **Submit both inputs during one proven running turn.** Gate the running pill, **stop
-   turn** control, and exactly one `/api/state.active_turns` address before using either
+1. **Submit both inputs during one proven running turn.** Gate the running pill, the two
+   running-turn cancel controls — `#stop` (**stop after step**) and `#abort` (**abort**);
+   the workbench renders no control called "stop turn" — and exactly one `/api/state.active_turns` address before using either
    ingress action. A receipt outside that window does not prove mid-turn behavior.
 2. **Intent and render must agree.** **inject now** must render `injected now` and return
    `ingress.scope: "active_turn"` targeting the exact active turn with
@@ -51,11 +52,14 @@ structure rather than exact assistant wording.
   `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
   overrides. Teardown with
   `just agent-workbench-down <port>`.
-- UI: composer, **inject now**, **queue next**, ingress receipt rows, transcript, running
-  pill, and Stop control.
+- UI: composer, **inject now** (`#injectNow`), **queue next** (`#queueNext`), ingress receipt
+  rows, transcript, running pill, and the `#stop` / `#abort` controls. Both ingress buttons are
+  disabled unless a turn is running.
 - HTTP truth: `GET /api/state`, `POST /api/turn`, and `POST /api/turn/input` with
   `{ "text": "...", "ingress": "active_turn" | "next_turn" }`.
-- Disk truth: `<data-dir>/lash-sessions/durable-core.db`, table `pending_turn_inputs`, and
+- Disk truth: `<data-dir>/lash-sessions/durable-core.db`, table `pending_turn_inputs` — note
+  an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
+  one-send run holds three rows, not two — and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
   `turn_input.completed`.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
@@ -85,7 +89,7 @@ the first tool batch, restart with a fresh turn; this scenario must not rely on 
 "likely" multi-step task. During that initial sleep, inject before the first search/tool
 batch. Poll, do not add an unrelated fixed delay, until all three gates hold:
 
-- the UI shows the running pill and **stop turn**;
+- the UI shows the running pill and both cancel controls (`#stop`, `#abort`);
 - the composer offers **inject now** and **queue next**;
 - `/api/state.active_turns` has exactly one address for the rendered session.
 

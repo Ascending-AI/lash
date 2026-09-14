@@ -22,8 +22,11 @@ internal assertions.
 ## Scenario-specific golden rules
 
 1. Set `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` to exactly the phase's documented value.
-   Require the startup warning and rendered model id `dev/failure-paths`; an OpenRouter
-   request or missing warning invalidates the run.
+   Require the launcher's startup warning naming the variable and the scenario, and the
+   host's own `agent_workbench.startup` record carrying that scenario. **The page does not
+   render the model id.** The selector shows `provider default` for the dev provider, so
+   `dev/failure-paths` is a log and trace witness, never a DOM one. An OpenRouter request or
+   a missing warning invalidates the run.
 2. Use a fresh data directory and a fresh port-derived stack for each scenario. Never
    carry provider call counts, sessions, or processes between phases.
 3. A provider error is a stopped `ProviderError`, never `Cancelled`. The public transcript
@@ -41,6 +44,10 @@ internal assertions.
    or render the fixture's second-generation sentinel.
 7. Process failure remains process failure. The work rail must show `failed` plus the
    durable error; a successful parent turn must not make the process look successful.
+   The default `/api/work` snapshot is a *live* projection: it filters retired processes to
+   the last 10 s (`retired_since_ms = now - 10_000` in `list_work`), so a terminal process
+   leaves it a few seconds after it fails. Poll from before the submit; a poll started after
+   the process settles observes an empty list, which is retirement, not a missing failure.
 
 ## Working material
 
@@ -57,8 +64,9 @@ internal assertions.
 
 ## Phase 0 — Common pre-flight
 
-For the selected scenario, poll `/healthz`, open the page, and require the rendered model
-id to be `dev/failure-paths`. Require the startup log to name
+For the selected scenario, poll `/healthz`, open the page, and require the `dev/failure-paths`
+model id from the startup log and the `agent_workbench.startup` record (the page renders
+`provider default`). Require the startup log to name
 `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` and the exact scenario. Require a fresh transcript,
 no active turn, and the idle pill. Screenshot `00-<scenario>-ready.png`.
 
@@ -71,8 +79,10 @@ page is idle and Stop is hidden, then gate all of:
   assistant success bubble for that turn; the execution scorecard retains `dev_auth_rejected`
   and HTTP 401 without leaking the provider message into the product transcript;
 - `/api/state.active_turns` is empty and `active-turns.json` contains no route;
-- the trace's completed turn has `outcome` stopped with `provider_error`, contains issue
-  code `dev_auth_rejected`, and has no cancellation evidence or cancelled outcome.
+- the trace's `turn_completed` record carries `outcome: {"status": "failed", "done_reason":
+  "provider_error"}` — `failed` with that done reason is the provider-error shape; there is no
+  `stopped` status here — the turn's issue code is `dev_auth_rejected`, and there is no
+  cancellation evidence or cancelled outcome.
 
 Save state and matching trace rows as `01-auth-failed-state.json` and
 `01-auth-failed-trace.json`; screenshot `01-auth-failed.png`.
@@ -101,8 +111,11 @@ remains. Require no error terminal, no cancellation evidence, and no active rout
 From `/api/state.product_events.events`, select the `model_call_recorded` call whose attempts
 carry `dev_rate_limited` and require exactly two attempts in ordinal order. Attempt 1 is
 `failed` at `response_observed`,
-has error code `dev_rate_limited` and HTTP 429, records a scheduled zero-delay retry, and has
-no provider response identity/model evidence. Attempt 2 is a successful protocol-boundary
+has error code `dev_rate_limited` and HTTP 429, and has no provider response identity/model
+evidence. Its retry decision must be `scheduled: true`. The provider's advertised
+`retry_after_ms` is `0`; the scheduled `delay_ms` is the runtime's own backoff and is a small
+nonzero number (45-279 ms observed), so gate on `scheduled: true` plus `retry_after_ms: 0`,
+never on a zero `delay_ms`. Attempt 2 is a successful protocol-boundary
 `interrupted` attempt at `output_started` and comes second. In the rendered
 **execution evidence** scorecard require two rows for that same call id in the same ordinal
 order. The first row must visibly name attempt 1, `failed`, `response_observed`,
@@ -135,10 +148,15 @@ require in captured observations
 `/api/state.messages` and the settled transcript. Require `UNSAFE second generation was
 purchased` to be absent everywhere.
 
-In the matching trace require exactly one LLM call attempt, `protocol_position` equal to
-`output_started`, retry decision `scheduled: false` with reason
-`output_started_without_retry_guarantee`, observed output usage equal to 4, and terminal issue
-code `unsafe_retry_after_output_started` with `retryable: false`. Require no attempt reset or
+Require exactly one LLM call attempt. The structured attempt fields —
+`protocol_position` equal to `output_started` and retry decision `scheduled: false` with
+reason `output_started_without_retry_guarantee` — live on the `model_call_recorded` product
+event in `/api/state.product_events`, not in the trace; the trace's `llm_call_failed` record
+carries the same facts as prose (`reason` ending `retry: output_started_without_retry_guarantee`),
+plus `charge_safety` (`outcome: denied`, `tokens_at_stake: 4`) and the attempt `usage`. Gate
+each field where it is actually emitted: output usage equal to 4 in either record, and
+terminal issue code `unsafe_retry_after_output_started` with `retryable: false` on the trace
+record's `error`. Require no attempt reset or
 retry-status event and no active route.
 
 Screenshot `04-paid-output-refused.png`; save state, observations, and trace rows as
@@ -147,10 +165,13 @@ Screenshot `04-paid-output-refused.png`; save state, observations, and trace row
 
 ## Phase 4 — Failed durable process in the work rail
 
-Boot fresh with `failed-process`. Submit `start deterministic failing process`; the parent
+Boot fresh with `failed-process`. **Start the `/api/work` poll before submitting** — see
+golden rule 7: the live projection retires the terminal row about ten seconds after it
+fails. Submit `start deterministic failing process`; the parent
 turn may complete successfully. Poll `GET /api/work` until the row labelled
 `FIG425_deterministic_failure` is terminal with status `failed` and error exactly
-`deterministic durable process failure`.
+`deterministic durable process failure`. Those fields are nested under the item's `process`
+object (`process.status_label`, `process.terminal`, `process.error`).
 
 Open the **work** rail and poll until that same row visibly shows both `failed` and
 `error: deterministic durable process failure`. The UI and `/api/work` must identify the

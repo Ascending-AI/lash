@@ -15,15 +15,26 @@ workflow.
 mock operations. Do not configure OpenRouter or a Restate stack for this run.
 
 **The canonical source in this scenario is not an RLM dialect.** This host opens no RLM
-session and prompts no model. The `process blank() { finish 0 }` text the code pane shows
-is the **workflow-graph lens's** canonical printer over the IR — the `/project` and
-`/workflow` seams round-trip through it — and
-[ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) leaves that printer
-where it is while retiring the authoring surface: a TypeScript canonical printer and its
-round-trip laws are named there as unbuilt future work with their own ADR, tracked as
-FIG-3033. So every source string asserted below is the lens's output, not a language a
-model was asked to write, and it changes when the lens's printer changes, not with this
-arc.
+session and prompts no model. The text the code pane shows is the **workflow-graph lens's**
+canonical printer over the IR — the `/project` and `/workflow` seams round-trip through it.
+**That printer now emits TypeScript.** The Blank baseline reads
+
+```ts
+const blank = defineProcess({
+  name: "blank",
+  signals: {},
+  run: async () => {
+    return 0;
+  },
+});
+```
+
+and the old lashlang form `process blank() { finish 0 }` is rejected by `POST /project`
+with HTTP 422 `{"error":{"code":"invalid_source","message":"TS_SYNTAX_ERROR: …"}}`. Assert
+the TypeScript form everywhere below, and do not carry the earlier note that the TypeScript
+canonical printer is unbuilt future work: it has landed for this seam. Every source string
+asserted below is the lens's output, not a language a model was asked to write, and it
+changes when the lens's printer changes, not with this arc.
 
 ## Scenario-specific golden rules
 
@@ -58,6 +69,10 @@ arc.
   line, then poll `GET /healthz` until it returns 200 with
   `{ "service": "workflow-graph-roundtrip", "status": "ok" }`.
 - Teardown is Ctrl-C/SIGTERM to that foreground recipe. Confirm the port is closed.
+- Value editing commits on **blur**. A chip opened with `✎` writes its new value when focus
+  leaves the input (Tab or a click elsewhere); pressing **Enter discards the edit** and the
+  field returns to its previous value. Drive every field edit with a blur, and never read a
+  post-Enter field as evidence that the product dropped a value.
 - Browser affordances: workflow selector; **Steps** / **Canvas** tabs; rail **+** menus;
   Canvas **+ Add node · main** palette; editable value chips; `</>` raw-expression
   toggle; node `⤴` scope menu; `▲` / `▼` order controls; **Save**; **Play**; canonical
@@ -78,11 +93,16 @@ After readiness, gate these API facts before opening the editor:
 - `GET /workflows` includes `{ id: "blank", name: "Blank workflow" }`;
 - `GET /operations` identifies Show message's `text` as `string`, Set progress's `pct`
   as `number`, and Finish's `expression` as `expression`;
-- projecting `process probe() { finish 0 }` through `POST /project` returns 200, canonical
-  source, one process, and one terminal without changing `GET /workflow`'s version. Every
-  such source string in this runbook is the workflow-graph lens's canonical printer output,
-  not a language a model was asked to write, and it changes when the TypeScript canonical
-  printer lands under FIG-3033, not with this arc.
+- projecting the TypeScript probe
+
+  ```ts
+  const probe = defineProcess({ name: "probe", signals: {}, run: async () => { return 0; } });
+  ```
+
+  through `POST /project` returns 200 with the canonical source, one process and one terminal
+  **inside a `document` envelope** — the response is `{"document": {…}}`, not the document at
+  top level — without changing `GET /workflow`'s version. A lashlang probe returns 422
+  `invalid_source`; that refusal is the current contract, not a gap.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical
 source pane, and Display panel. Screenshot `00-ready.png`.
@@ -92,9 +112,12 @@ source pane, and Display panel. Screenshot `00-ready.png`.
 Select **Blank workflow** through the browser and capture `POST /workflow/select`. Poll
 until all three surfaces agree:
 
-- the selector renders **Blank workflow** and Steps shows only the Finish card;
-- the select response and fresh `GET /workflow` have identical version/source/nodes,
-  with canonical source `process blank() { finish 0 }` (whitespace-insensitive);
+- the selector renders **Blank workflow**. Steps does **not** show "only the Finish card":
+  it renders the `blank` process under a **BACKGROUND TASKS** rail (Finish nested inside it)
+  and a `Save as blank` data card in the **STEPS** rail. Gate that shape, not a bare Finish;
+- the select response and fresh `GET /workflow` have identical version/source/nodes, with the
+  canonical source the TypeScript `defineProcess` form above (whitespace-insensitive) and
+  node types exactly `{data, process, terminal}`;
 - the source pane renders that version and source, while Display says no run yet.
 
 Record the baseline version and ids in `01-blank.json`. Screenshot `01-blank.png`.
@@ -131,7 +154,10 @@ Switch briefly to Steps and require the same order and values, then return to Ca
 On Finish, use the raw-expression toggle and replace `0` with malformed `1 +`. Commit the
 field and press Save while capturing the request and response. Require:
 
-- `POST /workflow` returns 422 and the JSON error satisfies golden rule 3;
+- `POST /workflow` returns 422 and the JSON error satisfies golden rule 3. The owning node
+  and field are **nested**: `error.code == "invalid_expression"`, with `error.details.nodeId`
+  (an unsaved node reads `new:<n>`) and `error.details.field == "expression"`, plus
+  `error.details.reason`. Do not look for `error.nodeId` at the top level;
 - the UI renders `invalid edit · invalid_expression`, names the message and node, and
   keeps Set progress, Show message, their values, order, and scope;
 - a fresh `GET /workflow` still equals the Blank baseline version and source.

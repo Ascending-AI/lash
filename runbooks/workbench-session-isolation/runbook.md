@@ -33,7 +33,9 @@ markers and structural API state, never exact assistant prose.
 
 ## Working material
 
-- Require `OPENROUTER_API_KEY` and `TAVILY_API_KEY`. Boot one empty, port-isolated stack:
+- Require `OPENROUTER_API_KEY`. The web tool is the **keyless** Parallel Search MCP the
+  workbench registers itself (`WORKBENCH_SEARCH_MCP_SERVER` in `bootstrap.rs`); no search
+  provider key is needed or read. Boot one empty, port-isolated stack:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Gate `GET /healthz` → 200. Teardown on success or Abort:
   `just agent-workbench-down <port>`.
@@ -72,13 +74,15 @@ the Blue host button that starts a durable process labeled `mirror_job` and reco
 button occurrence (process identifiers cannot contain hyphens, so the rendered
 process label is `mirror_job`). Submit the two registration turns concurrently.
 
-Poll both tabs until idle. Save `GET /api/triggers?session_id=A` and the B equivalent as
+Poll each tab to idle **independently** — the two registration turns run concurrently, so a
+single shared wait reads one session's trigger list before its turn commits and sees an empty
+list that is a polling artefact, not a leak. Save `GET /api/triggers?session_id=A` and the B equivalent as
 `01-triggers-a.json` and `01-triggers-b.json`. Require exactly one enabled registration
 per session. Require identical derived display names, `subscription_key` values, source
 types, and source configurations, but distinct `subscription_id` values. Same-name,
 same-key registrations across the two tabs are correct: the owner scope participates in
 `subscription_id`, so neither equality is evidence of a leak. Require each registrations
-rail to render the common target and trigger source (e.g. `mirror_job ← button.pressed`),
+rail to render the common target and trigger source (the rail renders `mirror_job ← ui.button.pressed`),
 the common trigger key, the registration alias, and only its own truncated id. Screenshot
 `01-trigger-a.png` and `01-trigger-b.png`.
 

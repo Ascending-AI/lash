@@ -70,6 +70,11 @@ Use one session id `<S> = runbook-cron-<run-id>` and one distinctive marker
 | Session store | `<data-dir>/lash-sessions/durable-core.db`: `queued_work_batches`, `queued_work_items`, `graph_nodes` (`node_json.kind == "event"`, conversation at `event.Conversation`) | queued item payload joins the wake/process identity; batch is completed/drained; committed assistant marker count advances by one |
 | Trace | `<data-dir>/trace.jsonl`, filtered by `context.session_id == <S>` | per tick: one `agent_workbench.cron.restate.run`, one `.emit_completed`, one `queued_work.restate.start`, and one `turn_completed`; join `fired_at`, process ids, and queued turn id |
 
+`WorkbenchCronJob.info` takes a **genuinely empty** request: send no body *and no
+`content-type`* (`curl -X POST <ingress>/WorkbenchCronJob/<key>/info`). A zero-length body
+sent with `content-type: application/json` is rejected with HTTP 400 `Expected body and
+content-type to be empty`; a disabled or deleted schedule answers with an empty response
+body, which is the `null` the gates below mean.
 `WorkbenchCronJob.info` is the honest schedule read: it is the object's shared handler over
 the Restate-persisted `cron_state`, not the workbench's in-memory set. Use the port-derived
 Restate ingress advertised by the dev runner metadata/log; do not assume the default port.
@@ -81,15 +86,21 @@ include the stored `record_json`/payload JSON needed to establish identities.
 
 ## Working material
 
-- Require `OPENROUTER_API_KEY`. Use port `3180` only, data directory
-  `/workspace/tmp/fig996-state/data`, and a fresh artifact directory. Boot with
-  `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig996-state/data AGENT_WORKBENCH_OPEN=0 just
-  agent-workbench 3180`. Gate `GET /healthz` to 200.
+- Require `OPENROUTER_API_KEY`. Pick one free `<port>`, a fresh `<data-dir>` outside any
+  other row's tree, and a fresh artifact directory; the whole stack (Restate ingress, admin
+  and endpoint ports) is derived from `<port>`, so two rows never share one. Boot with
+  `AGENT_WORKBENCH_DATA_DIR=<data-dir> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`
+  and read the derived ingress URL back from the host's own `agent_workbench.startup`
+  record rather than assuming it. Gate `GET /healthz` to 200.
 - Drive Chromium with a PEP 723 Playwright script under the artifact directory and `uv run`.
   Navigate with `wait_until="domcontentloaded"`, then explicit assertions.
-- Use the cron expression `* * * * *` in UTC: a minute schedule has an upper wait near 60
-  seconds, so use a 90-second positive gate and the advertised boundary plus 20 seconds for
-  negative observation. Do not substitute a seconds cron; this scenario judges the
+- Judge a **once-a-minute UTC schedule**, not one spelling of it. The agent authors the
+  expression, and both the 5-field `* * * * *` and the 6-field `0 * * * * *` (seconds
+  leading, "at second 0 of every minute") are correct registrations of that schedule; gate
+  on the tick interval the Restate object advertises, not on the literal string. A minute
+  schedule has an upper wait near 60 seconds, so use a 90-second positive gate and the
+  advertised boundary plus 20 seconds for negative observation. Do not accept a sub-minute
+  seconds cron such as `*/2 * * * * *` for the main phases; this scenario judges the
   user-facing recurring-reminder shape.
 - UI affordances: chat composer and **send**, transcript, running/idle pill, registrations
   rail with **disable**, **re-enable**, and **delete**, and rendered session id.
@@ -150,8 +161,10 @@ databases, `/api/state`, and the DOM until the chain settles. Bound the wait to 
 - exactly one process wake delivery/event for that process and target `<S>`;
 - exactly one new completed queued-work batch containing that wake, exactly one new
   `queued_work.restate.start`, and exactly one queued `turn_completed`;
-- no new user row/message and exactly one new assistant row/message at DOM, API, and store,
-  with the assistant text containing `<marker>`; and
+- no new user row/message, and exactly one new assistant row/message at DOM, API, and store
+  with the assistant text containing `<marker>`. A tick also commits one `event`-role
+  message — the rendered wake row, which carries the marker as its wake input — so
+  `/api/state.messages` grows by two per tick while the assistant count grows by one; and
 - all ids/count deltas remain stable across consecutive polls before capture.
 
 Record the six latency points named in golden rule 4. Save `02-tick-1-{dom,state,cron,
@@ -208,9 +221,14 @@ This phase distinguishes a valid non-current schedule from a retired-session orp
 
 1. On current session `S0`, register one `cron.Schedule` with a two-second expression. From the `agent_workbench.cron.restate.sync_upserted` record whose trace context is scoped to `S0`, capture its exact `payload.job_key` as `J` and require that `J` has the `{S0}:` prefix.
 2. Record the current count of `agent_workbench.cron.restate.run` records whose payload has both `job_session_id == S0` and `job_key == J`.
-3. Open a second scoped tab bound to a fresh session `S1` and make `S1` the active/current workbench session through the supported UI affordance; leave `S0` alive and undeleted, and do not cancel `J`.
+3. Open a second scoped tab bound to a fresh session `S1` through **new session tab**, which
+   is what moves the workbench's current session off `S0`; leave `S0` alive and undeleted,
+   and do not cancel `J`. `POST /api/sessions/select` only accepts a session on the roster
+   and answers 404 `not on the roster` for a tab-scoped id, so it is not the affordance here.
 4. Wait for two schedule intervals. PASS only if the scoped run-record count for `(S0, J)` increases by at least two, both new records say `decision_basis == "session_store_meta_present"` and `session_state == "live"`, and there is no scoped `agent_workbench.cron.restate.zombie_cancelled` record. This is the non-current-live gate.
-5. Delete `S0` through the supported session-delete path.
+5. Delete `S0` through the supported scoped session-delete path,
+   `DELETE /api/session?session_id=<S0>` — the page's **reset** control acts on the tab's own
+   current session, so drive the delete for a non-current `S0` over that route.
 6. PASS only if the supported delete path emits exactly one scoped typed cancellation record for `(S0, J)` and `WorkbenchCronJob/J/info` returns `null` after that record. Capture the exact cancel/sync event name and payload from the trace during the run and pin them in the execution report; for the current supported path this is `agent_workbench.cron.restate.cancel` with `payload.job_key == J` and `payload.reason == "reset"` in `S0`'s trace context. This is the retired-cancel gate.
 7. Record the scoped run and occurrence counts after that cancellation, then wait two more schedule intervals. PASS only if neither count changes and no delivery, queued wake, or assistant tick output attributable to `(S0, J)` appears. This is the post-retirement-silence gate.
 
@@ -226,9 +244,9 @@ post-reload multiset to equal the pre-reload multiset. Require the registration 
 absent in UI/API/store and no new trace/tick-chain row during reload. Save
 `09-reload-identity.json` and screenshot `09-after-reload.png`.
 
-Run `just agent-workbench-down 3180`; confirm the workbench port is closed and the
+Run `just agent-workbench-down <port>`; confirm the workbench port is closed and the
 port-derived Restate container is absent. Preserve the artifact directory, then remove
-`/workspace/tmp/fig996-state` and confirm it is gone.
+`<data-dir>` and confirm it is gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |---|---|---|---|
@@ -241,7 +259,7 @@ port-derived Restate container is absent. Preserve the artifact directory, then 
 | Delete silence | live registration absent; Restate object null; advertised next window adds nothing | | `07-deleted.png`, `08-deleted-silent.png`, `08-deleted-silence-*.json` |
 | Three-layer projection | every registration/tick delta reconciles DOM, API/store, and trace pairwise | | per-phase DOM/state/store/trace extracts |
 | Reload identity | post-reload transcript multiset equals pre-reload; registration stays absent | | `09-after-reload.png`, `09-reload-identity.json` |
-| Teardown | port 3180 closed; port-derived Restate container absent; scoped state directory removed | | teardown section in the execution report |
+| Teardown | `<port>` closed; port-derived Restate container absent; scoped state directory removed | | teardown section in the execution report |
 
 **Aggregate:** did one agent-authored minute schedule recur through two exact
 schedule-to-tick-to-wake-to-turn chains, stop atomically while disabled, resume under the

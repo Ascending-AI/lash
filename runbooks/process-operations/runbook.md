@@ -6,11 +6,12 @@
 
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
-> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> same-configuration restart is `scripts/agent-workbench-dev.sh restart` (no flag), wrapped by
+> `just agent-workbench-restart <port>`. It keeps the Restate journals and the application data
+> and is no longer blocked: FIG-3035 landed it, and it is the required path for every
+> worker-replacement step below. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
-> never substitute the destructive reset.
+> never substitute the destructive `agent-workbench-reset`.
 
 **Purpose.** Prove that an operator can inspect and act on the process-operations surface on
 real Restate, PostgreSQL, and MinIO geometry: typed wake failures, redrive, retargeting,
@@ -82,7 +83,11 @@ LASH_POSTGRES_DATABASE_URL=<disposable-url> LASH_REQUIRE_POSTGRES=1 \
 
 The PostgreSQL tier is the one this preflight judges: `lash-internal-conformance` runs the
 laws on the in-memory tier only, so the fail condition below can only fire from the store's own
-conformance binary. The laws must show: a terminal parent writes exactly one unsettled ledger
+conformance binary. The `parent_end` filter selects **three** test functions
+(`terminal_completion_atomically_retains_parent_end_plan`,
+`committed_turn_receipt_answers_the_parent_end_recovery_read`,
+`settled_parent_end_plans_are_reclaimed_by_retention`); expect `3 passed`, not one test per law —
+the laws below are assertions inside those three. The laws must show: a terminal parent writes exactly one unsettled ledger
 row; the children query is index-served and returns only the `Cancel` children that still owe a
 cancel; a `Cancel` child that registers after the row exists is refused `ParentEnded`; a child
 that already carries a cancel request leaves the page; settlement is idempotent and stamps the
@@ -105,10 +110,11 @@ standard-protocol `tools.batch` call.
 Use a fresh session for each row and save the rendered transcript, `/api/state`, Restate
 invocation/journal inspection, and `trace.jsonl` extract under a row-named artifact directory.
 Submit the row's named tool call or RLM program and wait until its turn is active and its first
-durable child command is visible. The next step requires a separately verified target-host
-restart that preserves the same run/data directories and Restate container. The historical
-`just agent-workbench-restart <port>` path is currently blocked and must not be executed or
-replaced with destructive reset. Never use Restate Admin kill as a substitute. After recovery,
+durable child command is visible. The next step requires a target-host restart that preserves the
+same run/data directories and Restate container: run `scripts/agent-workbench-dev.sh restart`
+(or `just agent-workbench-restart <port>`) from a shell that has sourced the fork's `env.sh`, so
+the launcher can find the judged binary. Never use the destructive `agent-workbench-reset` and
+never use Restate Admin kill as a substitute. After recovery,
 reconcile DOM,
 API/durable messages, trace executions, and the literal outcome below.
 
@@ -128,12 +134,17 @@ Abort/RCA under `RULES.md`.
 
 ## Phase 0 — Boot and establish durable geometry
 
-Run the deterministic companion. Require all of these before judging later phases:
+Run the deterministic companion. It prints `process-operations e2e passed: scenarios=8` on
+success; that is the index of the last scenario, and nine scenarios (0 through 8) actually run —
+require one `scenario <n> evidence:` line for every index 0-8, not eight lines. Require all of
+these before judging later phases:
 
-- `00-live-services.json` contains running Restate and MinIO services;
+- `00-live-services.json` contains running Restate, PostgreSQL and MinIO services;
 - `00-postgres-service.json` identifies the service publishing the assigned port;
 - `00-postgres.json` reports that same assigned port;
-- `restate-deployments.json` is a successful Restate Admin response; and
+- `restate-deployments.json` is a successful Restate Admin response. The companion registers no
+  service deployment of its own, so `{"deployments": []}` is the expected passing body; gate the
+  successful response, never a non-empty list; and
 - `00-minio-conformance.log` reports a passing S3-store conformance run.
 
 **Fail if:** any service is absent, PostgreSQL is exposed on another host port, MinIO object
