@@ -58,6 +58,14 @@ and work registry are.
    and a later source version without the registration declaration must leave the captured
    subscription unchanged. Only the explicit disable, re-enable, and delete operations in
    this scenario may change it.
+7. **The captured contract, not the live catalog, is what delivery honours.** A
+   registration pins the source contract and provider route it was admitted against
+   (FIG-2913). Re-linking the module or editing the source catalog between fires must not
+   change how an existing subscription validates its occurrences or where it routes; a
+   fire after such an edit is evidence only if it still matches the captured contract. A
+   subscription registered before this capture landed is refused at decode, so this
+   scenario always boots a fresh, empty data dir — never a store carried over from an
+   earlier build.
 
 ## Working material
 

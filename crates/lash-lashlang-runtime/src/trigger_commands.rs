@@ -117,6 +117,7 @@ async fn prepare_trigger_draft(
         payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema(
             &compatibility.resolved_event_type,
         )),
+        source_capture: captured_trigger_source(&request.source.source_type, &compatibility),
         target,
         target_identity,
         event_types,
@@ -127,6 +128,38 @@ async fn prepare_trigger_draft(
         .validate()
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     Ok(draft)
+}
+
+/// Copies the admitted source contract and provider route out of the module
+/// artifact's captured requirements and onto the subscription.
+///
+/// The artifact is what a durable process re-registering after the foreground
+/// session has ended can still read, which is why the route travels there and
+/// is copied here rather than resolved again. A source the linker admitted from
+/// the resident surface has no provider route to carry.
+fn captured_trigger_source(
+    source_type: &str,
+    compatibility: &lashlang::TriggerCompatibility,
+) -> lash_core::TriggerSourceCapture {
+    let constructor_path = source_type
+        .split('.')
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let config_schema =
+        lash_core::LashSchema::new(lashlang_type_expr_schema(&compatibility.config_type));
+    match compatibility.provider_id.as_deref() {
+        Some(provider_id) => lash_core::TriggerSourceCapture::provider(
+            constructor_path,
+            config_schema,
+            provider_id,
+            compatibility
+                .route
+                .as_deref()
+                .and_then(|route| serde_json::from_str(route).ok())
+                .unwrap_or(Value::Null),
+        ),
+        None => lash_core::TriggerSourceCapture::resident(constructor_path, config_schema),
+    }
 }
 
 async fn list_triggers(

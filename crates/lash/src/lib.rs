@@ -161,12 +161,14 @@ pub mod triggers {
         TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
         TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
         TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
-        TriggerOperationError, TriggerOwnerScope, TriggerRetentionReconciliationReport,
-        TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
-        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReceipt,
-        facade_support::TriggerEmitReport, facade_support::TriggerEvent,
-        facade_support::TriggerEventType, facade_support::TriggerRegistration,
-        facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
+        TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
+        TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
+        TriggerSourceCapture, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
+        TriggerSubscriptionRecord, facade_support::TriggerDeliveryEmitOutcome,
+        facade_support::TriggerDeliveryEmitReceipt, facade_support::TriggerEmitReport,
+        facade_support::TriggerEvent, facade_support::TriggerEventType,
+        facade_support::TriggerRegistration, facade_support::TriggerTarget,
+        facade_support::empty_trigger_source_key,
     };
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by
@@ -622,8 +624,9 @@ pub mod remote {
             RemoteTriggerEmitReport, RemoteTriggerInputBinding, RemoteTriggerInputTemplate,
             RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceOutcome,
             RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest,
-            RemoteTriggerRegisterSubscriptionReceipt, RemoteTriggerRegisterSubscriptionRequest,
-            RemoteTriggerRegistration, RemoteTriggerSubscriptionDraft,
+            RemoteTriggerProviderRoute, RemoteTriggerRegisterSubscriptionReceipt,
+            RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
+            RemoteTriggerSourceCapture, RemoteTriggerSubscriptionDraft,
             RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
         };
     }

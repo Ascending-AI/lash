@@ -300,6 +300,46 @@ fn validate_owner_key(
     Ok(())
 }
 
+/// Peer projection of the authorized route a subscription pinned for its source.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteTriggerProviderRoute {
+    #[default]
+    Resident,
+    Provider {
+        provider_id: String,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        route: serde_json::Value,
+    },
+}
+
+/// Peer projection of the source contract and route admitted at registration.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteTriggerSourceCapture {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constructor_path: Vec<String>,
+    #[serde(default)]
+    pub config_schema: serde_json::Value,
+    #[serde(default)]
+    pub route: RemoteTriggerProviderRoute,
+}
+
+impl RemoteTriggerSourceCapture {
+    /// Refuses a provider route with no provider identity, the same rule core
+    /// applies, so peer input yields a typed protocol error instead of failing
+    /// deeper in the runtime.
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        if let RemoteTriggerProviderRoute::Provider { provider_id, .. } = &self.route {
+            require_non_empty(type_name, "source_capture.provider_id", provider_id)?;
+        }
+        for segment in &self.constructor_path {
+            require_non_empty(type_name, "source_capture.constructor_path", segment)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerSubscriptionDraft {
     pub subscription_key: String,
@@ -314,6 +354,7 @@ pub struct RemoteTriggerSubscriptionDraft {
     pub source: serde_json::Value,
     #[serde(default)]
     pub payload_schema: serde_json::Value,
+    pub source_capture: RemoteTriggerSourceCapture,
     pub target: RemoteProcessInput,
     pub target_identity: RemoteProcessIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -343,6 +384,7 @@ impl RemoteTriggerSubscriptionDraft {
             source_key: source_key.into(),
             source: serde_json::Value::Object(serde_json::Map::new()),
             payload_schema: serde_json::Value::Object(serde_json::Map::new()),
+            source_capture: RemoteTriggerSourceCapture::default(),
             target,
             target_identity,
             event_types: Vec::new(),
@@ -363,6 +405,11 @@ impl RemoteTriggerSubscriptionDraft {
 
     pub fn with_payload_schema(mut self, payload_schema: serde_json::Value) -> Self {
         self.payload_schema = payload_schema;
+        self
+    }
+
+    pub fn with_source_capture(mut self, source_capture: RemoteTriggerSourceCapture) -> Self {
+        self.source_capture = source_capture;
         self
     }
 
@@ -420,6 +467,8 @@ impl RemoteTriggerSubscriptionDraft {
             self.target_label.as_deref(),
             self.target_identity.label.as_deref(),
         )?;
+        self.source_capture
+            .validate("RemoteTriggerSubscriptionDraft")?;
         self.input_template
             .validate("RemoteTriggerSubscriptionDraft")
     }
@@ -445,6 +494,7 @@ pub struct RemoteTriggerSubscriptionRecord {
     pub source: serde_json::Value,
     #[serde(default)]
     pub payload_schema: serde_json::Value,
+    pub source_capture: RemoteTriggerSourceCapture,
     pub target: RemoteProcessInput,
     pub target_identity: RemoteProcessIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -491,6 +541,7 @@ impl RemoteTriggerSubscriptionRecord {
             self.target_label.as_deref(),
             self.target_identity.label.as_deref(),
         )?;
+        self.source_capture.validate(type_name)?;
         self.input_template.validate(type_name)
     }
 }

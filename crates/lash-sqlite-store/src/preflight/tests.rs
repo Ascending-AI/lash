@@ -69,12 +69,13 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // upload evidence, 62 makes the parent scope a registration fact and
     // settles child lifecycle from one scope-keyed parent-end ledger, and 63
     // replaces the boolean cancel-requested fold with the instant the cancel
-    // was requested.
+    // was requested, and 64 requires every trigger subscription to carry the
+    // source contract and provider route it was admitted against.
     // All are reject-and-recreate
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
-    assert_eq!(expected, 63, "the pinned durable-core target changed");
+    assert_eq!(expected, 64, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

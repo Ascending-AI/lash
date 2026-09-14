@@ -474,11 +474,30 @@ impl LashlangHostCatalog {
         input_ty: TypeExpr,
         event_ty: NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
+        self.add_resolved_trigger_source_constructor(path, input_ty, event_ty, None, None)
+    }
+
+    /// Folds a trigger-source constructor admitted by a deferred trigger
+    /// provider, keeping that provider's identity and opaque authorized route
+    /// with the binding so a registration can capture them.
+    pub fn add_resolved_trigger_source_constructor(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<String>>,
+        input_ty: TypeExpr,
+        event_ty: NamedDataType,
+        provider_id: Option<String>,
+        route: Option<String>,
+    ) -> Result<(), LashlangHostCatalogError> {
         let path = path.into_iter().map(Into::into).collect::<Vec<_>>();
         assert!(!path.is_empty(), "constructor path must not be empty");
         let source_type = module_path_key(&path);
         let mut extended = self.clone();
-        extended.insert_trigger_source(source_type.clone(), event_ty.clone())?;
+        extended.insert_resolved_trigger_source(
+            source_type.clone(),
+            event_ty.clone(),
+            provider_id,
+            route,
+        )?;
         extended.add_value_constructor(
             path,
             input_ty,
@@ -489,14 +508,22 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    pub(crate) fn require_trigger_source_type(
+    /// Records a trigger source a program referenced, keeping the whole
+    /// binding.
+    ///
+    /// The provider identity and authorized route ride along deliberately: a
+    /// registration executed from a durable process reads its source contract
+    /// and route out of these captured requirements, long after the link
+    /// environment that admitted them is gone.
+    pub(crate) fn require_trigger_source_binding(
         &mut self,
         source_type: impl Into<String>,
-        event_type: NamedDataType,
+        binding: TriggerSourceBinding,
     ) -> Result<(), LashlangHostCatalogError> {
         let source_type = source_type.into();
+        let event_type = binding.event_type().clone();
         if let Some(existing) = self.trigger_sources.get(&source_type) {
-            if existing.event_type() == &event_type {
+            if existing == &binding {
                 return self.require_named_data_type(event_type);
             }
             return Err(LashlangHostCatalogError::ConflictingTriggerSource {
@@ -505,9 +532,8 @@ impl LashlangHostCatalog {
                 incoming: event_type.name().to_string(),
             });
         }
-        self.require_named_data_type(event_type.clone())?;
-        self.trigger_sources
-            .insert(source_type, TriggerSourceBinding::new(event_type));
+        self.require_named_data_type(event_type)?;
+        self.trigger_sources.insert(source_type, binding);
         Ok(())
     }
 
@@ -572,7 +598,7 @@ impl LashlangHostCatalog {
             }
         }
         for (source_type, incoming) in trigger_sources {
-            merged.insert_trigger_source(source_type, incoming.event_type().clone())?;
+            merged.insert_trigger_source_binding(source_type, incoming)?;
         }
         for (path, incoming) in value_constructors {
             merged.insert_value_constructor(path, incoming)?;
@@ -989,20 +1015,32 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    pub(super) fn insert_trigger_source(
+    pub(super) fn insert_resolved_trigger_source(
         &mut self,
         source_type: String,
         event_type: NamedDataType,
+        provider_id: Option<String>,
+        route: Option<String>,
+    ) -> Result<(), LashlangHostCatalogError> {
+        self.insert_trigger_source_binding(
+            source_type,
+            TriggerSourceBinding::resolved(event_type, provider_id, route),
+        )
+    }
+
+    pub(super) fn insert_trigger_source_binding(
+        &mut self,
+        source_type: String,
+        binding: TriggerSourceBinding,
     ) -> Result<(), LashlangHostCatalogError> {
         if let Some(existing) = self.trigger_sources.get(&source_type) {
             return Err(LashlangHostCatalogError::ConflictingTriggerSource {
                 source_type,
                 existing: existing.event_type().name().to_string(),
-                incoming: event_type.name().to_string(),
+                incoming: binding.event_type().name().to_string(),
             });
         }
-        self.trigger_sources
-            .insert(source_type, TriggerSourceBinding::new(event_type));
+        self.trigger_sources.insert(source_type, binding);
         Ok(())
     }
 }

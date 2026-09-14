@@ -254,11 +254,43 @@ pub struct ValueConstructorBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggerSourceBinding {
     pub(super) event_type: NamedDataType,
+    /// The trigger provider that admitted this source, when it came from
+    /// deferred resolution rather than the resident surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) provider_id: Option<String>,
+    /// The provider's opaque authorized route, kept as its canonical JSON text.
+    ///
+    /// A durable subscription must pin the route it was registered against, and
+    /// a durable process re-registering after the foreground session is gone
+    /// has only the captured execution requirements to read it from. Carrying
+    /// it here is what makes the route survive that boundary. The text form
+    /// keeps the catalog comparable by value, which its artifact identity
+    /// depends on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) route: Option<String>,
 }
 
 impl TriggerSourceBinding {
-    pub(super) fn new(event_type: NamedDataType) -> Self {
-        Self { event_type }
+    pub(super) fn resolved(
+        event_type: NamedDataType,
+        provider_id: Option<String>,
+        route: Option<String>,
+    ) -> Self {
+        Self {
+            event_type,
+            provider_id,
+            route,
+        }
+    }
+
+    /// The provider that admitted this source, or `None` for a resident one.
+    pub fn provider_id(&self) -> Option<&str> {
+        self.provider_id.as_deref()
+    }
+
+    /// The provider's opaque authorized route as canonical JSON text.
+    pub fn route(&self) -> Option<&str> {
+        self.route.as_deref()
     }
 
     pub fn event_type(&self) -> &NamedDataType {

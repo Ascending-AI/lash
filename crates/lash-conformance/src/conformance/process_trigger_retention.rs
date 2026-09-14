@@ -448,6 +448,12 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
     let mut input_template = BTreeMap::new();
     input_template.insert("event".to_string(), crate::TriggerInputBinding::Event);
     TriggerSubscriptionDraft {
+        source_capture: crate::TriggerSourceCapture::provider(
+            ["ui", "button"],
+            crate::LashSchema::any(),
+            "ui-provider",
+            serde_json::json!({"account": "a"}),
+        ),
         subscription_key: key.to_string(),
         env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:{session_id}")),
         wake_target: Some(SessionScope::new(session_id)),

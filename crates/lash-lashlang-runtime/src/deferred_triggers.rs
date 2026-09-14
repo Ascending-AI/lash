@@ -329,10 +329,15 @@ pub async fn resolve_and_fold_deferred_triggers(
                 }
                 surface
                     .resources
-                    .add_trigger_source_constructor(
+                    .add_resolved_trigger_source_constructor(
                         grant.constructor_path.iter().map(String::as_str),
                         grant.input_type.clone(),
                         grant.event_type.clone(),
+                        Some(grant.provider_id.clone()),
+                        (!grant.route.is_null()).then(|| {
+                            serde_json::to_string(&grant.route)
+                                .expect("a provider route is JSON by construction")
+                        }),
                     )
                     .map_err(|source| DeferredTriggerResolutionError::Fold {
                         path: path.clone(),
@@ -485,7 +490,39 @@ mod tests {
         .await
         .expect("deferred definition resolves");
 
-        assert_eq!(deferred.resources, resident.resources);
+        // FIG-2913: a deferred definition is no longer byte-identical to a
+        // resident one — it captures the provider id and route it was admitted
+        // through, which is the whole point. Everything else must still match,
+        // and the captured route must name the provider that granted it.
+        let binding = |surface: &LashlangSurface| {
+            surface
+                .resources
+                .trigger_sources()
+                .find(|(name, _)| *name == "calendar.Changed")
+                .map(|(_, binding)| binding.clone())
+                .expect("surface binds the trigger source")
+        };
+        let deferred_binding = binding(&deferred);
+        let resident_binding = binding(&resident);
+        assert_eq!(deferred_binding.event_type(), resident_binding.event_type());
+        assert_eq!(resident_binding.provider_id(), None);
+        assert_eq!(resident_binding.route(), None);
+        assert_eq!(deferred_binding.provider_id(), Some("calendar-provider"));
+        assert!(
+            deferred_binding
+                .route()
+                .is_some_and(|route| route.contains("calendar-provider")),
+            "the deferred binding captures the granted route: {:?}",
+            deferred_binding.route()
+        );
+        assert_eq!(
+            deferred.resources.named_data_types().collect::<Vec<_>>(),
+            resident.resources.named_data_types().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            deferred.resources.value_constructors().collect::<Vec<_>>(),
+            resident.resources.value_constructors().collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

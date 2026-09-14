@@ -567,6 +567,12 @@ fn sample_draft(
     let mut inputs = BTreeMap::new();
     inputs.insert("event".to_string(), crate::TriggerInputBinding::Event);
     crate::TriggerSubscriptionDraft {
+        source_capture: crate::TriggerSourceCapture::provider(
+            ["ui", "button"],
+            crate::LashSchema::any(),
+            "ui-provider",
+            serde_json::json!({"account": "a"}),
+        ),
         subscription_key: subscription_key.to_string(),
         env_ref: crate::ProcessExecutionEnvRef::new(format!("process-env:{session_id}")),
         wake_target: Some(crate::SessionScope::new(session_id)),
@@ -2101,14 +2107,27 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
     .await;
     assert_eq!(repeated.subscription_id, first.subscription_id);
     assert_eq!(repeated.revision, 1);
+    let restored = factory
+        .reopen
+        .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
+        .await
+        .unwrap();
+    assert_eq!(restored.len(), 1);
+    // FIG-2913: the source contract and provider route a registration was
+    // admitted against are durable subscription facts, not a live-catalog
+    // lookup. A store this host reopened after a crash must hand back the exact
+    // capture the registrant admitted, or delivery would validate and route
+    // against something nobody registered.
     assert_eq!(
-        factory
-            .reopen
-            .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
-            .await
-            .unwrap()
-            .len(),
-        1
+        restored[0].source_capture,
+        sample_draft(
+            &SessionId::from("session-a"),
+            "reopen-key",
+            "reopen-source",
+            "worker",
+        )
+        .source_capture,
+        "the captured source contract and provider route survive a store reopen"
     );
 }
 

@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 74;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 75;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -379,9 +379,10 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (crate::IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 70, 71),
         (crate::LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 71, 72),
         (crate::NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 72, 73),
+        (crate::FRESHEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 73, 74),
         (
-            crate::FRESHEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            73,
+            crate::CURRENT_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            74,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -1898,6 +1899,16 @@ fn fixture_register_command(env_ref: ProcessExecutionEnvRef) -> TriggerCommand {
                 "required": ["value"],
                 "additionalProperties": false
             })),
+            source_capture: lash_core::TriggerSourceCapture::provider(
+                ["fixture", "event"],
+                LashSchema::new(serde_json::json!({
+                    "type": "object",
+                    "properties": {"fixture": {"type": "string"}},
+                    "additionalProperties": false
+                })),
+                "fixture-provider",
+                serde_json::json!({"account": "fixture"}),
+            ),
             target: ProcessInput::Engine {
                 kind: "durable-read-trigger-target".to_string(),
                 payload: serde_json::json!({"fixture": "trigger"}),

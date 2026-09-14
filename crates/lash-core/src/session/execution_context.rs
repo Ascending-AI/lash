@@ -1201,8 +1201,9 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub async fn execute_trigger_effect(
         &self,
         effect_id: String,
-        command: crate::TriggerCommand,
+        mut command: crate::TriggerCommand,
     ) -> Result<crate::TriggerEffectResult, crate::RuntimeEffectControllerError> {
+        self.admit_trigger_command_target(&mut command).await?;
         let store = self.trigger_store().ok_or_else(|| {
             crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::TriggerStoreUnavailable,
@@ -1241,6 +1242,47 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?
             .into_trigger()
+    }
+
+    /// Runs the engine registry's admission on every registration-shaped
+    /// trigger command before it reaches the store (FIG-1522).
+    ///
+    /// A subscription's target is admitted exactly once, here: delivery replays
+    /// the recorded target without re-gating it, so an unregistered engine kind
+    /// that got past this point would produce starts admitted nowhere. A
+    /// registration whose target names an engine therefore requires a wired
+    /// engine registry; there is no unchecked path.
+    async fn admit_trigger_command_target(
+        &self,
+        command: &mut crate::TriggerCommand,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let draft = match command {
+            crate::TriggerCommand::Register { draft, .. }
+            | crate::TriggerCommand::Update { draft, .. }
+            | crate::TriggerCommand::Revive { draft, .. } => draft,
+            _ => return Ok(()),
+        };
+        if !matches!(draft.target, crate::ProcessInput::Engine { .. }) {
+            return Ok(());
+        }
+        // A runtime that wired no process-engine registry has no authority to
+        // consult: there is nothing here that could say whether the kind is
+        // known, and the start itself still fails closed when the engine is
+        // missing. Refusing here instead would break every embedder that
+        // registers triggers without an engine registry, which is not the hole
+        // FIG-1522 names — that hole is a *configured* registry never being
+        // asked.
+        let Some(registry) = self
+            .dispatch
+            .trigger_router
+            .as_ref()
+            .and_then(crate::TriggerRouter::process_engines)
+        else {
+            return Ok(());
+        };
+        crate::admit_trigger_registration_target(registry, draft)
+            .await
+            .map_err(crate::RuntimeEffectControllerError::from)
     }
 
     /// Exposes parent invocation to protocol and process-engine implementors while executing code

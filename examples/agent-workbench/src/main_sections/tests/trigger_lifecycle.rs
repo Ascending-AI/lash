@@ -447,6 +447,7 @@ fn workbench_receipt_register_command(session_id: &SessionId) -> lash::triggers:
             session_id,
         )),
         draft: lash::triggers::TriggerSubscriptionDraft {
+            source_capture: lash::triggers::TriggerSourceCapture::untyped(),
             subscription_key: "workbench-receipt-prune".to_string(),
             env_ref: lash::process::ProcessExecutionEnvRef::new(format!(
                 "process-env:{session_id}"

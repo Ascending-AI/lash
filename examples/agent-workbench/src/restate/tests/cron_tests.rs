@@ -258,6 +258,7 @@ fn fig1067_cron_registration(
     enabled: bool,
 ) -> lash::triggers::TriggerRegistration {
     let record = lash::triggers::TriggerSubscriptionRecord {
+        source_capture: lash::triggers::TriggerSourceCapture::untyped(),
         subscription_id: format!("subscription:{source_key}"),
         owner_scope: lash::triggers::TriggerOwnerScope::session(session_id),
         subscription_key: format!("cron-test:{source_key}"),

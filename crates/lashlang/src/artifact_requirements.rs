@@ -319,10 +319,7 @@ impl<'program> RequirementsCollector<'program> {
                 {
                     self.requirements
                         .resources
-                        .require_trigger_source_type(
-                            type_name.to_string(),
-                            binding.event_type().clone(),
-                        )
+                        .require_trigger_source_binding(type_name.to_string(), binding.clone())
                         .expect("trigger source requirement came from host catalog");
                 }
                 self.collect_expr(input, scope);

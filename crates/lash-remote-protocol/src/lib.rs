@@ -189,7 +189,12 @@ pub use usage_activity::*;
 // Window 76: FIG-2994 adds `register_process_definition` and `register_trigger`
 // to the tool-intent kind vocabulary. A window-75 peer refuses both tags when
 // decoding a turn report that carries either outcome, so peers must adopt 76.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 76;
+// Window 77: FIG-2913 makes a trigger subscription carry the source contract
+// and provider route it admitted at registration. Both the draft and the record
+// require `source_capture`, and a window-76 peer writes neither, so its
+// subscriptions have no contract to validate a delivery against and no route to
+// restore; such a record is refused rather than defaulted. Peers must adopt 77.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 77;
 
 /// One versioned remote-protocol message.
 ///

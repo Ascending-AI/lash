@@ -396,6 +396,12 @@ impl SurfaceRunner {
                     owner_scope: TriggerOwnerScope::session(SURFACE_SESSION),
                     actor: ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
                     draft: TriggerSubscriptionDraft {
+                        source_capture: lash_core::TriggerSourceCapture::provider(
+                            ["surface", "event"],
+                            lash_core::LashSchema::any(),
+                            "surface-provider",
+                            serde_json::json!({"account": "surface"}),
+                        ),
                         subscription_key,
                         env_ref: ProcessExecutionEnvRef::new("surface-env"),
                         wake_target: Some(SessionScope::new(SURFACE_SESSION)),

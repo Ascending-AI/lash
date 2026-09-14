@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 74,
+  "source_commit": "6c82924d0cba",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2913 schema-75 trigger source-capture cutover",
+  "artifacts": {
+    "postgres-expected.json": "c14673d750b4468c1a072c09531be0e356584cf43f88edc310edb6e91ad6ed80",
+    "sqlite-expected.json": "da1628c2b08543be139acee17664274ade6be323cfec7dd52f9e0786323b5116"
+  }
+}
