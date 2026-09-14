@@ -3,8 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessStartExpr, Program as LashProgram, ResourceRefExpr, TryExpr,
-    TypeExpr,
+    ProcessSignalDecl, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{
@@ -25,6 +24,7 @@ mod await_expr;
 mod binding;
 mod calls;
 mod constructs;
+mod entry;
 mod graph;
 mod json_replacer;
 mod regex;
@@ -32,6 +32,7 @@ mod spans;
 mod triggers;
 use binding::*;
 use constructs::*;
+pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
 use triggers::{
@@ -50,110 +51,6 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
-
-pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
-    lower_with_context(
-        program,
-        &std::collections::BTreeSet::new(),
-        &std::collections::BTreeSet::new(),
-        &std::collections::BTreeSet::new(),
-    )
-}
-
-/// Lowers `program` with `ambient` names already in scope.
-///
-/// The RLM session model is that top-level bindings persist across cells: cell
-/// A writes `const findings = ...`, and cell B reads `findings` while the
-/// prompt lists it under `=== BOUND VARIABLES ===` with its value. Lashlang
-/// parses permissively and resolves those names at *link*, where the live
-/// session globals are known. This lowerer resolves every name at parse against
-/// source-local scopes, so cell B rejected with `TS_UNKNOWN_BINDING` for a name
-/// the session was showing it — which breaks every stateful multi-cell
-/// TypeScript session.
-///
-/// The names arrive as an ambient root scope beneath the program's own: they
-/// are initialized (no temporal dead zone), immutable (a bare `findings = 1`
-/// with no declaration is still refused, and a capture of one is legal), and
-/// they never mangle, because a root declaration of the same name keeps the
-/// author's spelling — which is how a cell rebinds a session global.
-///
-/// A name in neither the source nor the session is still `TS_UNKNOWN_BINDING`
-/// at parse. That distinction is the whole contract: "unknown everywhere"
-/// stays an error, "known to the session" does not.
-pub(crate) fn lower_with_ambient(
-    program: &adapter::Program,
-    ambient: &std::collections::BTreeSet<String>,
-    process_handles: &std::collections::BTreeSet<String>,
-) -> Result<LashProgram, Diagnostic> {
-    lower_with_context(
-        program,
-        ambient,
-        process_handles,
-        &std::collections::BTreeSet::new(),
-    )
-}
-
-pub(crate) fn lower_with_context(
-    program: &adapter::Program,
-    ambient: &std::collections::BTreeSet<String>,
-    process_handles: &std::collections::BTreeSet<String>,
-    module_authority_roots: &std::collections::BTreeSet<String>,
-) -> Result<LashProgram, Diagnostic> {
-    let mut lowerer = Lowerer {
-        root_scope_depth: 2,
-        root_assigned_identifiers: assigned_identifiers_in_statements(&program.statements),
-        module_authority_roots: module_authority_roots.clone(),
-        ..Lowerer::default()
-    };
-    let mut ambient_scope = Scope::default();
-    for name in ambient {
-        // The generated namespace is reserved and never durable, so a name
-        // carrying it is not a session global this cell may read.
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
-            continue;
-        }
-        ambient_scope.bindings.insert(
-            name.clone(),
-            Binding {
-                internal: name.clone(),
-                kind: BindingKind::Const,
-                initialized: true,
-                owner_function: 0,
-                role: if process_handles.contains(name) {
-                    BindingRole::ProcessHandle
-                } else {
-                    BindingRole::Plain
-                },
-            },
-        );
-    }
-    lowerer.scopes.push(ambient_scope);
-    lowerer.scopes.push(Scope::default());
-    let expressions = lowerer.lower_statements(&program.statements, true)?;
-    let mut root_global_initializers = lowerer
-        .intrinsic_global_slots
-        .iter()
-        .map(|name| LashExpr::Assign {
-            target: AssignTarget::variable(name.as_str().into()),
-            expr: Box::new(LashExpr::Undefined),
-        })
-        .collect::<Vec<_>>();
-    root_global_initializers.extend(expressions);
-    let main = LashExpr::Block(root_global_initializers);
-    let expression_source_spans = spans::source_spans(&main, &lowerer.span_notes);
-    Ok(LashProgram {
-        declarations: lowerer.declarations,
-        main,
-        declaration_spans: lowerer.declaration_spans,
-        // Left empty deliberately: this table is the linker's per-root-statement
-        // fallback, and lowering only knows a statement's position when one of
-        // its expressions carries a source span. A placeholder here would put a
-        // caret on line 1 of a statement whose position is unknown, which is
-        // worse than the message-only rendering the fallback already gives.
-        expression_spans: Vec::new(),
-        expression_source_spans,
-    })
-}
 
 #[derive(Default)]
 struct FunctionContext {

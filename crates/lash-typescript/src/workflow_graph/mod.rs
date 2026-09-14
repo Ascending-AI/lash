@@ -31,13 +31,13 @@ mod printer;
 use editable_text::{
     assign_target_text, expression_text, opaque_process_run_body, parse_assignment_target_field,
     parse_comprehension_clauses, parse_expression_field, parse_simple_binding_field,
-    parse_typescript_fragment, with_assignment, workflow_clause,
+    parse_typescript_fragment, statement_text, with_assignment, workflow_clause,
 };
-use printer::process_run_body as process_run_body_of;
 pub use printer::{
     TypeScriptSourceError, typescript_assign_target_source, typescript_expression_source,
-    typescript_program_source,
+    typescript_program_source, typescript_statement_source,
 };
+use printer::{process_run_body as process_run_body_of, process_run_body_path};
 
 /// Parse source, canonicalize it, and project it into a deterministic graph,
 /// with optional host-derived, non-authoritative type facets.
@@ -164,6 +164,11 @@ impl<'a> GraphProjector<'a> {
         expression_text(expression, self.allow_non_sourceable_expressions)
     }
 
+    fn statement_text(&self, expression: &Expr, versions: &VersionState) -> String {
+        let bound = versions.known.iter().cloned().collect::<Vec<_>>();
+        statement_text(expression, &bound, self.allow_non_sourceable_expressions)
+    }
+
     fn workflow_clause(&self, clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
         workflow_clause(clause, self.allow_non_sourceable_expressions)
     }
@@ -220,7 +225,15 @@ impl<'a> GraphProjector<'a> {
             params: process.params.clone(),
             signals: process.signals.clone(),
             return_ty: process.return_ty.clone(),
-            body: self.project_block(&process.body, &owner, &[], &mut versions),
+            // `defineProcess` lowers to a wrapper that translates an uncaught
+            // error into process failure. Only the inner `run` body was
+            // authored, so that is what the graph shows — addressed by the
+            // wrapper's own AST path so node identity and execution-site
+            // correlation stay keyed on the real path (FIG-3033).
+            body: match process_run_body_path(process) {
+                Some((path, body)) => self.project_block(body, &owner, &path, &mut versions),
+                None => self.project_block(&process.body, &owner, &[], &mut versions),
+            },
         }
     }
 
@@ -231,16 +244,57 @@ impl<'a> GraphProjector<'a> {
         base_path: &[u32],
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
-        let expressions = match expr {
+        // The lowerer wraps every authored statement block as
+        // `Block([Block(inner), Undefined])` and ends `inner` with the block's
+        // completion value. Neither is authored text, so the projection
+        // descends through the wrapper — keeping the AST path, which node
+        // identity and execution-site correlation are both keyed on — and
+        // drops the trailing completion value.
+        let mut expr = expr;
+        let mut base_path = base_path.to_vec();
+        let mut unwrapped = false;
+        while let Some(inner) = printer::block_wrapper_inner(expr) {
+            base_path = lashlang::child_path(&base_path, 0);
+            expr = inner;
+            unwrapped = true;
+        }
+        let mut expressions = match expr {
             Expr::Block(expressions) => expressions.as_slice(),
             expression => std::slice::from_ref(expression),
         };
+        if let [rest @ .., last] = expressions
+            && printer::trailing_is_generated(last, unwrapped)
+        {
+            expressions = rest;
+        }
+        let indexed = matches!(expr, Expr::Block(_));
+        self.project_statements(
+            expressions,
+            owner,
+            &base_path,
+            indexed.then_some(0),
+            versions,
+        )
+    }
+
+    /// Project a statement list already normalised out of its block wrapper.
+    ///
+    /// `start` is the AST-path index of the first statement, or `None` when the
+    /// list is a single non-block expression that carries no index of its own.
+    fn project_statements(
+        &self,
+        expressions: &[Expr],
+        owner: &str,
+        base_path: &[u32],
+        start: Option<usize>,
+        versions: &mut VersionState,
+    ) -> WorkflowSubgraph {
         let mut subgraph = WorkflowSubgraph::default();
         let mut previous_effect: Option<WorkflowNodeId> = None;
         for (index, expression) in expressions.iter().enumerate() {
             let mut path = base_path.to_vec();
-            if matches!(expr, Expr::Block(_)) {
-                path.push(index as u32);
+            if let Some(start) = start {
+                path.push((start + index) as u32);
             }
             let node = self.project_node(expression, owner, &path, versions);
             add_dependency_edges(&mut subgraph.edges, &node, expression, versions);
@@ -312,6 +366,16 @@ impl<'a> GraphProjector<'a> {
         path: &[u32],
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
+        if let Some((target, value)) = printer::assignment_sugar(expression) {
+            return (
+                WorkflowNodeKind::StateUpdate {
+                    target: assign_target_text(&target),
+                    expression: self.expression_text(value),
+                },
+                format!("update {}", target.root),
+                vec![versions.allocate(target.root.as_str())],
+            );
+        }
         let (binding, value, value_path) = assignment_parts(expression, path);
         if let Expr::Assign { target, expr } = expression
             && (!target.is_simple() || versions.is_known(target.root.as_str()))
@@ -352,7 +416,12 @@ impl<'a> GraphProjector<'a> {
                         binding: binding.as_ref().map(assign_target_text),
                         condition: self.expression_text(condition),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
-                        else_is_block: matches!(else_block.as_ref(), Expr::Block(_)),
+                        // The lowerer spells a missing `else` as the unit
+                        // value, which renders as the empty block it was.
+                        else_is_block: matches!(
+                            else_block.as_ref(),
+                            Expr::Block(_) | Expr::Undefined
+                        ),
                         then_graph: Box::new(then_graph),
                         else_graph: Box::new(else_graph),
                     }),
@@ -365,15 +434,46 @@ impl<'a> GraphProjector<'a> {
                 iterable,
                 body,
             } => {
+                // `for (const x of xs)` lowers to a generated element binding
+                // over `Lash.ArrayFromIterable(xs)` whose body opens by copying
+                // the element into the authored binding `x`. The node shows the
+                // authored loop; the AST path still addresses the real body.
+                let sugar = printer::for_of_sugar(loop_binding.as_str(), iterable, body);
+                let (loop_binding, iterable, body_base, body_start, rest) = match sugar {
+                    Some((authored, source, rest)) => (
+                        authored,
+                        source,
+                        lashlang::child_path(&value_path, 1),
+                        1,
+                        Some(rest),
+                    ),
+                    None => (
+                        loop_binding.as_str(),
+                        iterable.as_ref(),
+                        lashlang::child_path(&value_path, 1),
+                        0,
+                        None,
+                    ),
+                };
                 let mut body_versions = versions.clone();
-                body_versions.shadow(loop_binding.as_str());
-                let body_graph = self.project_block(
-                    body,
-                    owner,
-                    &lashlang::child_path(&value_path, 1),
-                    &mut body_versions,
-                );
-                let outputs = loop_outputs(body, Some(loop_binding.as_str()), versions);
+                body_versions.shadow(loop_binding);
+                let body_graph = match rest {
+                    None => self.project_block(body, owner, &body_base, &mut body_versions),
+                    Some([single]) if matches!(single, Expr::Block(_)) => self.project_block(
+                        single,
+                        owner,
+                        &lashlang::child_path(&body_base, body_start),
+                        &mut body_versions,
+                    ),
+                    Some(rest) => self.project_statements(
+                        rest,
+                        owner,
+                        &body_base,
+                        Some(body_start),
+                        &mut body_versions,
+                    ),
+                };
+                let outputs = loop_outputs(body, Some(loop_binding), versions);
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::For {
                         binding: loop_binding.to_string(),
@@ -443,6 +543,16 @@ impl<'a> GraphProjector<'a> {
                     expression: self.expression_text(value),
                 },
                 "fail".to_string(),
+                Vec::new(),
+            ),
+            // Statement shapes the lens does not decompose into workflow
+            // structure yet travel as their own canonical TypeScript text, so
+            // a host still sees and edits exactly what was authored.
+            Expr::Try(_) | Expr::Throw(_) | Expr::Return(_) => (
+                WorkflowNodeKind::Opaque {
+                    source: self.statement_text(value, versions),
+                },
+                opaque_name(value).to_string(),
                 Vec::new(),
             ),
             _ if (lashlang::is_pure_expr(value) || matches!(value, Expr::TypeLiteral(_)))
@@ -737,6 +847,14 @@ fn invalid_payload<T>(node: &WorkflowNode, message: &str) -> Result<T, GraphRend
 }
 
 fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> {
+    let process_names = graph
+        .declarations
+        .iter()
+        .filter_map(|declaration| match declaration {
+            WorkflowDeclaration::Process(process) => Some(process.name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let mut declarations = Vec::with_capacity(graph.declarations.len());
     for declaration in &graph.declarations {
         declarations.push(match declaration {
@@ -754,29 +872,64 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
                     signals: process.signals.clone(),
                     return_ty: process.return_ty.clone(),
                     label,
-                    body: subgraph_to_block(&process.body, RenderContext::Process)?,
+                    body: process_wrapper(
+                        &process.params,
+                        subgraph_to_block(
+                            &process.body,
+                            RenderContext {
+                                scope: RenderScope::Process,
+                                processes: &process_names,
+                            },
+                        )?,
+                    ),
                 })
             }
         });
     }
     Ok(Program {
         declarations,
-        main: subgraph_to_block(&graph.main, RenderContext::Main)?,
+        main: subgraph_to_block(
+            &graph.main,
+            RenderContext {
+                scope: RenderScope::Main,
+                processes: &process_names,
+            },
+        )?,
         declaration_spans: Vec::new(),
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     })
 }
 
+/// What a node is being rendered back into.
 #[derive(Clone, Copy)]
-enum RenderContext {
+struct RenderContext<'a> {
+    scope: RenderScope,
+    /// The process names the module declares.
+    ///
+    /// `const child = defineProcess(..)` projects as the module binding its
+    /// process reference. The reference is not ordinary text — the name is
+    /// bound by the very statement that reads it — so it is rebuilt from the
+    /// declaration list instead of parsed.
+    processes: &'a [String],
+}
+
+impl RenderContext<'_> {
+    /// The module's `defineProcess` bindings, as a fragment parse sees them.
+    fn process_bindings(&self) -> std::collections::BTreeSet<String> {
+        self.processes.iter().cloned().collect()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RenderScope {
     Main,
     Process,
 }
 
 fn subgraph_to_block(
     graph: &WorkflowSubgraph,
-    context: RenderContext,
+    context: RenderContext<'_>,
 ) -> Result<Expr, GraphRenderError> {
     graph
         .nodes
@@ -786,13 +939,28 @@ fn subgraph_to_block(
         .map(Expr::Block)
 }
 
-fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, GraphRenderError> {
+fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr, GraphRenderError> {
+    // The module's own binding of a declared process.
+    if context.scope == RenderScope::Main
+        && let WorkflowNodeKind::Data {
+            binding: Some(binding),
+            expression,
+        } = &node.kind
+        && context.processes.iter().any(|name| name == expression)
+    {
+        return Ok(Expr::Assign {
+            target: parse_simple_binding_field(node, "binding", binding)?,
+            expr: Box::new(Expr::ProcessRef {
+                process: expression.clone().into(),
+            }),
+        });
+    }
     let expression = match &node.kind {
         WorkflowNodeKind::Data {
             binding,
             expression,
         } => {
-            let expression = parse_expression_field(node, "expression", expression)?;
+            let expression = parse_expression_field(node, "expression", expression, context)?;
             if !lashlang::is_pure_expr(&expression) && !matches!(expression, Expr::TypeLiteral(_)) {
                 return invalid_payload(node, "data expression is effectful");
             }
@@ -803,7 +971,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
             expression,
             operation,
         } => {
-            let expression = parse_expression_field(node, "expression", expression)?;
+            let expression = parse_expression_field(node, "expression", expression, context)?;
             if first_receiver_operation(&expression) != Some(operation.as_str()) {
                 return invalid_payload(
                     node,
@@ -817,7 +985,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
             expression,
             effect,
         } => {
-            let expression = parse_expression_field(node, "expression", expression)?;
+            let expression = parse_expression_field(node, "expression", expression, context)?;
             if effect_kind(&expression).as_ref() != Some(effect) {
                 return invalid_payload(node, "effect kind does not match its expression");
             }
@@ -827,7 +995,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
             binding,
             expression,
         } => {
-            let expression = parse_expression_field(node, "expression", expression)?;
+            let expression = parse_expression_field(node, "expression", expression, context)?;
             with_assignment(node, binding, expression, true)?
         }
         WorkflowNodeKind::StateUpdate { target, expression } => {
@@ -840,14 +1008,19 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
             }
             Expr::Assign {
                 target,
-                expr: Box::new(parse_expression_field(node, "expression", expression)?),
+                expr: Box::new(parse_expression_field(
+                    node,
+                    "expression",
+                    expression,
+                    context,
+                )?),
             }
         }
         WorkflowNodeKind::Terminal {
             terminal,
             expression,
         } => {
-            let expression = parse_expression_field(node, "expression", expression)?;
+            let expression = parse_expression_field(node, "expression", expression, context)?;
             let valid = matches!(
                 (terminal, &expression),
                 (WorkflowTerminalKind::Finish, Expr::Finish(_))
@@ -873,7 +1046,12 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
                     node,
                     binding,
                     Expr::If {
-                        condition: Box::new(parse_expression_field(node, "condition", condition)?),
+                        condition: Box::new(parse_expression_field(
+                            node,
+                            "condition",
+                            condition,
+                            context,
+                        )?),
                         then_block: Box::new(subgraph_to_branch(
                             node,
                             then_graph,
@@ -896,7 +1074,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
                 binding, iterable, ..
             } => Expr::For {
                 binding: parse_simple_binding_field(node, "binding", binding)?.root,
-                iterable: Box::new(parse_expression_field(node, "iterable", iterable)?),
+                iterable: Box::new(parse_expression_field(node, "iterable", iterable, context)?),
                 body: Box::new(subgraph_to_block(
                     container
                         .child_subgraphs()
@@ -907,7 +1085,12 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
                 )?),
             },
             WorkflowContainer::While { condition, .. } => Expr::While {
-                condition: Box::new(parse_expression_field(node, "condition", condition)?),
+                condition: Box::new(parse_expression_field(
+                    node,
+                    "condition",
+                    condition,
+                    context,
+                )?),
                 body: Box::new(subgraph_to_block(
                     container
                         .child_subgraphs()
@@ -939,7 +1122,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
                     binding,
                     Expr::ListComprehension {
                         element: Box::new(expressions.remove(0)),
-                        clauses: parse_comprehension_clauses(node, clauses)?,
+                        clauses: parse_comprehension_clauses(node, clauses, context)?,
                     },
                     true,
                 )?
@@ -963,7 +1146,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext) -> Result<Expr, Gra
 fn subgraph_to_branch(
     node: &WorkflowNode,
     graph: &WorkflowSubgraph,
-    context: RenderContext,
+    context: RenderContext<'_>,
     is_block: bool,
     child: &'static str,
 ) -> Result<Expr, GraphRenderError> {
@@ -982,15 +1165,12 @@ fn subgraph_to_branch(
 fn parse_opaque_statement(
     node: &WorkflowNode,
     source: &str,
-    context: RenderContext,
+    context: RenderContext<'_>,
 ) -> Result<Expr, GraphRenderError> {
-    let program = parse_typescript_fragment(node, source, context)?;
-    let expressions = match context {
-        RenderContext::Main => match program.main {
-            Expr::Block(expressions) => expressions,
-            expression => vec![expression],
-        },
-        RenderContext::Process => {
+    let (program, prelude) = parse_typescript_fragment(node, source, context)?;
+    let expressions = match context.scope {
+        RenderScope::Main => printer::statement_block_contents(&program.main).to_vec(),
+        RenderScope::Process => {
             let Some(Declaration::Process(process)) = program.declarations.into_iter().next()
             else {
                 return invalid_payload(node, "opaque process wrapper did not produce a process");
@@ -998,12 +1178,10 @@ fn parse_opaque_statement(
             let Some(body) = opaque_process_run_body(&process) else {
                 return invalid_payload(node, "opaque process wrapper did not produce a run body");
             };
-            match body {
-                Expr::Block(expressions) => expressions.clone(),
-                expression => vec![expression.clone()],
-            }
+            printer::statement_block_contents(body).to_vec()
         }
     };
+    let expressions = expressions.into_iter().skip(prelude).collect::<Vec<_>>();
     if expressions.len() != 1 {
         return Err(GraphRenderError::InvalidOpaqueSource {
             node_id: node.id.to_string(),
@@ -1250,9 +1428,21 @@ fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
     .to_string()
 }
 
+/// A builtin's display name, never a generated one.
+///
+/// The lowerer's own builtins carry the reserved generated prefix, which is not
+/// a name a user would recognise, so they show as the kind of thing they are.
+fn builtin_name(name: &str) -> String {
+    match name.strip_prefix(crate::GENERATED_BINDING_PREFIX) {
+        Some("await_array") => "await all".to_string(),
+        Some(_) => "computation".to_string(),
+        None => name.to_string(),
+    }
+}
+
 fn data_name(expression: &Expr) -> String {
     match expression {
-        Expr::BuiltinCall { name, .. } => name.to_string(),
+        Expr::BuiltinCall { name, .. } => builtin_name(name),
         Expr::List(_) => "list".to_string(),
         Expr::Record(_) => "record".to_string(),
         Expr::Tuple(_) => "tuple".to_string(),
@@ -1266,7 +1456,7 @@ fn computation_name(expression: &Expr) -> String {
         Expr::Tuple(_) => "tuple computation",
         Expr::List(_) => "list computation",
         Expr::Record(_) => "record computation",
-        Expr::BuiltinCall { name, .. } => return name.to_string(),
+        Expr::BuiltinCall { name, .. } => return builtin_name(name),
         Expr::Binary { .. } => "binary computation",
         Expr::Unary { .. } => "unary computation",
         Expr::Field { .. } => "field computation",
@@ -1292,4 +1482,44 @@ fn kind_tag(kind: &WorkflowNodeKind) -> &'static str {
 
 fn hex_digest(domain: &str, bytes: &[u8]) -> String {
     lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
+}
+
+/// The derived name of an opaque statement node.
+fn opaque_name(expression: &Expr) -> &'static str {
+    match expression {
+        Expr::Try(_) => "try",
+        Expr::Throw(_) => "throw",
+        Expr::Return(_) => "return",
+        Expr::Break => "break",
+        Expr::Continue => "continue",
+        _ => "statement",
+    }
+}
+
+/// Rebuild the lowerer's `defineProcess` wrapper around an authored run body.
+///
+/// The graph shows the authored body; the wrapper that turns an uncaught error
+/// into process failure is generated, so it is regenerated here rather than
+/// stored.
+fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
+    let error = format!("{}0_process_error", crate::GENERATED_BINDING_PREFIX);
+    Expr::Try(Box::new(lashlang::TryExpr {
+        body: Box::new(Expr::Finish(Box::new(Expr::Call {
+            function: Box::new(Expr::Function(Box::new(lashlang::FunctionExpr {
+                name: None,
+                params: params.iter().map(|param| param.name.clone()).collect(),
+                captures: Vec::new(),
+                body: Box::new(body),
+            }))),
+            args: params
+                .iter()
+                .map(|param| Expr::Variable(param.name.clone()))
+                .collect(),
+        }))),
+        catch: Some(lashlang::CatchClause {
+            binding: error.clone().into(),
+            body: Box::new(Expr::Fail(Box::new(Expr::Variable(error.into())))),
+        }),
+        finally: None,
+    }))
 }

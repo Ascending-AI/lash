@@ -67,6 +67,19 @@ pub fn typescript_expression_source(expression: &Expr) -> Printed {
     Printer.statement_expression(expression)
 }
 
+/// Print one statement as canonical TypeScript.
+///
+/// `bound` names the identifiers already in scope where the statement sits, so
+/// a re-assignment is not re-declared. This is the textual form carried by an
+/// opaque node, which owns a whole statement rather than one expression.
+pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Printed {
+    let mut bound = bound.to_vec();
+    Ok(Printer
+        .statement(expression, 0, &mut bound)?
+        .trim_end()
+        .to_string())
+}
+
 /// Print one assignment target as canonical TypeScript.
 pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
     Printer.assign_target(target)
@@ -221,10 +234,26 @@ impl Printer {
     }
 
     fn block(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
-        let statements = match expression {
-            Expr::Block(statements) => statements.as_slice(),
-            statement => std::slice::from_ref(statement),
-        };
+        let statements = statement_block_contents(expression);
+        if statements.is_empty() {
+            return Ok("{}".to_string());
+        }
+        let mut out = String::from("{\n");
+        for statement in statements {
+            out.push_str(&self.statement(statement, level + 1, bound)?);
+        }
+        out.push_str(&indent(level));
+        out.push('}');
+        Ok(out)
+    }
+
+    /// Print an already-normalised statement list as a braced block.
+    fn block_statements(
+        &self,
+        statements: &[Expr],
+        level: usize,
+        bound: &mut Vec<String>,
+    ) -> Printed {
         if statements.is_empty() {
             return Ok("{}".to_string());
         }
@@ -249,6 +278,11 @@ impl Printer {
                 // annotated statement itself.
                 self.statement(expr, level, bound)
             }
+            expression if let Some((target, value)) = assignment_sugar(expression) => Ok(format!(
+                "{prefix}{} = {};\n",
+                self.assign_target(&target)?,
+                self.expression(value)?
+            )),
             Expr::Block(_) => {
                 let mut inner = bound.clone();
                 Ok(format!(
@@ -293,6 +327,27 @@ impl Printer {
                 iterable,
                 body,
             } => {
+                // `for (const x of xs)` lowers to a generated element binding
+                // over `Lash.ArrayFromIterable(xs)` whose body opens by copying
+                // the element into the authored binding. Re-sugar that shape
+                // back to the loop the user wrote.
+                if let Some((authored, iterable, body)) = for_of_sugar(binding, iterable, body) {
+                    let mut body_bound = bound.clone();
+                    body_bound.push(authored.to_string());
+                    return Ok(format!(
+                        "{prefix}for (const {} of {}) {}\n",
+                        self.identifier("loop binding", authored)?,
+                        self.expression(iterable)?,
+                        self.block_statements(
+                            match body {
+                                [single] => statement_block_contents(single),
+                                body => body,
+                            },
+                            level,
+                            &mut body_bound,
+                        )?
+                    ));
+                }
                 let mut body_bound = bound.clone();
                 body_bound.push(binding.to_string());
                 Ok(format!(
@@ -576,9 +631,9 @@ impl Printer {
             Expr::ListComprehension { .. } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a list comprehension",
             }),
-            Expr::ResultUnwrap(_) => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a result unwrap",
-            }),
+            // A failed host operation throws in TypeScript, so the unwrap the
+            // lowerer wraps every module call in has no spelling of its own.
+            Expr::ResultUnwrap(value) => self.expression(value),
             Expr::Map { .. } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a bare map intrinsic",
             }),
@@ -590,6 +645,13 @@ impl Printer {
 
     /// Re-sugar one lowered shape, or `Ok(None)` if this is not one.
     fn sugar(&self, expression: &Expr) -> Result<Option<String>, TypeScriptSourceError> {
+        // `await x` on a value that may be a pending promise.
+        if let Expr::BuiltinCall { name, args } = expression
+            && name.as_str() == "__typescript_await_pending"
+            && let [value] = args.as_slice()
+        {
+            return Ok(Some(format!("await {}", self.unary_operand(value)?)));
+        }
         if let Expr::Print(inner) = expression
             && let Some(args) = stdlib_call(inner, "__consoleObservationText")
             && let [value] = args
@@ -781,7 +843,31 @@ impl Printer {
 /// The wrapper is `Try { body: Finish(Call(Function)), catch: <generated> }`;
 /// only its function body was authored, so that is what prints back.
 pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
-    let Expr::Try(wrapper) = &process.body else {
+    process_run_body_path(process).map(|(_, body)| strip_completion_value(body))
+}
+
+/// The authored `run` body of a lowered `defineProcess`, with its AST path.
+///
+/// `defineProcess({ run })` lowers to `Try(Finish(Call(Function)))` with a
+/// generated `__typescript_*_process_error` catch. The authored statements are
+/// the inner function's body, and everything above it is the wrapper. The
+/// returned path is the prefix that addresses that body inside the process
+/// declaration: it is read off the AST — each step is the position of the
+/// chosen child in [`Expr::children`], the same spelling `execution_sites` and
+/// the compiler use — so node identity and execution-site correlation stay
+/// keyed on the real path rather than on a transcribed constant.
+pub(super) fn process_run_body_path(process: &ProcessDecl) -> Option<(Vec<u32>, &Expr)> {
+    let mut path = Vec::new();
+    let step = |parent: &Expr, child: &Expr, path: &mut Vec<u32>| {
+        let index = parent.children().position(|candidate| {
+            std::ptr::eq(std::ptr::from_ref(candidate), std::ptr::from_ref(child))
+        })?;
+        path.push(u32::try_from(index).ok()?);
+        Some(())
+    };
+
+    let wrapper = &process.body;
+    let Expr::Try(try_expr) = wrapper else {
         return None;
     };
     let TryExpr {
@@ -791,7 +877,7 @@ pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
             body: catch_body,
         }),
         finally: None,
-    } = wrapper.as_ref()
+    } = try_expr.as_ref()
     else {
         return None;
     };
@@ -805,16 +891,163 @@ pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
         },
         _ => return None,
     }
-    let Expr::Finish(call) = body.as_ref() else {
+
+    let finish = body.as_ref();
+    step(wrapper, finish, &mut path)?;
+    let Expr::Finish(call) = finish else {
         return None;
     };
-    let Expr::Call { function, .. } = call.as_ref() else {
+    let call = call.as_ref();
+    step(finish, call, &mut path)?;
+    let Expr::Call { function, .. } = call else {
         return None;
     };
-    let Expr::Function(function) = function.as_ref() else {
+    let function = function.as_ref();
+    step(call, function, &mut path)?;
+    let Expr::Function(run) = function else {
         return None;
     };
-    Some(strip_completion_value(&function.body))
+    let run_body = &run.body;
+    step(function, run_body, &mut path)?;
+    Some((path, run_body))
+}
+
+/// The statements of a block, with the lowerer's block wrapper removed.
+///
+/// The lowerer wraps every authored statement block and ends it with the
+/// block's completion value. Neither piece is authored text: the wrapper has no
+/// spelling and the completion value is unobservable in statement position, and
+/// both are re-synthesised when the printed block is lowered again.
+pub(super) fn statement_block_contents(expression: &Expr) -> &[Expr] {
+    let mut expression = expression;
+    let mut unwrapped = false;
+    while let Some(inner) = block_wrapper_inner(expression) {
+        expression = inner;
+        unwrapped = true;
+    }
+    let Expr::Block(statements) = expression else {
+        return std::slice::from_ref(expression);
+    };
+    match statements.as_slice() {
+        [rest @ .., last] if trailing_is_generated(last, unwrapped) => rest,
+        other => other,
+    }
+}
+
+/// Whether a block's last element is the lowerer's completion value.
+///
+/// `Undefined` is the unit completion the lowerer appends to every statement
+/// block; inside the wrapper the completion is the block's own value, which is
+/// unobservable in statement position and re-synthesised on the way back down.
+pub(super) fn trailing_is_generated(last: &Expr, unwrapped: bool) -> bool {
+    matches!(last, Expr::Undefined) || (unwrapped && lashlang::is_pure_expr(last))
+}
+
+/// The inner block of the lowerer's statement-block wrapper.
+pub(super) fn block_wrapper_inner(expression: &Expr) -> Option<&Expr> {
+    let Expr::Block(statements) = expression else {
+        return None;
+    };
+    let inner = match statements.as_slice() {
+        [inner @ Expr::Block(_), Expr::Undefined] | [inner @ Expr::Block(_)] => inner,
+        _ => return None,
+    };
+    // A lowered member assignment is also a block of generated bindings, but
+    // it is one statement rather than a nested scope.
+    if assignment_sugar(inner).is_some() {
+        return None;
+    }
+    Some(inner)
+}
+
+/// The authored target and value of a lowered member assignment.
+///
+/// `a.b = v` lowers to a block that pins the reference base, evaluates the
+/// value, stores through the pinned base and completes with the stored value.
+/// Every binding in that block is generated, so the block prints and projects
+/// as the one assignment the user wrote.
+pub(super) fn assignment_sugar(expression: &Expr) -> Option<(AssignTarget, &Expr)> {
+    let Expr::Block(statements) = expression else {
+        return None;
+    };
+    let [
+        Expr::Assign {
+            target: base_target,
+            expr: base,
+        },
+        Expr::Assign {
+            target: result_target,
+            expr: value,
+        },
+        Expr::Assign {
+            target: store,
+            expr: stored,
+        },
+        Expr::Variable(completion),
+    ] = statements.as_slice()
+    else {
+        return None;
+    };
+    if !generated_binding(base_target, "_reference_base")
+        || !generated_binding(result_target, "_assignment_result")
+        || store.root != base_target.root
+        || store.steps.is_empty()
+        || completion != &result_target.root
+    {
+        return None;
+    }
+    match stored.as_ref() {
+        Expr::Variable(name) if name == &result_target.root => {}
+        _ => return None,
+    }
+    let Expr::Variable(root) = base.as_ref() else {
+        return None;
+    };
+    Some((
+        AssignTarget {
+            root: root.clone(),
+            steps: store.steps.clone(),
+        },
+        value,
+    ))
+}
+
+fn generated_binding(target: &AssignTarget, suffix: &str) -> bool {
+    target.is_simple()
+        && target.root.starts_with(GENERATED_BINDING_PREFIX)
+        && target.root.ends_with(suffix)
+}
+
+/// The authored binding, iterable and body of a lowered `for (.. of ..)` loop.
+///
+/// `for (const x of xs)` lowers to a generated element binding over
+/// `Lash.ArrayFromIterable(xs)` whose body opens by copying the element into
+/// the authored binding.
+pub(super) fn for_of_sugar<'a>(
+    binding: &str,
+    iterable: &'a Expr,
+    body: &'a Expr,
+) -> Option<(&'a str, &'a Expr, &'a [Expr])> {
+    if !binding.starts_with(GENERATED_BINDING_PREFIX) {
+        return None;
+    }
+    let [source] = stdlib_call(iterable, "Lash.ArrayFromIterable")? else {
+        return None;
+    };
+    let Expr::Block(statements) = body else {
+        return None;
+    };
+    let [Expr::Assign { target, expr }, rest @ ..] = statements.as_slice() else {
+        return None;
+    };
+    if !target.is_simple() {
+        return None;
+    }
+    match expr.as_ref() {
+        Expr::Variable(name) if name.as_str() == binding => {}
+        _ => return None,
+    }
+    Some((target.root.as_str(), source, rest))
 }
 
 /// Drop the lowerer's trailing unit completion value from a function body.

@@ -65,7 +65,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-usage-ledger-request/v1",
     "lash-workflow-edge/v2",
     "lash-workflow-node/v2",
-    "lash-workflow-source/v2",
+    "lash-workflow-source/v3",
     "lash.agent-frame-key/v2",
     "lashlang-process-start/v2",
 ];

@@ -12,9 +12,11 @@ use std::collections::BTreeSet;
 
 use lashlang::{AssignPathStep, AssignTarget, Expr, ListComprehensionClause, Program};
 
-use super::printer::{typescript_assign_target_source, typescript_expression_source};
+use super::printer::{
+    typescript_assign_target_source, typescript_expression_source, typescript_statement_source,
+};
 use super::{
-    GraphRenderError, RenderContext, WorkflowListComprehensionClause, WorkflowNode,
+    GraphRenderError, RenderContext, RenderScope, WorkflowListComprehensionClause, WorkflowNode,
     process_run_body_of,
 };
 
@@ -24,6 +26,20 @@ pub(super) fn expression_text(expression: &Expr, allow_non_sourceable: bool) -> 
         Err(error) if allow_non_sourceable => format!("<non-sourceable expression: {error}>"),
         Err(error) => {
             panic!("an expression parsed from canonical source must remain sourceable: {error}")
+        }
+    }
+}
+
+pub(super) fn statement_text(
+    expression: &Expr,
+    bound: &[String],
+    allow_non_sourceable: bool,
+) -> String {
+    match typescript_statement_source(expression, bound) {
+        Ok(text) => text,
+        Err(error) if allow_non_sourceable => format!("<non-sourceable statement: {error}>"),
+        Err(error) => {
+            panic!("a statement parsed from canonical source must remain sourceable: {error}")
         }
     }
 }
@@ -51,28 +67,52 @@ pub(super) fn workflow_clause(
 }
 
 /// Parse one fragment of TypeScript with the node's visible bindings in scope.
+///
+/// Returns the parsed program and the number of leading statements the wrapper
+/// itself contributed, which the caller skips.
 pub(super) fn parse_typescript_fragment(
     node: &WorkflowNode,
     text: &str,
-    context: RenderContext,
-) -> Result<Program, GraphRenderError> {
-    let globals = node
-        .available_variables
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let source = match context {
-        RenderContext::Main => text.to_string(),
-        RenderContext::Process => format!(
-            "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", signals: {{}}, run: async () => {{\n{text}\n}} }});\n"
-        ),
+    context: RenderContext<'_>,
+) -> Result<(Program, usize), GraphRenderError> {
+    let names = fragment_bindings(node);
+    let (source, globals, prelude) = match context.scope {
+        RenderScope::Main => (text.to_string(), names.iter().cloned().collect(), 0),
+        // A process fragment is reparsed inside a process, and a function body
+        // cannot close over a mutable outer binding. So the visible names are
+        // re-declared inside the wrapper rather than left sitting above it,
+        // which is what keeps an edited reassignment parseable.
+        RenderScope::Process => {
+            let prelude = names
+                .iter()
+                .map(|name| format!("  let {name};\n"))
+                .collect::<String>();
+            (
+                format!(
+                    "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", signals: {{}}, run: async () => {{\n{prelude}{text}\n}} }});\n"
+                ),
+                BTreeSet::new(),
+                names.len(),
+            )
+        }
     };
-    crate::parse_with_globals(&source, &globals).map_err(|error| {
-        GraphRenderError::InvalidOpaqueSource {
+    let program = crate::parse_workflow_fragment(&source, &globals, &context.process_bindings())
+        .map_err(|error| GraphRenderError::InvalidOpaqueSource {
             node_id: node.id.to_string(),
             message: error.to_string(),
-        }
-    })
+        })?;
+    Ok((program, prelude))
+}
+
+/// The names a fragment may read, in the order the wrapper declares them.
+///
+/// Generated bindings are not authored names and never reach a fragment.
+fn fragment_bindings(node: &WorkflowNode) -> Vec<String> {
+    node.available_variables
+        .iter()
+        .filter(|name| !name.starts_with(crate::GENERATED_BINDING_PREFIX))
+        .cloned()
+        .collect()
 }
 
 /// The name the opaque-statement wrapper binds. It never reaches a graph.
@@ -87,19 +127,19 @@ pub(super) fn parse_expression_field(
     node: &WorkflowNode,
     field: &'static str,
     text: &str,
+    context: RenderContext<'_>,
 ) -> Result<Expr, GraphRenderError> {
     let globals = node
         .available_variables
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let program = crate::parse_with_globals(text, &globals).map_err(|error| {
-        GraphRenderError::InvalidExpression {
+    let program = crate::parse_workflow_fragment(text, &globals, &context.process_bindings())
+        .map_err(|error| GraphRenderError::InvalidExpression {
             node_id: node.id.to_string(),
             field,
             message: error.to_string(),
-        }
-    })?;
+        })?;
     if !program.declarations.is_empty() {
         return Err(GraphRenderError::InvalidExpression {
             node_id: node.id.to_string(),
@@ -146,13 +186,14 @@ pub(super) fn parse_assignment_target_field(
         .cloned()
         .collect::<BTreeSet<_>>();
     globals.insert(root);
-    let program = crate::parse_with_globals(text, &globals).map_err(|error| {
-        GraphRenderError::InvalidAssignmentTarget {
-            node_id: node.id.to_string(),
-            field,
-            message: error.to_string(),
-        }
-    })?;
+    let program =
+        crate::parse_workflow_fragment(text, &globals, &BTreeSet::new()).map_err(|error| {
+            GraphRenderError::InvalidAssignmentTarget {
+                node_id: node.id.to_string(),
+                field,
+                message: error.to_string(),
+            }
+        })?;
     let invalid = || GraphRenderError::InvalidAssignmentTarget {
         node_id: node.id.to_string(),
         field,
@@ -199,6 +240,7 @@ pub(super) fn parse_simple_binding_field(
 pub(super) fn parse_comprehension_clauses(
     node: &WorkflowNode,
     clauses: &[WorkflowListComprehensionClause],
+    context: RenderContext<'_>,
 ) -> Result<Vec<ListComprehensionClause>, GraphRenderError> {
     clauses
         .iter()
@@ -206,11 +248,11 @@ pub(super) fn parse_comprehension_clauses(
             WorkflowListComprehensionClause::For { binding, iterable } => {
                 Ok(ListComprehensionClause::For {
                     binding: parse_simple_binding_field(node, "clause binding", binding)?.root,
-                    iterable: parse_expression_field(node, "clause iterable", iterable)?,
+                    iterable: parse_expression_field(node, "clause iterable", iterable, context)?,
                 })
             }
             WorkflowListComprehensionClause::If { condition } => Ok(ListComprehensionClause::If {
-                condition: parse_expression_field(node, "clause condition", condition)?,
+                condition: parse_expression_field(node, "clause condition", condition, context)?,
             }),
         })
         .collect()
