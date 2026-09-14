@@ -1224,28 +1224,28 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn false_if_branch_and_finish_inside_loop_are_covered() {
-    let value = exec(
-        r#"
-        if false {
-          out = 1
-        } else {
-          out = 2
-        }
-        finish out
-        "#,
-    )
+    // `if false { out = 1 } else { out = 2 }` / `finish out`
+    let value = exec(builders::program(vec![
+        builders::if_else(
+            builders::bool_lit(false),
+            builders::block(vec![builders::assign("out", builders::num(1.0))]),
+            builders::block(vec![builders::assign("out", builders::num(2.0))]),
+        ),
+        builders::finish(builders::var("out")),
+    ]))
     .await
     .expect("else branch should succeed");
     assert_eq!(value, Value::Number(2.0));
 
-    let value = exec(
-        r#"
-        for x in [1, 2] {
-          finish x
-        }
-        finish 0
-        "#,
-    )
+    // `for x in [1, 2] { finish x }` / `finish 0`
+    let value = exec(builders::program(vec![
+        builders::for_in(
+            "x",
+            builders::list(vec![builders::num(1.0), builders::num(2.0)]),
+            builders::block(vec![builders::finish(builders::var("x"))]),
+        ),
+        builders::finish(builders::num(0.0)),
+    ]))
     .await
     .expect("finish inside loop should bubble out");
     assert_eq!(value, Value::Number(1.0));

@@ -361,8 +361,16 @@ mod tests {
 
     #[test]
     fn scalar_type_keyword_in_value_position_has_type_literal_hint() {
+        // `finish { value: str }`: in value position `str` is an ordinary name,
+        // and the linker has no binding for it.
         let source = "finish { value: str }";
-        let program = crate::parse(source).expect("source should parse");
+        let program =
+            crate::testing::ast_builders::program(vec![crate::testing::ast_builders::finish(
+                crate::testing::ast_builders::record(vec![(
+                    "value",
+                    crate::testing::ast_builders::var("str"),
+                )]),
+            )]);
         let error = crate::LinkedModule::link(program, crate::LashlangHostEnvironment::default())
             .expect_err("scalar type keyword is not a value");
         let diagnostic = format_link_diagnostic(source, &error);
@@ -503,10 +511,14 @@ mod tests {
             LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::default());
         let mut cache = LinkedProgramCache::with_capacity(2);
 
+        // The cache is keyed by the source text; what it stores is the linked
+        // AST, so the program is built directly.
         let first = cache
             .get_or_compile_ast(
                 source,
-                crate::parse(source).expect("source parses"),
+                crate::testing::ast_builders::program(vec![crate::testing::ast_builders::finish(
+                    crate::testing::ast_builders::num(1.0),
+                )]),
                 &environment,
             )
             .expect("link first program");
