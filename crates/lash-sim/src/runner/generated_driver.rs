@@ -81,6 +81,10 @@ pub(super) async fn drive_generated_workload(
                 continue;
             }
             if scheduler.is_empty() {
+                debug_assert!(
+                    world.staged_admissions_is_empty(),
+                    "the run ended with discovered boundaries still unadmitted"
+                );
                 break;
             }
             continue;

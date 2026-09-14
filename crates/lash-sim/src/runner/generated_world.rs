@@ -656,6 +656,14 @@ impl GeneratedRuntimeWorld {
                     .finished_provider_turns
                     .insert(turn_id, observed);
                 debug_assert_eq!(completion_event.at, final_ready_at);
+                // `min_unadmitted_at` orders provider completions against
+                // suspend resumes by time alone, so the two ranges must stay
+                // disjoint: a completion at or past the suspend base would let a
+                // resume be admitted while a workload boundary is still owed.
+                debug_assert!(
+                    final_ready_at < SUSPEND_RESOLUTION_BASE_AT,
+                    "provider completion at {final_ready_at} reached the suspend-resume range"
+                );
                 self.stage_admission(completion_event);
             }
         }
@@ -730,6 +738,14 @@ impl GeneratedRuntimeWorld {
                 .expect("staged boundary just found by id");
             scheduler.schedule(event);
         }
+    }
+
+    /// Whether every discovered boundary has been admitted to the scheduler.
+    /// The driver asserts this before it treats an empty scheduler as the end of
+    /// the run, so a future interleaving of suspend and workload times cannot
+    /// silently drop a staged boundary.
+    pub(super) fn staged_admissions_is_empty(&self) -> bool {
+        self.staged_admissions.is_empty()
     }
 
     pub(super) fn active_provider_turn_count(&self) -> usize {
@@ -1027,12 +1043,13 @@ impl GeneratedRuntimeWorld {
     /// turn, and it is delivered after the generated workload has drained, so it
     /// is scheduled past every workload boundary.
     ///
-    /// Its `at` is derived from the parked turn's own alias rather than from how
-    /// many driver iterations had run when the host noticed the key: the pass
-    /// that notices is decided by task-poll progress, so a counter advanced by
-    /// the driver loop would put host timing into recorded simulator evidence
-    /// (see `staged_admissions`). Resolutions are independent of one another, so
-    /// ordering them by the alias the workload already fixed loses nothing.
+    /// Its `at` is `resolution_at`, fixed from the spawn-order counter when the
+    /// delivery that spawned the turn ran — not from how many driver passes had
+    /// gone by when the host noticed the await key. Which pass notices is
+    /// decided by task-poll progress, so a counter advanced by the driver loop
+    /// would put host timing into recorded simulator evidence (see
+    /// `staged_admissions`). Resolutions are independent of one another, so
+    /// ordering them by spawn order loses nothing.
     pub(super) async fn schedule_parked_suspend_resolutions(
         &mut self,
         scheduler: &mut BoundaryScheduler,
