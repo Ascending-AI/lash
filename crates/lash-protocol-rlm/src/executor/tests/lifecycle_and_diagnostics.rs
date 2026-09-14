@@ -1058,19 +1058,20 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // `LASHLANG_SEMANTIC_HASH_VERSION` to v10 because a declared process
         // parameter type now reaches module identity. Re-pinned again by
         // FIG-2996 part 1, which moved `LASHLANG_SEMANTIC_HASH_VERSION` to v11
-        // for the one handle kind. What the pair asserts is unchanged: the two
+        // for the one handle kind. Re-pinned again by FIG-3088, which moved the
+        // constant to v12 after the hash-writer rewrite. What the pair asserts is unchanged: the two
         // sides are still equal, which is the trace-sink independence this
         // test exists for; only the constant both sides derive from moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:3752529d2823e6912f547f59:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:d4fd3ce2f632178123c0b3d0:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:3752529d2823e6912f547f59:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:d4fd3ce2f632178123c0b3d0:1"
             )
         );
 
@@ -1084,11 +1085,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/903a1f97e48179b6c3b67f9467a6f9b05fba8b433acfdeef0f9bb1d221a8b86c"
+            "frame-key/v2/d5a1b12c35653a4ddc9f4929104826ff8ed1cc7fbd86628645bce94d242e8d2d"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/903a1f97e48179b6c3b67f9467a6f9b05fba8b433acfdeef0f9bb1d221a8b86c"
+            "frame-key/v2/d5a1b12c35653a4ddc9f4929104826ff8ed1cc7fbd86628645bce94d242e8d2d"
         );
     });
 }
