@@ -28,6 +28,7 @@ impl Default for TestLocalProcessRegistry {
             process_terminal_write_error: Arc::new(Mutex::new(None)),
             process_terminal_write_outcome: Arc::new(Mutex::new(None)),
             external_ref_write_error: Arc::new(Mutex::new(None)),
+            cancel_request_write_error: Arc::new(Mutex::new(None)),
             process_lease_release_error: Arc::new(Mutex::new(None)),
             next_change_seq: Arc::new(Mutex::new(0)),
             tombstone_compaction_horizon: Arc::new(Mutex::new(0)),
@@ -62,6 +63,16 @@ impl TestLocalProcessRegistry {
     #[doc(hidden)]
     pub async fn fail_next_external_ref_write_for_testing(&self, error: PluginError) {
         *self.external_ref_write_error.lock().await = Some(error);
+    }
+
+    /// Injects an error into the next cancel-request write.
+    ///
+    /// Exercises the compensation path of a failed start: the caller's
+    /// StartFailed request cannot be recorded, so the row stays nonterminal and
+    /// the recovery sweep owns it.
+    #[doc(hidden)]
+    pub async fn fail_next_cancel_request_for_testing(&self, error: PluginError) {
+        *self.cancel_request_write_error.lock().await = Some(error);
     }
 
     /// Inject a structurally valid wake row for delivery-driver boundary tests.

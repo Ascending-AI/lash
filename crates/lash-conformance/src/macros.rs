@@ -421,6 +421,8 @@ macro_rules! process_registry_tests {
                 (reused_process_ids_refuse_superseded_incarnations, "incarnation-reuse"),
                 (watched_process_registry_reused_process_ids_refuse_superseded_incarnations, "watched-incarnation-reuse"),
                 (lifecycle_transition_refusals_are_backend_invariant, "transition-refusals"),
+                (external_ref_is_written_compare_and_set_by_segment_ordinal, "external-ref-compare-and-set"),
+                (registration_reports_created_then_existing, "registration-disposition"),
                 (caller_departure_state_machine, "caller-departure"),
                 (caller_departed_rows_are_reclaimed_by_retention, "caller-departed-retention"),
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),

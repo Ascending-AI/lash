@@ -1350,40 +1350,8 @@ async fn signal_ordinal_for_event(
         .await
 }
 
-async fn schedule_restate_process<'ctx, C>(
-    registry: Arc<dyn ProcessRegistry>,
-    registration: lash_core::ProcessRegistration,
-    observers: Vec<SessionId>,
-    execution_context: lash_core::ProcessExecutionContext,
-    context: &C,
-) -> Result<ProcessRecord, PluginError>
-where
-    C: RestateControllerContext<'ctx> + ?Sized,
-{
-    let process_id = registration.id.clone();
-    registry
-        .register_process_with_observers(registration.clone(), &observers)
-        .await?;
-    let invocation_id = context
-        .start_process_workflow(registration, execution_context)
-        .await
-        .map_err(|err| {
-            PluginError::Runtime(RuntimeError::new(
-                RuntimeErrorCode::RestateProcessIngressSubmit,
-                format!("Restate process workflow start failed: {err}"),
-            ))
-        })?;
-    registry
-        .set_external_ref(
-            &process_id,
-            ProcessExternalRef {
-                backend: "restate".to_string(),
-                id: format!("LashProcessWorkflow/{process_id}"),
-                metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
-            },
-        )
-        .await
-}
+mod process_scheduling;
+use process_scheduling::schedule_restate_process;
 
 #[derive(Debug)]
 pub(crate) enum RestateEffectExecution {

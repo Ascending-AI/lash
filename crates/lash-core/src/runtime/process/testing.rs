@@ -314,18 +314,21 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
 
 #[async_trait::async_trait]
 impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
-    async fn register_process_with_observers(
+    async fn register_process_reporting_disposition(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<crate::ProcessRegistrationOutcome, PluginError> {
         let _transaction = self.transaction.lock().await;
         let process_id = registration.id.clone();
         let managed_before = self.managed.lock().await.clone();
         let observers_before = self.observers.lock().await.clone();
         let wake_targets_before = self.wake_targets.lock().await.clone();
         let result = async {
-            self.insert_process(registration, observers).await?;
+            let inserted = self.insert_process(registration, observers).await?;
+            if !inserted.is_created() {
+                return Ok(inserted);
+            }
             let mut managed = self.managed.lock().await;
             let record = managed
                 .get_mut(&process_id)
@@ -348,7 +351,7 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
             self.scope_fence_hosts
                 .reinstate_process_scope(&process_id)
                 .await?;
-            Ok(record)
+            Ok(crate::ProcessRegistrationOutcome::created(record))
         }
         .await;
         if result.is_err() {

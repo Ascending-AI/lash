@@ -414,16 +414,21 @@ impl RestateProcessIngressRunner {
         if record.disposition == RecoveryContract::ExternallyOwned {
             return Ok(IngressSubmitOutcome::ExternallyOwned);
         }
-        // The record may have reached a terminal state between the list and the submit.
-        // Idempotent by process_id: never re-submit a finished process.
-        if let Some(current) = self
-            .registry
-            .get_process(&process_id)
-            .await?
-            .filter(|current| current.is_terminal())
-        {
+        // Re-read before submitting: the worklist page is a snapshot, and the
+        // row may have moved under it.
+        let current = self.registry.get_process(&process_id).await?;
+        // Idempotent by process id: never re-submit a finished process.
+        if let Some(current) = current.as_ref().filter(|current| current.is_terminal()) {
             return Ok(IngressSubmitOutcome::SettledByPeer(current.status));
         }
+        // A standing cancel request is not a reason to withhold the submission.
+        // Only a `StartFailed` request is terminal on the spot; every other
+        // origin is recorded and waits for the run to honour it. Since the
+        // sweep never writes a terminal of its own, skipping here would leave a
+        // cancel-requested row that was never submitted permanently
+        // non-terminal: `await_process_terminal` would never return and
+        // retention would never reclaim it. The row is submitted, and the
+        // workflow's own journaled cancellation step settles it.
         let latest_handover = self
             .continuations
             .latest_segment_handover(&process_id)
@@ -431,6 +436,22 @@ impl RestateProcessIngressRunner {
         let segment_ordinal = latest_handover
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
+        // The skip is by segment, not by "a reference exists". A row that has
+        // handed over carries the reference of whichever segment last reached
+        // Restate; if that is the segment this pass would submit, a submission
+        // is already in flight and resubmitting would be a second POST for it.
+        // If it is an earlier segment — the successor send or its reference
+        // write did not land — then no submission exists for the segment the
+        // process actually advanced to, and the sweep is the thing that has to
+        // make it exist. Comparing `is_some()` instead would make every
+        // handed-over row permanently un-sweepable.
+        if let Some(external) = current
+            .as_ref()
+            .and_then(|current| current.external_ref.as_ref())
+            && external.segment_ordinal() >= segment_ordinal
+        {
+            return Ok(IngressSubmitOutcome::AlreadySubmitted);
+        }
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         let registration = ProcessRegistration {
             id: record.id,
@@ -471,8 +492,9 @@ impl RestateProcessIngressRunner {
                 &process_id,
                 ProcessExternalRef {
                     backend: "restate".to_string(),
-                    id: format!("LashProcessWorkflow/{process_id}"),
+                    id: format!("LashProcessWorkflow/{workflow_key}"),
                     metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
+                    segment_ordinal: Some(segment_ordinal),
                 },
             )
             .await
@@ -603,6 +625,16 @@ impl RestateProcessIngressRunner {
                             },
                         });
                     }
+                    // Not this pass's row to start, and not a fault. `Busy`
+                    // is the existing dialect's word for a row another owner
+                    // holds; this lane adds a resubmission rule, not a new
+                    // recovery outcome.
+                    Ok(IngressSubmitOutcome::AlreadySubmitted) => {
+                        report.deferred.push(ProcessAdmissionDeferred {
+                            process_id,
+                            disposition: ProcessRecoveryAttemptOutcome::Busy,
+                        });
+                    }
                     Err(error) => {
                         // Per-row submit failure is a per-row deferral. Failing
                         // the whole call here would throw away the ids that
@@ -642,6 +674,9 @@ enum IngressSubmitOutcome {
     ExternallyOwned,
     /// The row was already terminal when re-read just before submitting.
     SettledByPeer(ProcessStatus),
+    /// The row already carries an external reference for its current segment:
+    /// a submission reached Restate and the workflow key coalesces onto it.
+    AlreadySubmitted,
 }
 
 impl RestateProcessIngressRunner {

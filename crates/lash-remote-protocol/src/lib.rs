@@ -158,10 +158,10 @@ pub use usage_activity::*;
 // the input kind. A window-66 peer may still send those shapes; refusing them
 // narrows the accepted record set, so peers must adopt 67.
 // Windows 68-70 are deliberately reserved, not skipped by accident: they are
-// held for bump members that are planned but not yet open, so those lanes can
-// take a window without renumbering this one. Nothing decodes them, and the
-// refusal test below pins that a peer speaking 68, 69 or 70 is rejected by this
-// build exactly as an older peer is.
+// held for bump members that are planned but not yet landed here, so those
+// lanes can take a window without renumbering this one. Nothing decodes them,
+// and the refusal test below pins that a peer speaking 68, 69 or 70 is
+// rejected by this build exactly as an older peer is.
 // Window 71: FIG-1272 gives a context-window overflow its own turn stop,
 // `RemoteTurnStop::ContextOverflow`, instead of collapsing it into
 // `ProviderError`. A window-67 peer decoding a window-71 turn report would
@@ -170,7 +170,11 @@ pub use usage_activity::*;
 // turn result. Child lifecycle is settled from the registry's scope-keyed
 // parent-end ledger, so the field carried no fact a peer could act on; removing
 // it narrows the accepted record set, so peers must adopt 72.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 72;
+// Window 73: FIG-2964 carries the segment ordinal a process's durable backend
+// reference was minted for, `ProcessExternalRef::segment_ordinal`. A window-72
+// peer reads a reference without it and cannot tell a stale segment-0 reference
+// from the live one, so peers must adopt 73.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 73;
 
 /// One versioned remote-protocol message.
 ///

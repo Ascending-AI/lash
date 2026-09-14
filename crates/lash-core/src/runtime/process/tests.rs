@@ -818,6 +818,7 @@ async fn lifecycle_append_serializes_target_cleanup_and_cannot_recreate_sender_f
                     backend: "test".to_string(),
                     id: "external".to_string(),
                     metadata: None,
+                    segment_ordinal: None,
                 },
             )
             .await

@@ -1164,6 +1164,53 @@ lifecycle_vocabulary!(ProcessStatus, label, by_ref {
     CallerDeparted => "caller_departed",
 });
 
+/// What a registration call did to the registry.
+///
+/// Registration is idempotent by fingerprint on every backend: an exact repeat
+/// returns the recorded row instead of failing. `Created` therefore says
+/// something a successful `Ok` does not — that this call, and no earlier one,
+/// put the row there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessRegistrationDisposition {
+    /// This call inserted the row.
+    Created,
+    /// A row with this registration's fingerprint was already recorded; the
+    /// returned record is that row, untouched.
+    Existing,
+}
+
+/// A registered process record together with [`ProcessRegistrationDisposition`].
+#[derive(Clone, Debug)]
+pub struct ProcessRegistrationOutcome {
+    /// The registered record, newly created or already recorded.
+    pub record: ProcessRecord,
+    /// Whether this call created the record.
+    pub disposition: ProcessRegistrationDisposition,
+}
+
+impl ProcessRegistrationOutcome {
+    /// A record this call inserted.
+    pub fn created(record: ProcessRecord) -> Self {
+        Self {
+            record,
+            disposition: ProcessRegistrationDisposition::Created,
+        }
+    }
+
+    /// A record that was already recorded before this call.
+    pub fn existing(record: ProcessRecord) -> Self {
+        Self {
+            record,
+            disposition: ProcessRegistrationDisposition::Existing,
+        }
+    }
+
+    /// Whether this call created the record.
+    pub fn is_created(&self) -> bool {
+        self.disposition == ProcessRegistrationDisposition::Created
+    }
+}
+
 /// Durable process lifecycle fold. Observer membership and wake subscription
 /// are queryable edge state, audited by events but deliberately not projected
 /// into this record.
@@ -1526,6 +1573,31 @@ pub struct ProcessExternalRef {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+    /// Execution segment this reference was minted for.
+    ///
+    /// A run that hands over to a successor is a new segment with its own
+    /// backend identity, and the live host and the recovery sweep can both
+    /// submit one. The reference is therefore written compare-and-set on this
+    /// ordinal: an absent or lower ordinal never displaces a higher one, so a
+    /// slow writer for an earlier segment cannot overwrite the owner a later
+    /// segment already recorded. `None` reads as segment zero: it is what a
+    /// writer that predates segmented references wrote, and every such writer
+    /// only ever minted the first segment's reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_ordinal: Option<u64>,
+}
+
+impl ProcessExternalRef {
+    /// The segment this reference belongs to, reading an absent ordinal as zero.
+    pub fn segment_ordinal(&self) -> u64 {
+        self.segment_ordinal.unwrap_or(0)
+    }
+
+    /// Whether this reference supersedes `existing` under the compare-and-set
+    /// rule: only a strictly later segment displaces a recorded owner.
+    pub fn supersedes(&self, existing: &Self) -> bool {
+        self.segment_ordinal() > existing.segment_ordinal()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

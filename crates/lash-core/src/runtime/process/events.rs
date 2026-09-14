@@ -658,7 +658,15 @@ impl ProcessEventAppendRequest {
             "process.external_ref_set",
             serde_json::json!({ "external_ref": external_ref }),
         )
-        .with_replay_key(format!("process:{process_id}:external-ref"))
+        .with_replay_key(match external_ref.segment_ordinal() {
+            // Segment zero keeps the key every pre-segment writer used, so an
+            // existing row's recorded append identity does not move. A later
+            // segment mints its own key: one key per segment is what lets a
+            // superseding reference be appended at all, since a replay key
+            // reused with a different payload is a conflict, not an update.
+            0 => format!("process:{process_id}:external-ref"),
+            ordinal => format!("process:{process_id}:external-ref:{ordinal}"),
+        })
     }
 
     /// Builds the replay-stable abandon-request event for process-store implementors; repeated

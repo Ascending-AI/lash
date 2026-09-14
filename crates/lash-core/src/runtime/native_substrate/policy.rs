@@ -18,6 +18,10 @@ impl NativeSubstrateConfig {
             "worker_sweep.fetch_retry_base",
             self.worker_sweep.fetch_retry_base,
         )?;
+        validate_non_zero_duration(
+            "worker_sweep.rescan_interval",
+            self.worker_sweep.rescan_interval,
+        )?;
         self.work_cadence.validate()
     }
 }
@@ -28,6 +32,14 @@ pub struct WorkerSweepPolicy {
     pub intake_page: NonZeroUsize,
     pub fetch_attempts: NonZeroUsize,
     pub fetch_retry_base: Duration,
+    /// How long an idle dispatcher waits before rescanning the registry.
+    ///
+    /// Without it the dispatcher ends its pass when nothing is left to run, and
+    /// the only thing that ever looks at the store again is a poke. A poke that
+    /// fails would then strand its row until some unrelated call happened to
+    /// poke again, which is not a recovery guarantee — so the advisory poke has
+    /// this rescan behind it.
+    pub rescan_interval: Duration,
 }
 
 impl WorkerSweepPolicy {
@@ -35,6 +47,7 @@ impl WorkerSweepPolicy {
         intake_page: NonZeroUsize::new(256).unwrap(),
         fetch_attempts: NonZeroUsize::new(3).unwrap(),
         fetch_retry_base: Duration::from_millis(10),
+        rescan_interval: Duration::from_millis(250),
     };
 }
 

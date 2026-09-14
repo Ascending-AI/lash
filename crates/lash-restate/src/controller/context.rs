@@ -29,6 +29,40 @@ use restate_sdk::context::{
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
+
+/// Why a process workflow submission did not return an invocation id.
+///
+/// The distinction decides whether the scheduling boundary may compensate. A
+/// `StartFailed` cancellation is terminal on the spot for a row with no
+/// execution and no external reference, so writing one for a submission that
+/// *did* reach the runtime would terminalise a row whose workflow is running —
+/// the workflow would then do the child's work and fail its own terminal write.
+/// Only a failure that proves the run was never accepted may compensate.
+#[derive(Debug)]
+pub enum ProcessWorkflowStartFailure {
+    /// The submission was decided against: a reply, or a journaled terminal
+    /// failure, proves no invocation was accepted. Nothing is running.
+    Rejected(TerminalError),
+    /// The submission's fate is unknown — a connection error, a timeout, or any
+    /// failure carrying no proof of non-acceptance. An invocation may be
+    /// running, so the row must be left alive and sweep-owned.
+    Ambiguous(TerminalError),
+}
+
+impl ProcessWorkflowStartFailure {
+    /// The underlying failure, whichever class it is.
+    pub fn error(&self) -> &TerminalError {
+        match self {
+            Self::Rejected(error) | Self::Ambiguous(error) => error,
+        }
+    }
+
+    /// Whether a compensating `StartFailed` cancellation is sound to write.
+    pub fn proves_nothing_is_running(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
+}
+
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
@@ -574,11 +608,15 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run;
 
+    /// Submits the process's workflow run.
+    ///
+    /// The failure is classified because the scheduling boundary compensates on
+    /// one class and not the other: see [`ProcessWorkflowStartFailure`].
     fn start_process_workflow<'run>(
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run;
 
@@ -985,7 +1023,13 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
-                ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+                ) -> Pin<
+                    Box<
+                        dyn Future<Output = Result<String, ProcessWorkflowStartFailure>>
+                            + Send
+                            + 'run,
+                    >,
+                >
                 where
                     'ctx: 'run,
                 {
@@ -1000,7 +1044,14 @@ macro_rules! impl_restate_controller_context {
                         }));
                     let handle = request.send();
                     Box::pin(async move {
-                        let handle = handle.await?;
+                        // A journaled send that completes with a terminal
+                        // failure is proof of non-acceptance: the runtime
+                        // records the send as an entry, and a transient
+                        // condition (no connection, no reply yet) suspends and
+                        // retries the handler instead of completing the entry.
+                        // Anything that reaches here therefore names a decision,
+                        // not a silence.
+                        let handle = handle.await.map_err(ProcessWorkflowStartFailure::Rejected)?;
                         Ok(handle.invocation_id().to_owned())
                     })
                 }

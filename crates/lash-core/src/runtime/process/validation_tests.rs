@@ -603,6 +603,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
                 backend: "fixture".to_string(),
                 id: "external".to_string(),
                 metadata: None,
+                segment_ordinal: None,
             },
         ),
         ProcessEventAppendRequest::abandon_requested(

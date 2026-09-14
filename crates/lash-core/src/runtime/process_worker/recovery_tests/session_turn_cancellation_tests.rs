@@ -22,24 +22,26 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
         })
         .await
         .expect("materialize unrelated durable root session");
-    let worker = DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(
-                crate::testing::test_standard_protocol_factories(),
-            )),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
-            factory,
-            crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
-            local_owner("cleanup-failure-worker", "host-a", "cleanup-failure-start"),
-        )
-        .with_session_policy(policy)
-        .with_process_event_sink(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>),
+    // This test drives every attempt by hand and counts them, so the idle
+    // dispatcher's autonomous rescan is pushed outside the test's window: the
+    // attempts asserted below are the ones this test asked for.
+    let mut config = DurableProcessWorkerConfig::new(
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
+        RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ),
+        factory,
+        crate::WorkerProcessWork::SelfNative(watched),
+        Arc::new(crate::NoQueuedWork::new()),
+        local_owner("cleanup-failure-worker", "host-a", "cleanup-failure-start"),
     )
-    .expect("valid cleanup-failure worker");
+    .with_session_policy(policy)
+    .with_process_event_sink(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>);
+    config.native_substrate.worker_sweep.rescan_interval = Duration::from_secs(3600);
+    let worker = DurableProcessWorker::new(config).expect("valid cleanup-failure worker");
     let process_id = "session-turn-repeated-cleanup-failure";
     registry
         .register_process(
@@ -75,9 +77,13 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
         .expect("failed cleanup attempt reaches the fault sink");
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
+                // The dispatcher is resident: it rescans the registry on the
+                // worker-sweep cadence rather than exiting when the worklist
+                // drains, so "idle" is "nothing is executing", not "the
+                // dispatcher task is gone".
                 let idle = {
                     let state = worker.execution_scheduler.state.lock_recover();
-                    state.active == 0 && !state.dispatcher_running
+                    state.active == 0 && matches!(state.worklist_scan, ProcessWorklistScan::Idle)
                 };
                 if idle {
                     break;

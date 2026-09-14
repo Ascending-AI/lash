@@ -1935,3 +1935,230 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
         .await
         .expect("completed durable timer replay should finish without panicking");
 }
+
+/// FIG-2964: a refused successor-reference write does not fail the segment.
+///
+/// The write happens after the successor send is journaled, so propagating its
+/// error would terminally fail a segment of a chain that is already advancing.
+/// The only cost of a missing later reference is one coalescing resubmission,
+/// which the ordinal-aware sweep performs against the successor's own workflow
+/// key.
+#[tokio::test]
+pub(super) async fn segment_handover_survives_a_refused_successor_reference_write() {
+    let process_id = "fig2964-handover-ref-write-refused";
+    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let (registry, continuations, boundary) = drive_to_live_segment_boundary_with_stores(
+        process_id,
+        Arc::clone(&stores) as Arc<dyn lash_core::ProcessRegistry>,
+        Arc::clone(&stores) as Arc<dyn lash_core::ProcessContinuationStore>,
+    )
+    .await;
+    stores
+        .fail_next_external_ref_write_for_testing(lash_core::PluginError::Session(
+            "injected external-ref write failure".to_string(),
+        ))
+        .await;
+
+    // The assertion inside `complete_handover` is the point: the segment still
+    // reports `SegmentChained`, so its invocation did not fail.
+    boundary.complete_handover(process_id).await;
+
+    let handover = continuations
+        .latest_segment_handover(&ProcessId::from(process_id))
+        .await
+        .expect("read handover")
+        .expect("the boundary persisted a handover");
+    assert_eq!(
+        handover.segment_ordinal, 1,
+        "the handover is durable whether or not its reference write landed"
+    );
+    let record = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read process")
+        .expect("the row stands");
+    assert_eq!(
+        record
+            .external_ref
+            .as_ref()
+            .and_then(|external| external.segment_ordinal),
+        Some(0),
+        "the refused write leaves the earlier reference standing; the sweep resubmits segment 1"
+    );
+}
+
+/// FIG-2964: the handover path writes the successor's external reference, so a
+/// live segment chain — not a hand-built fixture — is what produces a row whose
+/// recorded reference names an ordinal above zero.
+///
+/// Without this write the row keeps the segment-0 reference its start wrote for
+/// the whole chain, and the recovery sweep has nothing to compare a segment
+/// against: every handed-over row would read as "already submitted" forever.
+/// Drives one process up to a real segment boundary: the start's segment-0
+/// reference is recorded, the boundary persists the segment-1 handover, and the
+/// attempt then suspends on the successor send.
+///
+/// That suspension is exactly the state a host crash between the successor send
+/// and its reference write leaves behind — handover at ordinal 1, reference
+/// still at ordinal 0 — and it is the state the recovery sweep meets in
+/// production. Nothing here is hand-built: a fixture that simply writes a
+/// handover row with no reference produces a state no live start can reach (the
+/// start always records ordinal 0 on success), so a sweep rule tested against
+/// it proves nothing about the rows the sweep actually has to repair.
+pub(super) async fn drive_to_live_segment_boundary(
+    process_id: &str,
+) -> (
+    Arc<dyn lash_core::ProcessRegistry>,
+    Arc<dyn lash_core::ProcessContinuationStore>,
+    LiveSegmentBoundary,
+) {
+    let (registry, continuations) = process_stores();
+    drive_to_live_segment_boundary_with_stores(process_id, registry, continuations).await
+}
+
+/// The same live boundary against caller-supplied stores, so a test can drive
+/// the handover against a registry that refuses a write.
+pub(super) async fn drive_to_live_segment_boundary_with_stores(
+    process_id: &str,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+) -> (
+    Arc<dyn lash_core::ProcessRegistry>,
+    Arc<dyn lash_core::ProcessContinuationStore>,
+    LiveSegmentBoundary,
+) {
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register segmented process");
+    registry
+        .set_external_ref(
+            &ProcessId::from(process_id),
+            lash_core::ProcessExternalRef {
+                backend: "restate".to_string(),
+                id: format!("LashProcessWorkflow/{process_id}"),
+                metadata: None,
+                segment_ordinal: Some(0),
+            },
+        )
+        .await
+        .expect("record the start's segment-0 reference");
+
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(Fig788SegmentBoundaryRunner),
+                Arc::clone(&registry),
+                Arc::clone(&continuations),
+            )
+            .serve(),
+        )
+        .build();
+    let input = RestateProcessWorkflowInput {
+        registration,
+        execution_context: ProcessExecutionContext::default(),
+        segment_ordinal: 0,
+        execution_id: None,
+    };
+    // The first attempt suspends after scheduling its successor, exactly as
+    // FIG-788 pins.
+    let suspension = invoke_endpoint(&endpoint, "LashProcessWorkflow", "run", process_id, &input)
+        .await
+        .expect("first segment attempt suspends after scheduling its successor");
+    (
+        registry,
+        continuations,
+        LiveSegmentBoundary {
+            endpoint,
+            input,
+            suspension,
+        },
+    )
+}
+
+/// The suspended first attempt of a live segment boundary, replayable past the
+/// deployed successor send.
+pub(super) struct LiveSegmentBoundary {
+    endpoint: Endpoint,
+    input: RestateProcessWorkflowInput,
+    suspension: bytes::Bytes,
+}
+
+impl LiveSegmentBoundary {
+    /// Replays the deployed prefix so the handler runs past the successor send
+    /// and completes the handover, writing the successor's reference.
+    pub(super) async fn complete_handover(&self, process_id: &str) {
+        let replay = encode_process_segment_send_replay(process_id, &self.input, &self.suspension)
+            .expect("splice deployed segment-send journal");
+        let output = invoke_endpoint_body_with_json_call_responses(
+            &self.endpoint,
+            "LashProcessWorkflow",
+            "run",
+            replay,
+            vec![serde_json::Value::Null],
+        )
+        .await
+        .expect("the replayed attempt completes the handover");
+        assert_eq!(
+            restate_output_json::<RestateProcessWorkflowOutput>(&output),
+            Some(RestateProcessWorkflowOutput::SegmentChained {
+                next_segment_ordinal: 1,
+            })
+        );
+    }
+}
+
+/// FIG-2964: the handover path writes the successor's external reference, so a
+/// live segment chain — not a hand-built fixture — is what produces a row whose
+/// recorded reference names an ordinal above zero.
+///
+/// Without this write the row keeps the segment-0 reference its start wrote for
+/// the whole chain, and the recovery sweep has nothing to compare a segment
+/// against: every handed-over row would read as "already submitted" forever.
+#[tokio::test]
+pub(super) async fn segment_handover_records_the_successor_external_reference() {
+    let process_id = "fig2964-handover-external-ref";
+    let (registry, continuations, boundary) = drive_to_live_segment_boundary(process_id).await;
+
+    // Before the handover completes, the row carries only what its start wrote.
+    let before = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read process")
+        .expect("the row stands");
+    assert_eq!(
+        before
+            .external_ref
+            .as_ref()
+            .and_then(|external| external.segment_ordinal),
+        Some(0),
+        "the send has not been journaled yet, so segment 0 still owns the row"
+    );
+
+    boundary.complete_handover(process_id).await;
+
+    let handover = continuations
+        .latest_segment_handover(&ProcessId::from(process_id))
+        .await
+        .expect("read handover")
+        .expect("the boundary persisted a handover");
+    assert_eq!(handover.segment_ordinal, 1);
+
+    let record = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read process")
+        .expect("the row stands");
+    let external = record.external_ref.as_ref().expect("external ref recorded");
+    assert_eq!(
+        external.segment_ordinal,
+        Some(1),
+        "the handover must name the segment it scheduled, not leave segment 0 standing"
+    );
+    assert_eq!(
+        external.id,
+        format!("LashProcessWorkflow/{process_id}#1"),
+        "the recorded reference must address the successor's workflow key"
+    );
+}

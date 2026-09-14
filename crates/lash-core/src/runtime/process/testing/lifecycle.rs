@@ -318,6 +318,9 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
+        if let Some(error) = self.cancel_request_write_error.lock().await.take() {
+            return Err(error);
+        }
         let _transaction = self.transaction.lock().await;
         let mut managed = self.managed.lock().await;
         let Some(record) = managed.get_mut(&process_ref.process_id) else {

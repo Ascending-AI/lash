@@ -130,6 +130,19 @@ macro_rules! delegate_process_registrar {
                 $registration_hook
             }
 
+            async fn register_process_reporting_disposition(
+                &self,
+                registration: $crate::ProcessRegistration,
+                observers: &[$crate::SessionId],
+            ) -> Result<$crate::ProcessRegistrationOutcome, $crate::PluginError> {
+                let $registration_process_id = registration.id.clone();
+                let $registration_self = self;
+                let $registration_call = self
+                    .$inner
+                    .register_process_reporting_disposition(registration, observers);
+                $registration_hook
+            }
+
             fn bind_effect_host(&self, effect_host: &std::sync::Arc<dyn $crate::EffectHost>) {
                 self.$inner.bind_effect_host(effect_host);
             }
