@@ -84,25 +84,59 @@ async fn resolve_start_state(
     request: &SessionCreateRequest,
     session_id: &SessionId,
 ) -> Result<RuntimeSessionState, crate::PluginError> {
-    match &request.start {
-        SessionStartPoint::Empty => Ok(RuntimeSessionState {
+    let mut state = match &request.start {
+        SessionStartPoint::Empty => RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(current.policy.clone())
-        }),
-        SessionStartPoint::CurrentSession => Ok(current.snapshot.to_runtime_state()),
+        },
+        SessionStartPoint::CurrentSession => current.snapshot.to_runtime_state(),
         SessionStartPoint::ExistingSession { session_id } => current
             .resident_state_by_id(managed, session_id)
             .await
-            .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`"))),
+            .ok_or_else(|| {
+                crate::PluginError::Session(format!("unknown session `{session_id}`"))
+            })?,
         SessionStartPoint::Snapshot { snapshot } => {
             let mut state = current
                 .resident_state_by_id(managed, &snapshot.session_id)
                 .await
                 .unwrap_or_else(|| RuntimeSessionState::from_snapshot((**snapshot).clone()));
             state.apply_snapshot(snapshot);
-            Ok(state)
+            state
         }
+    };
+    // FIG-3107: a snapshot-start child of a parent whose last commit released
+    // its resident execution bodies otherwise refuses hydration with
+    // `ExecutionStateBodiesReleased` at its first protocol restore. The
+    // released bodies are a released *resident copy*; the durable head still
+    // carries the accepted execution, so the child resolves it there.
+    if let Err(crate::StoreError::ExecutionStateBodiesReleased) = state.execution_state_hydration()
+    {
+        let store = current.store.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(
+                "a session created from released execution bodies requires the parent's \
+                 durable store to rehydrate them in the child"
+                    .to_string(),
+            )
+        })?;
+        let fresh = crate::store::load_persisted_session_state(store.as_ref())
+            .await
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?
+            .ok_or_else(|| {
+                crate::PluginError::Session(
+                    "the parent session has no durable head to rehydrate released \
+                     execution bodies from"
+                        .to_string(),
+                )
+            })?;
+        if fresh.execution_state_hydration().is_err() {
+            return Err(crate::PluginError::Session(
+                "the durable head does not hydrate the released execution state".to_string(),
+            ));
+        }
+        state.adopt_execution_components_from(&fresh);
     }
+    Ok(state)
 }
 
 /// Resolve the new session's policy, honoring the provider pin recorded on the

@@ -1195,12 +1195,11 @@ pub use plugin::{
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
     SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
     SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, durable_identity_conflict,
-    is_durable_identity_conflict,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, SwitchAgentFrameRequest,
+    durable_identity_conflict, is_durable_identity_conflict,
 };
-pub(crate) use plugin::{
-    OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,
-};
+pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
+pub(crate) use plugin::{PluginRuntimeDirective, SessionTurnInput};
 
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

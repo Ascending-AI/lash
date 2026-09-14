@@ -123,6 +123,13 @@ for name, value in (("injected", observed), ("classified", classified)):
         fail(f"[{name}] plugin-owned recovery did not complete: {value}")
     if value["plugin_recovery_summary_chars"] <= 0:
         fail(f"[{name}] plugin recovery produced no summary: {value}")
+    # FIG-3107: the recovery is a plugin-visible durable agent-frame switch.
+    # The recovery frame exists (an ordinary compaction frame) and the
+    # continued session is resident in it after recovery.
+    if value.get("recovery_frame_reason") != "compaction":
+        fail(f"[{name}] the recovery frame is not a compaction frame: {value}")
+    if value.get("recovery_frame_moved") is not True:
+        fail(f"[{name}] the session is not resident in the recovery frame: {value}")
     if value["continued_is_success"] is not True:
         fail(f"[{name}] the session did not continue after recovery: {value}")
     if value["continued_is_context_overflow"] is not False:
