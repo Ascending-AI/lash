@@ -303,11 +303,35 @@ impl SessionReadMeta {
     }
 
     fn to_snapshot(&self, session_graph: crate::SessionGraph) -> SessionSnapshot {
+        // Frame identity is derived from the graph this view already carries.
+        // Leaving it out made a durable frame switch (FIG-3107) invisible to
+        // every read-view consumer: the plugin that opens a recovery frame
+        // then derives the next frame key from an empty parent, and a host
+        // reading the view cannot tell which frame the session is resident in.
+        let current_frame_node_id = session_graph
+            .nearest_frame_node_id(session_graph.leaf_node_id.as_deref())
+            .and_then(|node_id| crate::FrameNodeId::new(node_id.as_str()).ok());
+        // An unreadable frame set is the same blind state this projection just
+        // stopped producing, so it is reported rather than silently defaulted.
+        // `to_snapshot` is infallible on every read-view consumer (stores,
+        // protocols, plugins, the facade), and widening it to a `Result` for a
+        // derived convenience field would spread through all of them.
+        let agent_frames = session_graph
+            .try_agent_frame_records(&self.session_id)
+            .unwrap_or_else(|error| {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    %error,
+                    "session read view could not derive agent frame records; \
+                     projecting a snapshot without them"
+                );
+                Vec::new()
+            });
         SessionSnapshot {
             session_id: self.session_id.clone(),
             policy: self.policy.clone(),
-            agent_frames: Vec::new(),
-            current_frame_node_id: None,
+            agent_frames,
+            current_frame_node_id,
             session_graph,
             turn_index: self.turn_index,
             token_usage: self.token_usage.clone(),

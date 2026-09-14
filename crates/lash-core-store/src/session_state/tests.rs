@@ -424,6 +424,35 @@ fn session_snapshot_serialization_excludes_runtime_only_fields_and_round_trips()
     assert!(!hydrated.agent_frames.is_empty());
 }
 
+/// FIG-3107: a read view carries the session graph, so the snapshot it projects
+/// must carry the frame identity derived from that graph. Dropping it made a
+/// durable frame switch invisible to every read-view consumer, and left the
+/// rolling-history recovery deriving its next frame key from an empty parent.
+#[test]
+fn read_view_snapshot_projects_frame_identity_from_the_graph() {
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("read-view-frames"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    assert!(state.current_frame_node_id.is_some());
+
+    let projected = state
+        .read_view()
+        .expect("runtime frame scope resolves")
+        .to_snapshot();
+
+    assert_eq!(
+        projected.current_frame_node_id, state.current_frame_node_id,
+        "the read view dropped the frame the session is resident in"
+    );
+    assert_eq!(
+        projected.agent_frames.len(),
+        state.agent_frames.len(),
+        "the read view dropped the session's frame records"
+    );
+}
+
 #[test]
 fn boxed_runtime_authority_keeps_flat_json_and_requires_tool_access() {
     let mut state =

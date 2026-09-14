@@ -1298,6 +1298,49 @@ fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
     }
 }
 
+/// FIG-3107 regression: the summarizer child must not inherit the plugin's own
+/// still-open recovery marker. A child whose read state derives `pending` runs
+/// the recovery policy on its own prepare-turn and spawns another summarizer
+/// child. Before the fix that recursed without bound: the
+/// `context-overflow-recovery` e2e nested 202 `-compaction:` sessions, spent
+/// ~200 provider calls and grew memory without limit instead of taking one
+/// summary and returning.
+#[tokio::test]
+async fn recovery_summarizer_child_does_not_inherit_the_pending_marker() {
+    let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
+    let (_history, state) = recovery_history(true);
+    let lifecycle = RecordingCompactionLifecycle::with_summary("Recovered: the verdict stands.");
+    let ctx = transform_state_ctx_with_lifecycle(
+        state,
+        empty_direct_client(),
+        lifecycle.clone(),
+        trace.clone(),
+        200_000,
+    );
+
+    RollingTurnTransform::new(RollingHistoryConfig)
+        .transform(&ctx, recovery_test_input())
+        .await
+        .expect("recovery transform runs");
+
+    let snapshots = lifecycle.snapshot_texts();
+    assert_eq!(snapshots.len(), 1, "exactly one summarizer child ran");
+    let child: SessionSnapshot =
+        serde_json::from_str(&snapshots[0]).expect("decode the summarizer child snapshot");
+    let child_messages = child
+        .read_view()
+        .expect("summarizer child read view")
+        .messages()
+        .to_vec();
+    let kinds: Vec<OverflowRecoveryRecord> = history_recovery_records(&child_messages);
+    let derived = OverflowRecoveryState::derive(kinds.clone());
+    assert!(
+        !derived.pending,
+        "the summarizer child re-derives the very recovery it is summarizing for \
+         and spawns another summarizer: {kinds:?}"
+    );
+}
+
 #[tokio::test]
 async fn recovery_failure_is_bounded_and_explicit() {
     let empty_direct = empty_direct_client();
