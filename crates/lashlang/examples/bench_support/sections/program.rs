@@ -4,15 +4,17 @@
 /// are no longer authored in the retired one. They are not authored in
 /// TypeScript either: what this corpus measures is the IR and the VM, which the
 /// ADR keeps, and lowering it through the dialect would change the measurement
-/// rather than its spelling. TypeScript has no O(1) list append (FIG-3063) —
-/// `.push()`, `.concat()` and index assignment all clone the backing vector,
-/// where the IR's `push` compiles to an in-place `PushAssign` — so every
-/// accumulating loop here would become quadratic: `heap_list_iteration` alone
-/// measured 214x its allocation budget, and 27 of the 29 scenarios exceeded
-/// theirs. The per-step-cost laws the heap scenarios exist to pin would stop
-/// holding. Building the corpus with the AST constructors keeps every budget
-/// exactly as calibrated and removes the dialect from a measurement that was
-/// never about it.
+/// rather than its spelling. Building the corpus with the AST constructors
+/// keeps every budget exactly as calibrated and removes the dialect from a
+/// measurement that was never about it.
+///
+/// That reason used to be a harder one: the dialect had no O(1) list append, so
+/// `heap_list_iteration` measured 214x its allocation budget and 27 of the 29
+/// scenarios exceeded theirs. FIG-3063 gave `.push()` and a write one past the
+/// end the VM's in-place append, and `crates/lashlang/tests/dialect_cost.rs`
+/// now authors `heap_list_iteration` in TypeScript and measures it beside this
+/// corpus to keep that true. The corpus still builds from the AST, for the
+/// reason above rather than that one.
 pub fn benchmark_program(scenario: Scenario) -> Program {
     let mut declarations = benchmark_declarations();
     declarations.extend(scenario_declarations(scenario));

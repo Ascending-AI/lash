@@ -128,6 +128,29 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "dialect_cost__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "dialect_cost",
+    crate_root = "tests/dialect_cost.rs",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [
+        "//:perf_guard_budgets",
+    ],
+    test_env = {"RUST_TEST_THREADS": "1"},
+    library = ":lashlang",
+    library_crate_name = "lashlang",
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "append_cost__test",
     crate_features = [
         "testing",
@@ -138,6 +161,7 @@ lash_rust_integration_test(
         "testing",
     ],
     extra_compile_data = [],
+    test_env = {"RUST_TEST_THREADS": "1"},
     library = ":lashlang",
     library_crate_name = "lashlang",
     manifest_dir = "crates/lashlang",
