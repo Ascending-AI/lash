@@ -45,7 +45,7 @@ fn registration() -> ProcessRegistration {
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
         ProcessIdentity::for_definition(
             lash::process::ProcessDefinitionRef::unclaimed(
                 "runbook",
@@ -131,7 +131,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
                 ProcessIdentity::new("runbook-retarget"),
             ))
             .with_extra_event_types([ProcessEventType {
