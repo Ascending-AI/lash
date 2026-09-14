@@ -791,7 +791,7 @@ impl RuntimeSessionState {
     /// carries the bodies, so the child resolves them there instead. The
     /// parent's other components, its graph, and its residency bookkeeping are
     /// untouched: only the execution root and its leaves move.
-    pub(crate) fn adopt_execution_components_from(&mut self, source: &Self) {
+    pub fn adopt_execution_components_from(&mut self, source: &Self) {
         self.checkpoint_components
             .adopt_execution_components_from(&source.checkpoint_components);
     }

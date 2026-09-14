@@ -61,6 +61,33 @@ impl ProcessRef {
     pub fn from_record(record: &impl ProcessRecordIdentity) -> Self {
         Self::new(record.process_id().clone(), record.process_incarnation())
     }
+
+    /// Read the identity out of a cell-visible handle value.
+    ///
+    /// Delegates to the one handle parser (FIG-2996 part 1) rather than reading
+    /// the encoding again: tools that take a process handle as an argument
+    /// parse it here, so a handle argument and a handle the runtime minted are
+    /// read by the same code.
+    pub fn from_handle_json(handle: &serde_json::Value) -> Result<Self, String> {
+        let target = lash_sansio::handle::parse_handle_json(handle)
+            .as_ref()
+            .and_then(lash_sansio::handle::HandleId::target)
+            .ok_or_else(|| "Invalid process handle".to_string())?;
+        let lash_sansio::handle::HandleTarget::Process {
+            process_id,
+            incarnation,
+        } = target
+        else {
+            return Err("Invalid process handle: not a process".to_string());
+        };
+        if incarnation == 0 {
+            return Err("Invalid process handle: missing `incarnation`".to_string());
+        }
+        Ok(Self::new(
+            process_id,
+            ProcessIncarnation::from_registration_sequence(incarnation),
+        ))
+    }
 }
 impl fmt::Display for ProcessRef {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
