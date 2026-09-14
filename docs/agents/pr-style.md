@@ -4,7 +4,7 @@
 
 PRs are a code-review surface, not a request surface; work items live in Linear ([way-of-working.md](way-of-working.md)). A PR exists to get a change reviewed and merged, so write it for the reviewer.
 
-**Why the *why* lives in the ticket, not here: a deliberate departure.** Git-native convention (Google CL descriptions, Conventional Commits) anchors the *why* in the commit message. We anchor it in the ticket instead, because a ticket must be plannable, by a human or an AFK agent, before any code or diff exists. One consequence to respect: the squash commit body is durable history in this repo and feeds the release notes (below), while review scaffolding in the PR body is not. Anything that must outlive this diff belongs in the ticket, an ADR, the code, or the commit body, not only in review comments.
+**Why the *why* lives in the ticket, not here: a deliberate departure.** Git-native convention (Google CL descriptions, Conventional Commits) anchors the *why* in the commit message. We anchor it in the ticket instead, because a ticket must be plannable, by a human or an AFK agent, before any code or diff exists. One consequence to respect: the squash commit body is durable history in this repo, while review scaffolding in the PR body is not. Anything that must outlive this diff belongs in the ticket, an ADR, the code, or the commit body, not only in review comments.
 
 ## What a PR carries
 
