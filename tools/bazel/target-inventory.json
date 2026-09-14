@@ -498,6 +498,8 @@
       "dependencies": [
         "async-trait",
         "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
         "lash-internal-tool-support",
         "serde_json",
         "tokio"

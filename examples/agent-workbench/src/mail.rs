@@ -535,7 +535,7 @@ fn done(result: ToolOutcome) -> ToolAttemptOutcome {
         ToolOutcome::Done(output) => {
             ToolAttemptOutcome::done_without_intents(ToolOutcomeDone::from_output(*output))
         }
-        ToolOutcome::Pending(pending) => ToolAttemptOutcome::pending(pending),
+        ToolOutcome::Pending(pending) => ToolAttemptOutcome::pending(*pending),
     }
 }
 

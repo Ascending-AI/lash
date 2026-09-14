@@ -17,6 +17,16 @@ use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolDefinitionBindingExt,
 };
 
+mod declarations;
+
+pub use declarations::{
+    DEFAULT_PROCESS_ENGINE_KIND, execute_process_emit_tool_call,
+    execute_process_register_tool_call, execute_process_signal_tool_call,
+    execute_process_start_tool_call, process_emit_tool_definition,
+    process_register_tool_definition, process_signal_tool_definition,
+    process_start_tool_definition,
+};
+
 /// Plugin factory for process-control tools.
 ///
 /// Declares its provider through a [`PluginSpec`] driven by
@@ -89,6 +99,18 @@ impl StaticToolExecute for SessionProcessAdminTools {
         if call.name == "await_process" {
             return execute_process_await_tool_call(call.context, call.args);
         }
+        if call.name == "start_process" {
+            return execute_process_start_tool_call(call.context, call.args).await;
+        }
+        if call.name == "signal_process" {
+            return execute_process_signal_tool_call(call.context, call.args);
+        }
+        if call.name == "emit_process_event" {
+            return execute_process_emit_tool_call(call.context, call.args);
+        }
+        if call.name == "register_process" {
+            return execute_process_register_tool_call(call.context, call.args);
+        }
         if call.name == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
@@ -100,16 +122,9 @@ impl StaticToolExecute for SessionProcessAdminTools {
                 call.name
             )));
         }
-        let Some(process_id) = call
-            .args
-            .get("process_id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-        else {
+        let Some(process_id) = cancel_target(call.args) else {
             return done_without_intents(ToolOutcome::err_fmt(
-                "cancel_process requires `process_id`",
+                "cancel_process requires `handle` or `process_id`",
             ));
         };
         lash_core::ToolAttemptOutcome::done(
@@ -127,12 +142,31 @@ impl StaticToolExecute for SessionProcessAdminTools {
     }
 }
 
-fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
+/// The process a cancel names, from either accepted spelling.
+///
+/// A handle is the shape every other process tool takes, so `cancel` accepts
+/// it too and reads it through the one handle parser. The bare `process_id`
+/// stays for a host that holds an id and never held a handle — a `shell.start`
+/// run reported by id, for instance.
+fn cancel_target(args: &Value) -> Option<String> {
+    if let Some(handle) = args.get("handle")
+        && let Ok(process_ref) = lash_core::ProcessRef::from_handle_json(handle)
+    {
+        return Some(process_ref.process_id.to_string());
+    }
+    args.get("process_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
     match result {
         ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
             lash_core::ToolOutcomeDone::from_output(*output),
         ),
-        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
+        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(*pending),
     }
 }
 
@@ -173,8 +207,12 @@ pub fn process_list_tool_definition() -> ToolDefinition {
 
 fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinition> {
     let mut definitions = vec![
+        process_start_tool_definition(),
         process_list_tool_definition(),
         process_await_tool_definition(),
+        process_signal_tool_definition(),
+        process_emit_tool_definition(),
+        process_register_tool_definition(),
     ];
     if include_cancel_process {
         definitions.push(process_cancel_tool_definition());
@@ -223,16 +261,19 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",
-        "Request cancellation for a durable process, including a running `shell.start` process, by `process_id`.",
+        "Request cancellation for a durable process, including a running `shell.start` process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`.",
         serde_json::json!({
             "type": "object",
             "properties": {
+                "handle": {
+                    "x-lash": { "kind": "process_unknown" },
+                    "description": "Process handle to cancel, as returned by a process start or `processes.list(...)`."
+                },
                 "process_id": {
                     "type": "string",
-                    "description": "Process id returned by a process handle or `processes.list(...)`."
+                    "description": "Process id, for a caller that holds the bare id rather than a handle."
                 }
             },
-            "required": ["process_id"],
             "additionalProperties": false
         }),
         serde_json::json!({
@@ -249,6 +290,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
         }),
     )
     .with_examples(vec![
+        "await processes.cancel({ handle: h })?".into(),
         r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
         r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
     ])
@@ -302,49 +344,70 @@ pub async fn execute_process_list_tool_call(
     }
 }
 
+/// The one handle shape `processes.list` answers with.
+///
+/// Written from [`lash_core::ProcessHandleView`]'s own serde shape rather than
+/// from a reading of what a caller might want: the contract a cell type-checks
+/// against and the record it actually receives are the same shape, and
+/// `list_output_contract_matches_the_handle_view` fails if they drift. The
+/// previous hand-written schema had already drifted — it advertised a
+/// `descriptor` object and a `{name}` definition that no handle view has ever
+/// carried, and omitted the `incarnation` a process handle needs to be
+/// awaitable.
 fn process_list_output_schema() -> Value {
     serde_json::json!({
         "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "__handle__": {
-                    "type": "string",
-                    "enum": ["process"],
-                    "description": "Handle marker; pass the whole record where a process handle is needed."
-                },
-                "id": {
-                    "type": "string",
-                    "description": "Process handle id."
-                },
-                "process_id": {
-                    "type": "string",
-                    "description": "Same process id, repeated for tools that ask for process_id."
-                },
-                "descriptor": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "type": "string" },
-                        "label": { "type": "string" }
-                    },
-                    "additionalProperties": false
-                },
-                "definition": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" }
-                    },
-                    "required": ["name"],
-                    "additionalProperties": false
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["running", "completed", "failed", "cancelled"]
-                }
+        "items": process_handle_view_schema()
+    })
+}
+
+/// The schema of one [`lash_core::ProcessHandleView`].
+pub fn process_handle_view_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "__handle__": {
+                "type": "string",
+                "description": "Handle marker; pass the whole record where a process handle is needed."
             },
-            "required": ["__handle__", "id", "process_id", "descriptor", "status"],
-            "additionalProperties": false
-        }
+            "id": {
+                "type": "string",
+                "description": "Process handle id."
+            },
+            "process_id": {
+                "type": "string",
+                "description": "Same process id, repeated for tools that ask for process_id."
+            },
+            "incarnation": {
+                "type": "integer",
+                "description": "Registration incarnation this handle pins, so the handle cannot rebind to a later run of the same id."
+            },
+            "kind": {
+                "type": "string",
+                "description": "Engine kind that owns the run."
+            },
+            "label": {
+                "type": "string",
+                "description": "Host-facing label, absent when the run has none."
+            },
+            "definition": {
+                "type": "object",
+                "properties": {
+                    "engine_kind": { "type": "string" },
+                    "definition": { "description": "Engine-owned definition value." },
+                    "signature": { "description": "Signature the engine resolved for the definition." }
+                },
+                "required": ["engine_kind", "definition", "signature"],
+                "additionalProperties": false,
+                "description": "The definition reference this run pins, absent for a run that names none."
+            },
+            "status": {
+                "type": "string",
+                "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"]
+            }
+        },
+        "required": ["__handle__", "id", "process_id", "incarnation", "kind", "status"],
+        "additionalProperties": false
     })
 }
 
@@ -362,7 +425,15 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["list_process_handles", "await_process", "cancel_process"]
+            vec![
+                "start_process",
+                "list_process_handles",
+                "await_process",
+                "signal_process",
+                "emit_process_event",
+                "register_process",
+                "cancel_process"
+            ]
         );
         #[cfg(not(feature = "lashlang"))]
         for definition in &definitions {
@@ -390,6 +461,87 @@ mod tests {
                 .bindings
                 .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY)
         }));
+    }
+
+    #[test]
+    fn list_output_contract_matches_the_handle_view() {
+        // The contract a cell type-checks against and the record it receives
+        // must be the same shape. Comparing the schema's property set against a
+        // real `ProcessHandleView` serialization is what catches the drift the
+        // previous hand-written schema had already accumulated.
+        let view = lash_core::ProcessHandleView::new(
+            "process-1",
+            lash_core::ProcessIncarnation::from_registration_sequence(4),
+            lash_core::ProcessIdentity::for_definition(
+                lash_core::ProcessDefinitionRef::unclaimed(
+                    "lashlang",
+                    serde_json::json!({ "process_name": "on_button" }),
+                ),
+                Some("on_button"),
+            ),
+            lash_core::ProcessStatus::Running,
+        );
+        let serialized = serde_json::to_value(&view).expect("a handle view serializes");
+        let serialized = serialized.as_object().expect("a handle view is an object");
+        let schema = process_handle_view_schema();
+        let properties = schema["properties"]
+            .as_object()
+            .expect("the schema declares properties");
+
+        for name in serialized.keys() {
+            assert!(
+                properties.contains_key(name),
+                "the handle view carries `{name}`, which the contract does not declare"
+            );
+        }
+        for name in properties.keys() {
+            assert!(
+                serialized.contains_key(name),
+                "the contract declares `{name}`, which no handle view carries"
+            );
+        }
+        for name in schema["required"]
+            .as_array()
+            .expect("the schema names required properties")
+        {
+            let name = name.as_str().expect("a required property is a name");
+            assert!(
+                serialized.contains_key(name),
+                "the contract requires `{name}`, which this handle view omits"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_process_accepts_the_handle_shape_every_other_process_tool_takes() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = lash_core::AttemptContext::__for_testing(
+            &tool_context,
+            "process-controls-intent-scope",
+        );
+        let result = tools
+            .execute_attempt(ToolCall {
+                name: "cancel_process",
+                args: &serde_json::json!({
+                    "handle": {
+                        "__handle__": "process",
+                        "id": "handle-process",
+                        "incarnation": 2,
+                    }
+                }),
+                context: &context,
+            })
+            .await;
+        let lash_core::ToolAttemptOutcome::Done { intents, .. } = result else {
+            panic!("cancel is not a deferring tool");
+        };
+        let [lash_core::ToolIntent::CancelProcess(intent)] = intents.intents.as_slice() else {
+            panic!("expected one cancel declaration, got {intents:?}");
+        };
+        assert_eq!(intent.process_id.as_str(), "handle-process");
     }
 
     #[test]

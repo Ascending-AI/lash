@@ -51,7 +51,7 @@ pub trait StaticToolExecute: Send + Sync + 'static {
             ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
                 lash_core::ToolOutcomeDone::from_output(*output),
             ),
-            ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
+            ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(*pending),
         }
     }
 
