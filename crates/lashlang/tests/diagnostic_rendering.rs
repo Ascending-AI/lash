@@ -6,17 +6,16 @@
 //! keep the case names the unit-test corpus used, so the corpus entry and its
 //! replacement read side by side.
 //!
-//! FIG-3065: `lash_typescript` lowers to a `Program` whose span vectors are
-//! empty, so neither renderer can emit its `--> line N, column M` block or its
-//! caret run for a TypeScript program. These tests therefore assert the message
-//! and hint exactly, and assert the *absence* of a location block — which is
-//! what makes them the tests that change when FIG-3065 lands. The renderer's
-//! location machinery itself stays pinned, on stated span tables, in
-//! `src/runtime/tests.rs`.
+//! FIG-3065 carries TypeScript spans into link diagnostics: `lash_typescript`
+//! now fills its span tables, so both renderers emit the `--> line N, column M`
+//! block, the source line and the caret run for a TypeScript program. These
+//! tests therefore assert the message, the hint and the location block exactly.
+//! The renderer's location machinery is pinned in addition, on stated span
+//! tables, in `src/runtime/tests.rs`.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, LashlangAbilities,
-    LashlangHostCatalog, LashlangHostEnvironment, State, TypeExpr,
+    AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, State, TypeExpr,
 };
 
 struct DiagnosticHost;
@@ -69,7 +68,7 @@ fn lower(source: &str) -> lashlang::Program {
 #[test]
 fn link_unknown_resource_operation() {
     let source = "finish(await tools.does_not_exist({}));";
-    let error = lashlang::LinkedModule::link(lower(source), &environment())
+    let error = lashlang::LinkedModule::link(lower(source), environment())
         .expect_err("unknown operation should not link");
     let diagnostic = lashlang::format_link_diagnostic(source, &error);
 
@@ -83,9 +82,12 @@ fn link_unknown_resource_operation() {
         ),
         "{diagnostic}"
     );
+    // FIG-3065 carries TypeScript spans into link diagnostics.
     assert!(
-        !diagnostic.contains("--> line"),
-        "FIG-3065: a TypeScript program carries no spans, so there is no location block:\n{diagnostic}"
+        diagnostic.contains(
+            "--> line 1, column 14\nfinish(await tools.does_not_exist({}));\n             ^~~~~~~~~~~~~~~~~~~~~~~~"
+        ),
+        "{diagnostic}"
     );
 }
 
@@ -95,21 +97,27 @@ fn link_unknown_resource_operation() {
 async fn runtime_failed_resource_operation_unwrap() {
     let source = "finish(await tools.err({}));";
     let program = lower(source);
-    let linked =
-        lashlang::LinkedModule::link(program, &environment()).expect("program should link");
+    let linked = lashlang::LinkedModule::link(program, environment()).expect("program should link");
     let compiled = lashlang::compile_linked(&linked);
     let mut state = State::new();
-    let error = lashlang::execute(&compiled, &mut state, &DiagnosticHost)
+    let host = ExecutionEnvironment::new(&DiagnosticHost).traced();
+    lashlang::execute(&compiled, &mut state, &host)
         .await
         .expect_err("the failed tool call should abort the program");
-    let diagnostic = lashlang::format_runtime_diagnostic(source, &error, None);
+    let failure = host
+        .take_runtime_failure()
+        .expect("the traced host records the failure");
+    let diagnostic = lashlang::format_runtime_diagnostic(source, &failure.error, failure.span);
 
     assert!(
         diagnostic.contains("`?` unwrapped failed module operation: boom"),
         "{diagnostic}"
     );
+    // FIG-3065 carries TypeScript spans into runtime diagnostics.
     assert!(
-        !diagnostic.contains("--> line"),
-        "FIG-3065: a TypeScript program carries no spans, so there is no location block:\n{diagnostic}"
+        diagnostic.contains(
+            "--> line 1, column 14\nfinish(await tools.err({}));\n             ^~~~~~~~~~~~~"
+        ),
+        "{diagnostic}"
     );
 }
