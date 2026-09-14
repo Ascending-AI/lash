@@ -72,12 +72,54 @@ capture_search() {
   fi
 }
 
-test_region_start_line() {
-  local file=$1
-  # A production file can contain an earlier closed cfg(test) module and then
-  # resume production code. The final cfg(test) module is the bottom test
-  # region covered by A13's post-filter contract.
-  grep -nE '^[[:space:]]*#\[cfg\(test\)\]' "$file" | tail -1 | cut -d: -f1 || true
+line_in_test_region() {
+  local file=$1 line=$2
+  # A production file can contain any number of `#[cfg(test)]` modules, closed
+  # ones with production code resuming after them and a run of them at the
+  # bottom alike. Each module's region runs from its attribute to the closing
+  # brace rustfmt puts at the attribute's own indentation, so the regions are
+  # read off directly instead of guessing that the last attribute opens the
+  # only bottom region -- a guess that read the middle module of three as
+  # production code.
+  awk -v target="$line" '
+    { lines[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (lines[i] !~ /^[[:space:]]*#\[cfg\(test\)\]/) {
+          continue
+        }
+        match(lines[i], /^[[:space:]]*/)
+        indent = RLENGTH
+        next_line = i + 1
+        while (next_line <= NR && lines[next_line] ~ /^[[:space:]]*$/) {
+          next_line++
+        }
+        if (next_line > NR || lines[next_line] !~ /^[[:space:]]*mod[[:space:]]+[A-Za-z0-9_]+[[:space:]]*\{[[:space:]]*$/) {
+          # Not a `#[cfg(test)] mod ... {` block: nothing to bound, so the
+          # attribute exempts nothing.
+          continue
+        }
+        closer = ""
+        for (pad = 0; pad < indent; pad++) {
+          closer = closer " "
+        }
+        closer = closer "}"
+        end = NR
+        for (j = next_line + 1; j <= NR; j++) {
+          if (lines[j] == closer) {
+            end = j
+            break
+          }
+        }
+        if (target >= i && target <= end) {
+          print "1"
+          exit
+        }
+        i = end
+      }
+      print "0"
+    }
+  ' "$file"
 }
 
 clock_exemption_is_allowlisted() {
@@ -92,7 +134,7 @@ clock_exemption_is_allowlisted() {
     crates/lash-core/src/runtime/event_pump.rs:41)
       [[ $source == *'tokio::task::yield_now()'* ]]
       ;; # Cooperative scheduling only; no time value participates in behavior.
-    crates/lash-core/src/runtime/commit_admission.rs:235)
+    crates/lash-core/src/runtime/commit_admission.rs:239)
       [[ $source == *'tokio::time::sleep(self.inner.wait_ttl)'* ]]
       ;; # Process-local admission timeout; no durable timestamp or ordering fact.
     *)
@@ -114,8 +156,7 @@ while IFS=: read -r file line source; do
   if [[ $file =~ $test_path_regex ]]; then
     continue
   fi
-  cfg_test_line=$(test_region_start_line "$file")
-  if [[ -n $cfg_test_line && $line -ge $cfg_test_line ]]; then
+  if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
     continue
   fi
   if clock_exemption_is_allowlisted "$file" "$line" "$source"; then
@@ -137,8 +178,7 @@ while IFS=: read -r file line source; do
   if [[ $file =~ $containment_test_path_regex ]]; then
     continue
   fi
-  cfg_test_line=$(test_region_start_line "$file")
-  if [[ -n $cfg_test_line && $line -ge $cfg_test_line ]]; then
+  if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
     continue
   fi
   case "$file" in
