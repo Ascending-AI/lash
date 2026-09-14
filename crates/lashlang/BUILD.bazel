@@ -128,6 +128,26 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "append_cost__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "append_cost",
+    crate_root = "tests/append_cost.rs",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    library = ":lashlang",
+    library_crate_name = "lashlang",
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "benchmark_contract__test",
     crate_features = [
         "testing",

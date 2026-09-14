@@ -2,6 +2,8 @@
 mod advertised_tool_surface;
 #[path = "agent_surface.rs"]
 mod agent_surface;
+#[path = "array_append.rs"]
+mod array_append;
 #[path = "cell_boundary_closures.rs"]
 mod cell_boundary_closures;
 #[path = "console_observation.rs"]

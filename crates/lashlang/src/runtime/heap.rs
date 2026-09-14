@@ -1055,6 +1055,86 @@ impl Heap {
         })
     }
 
+    /// Appends `items` to the end of the JavaScript array `id` names, in place.
+    ///
+    /// Every other mutation of a heap list rebuilds it: the caller clones the
+    /// backing vector, edits the clone, and hands it back through
+    /// `replace_javascript_list`, which clones the object a second time and
+    /// re-walks every member to price it. That is the right shape for a splice
+    /// or a sort, and it is quadratic for the one operation a program runs once
+    /// per loop iteration — an append. Growing the vector the heap already owns
+    /// costs one amortised slot and one member's worth of byte accounting, so a
+    /// loop that appends n items does O(n) work rather than O(n²) (FIG-3063).
+    ///
+    /// Nothing about what is stored changes: the members are cloned as the
+    /// rebuild cloned them, the receiver keeps its identity, and every other
+    /// name that reaches the object observes the append, exactly as ECMA
+    /// reference semantics require (ADR 0096).
+    ///
+    /// Returns the array's new length.
+    pub(crate) fn append_javascript_list(
+        &mut self,
+        id: HeapId,
+        items: &[Value],
+    ) -> Result<usize, RuntimeError> {
+        let added_bytes = items
+            .iter()
+            .map(value_logical_bytes)
+            .fold(0_u64, u64::saturating_add);
+        let next_live = self.live_logical_bytes.saturating_add(added_bytes);
+        if next_live > self.logical_byte_limit {
+            return Err(RuntimeError::MemoryLimitExceeded {
+                limit: self.logical_byte_limit,
+                attempted: next_live,
+            });
+        }
+        let slot = self
+            .id_to_slot
+            .get(&id)
+            .copied()
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.slots[slot]
+            .as_mut()
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let HeapObject::List(values) = &mut entry.object else {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "TS_METHOD_UNSUPPORTED: receiver has the wrong heap kind".to_string(),
+            });
+        };
+        values.extend(items.iter().cloned());
+        let length = values.len();
+        entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
+        self.live_logical_bytes = next_live;
+        for item in items {
+            for child in value_refs(item) {
+                let parents = self.parents.entry(child).or_default();
+                if !parents.contains(&id) {
+                    parents.push(id);
+                }
+            }
+        }
+        self.invalidate_materialized_reaching(id);
+        self.debug_assert_byte_accounting();
+        Ok(length)
+    }
+
+    /// The logical size the heap currently charges for the object `id` names.
+    ///
+    /// Reading the recorded figure keeps the memory pre-checks that used to
+    /// re-price a whole object O(1) on the append path.
+    pub(crate) fn object_logical_bytes(&self, id: HeapId) -> Result<u64, RuntimeError> {
+        let slot = self
+            .id_to_slot
+            .get(&id)
+            .copied()
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        self.slots
+            .get(slot)
+            .and_then(Option::as_ref)
+            .map(|entry| entry.logical_bytes)
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
+    }
+
     pub(crate) fn push_list(&mut self, target: &Value, item: Value) -> Result<Value, RuntimeError> {
         let Value::Ref(id) = target else {
             return Err(RuntimeError::PushUnsupported);

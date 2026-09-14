@@ -332,6 +332,35 @@ impl Heap {
         }
 
         let imported = self.import_values(vec![value], 1)?.remove(0);
+
+        // `xs[xs.length] = item` is an append written as an index write, and
+        // it is the other spelling a loop uses to build a list. Taking it
+        // through the rebuild below cloned the array twice and re-priced every
+        // member, making the loop quadratic; growing the vector in place costs
+        // one member. Only the terminal index qualifies — a write inside the
+        // array replaces a member and must go on rebuilding so the member it
+        // displaces is re-priced and its parent edges retargeted (FIG-3063).
+        if matches!(*leaf, CompiledAssignPathStep::Index)
+            && let Some(key) = leaf_key.as_deref()
+            && let Some(index) = javascript_array_index_key(key)
+            && matches!(self.get(target_id)?, HeapObject::List(values) if index == values.len())
+        {
+            // The rebuild priced a one-slot growth against the object before
+            // touching it. Keep that refusal, and keep its wording, so the
+            // memory bound answers at the same point it always did.
+            let attempted = self
+                .object_logical_bytes(target_id)?
+                .saturating_add(VALUE_SLOT_BYTES + 1);
+            if attempted > self.logical_byte_limit {
+                return Err(RuntimeError::MemoryLimitExceeded {
+                    limit: self.logical_byte_limit,
+                    attempted,
+                });
+            }
+            self.append_javascript_list(target_id, std::slice::from_ref(&imported))?;
+            return Ok(());
+        }
+
         let slot = self.id_to_slot.get(&target_id).copied().ok_or(
             RuntimeError::DanglingHeapReference {
                 id: target_id.get(),
