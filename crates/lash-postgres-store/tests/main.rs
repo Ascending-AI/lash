@@ -18,6 +18,8 @@ mod postgres_clock_contract;
 mod postgres_lease_multiconnection;
 #[path = "pre_frame_key_cutover.rs"]
 mod pre_frame_key_cutover;
+#[path = "pre_sleep_spec_cutover.rs"]
+mod pre_sleep_spec_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
 #[path = "refcount_benchmark.rs"]

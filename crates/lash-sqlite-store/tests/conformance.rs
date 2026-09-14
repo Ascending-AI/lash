@@ -130,6 +130,8 @@ use tempfile::TempDir;
 mod direct_turn_acceptance;
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
+#[path = "conformance/pre_sleep_spec.rs"]
+mod pre_sleep_spec;
 #[path = "conformance/schema_refusal.rs"]
 mod schema_refusal;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
@@ -1155,7 +1157,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 21"));
+    assert!(message.contains("supports schema version 22"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1163,12 +1165,12 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 }
 
 #[tokio::test]
-async fn sqlite_effect_controller_rejects_retained_generation_20_schema_before_serving() {
-    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 20;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 21);
+async fn sqlite_effect_controller_rejects_retained_generation_21_schema_before_serving() {
+    const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 21;
+    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 22);
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("retained-generation-20-effects.db");
+    let path = dir.path().join("retained-generation-21-effects.db");
     let conn = rusqlite::Connection::open(&path).expect("open retained effect db");
     conn.pragma_update(None, "user_version", RETAINED_PRIOR_EFFECT_GENERATION)
         .expect("stamp retained prior effect schema");
@@ -1183,8 +1185,8 @@ async fn sqlite_effect_controller_rejects_retained_generation_20_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 21"));
-    assert!(message.contains("database reports version 20"));
+    assert!(message.contains("supports schema version 22"));
+    assert!(message.contains("database reports version 21"));
 }
 
 #[tokio::test]

@@ -354,7 +354,17 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // with cancel_requested_at_ms, the timestamp of the first accepted cancel, and
 // adds the partial index a pending-cancel list reads. Component-93 stores carry
 // a boolean this schema no longer has, so they are rejected and recreated.
-const SCHEMA_VERSION: i32 = 95;
+// Version 96 drains effect journals written before the canonical `SleepSpec`
+// encoding (FIG-2968, FIG-2983). A sleep row written at component 95 carries
+// the resolved `Sleep { duration_ms }` command in
+// `lash_runtime_effect_replay.envelope_json`; this build re-encodes the same
+// intent as `Sleep { spec }`, so the row's replay-hash fence no longer
+// reconstructs and a redrive reported `ReplayMismatch` instead of a refusal at
+// open. No relation or column moves -- the cutover is in the journaled command
+// encoding -- so component 95 is rejected and recreated rather than migrated:
+// the resolved duration cannot be turned back into the deadline the guest
+// asked for.
+const SCHEMA_VERSION: i32 = 96;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
