@@ -190,19 +190,19 @@ rather than exempted:
   moving it alone left the Cargo compile in place; with the other three moved,
   that reason is gone. It carries `no-remote-exec`: its no-abort guarantee
   forks a dozen children that each parse deliberately deep sources right up to
-  the stack bound, and the pool's 4 GiB per-action budget (`memory_kb` in
-  `.bazelrc`) SIGKILLs them. The same label passes locally in 44 s, which is
-  how CI's Bazel job executes tests, so the tag pins placement rather than
-  softening what the test proves.
+  the stack bound, and their combined footprint exceeds any single-action
+  memory budget the pool grants. Re-measured against the raised per-action
+  floor, `the_abort_corpus_survives_without_the_preflight` and
+  `fuzzed_sources_survive_without_the_preflight` still die of
+  `signal: 9 (SIGKILL)`; the same label passes locally in 43 s. The tag pins
+  placement rather than softening what the test proves.
 
-`//crates/lash-core:lash-core__unit_test` carries `no-remote-exec` for the same
-class of reason: rustc for the workspace's largest test binary is killed
-without a diagnostic by CI's executor pool, twice in a row and at different
-points in the compile, while the same action succeeds on the developer pool
-even at a raised per-target `memory_kb`. The budget is not the lever, so the
-label compiles and runs on the runner. Its two source lints resolve module
-paths through symlinks for that reason: a locally executed test reads its
-sources from a runfiles symlink tree.
+`//crates/lash-core:lash-core__unit_test` needed the same pin when the pool
+capped every action at 4 GiB: rustc for the workspace's largest test binary
+peaks just above that and was killed without a diagnostic. Every pool worker
+now grants an action at least 5 GiB, the compile executes remotely again, and
+the pin is gone. Its two effect source lints still resolve module paths through
+symlinks, which is correct in a runfiles tree and in a Cargo checkout alike.
 
 `//crates/lash-sim:lash-sim__unit_test` declares `timeout = "long"`. It carries
 the generated-simulation and minimizer fixture replays and ran 227-300 s on the

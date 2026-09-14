@@ -342,6 +342,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         TraceTurnFailureReason::MaxTurns,
         TraceTurnFailureReason::ToolFailure,
         TraceTurnFailureReason::ProviderError,
+        TraceTurnFailureReason::ContextOverflow,
         TraceTurnFailureReason::PluginAbort,
         TraceTurnFailureReason::RuntimeError,
         TraceTurnFailureReason::SubmittedError,

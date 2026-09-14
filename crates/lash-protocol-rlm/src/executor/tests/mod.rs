@@ -20,6 +20,7 @@ mod step_trace;
 use super::*;
 use std::sync::Mutex;
 
+mod child_attempt_bound;
 mod deferred_and_processes;
 mod lifecycle_and_diagnostics;
 mod projections_and_snapshots;

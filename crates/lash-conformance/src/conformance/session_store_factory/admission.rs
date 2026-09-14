@@ -161,6 +161,71 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
         "a refused rebind must leave a root session a root"
     );
 
+    // A recorded fork is pinned to *both* halves of its lineage: the session it
+    // branched from and the node it branched at. Restating it as a child of its
+    // own source is a different lineage, not a paraphrase of the same one, and
+    // moving the branch point silently would rewrite where the history it
+    // continues was cut.
+    let fork_source_session_id = SessionId::from("admission-fork-source");
+    let fork_request = session_store_request(
+        &SessionId::from("admission-fork"),
+        "admission-model",
+        crate::SessionRelation::Fork {
+            source_session_id: fork_source_session_id.clone(),
+            source_node_id: "admission-fork-node".to_string(),
+            observer_inheritance: crate::ObserverInheritance::None,
+        },
+    );
+    let fork_store = factory
+        .create_store(&fork_request)
+        .await
+        .expect("create admission fork fixture");
+    let fork_binding = crate::SessionBinding::from_create_request(&fork_request);
+    assert_eq!(
+        fork_store
+            .admit_and_bind_session(&fork_binding)
+            .await
+            .expect("same-relation rebind of a forked session"),
+        crate::SessionAdmission::Rebound
+    );
+    assert!(matches!(
+        fork_store
+            .admit_and_bind_session(&crate::SessionBinding {
+                session_id: fork_request.session_id.clone(),
+                relation: crate::SessionRelation::Child {
+                    parent_session_id: fork_source_session_id.clone(),
+                    caused_by: None,
+                },
+            })
+            .await
+            .expect_err("restating a recorded fork as a child of its own source must be refused"),
+        crate::StoreError::SessionRelationMismatch { .. }
+    ));
+    assert!(matches!(
+        fork_store
+            .admit_and_bind_session(&crate::SessionBinding {
+                session_id: fork_request.session_id.clone(),
+                relation: crate::SessionRelation::Fork {
+                    source_session_id: fork_source_session_id.clone(),
+                    source_node_id: "admission-fork-other-node".to_string(),
+                    observer_inheritance: crate::ObserverInheritance::None,
+                },
+            })
+            .await
+            .expect_err("moving a recorded fork's branch point must be refused"),
+        crate::StoreError::SessionRelationMismatch { .. }
+    ));
+    assert_eq!(
+        fork_store
+            .load_session_meta()
+            .await
+            .expect("reload fork metadata")
+            .expect("fork metadata")
+            .relation,
+        fork_request.relation,
+        "a refused rebind must leave the recorded fork lineage unchanged"
+    );
+
     let deleted_request = session_store_request(
         &SessionId::from("admission-deleted"),
         "admission-model",

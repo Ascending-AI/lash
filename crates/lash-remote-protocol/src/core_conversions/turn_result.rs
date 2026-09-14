@@ -198,6 +198,7 @@ impl From<lash_core::facade_support::TurnStop> for RemoteTurnStop {
             lash_core::facade_support::TurnStop::MaxTurns => Self::MaxTurns,
             lash_core::facade_support::TurnStop::ToolFailure => Self::ToolFailure,
             lash_core::facade_support::TurnStop::ProviderError => Self::ProviderError,
+            lash_core::facade_support::TurnStop::ContextOverflow => Self::ContextOverflow,
             lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,
             lash_core::facade_support::TurnStop::RuntimeError => Self::RuntimeError,
             lash_core::facade_support::TurnStop::SubmittedError { value } => {

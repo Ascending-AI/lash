@@ -1297,6 +1297,10 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
         "turn-cancel-escalation:stop-again",
         Some("conformance-host".to_string()),
     )
+    // Same disposition as `stop`, so this isolates same-strength
+    // non-replacement: it is refused for its timing alone, not because it also
+    // disagrees about the undelivered-input policy.
+    .undelivered(crate::TurnCancelDisposition::Drop)
     .mode(crate::TurnCancelMode::AfterStep);
     store
         .record_turn_cancel_request(weaker_again)
@@ -1927,8 +1931,14 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
 /// conflict, not an escalation. On every backend the durable row keeps the
 /// first acceptor verbatim and its intent revision — the predicate the live
 /// owner's closure CAS is pinned to — does not move, while a genuine
-/// same-disposition escalation still advances it. Both survive reopen, and a
-/// committed turn absorbs either repeat without a write.
+/// same-disposition escalation still advances it. Reopening the store does not
+/// reopen the decision: a conflicting repeat against the reopened store is
+/// absorbed the same way.
+///
+/// Refusing a repeat *after the turn has ended* is the gate's job, not the
+/// store's — the store has no terminal to consult — so that case is a runtime
+/// law (`sealed_turn_refuses_a_conflicting_repeat_without_durable_effect`) and
+/// is deliberately not asserted here.
 pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -2052,5 +2062,104 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
             .request,
         accepted,
         "reopen does not reopen the policy decision",
+    );
+}
+
+/// Opposing first requests racing on one address converge on a single accepted
+/// policy on every backend. The in-process gate arbitrates with a keyed
+/// promise, but the durable projection each racer writes is the store's own
+/// concurrency problem: `record_turn_cancel_request` is first-writer-wins, so
+/// however the writes interleave every racer must read back the same accepted
+/// request, the row must hold that request, and the intent revision that
+/// fences the owner's closure CAS must be exactly one — no racer past the
+/// first may advance it, because a disagreeing repeat is a conflict, not an
+/// escalation.
+pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
+    factory: Arc<dyn crate::SessionStoreFactory>,
+) {
+    let request = session_store_request(
+        &SessionId::from("turn-cancel-concurrent-opposing"),
+        "turn-cancel-concurrent-opposing-model",
+        crate::SessionRelation::Root,
+    );
+    let store = factory.create_store(&request).await.expect("create store");
+    let turn_id = TurnId::from("turn-cancel-concurrent-opposing:turn");
+    let address = crate::TurnAddress::new(&request.session_id, &turn_id);
+
+    // Alternating dispositions, one shared timing. Every racer asks for the
+    // strongest mode, so no racer can be an escalation of another and the
+    // converged revision is exactly the first write: every loser is either a
+    // conflict or a same-strength repeat, and neither may move the
+    // closure-CAS predicate. Escalation across modes is its own law.
+    let racers = (0..8).map(|index| {
+        crate::TurnCancelRequest::new(address.clone(), format!("racer-{index}"), None)
+            .undelivered(if index % 2 == 0 {
+                crate::TurnCancelDisposition::Drop
+            } else {
+                crate::TurnCancelDisposition::Defer
+            })
+            .mode(crate::TurnCancelMode::Immediate)
+    });
+
+    let mut handles = Vec::new();
+    for racer in racers {
+        let store = Arc::clone(&store);
+        handles.push(crate::task::spawn(async move {
+            store
+                .record_turn_cancel_request(racer)
+                .await
+                .expect("every racer gets a receipt")
+                .request
+        }));
+    }
+    let mut observed = Vec::new();
+    for handle in handles {
+        observed.push(handle.await.expect("racer task completes"));
+    }
+
+    let accepted = observed.first().expect("at least one racer").clone();
+    for seen in &observed {
+        assert_eq!(
+            seen, &accepted,
+            "every concurrent racer must read back the one accepted policy",
+        );
+    }
+    assert_eq!(
+        store
+            .turn_cancel_request(&address)
+            .await
+            .expect("read the converged row")
+            .expect("the converged row exists")
+            .request,
+        accepted,
+        "the durable row must hold the policy the racers agreed on",
+    );
+    assert!(
+        matches!(
+            store
+                .turn_cancel_request_intent(&address)
+                .await
+                .expect("snapshot the converged intent"),
+            crate::TurnCancelIntentSnapshot::Present { ref request, revision: 1 }
+                if request == &accepted
+        ),
+        "a losing racer must not advance the closure-CAS predicate",
+    );
+
+    drop(store);
+    let reopened = factory
+        .open_existing_store(&request)
+        .await
+        .expect("reopen the raced store")
+        .expect("the raced store exists");
+    assert_eq!(
+        reopened
+            .turn_cancel_request(&address)
+            .await
+            .expect("read the converged row after reopen")
+            .expect("the converged row survives reopen")
+            .request,
+        accepted,
+        "crash and reopen converge on the same winner",
     );
 }

@@ -1250,6 +1250,76 @@ async fn assert_refold_matches_stored_projection(
     );
 }
 
+/// A redrive that re-registers the same deterministic child must carry the
+/// attempt bound already on the row, not the host default in force now.
+///
+/// The bound is hashed into the registration fingerprint, so a run that starts
+/// a child, loses its lease before the uncommitted tail commits, and is then
+/// redriven on a reconfigured host would re-register the same id with a
+/// different fingerprint and conflict forever. The row is the durable truth:
+/// the caller's own resolution decides only for a child with no row yet.
+pub async fn redriven_child_reregisters_with_the_recorded_attempt_bound(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let process_id = ProcessId::from("process-redriven-attempt-bound");
+    let registration = |max_attempts: u32| {
+        ProcessRegistration::new(
+            process_id.clone(),
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        )
+        .with_max_attempts(Some(max_attempts))
+    };
+
+    // The first run pins 5 and the row lands with it.
+    registry
+        .register_process(registration(5))
+        .await
+        .expect("register the child with the pinned bound");
+    let recorded = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the registered child")
+        .expect("the child row exists")
+        .max_attempts;
+    assert_eq!(recorded, Some(5), "the row records the bound it registered");
+
+    // The uncommitted tail is dropped and the host default moves to 10. A
+    // redrive that trusted its fresh pin would hash a different fingerprint.
+    let conflict = registry
+        .register_process(registration(10))
+        .await
+        .expect_err("a changed attempt bound is a fingerprint conflict, not a silent overwrite");
+    assert!(
+        conflict.to_string().contains("registration fingerprint"),
+        "unexpected refusal: {conflict}"
+    );
+
+    // Resolving the bound from the row instead re-registers idempotently.
+    let recorded = recorded.expect("the recorded bound is present");
+    registry
+        .register_process(registration(recorded))
+        .await
+        .expect("the redrive re-registers idempotently against the recorded bound");
+    let after = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the redriven child")
+        .expect("the child row survives the redrive");
+    assert_eq!(
+        after.max_attempts,
+        Some(5),
+        "the redrive must not move the recorded bound"
+    );
+}
+
 pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("process-attempt-budget");
     registry

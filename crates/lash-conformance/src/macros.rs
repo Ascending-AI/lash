@@ -415,6 +415,7 @@ macro_rules! process_registry_tests {
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (refolded_process_record_matches_hot_projection, "hot-refold"),
                 (process_attempt_budget_is_typed, "attempt-budget"),
+                (redriven_child_reregisters_with_the_recorded_attempt_bound, "redriven-attempt-bound"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (reused_process_ids_refuse_superseded_incarnations, "incarnation-reuse"),
                 (watched_process_registry_reused_process_ids_refuse_superseded_incarnations, "watched-incarnation-reuse"),
@@ -1488,6 +1489,7 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_repair_orders_intent_and_ordinary_redefer, "turn-cancel-repair-redefer"),
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
             (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
+            (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

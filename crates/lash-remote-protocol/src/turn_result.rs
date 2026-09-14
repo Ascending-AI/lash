@@ -264,6 +264,7 @@ pub enum RemoteTurnStop {
     MaxTurns,
     ToolFailure,
     ProviderError,
+    ContextOverflow,
     PluginAbort,
     RuntimeError,
     SubmittedError {

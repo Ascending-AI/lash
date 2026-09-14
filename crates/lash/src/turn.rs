@@ -1515,6 +1515,21 @@ impl TurnReport {
             TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
         )
     }
+
+    /// Returns whether the turn stopped because the assembled context
+    /// exceeded the model's window.
+    ///
+    /// This is the recovery seam's read side: the outcome says the stop is
+    /// recoverable by compaction rather than an undifferentiated provider
+    /// failure. Acting on it is host policy — typically
+    /// [`SessionAdmin::compact_context`](crate::admin::SessionAdmin::compact_context)
+    /// followed by another turn on the same session. Lash chooses nothing.
+    pub fn is_context_overflow(&self) -> bool {
+        matches!(
+            self.outcome,
+            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ContextOverflow)
+        )
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1545,6 +1560,12 @@ impl TurnOutput {
     /// Returns whether the underlying turn reached a successful terminal outcome.
     pub fn is_success(&self) -> bool {
         self.result.is_success()
+    }
+
+    /// Returns whether the underlying turn stopped on a context-window
+    /// overflow. See [`TurnReport::is_context_overflow`].
+    pub fn is_context_overflow(&self) -> bool {
+        self.result.is_context_overflow()
     }
 }
 

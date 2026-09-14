@@ -1782,7 +1782,9 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
 
     drop(state);
     let reload_provider = lash::testing::TestProvider::builder()
-        .kind("continue-as-workbench-reload")
+        // Reopen under the recorded provider pin (ADR 0066); the panicking
+        // completer still proves the projection reload never calls it.
+        .kind("continue-as-workbench-projection")
         .complete(|_| async { panic!("projection reload must not call the provider") })
         .build()
         .into_handle();

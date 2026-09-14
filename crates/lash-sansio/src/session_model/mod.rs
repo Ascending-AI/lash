@@ -541,6 +541,12 @@ pub enum TurnStop {
     MaxTurns,
     ToolFailure,
     ProviderError,
+    /// The model refused the request because the assembled context exceeded
+    /// the model's window. Distinct from [`TurnStop::ProviderError`] because
+    /// the cause is known and recoverable: a host or plugin that observes this
+    /// outcome can compact the session context and continue instead of
+    /// restarting. The kernel states the outcome and chooses no policy.
+    ContextOverflow,
     PluginAbort,
     RuntimeError,
     SubmittedError {
