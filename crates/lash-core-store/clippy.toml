@@ -1,0 +1,12 @@
+# Crate-scoped clippy configuration for lash-core-store. Clippy stops at the
+# first `clippy.toml` it finds walking up from the manifest directory, so this
+# file shadows the workspace one and must repeat its keys. It mirrors
+# `crates/lash-core/clippy.toml`, the file that covered this code before the
+# carve: `lash_core_store::task` is the same tracing-context spawn idiom, and
+# the crate's tests keep the same expect/unwrap exemptions.
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+disallowed-methods = [
+    { path = "tokio::spawn", reason = "use lash_core::task::spawn so tasks inherit the caller's tracing context" },
+    { path = "tokio::task::spawn", reason = "use lash_core::task::spawn so tasks inherit the caller's tracing context" },
+]
