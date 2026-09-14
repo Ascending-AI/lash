@@ -196,6 +196,10 @@ fn retire_quiescent_operation_scopes(
         let Ok(identity) = scope.journal_identity() else {
             continue;
         };
+        #[expect(
+            clippy::expect_used,
+            reason = "`ExecutionScope` is a derived-`Serialize` enum of strings, so encoding it cannot fail"
+        )]
         let scope_json = serde_json::to_string(&scope).expect("execution scopes serialize");
         let receipt_recorded: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE turn_id = ?1)",

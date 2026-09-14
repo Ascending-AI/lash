@@ -132,6 +132,10 @@ struct PayloadRegistration {
 }
 
 impl PayloadRegistration {
+    #[expect(
+        clippy::expect_used,
+        reason = "`schemars::RootSchema` is a derived-`Serialize` type over plain data, so encoding it cannot fail"
+    )]
     fn of<T: JsonSchema>() -> Self {
         let schema = serde_json::to_value(schemars::schema_for!(T))
             .expect("schemars root schemas are serializable");
@@ -681,6 +685,10 @@ fn literal_values(values: &[Value]) -> String {
     format!("[{}]", values.join(","))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the argument is already a `serde_json::Value`, so re-encoding it cannot fail"
+)]
 fn literal_value(value: &Value) -> String {
     serde_json::to_string(value).expect("JSON Schema literals are serializable")
 }

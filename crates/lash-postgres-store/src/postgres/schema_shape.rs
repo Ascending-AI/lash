@@ -455,6 +455,10 @@ impl SchemaShape {
     /// Panics if the compiled-in artifact is malformed or stamped with a
     /// component version other than the one this build implements. Both are
     /// build-time defects in this crate, not host conditions.
+    #[expect(
+        clippy::expect_used,
+        reason = "the artifact is compiled in from this crate's own `schema-shape.txt`, so a parse failure is a build-time defect here, as the doc comment above states"
+    )]
     pub(crate) fn expected() -> Self {
         let (version, shape) =
             Self::parse(SHAPE_ARTIFACT).expect("the compiled-in schema shape artifact must parse");
@@ -496,6 +500,10 @@ impl SchemaShape {
                 current_payload = None;
             } else {
                 let table_name = current.as_ref().ok_or_else(|| bad("no enclosing table"))?;
+                #[expect(
+                    clippy::expect_used,
+                    reason = "`current` is only set by the table header branch, which inserts the entry before any member line can name it"
+                )]
                 let table = shape
                     .tables
                     .get_mut(table_name)
@@ -546,6 +554,10 @@ impl SchemaShape {
                     let payload_column = current_payload
                         .as_ref()
                         .ok_or_else(|| bad("no enclosing payload shape"))?;
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "`current_payload` is only set by the payload header branch, which inserts the entry before any entry line can name it"
+                    )]
                     let payload = table
                         .payload_shapes
                         .get_mut(payload_column)

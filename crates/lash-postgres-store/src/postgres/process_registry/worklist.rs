@@ -124,6 +124,10 @@ pub(super) async fn list_non_terminal_page(
     }
     let has_more = records.len() > limit.get();
     records.truncate(limit.get());
+    #[expect(
+        clippy::expect_used,
+        reason = "`has_more` is only true when `records` held more than `limit` rows, so the truncated page is non-empty"
+    )]
     let continuation = has_more.then(|| {
         lash_core::ProcessWorklistCursor::new(
             CURSOR_BACKEND,

@@ -109,6 +109,10 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the caller already resolved `scope.journal_identity()` at the top of this function, so re-reading it for the refusal message cannot fail"
+    )]
     async fn register_turn_cancel_closure_participant(
         &self,
         participant_id: &str,
@@ -971,17 +975,26 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     .await
                     .map_err(retirement_error);
             }
+            #[expect(
+                clippy::expect_used,
+                reason = "`retired_scope` is `Some` for exactly the process and runtime-operation variants this arm matches"
+            )]
             EffectJournalRetirement::Process { .. }
             | EffectJournalRetirement::RuntimeOperation { .. } => retirement
                 .retired_scope()
                 .expect("scope-exact retirements name their scope"),
         };
-        let identity = scope
-            .journal_identity()
-            .expect("process and runtime-operation scopes always form durable journal identities");
+        #[expect(
+            clippy::expect_used,
+            reason = "process and runtime-operation scopes carry no session id to validate, so their journal identity always forms, and `ExecutionScope` is a derived-`Serialize` enum of strings"
+        )]
+        let (identity, scope_json) = (
+            scope.journal_identity().expect(
+                "process and runtime-operation scopes always form durable journal identities",
+            ),
+            serde_json::to_string(&scope).expect("execution scopes serialize infallibly"),
+        );
         let scope_id = identity.key().to_string();
-        let scope_json =
-            serde_json::to_string(&scope).expect("execution scopes serialize infallibly");
         let when_quiescent = retirement.gate() == Some(EffectRetirementGate::WhenQuiescent);
         let fences = self
             .registry
@@ -1253,6 +1266,10 @@ pub(crate) fn purge_rows_under_fenced_scopes(
         for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
             let key = key?;
             if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key) {
+                #[expect(
+                    clippy::expect_used,
+                    reason = "`ExecutionScope` is a derived-`Serialize` enum of strings, so encoding it cannot fail"
+                )]
                 let scope_json = serde_json::to_string(&scope).expect("execution scopes serialize");
                 scopes.push((key, scope_json));
             }

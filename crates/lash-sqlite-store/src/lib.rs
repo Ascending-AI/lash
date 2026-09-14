@@ -42,11 +42,6 @@
 //! [`RuntimePersistence`]: lash_core::RuntimePersistence
 //! [`AttachmentManifest`]: lash_core::AttachmentManifest
 
-#![expect(
-    clippy::expect_used,
-    reason = "FIG-2784 pass 1, a later PR in the chain"
-)]
-
 use lash_sansio::SessionId;
 mod namespace;
 mod process_key;

@@ -429,12 +429,15 @@ pub(crate) async fn read_live_shape(
                 row.get("has_default"),
             ),
         };
-        shape
+        #[expect(
+            clippy::expect_used,
+            reason = "`table_of` resolves an oid only to a table name this walk already seeded into `shape.tables`"
+        )]
+        let table_shape = shape
             .tables
             .get_mut(table)
-            .expect("every resolved table was seeded")
-            .columns
-            .insert(column.name.clone(), column);
+            .expect("every resolved table was seeded");
+        table_shape.columns.insert(column.name.clone(), column);
     }
 
     // Every uniqueness guarantee is read from `pg_index`, not `pg_constraint`:
@@ -487,12 +490,15 @@ pub(crate) async fn read_live_shape(
                 .map(|predicate| normalize_predicate(&predicate)),
             nulls_not_distinct: row.get("nulls_not_distinct"),
         };
-        shape
+        #[expect(
+            clippy::expect_used,
+            reason = "`table_of` resolves an oid only to a table name this walk already seeded into `shape.tables`"
+        )]
+        let table_shape = shape
             .tables
             .get_mut(table)
-            .expect("every resolved table was seeded")
-            .unique_guards
-            .insert(guard);
+            .expect("every resolved table was seeded");
+        table_shape.unique_guards.insert(guard);
     }
 
     // `contype = 'f'` is filtered explicitly. `confdeltype` is a single stable
@@ -544,12 +550,15 @@ pub(crate) async fn read_live_shape(
             parent_columns: row.get("parent_columns"),
             on_delete: ForeignKeyAction::from_catalog(&row.get::<String, _>("on_delete")),
         };
-        shape
+        #[expect(
+            clippy::expect_used,
+            reason = "`table_of` resolves an oid only to a table name this walk already seeded into `shape.tables`"
+        )]
+        let table_shape = shape
             .tables
             .get_mut(table)
-            .expect("every resolved table was seeded")
-            .foreign_keys
-            .insert(key);
+            .expect("every resolved table was seeded");
+        table_shape.foreign_keys.insert(key);
     }
     for ((table, column), payload) in registered_payload_shapes() {
         if let Some(table) = shape.tables.get_mut(&table)

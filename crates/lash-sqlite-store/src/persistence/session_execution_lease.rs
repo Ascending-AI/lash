@@ -23,6 +23,10 @@ impl SessionExecutionLeaseStore for Store {
                     if current.as_ref().is_some_and(|lease| {
                         lease.lease_token.is_some() && lease.expires_at_ms > now
                     }) {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the `is_some_and` guard above is the only way into this branch"
+                    )]
                         let current = current.expect("checked current lease is present");
                         if current
                             .owner

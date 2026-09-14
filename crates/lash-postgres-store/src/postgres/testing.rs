@@ -51,6 +51,10 @@ impl IsolatedDatabase {
     ///
     /// Panics when the base URL cannot be parsed or the database cannot be
     /// created; both are test-configuration faults with no useful recovery.
+    #[expect(
+        clippy::expect_used,
+        reason = "test-harness helper: a base URL that will not parse or a database that will not create is a test-configuration fault with no useful recovery, as the doc comment above states"
+    )]
     pub async fn create(base_url: &str) -> Self {
         let database_name = format!("lash_test_{}", uuid::Uuid::new_v4().simple());
         let url = replace_database_name(base_url, &database_name);
