@@ -56,7 +56,9 @@ predicate is whether the scenario opens an RLM session, and the claim is checkab
 runbook binary or driver.
 
 There is nothing to pin. The RLM session-creation contract carries no language, so
-`LASH_RUNBOOK_DIALECT` is gone and no row sets it. A row that served anything but a
+`LASH_RUNBOOK_DIALECT` is inert: nothing reads it, and the runbooks and drivers that
+still name it are cleaned up with [FIG-3055](https://linear.app/ascending-ai/issue/FIG-3055)
+and [FIG-3022](https://linear.app/ascending-ai/issue/FIG-3022). A row that served anything but a
 TypeScript prompt, cell tag, execution event or restored engine id is still a contract
 violation that triggers the normal Abort/RCA rule — it just cannot be caused by
 configuration any more. This includes a subagent's prompt: children read the same

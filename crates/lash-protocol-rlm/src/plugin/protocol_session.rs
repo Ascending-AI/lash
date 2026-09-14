@@ -245,17 +245,16 @@ pub fn rlm_session_config_options(
 ///
 /// Applies the materialization's plugin options as a guarded set-if-unset write
 /// over whatever the session already recorded. On a session that has recorded
-/// nothing yet — and only then — the two facts the runtime cannot start without
-/// are filled from their defaults: the language, and the presentation format
-/// the prompt is written against (`Markdown` for root sessions,
-/// `RawFinalValue` for children). That is what pins a session's dialect at its
-/// first open, as it always has.
+/// nothing yet — and only then — the one fact the runtime cannot start without
+/// is filled from its default: the presentation format the prompt is written
+/// against (`Markdown` for root sessions, `RawFinalValue` for children). A
+/// session records no language: TypeScript is the only one (ADR 0096), so
+/// there is nothing to pin at first open.
 ///
 /// A session that has recorded something is never *re*-defaulted. A reopen that
 /// states nothing therefore carries every recorded fact through untouched,
-/// which is the whole of the two clobber fixes: a reopen no longer resets the
-/// recorded final-answer format, and options that state only a dialect no
-/// longer restate the termination.
+/// which is the whole of the clobber fix: a reopen no longer resets the
+/// recorded final-answer format.
 pub(crate) fn resolve_rlm_session_options(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
