@@ -1157,7 +1157,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("build-release-assets", workflow)
         self.assertNotIn("install_lash.sh", workflow)
         self.assertIn("needs: [prepare-release, publish-crates]", publish)
-        self.assertIn("needs: [prepare-release, validate-release-ref]", publish_crates)
+        self.assertIn("needs: [prepare-release, validate-release-ref, package-crates]", publish_crates)
         self.assertIn("runs-on: ubuntu-24.04", validate_release)
         self.assertIn(
             "ref: ${{ needs.prepare-release.outputs.release_sha }}", validate_release
@@ -1186,7 +1186,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         release_cache = workflow_job_block(release_cache_workflow, "linux-release-cache")
 
         self.assertIn("workflow_dispatch:", perf)
-        self.assertNotIn("schedule:", perf)
+        # FIG-3064: the full profile also runs nightly (03:41 UTC) so a
+        # release-only guard cannot drift unmeasured; it still never runs on
+        # push or pull_request.
+        self.assertIn('cron: "41 3 * * *"', perf)
+        self.assertNotIn("pull_request:", perf)
+        self.assertNotIn("push:", perf)
         self.assertIn("runs-on: ubuntu-24.04", perf)
         self.assertIn(
             "uses: Swatinem/rust-cache@"
