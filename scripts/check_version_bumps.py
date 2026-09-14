@@ -107,6 +107,15 @@ REGISTRATION_BASELINES = {
     "crates/lash-core/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
         "sha256:0b06228ca33674b8cbfcb73a02c46a03f6629dcc7949f9da785a43c9082bcfdc"
     ),
+
+    # FIG-2996 part 2: the durable process-lease block (PROCESS_LEASE_SCHEMA_VERSION,
+    # ProcessLease and its version fence) moved verbatim from
+    # crates/lash-core/src/runtime/process/model.rs into the sibling
+    # model/lease.rs to bring model.rs back under the production file-size
+    # budget. Same re-exports, no field, variant, serde attribute or constant
+    # changed, so the serialized lease bytes are identical and
+    # PROCESS_LEASE_SCHEMA_VERSION stays 2 under its relocated key.
+    'crates/lash-core/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:627d95b22c67fe20640132b6a8fff0b188aa1b107891feaf350487de0194e8f6',
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded
