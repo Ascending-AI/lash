@@ -195,6 +195,10 @@ impl EffectAddress {
     /// projections and causal references.
     pub fn graph_key(&self) -> String {
         let scope = EffectJournalIdentity::from_scope(&self.execution_scope);
+        #[expect(
+            clippy::expect_used,
+            reason = "the value is a `String`, and `serde_json` never fails to encode one"
+        )]
         let replay_key = serde_json::to_string(&self.replay_key)
             .expect("effect replay key is an infallible JSON string");
         format!("effect:{}:{replay_key}", scope.key())
@@ -238,6 +242,10 @@ impl EffectJournalIdentity {
                 ("op", None, Some(operation_id.as_str()))
             }
         };
+        #[expect(
+            clippy::expect_used,
+            reason = "`Wire` is a fixed struct of `&str`/`Option<&str>` fields, so encoding it cannot fail"
+        )]
         let key = serde_json::to_string(&Wire {
             version: JOURNAL_IDENTITY_VERSION,
             kind,

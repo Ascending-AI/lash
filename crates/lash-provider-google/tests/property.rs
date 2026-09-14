@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 

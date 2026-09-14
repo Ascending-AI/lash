@@ -20,6 +20,8 @@
 //! those spellings mean is pinned next door in
 //! `crates/lash-typescript/tests/array_append.rs`.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 

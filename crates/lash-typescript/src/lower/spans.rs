@@ -64,7 +64,12 @@ struct PositionedNode {
 fn positions(expr: &LashExpr, path: &mut Vec<u32>, out: &mut Vec<PositionedNode>) -> usize {
     let mut nodes = 1;
     for (index, child) in expr.children().enumerate() {
-        path.push(u32::try_from(index).expect("AST child index fits u32"));
+        #[expect(
+            clippy::expect_used,
+            reason = "the parser refuses a program long before a single node reaches u32::MAX children"
+        )]
+        let child_index = u32::try_from(index).expect("AST child index fits u32");
+        path.push(child_index);
         nodes += positions(child, path, out);
         path.pop();
     }

@@ -670,9 +670,13 @@ impl<'source> SourceNestingVisitor<'source> {
     fn visit_unicode_line_terminator(&mut self) {
         // U+2028 / U+2029 end a line in ECMAScript, so SWC inserts a semicolon
         // after them and the budget has to release in the same places.
-        self.index += unicode_line_terminator_length(self.bytes, self.index)
-            .expect("a line terminator was just matched")
-            - 1;
+        #[expect(
+            clippy::expect_used,
+            reason = "the caller only enters this visit after `unicode_line_terminator_length` matched at `self.index`"
+        )]
+        let terminator = unicode_line_terminator_length(self.bytes, self.index)
+            .expect("a line terminator was just matched");
+        self.index += terminator - 1;
         self.mark_pending_statement_end();
     }
 

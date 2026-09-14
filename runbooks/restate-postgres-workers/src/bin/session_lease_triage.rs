@@ -39,6 +39,8 @@
 //! line per backend. Session ids carry a per-run suffix, so a shared PostgreSQL
 //! database never collides with an earlier run and no phase truncates tables.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::BTreeMap;

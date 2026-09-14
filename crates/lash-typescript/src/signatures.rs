@@ -304,6 +304,10 @@ pub fn render_schema_type(schema: &Value) -> String {
 /// call is refused rather than advertised as a callable nothing (FIG-1444).
 pub fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), Diagnostic> {
     let segments = call_path.split('.').collect::<Vec<_>>();
+    #[expect(
+        clippy::expect_used,
+        reason = "`str::split` always yields at least one segment, so the vector is never empty"
+    )]
     let (operation, modules) = segments.split_last().expect("split never yields nothing");
     if modules.is_empty() {
         return Err(Diagnostic::new(
@@ -365,6 +369,10 @@ fn render_type(ty: &TypeExpr) -> String {
         TypeExpr::Bool => "boolean".to_string(),
         TypeExpr::Dict => "Record<string, unknown>".to_string(),
         TypeExpr::Null => "null".to_string(),
+        #[expect(
+            clippy::expect_used,
+            reason = "the values are `str`s, and `serde_json` never fails to encode one"
+        )]
         TypeExpr::Enum(values) => values
             .iter()
             .map(|value| serde_json::to_string(value.as_str()).expect("strings serialize"))
@@ -428,6 +436,10 @@ fn render_identifier(name: &str) -> String {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the value is a `str`, and `serde_json` never fails to encode one"
+)]
 fn render_property_name(name: &str) -> String {
     if is_identifier(name) && !is_reserved_word(name) {
         name.to_string()

@@ -5,7 +5,6 @@
 //! `schema_version` tripwire, the `type` tag for every [`TraceEvent`] variant,
 //! the full payload shape of the load-bearing variants, and a JSONL round-trip
 //! carrying an `exec_code_completed` diagnostic.
-
 use lash_sansio::ProcessId;
 use std::collections::BTreeSet;
 

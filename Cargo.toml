@@ -120,6 +120,14 @@ await_holding_lock = "deny"
 # directly (234 call sites outside core). The lint level is workspace-wide so a
 # new entry in that list is enforced everywhere it applies.
 disallowed_methods = "deny"
+# A production panic a reviewer cannot tell apart from a deliberate invariant
+# assertion is the defect these close (FIG-2784). Test code keeps both: the
+# exemptions are `allow-expect-in-tests` / `allow-unwrap-in-tests` in
+# `clippy.toml` (repeated in `crates/lash-core/clippy.toml`, which shadows it).
+# A surviving site either propagates its error, carries an `expect` whose reason
+# a reader can check, or carries a scoped `#[expect(..., reason = "...")]`.
+expect_used = "deny"
+unwrap_used = "deny"
 identity_op = "deny"
 manual_clamp = "deny"
 manual_filter = "deny"
@@ -155,12 +163,6 @@ result_large_err = "warn"
 # Deliberately not adopted, with the site count measured on this tree
 # (`cargo clippy --workspace --all-targets` with the table set to "warn"):
 #
-#   clippy::expect_used                        4351   (2427 of them in the
-#                                                     conformance crate, whose
-#                                                     laws are library code and
-#                                                     therefore outside
-#                                                     `allow-expect-in-tests`)
-#   clippy::unwrap_used                         286
 #   rust::missing_debug_implementations         361
 #   clippy::redundant_closure_for_method_calls  180
 #   clippy::redundant_clone                     161
@@ -178,10 +180,6 @@ result_large_err = "warn"
 #                                                     is there to dedupe)
 #   clippy::trivially_copy_pass_by_ref           46
 #   clippy::uninlined_format_args                41
-#
-# `unwrap_used`/`expect_used` are the ones worth a dedicated round: the
-# exemption keys they need are already set in `clippy.toml`, so that round is a
-# level change plus the site work, not a config design.
 
 # The release series CI advances. `scripts/release_version.py print-next` reads
 # this channel and returns the next `<channel>.N` (or, for a clean X.Y.Z

@@ -376,10 +376,14 @@ pub fn first_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Op
         .map(|(_, value)| value.as_str())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`http_client_builder` fixes the whole configuration in this crate and installs no TLS identity, resolver or proxy that `build` could reject"
+)]
 pub fn build_http_client() -> reqwest::Client {
     http_client_builder()
         .build()
-        .expect("failed to build reqwest HTTP client")
+        .expect("the in-crate builder configuration is always accepted")
 }
 
 /// Build a reqwest client with Lash's shared connection safeguards while

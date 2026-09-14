@@ -128,12 +128,20 @@ impl Adapter {
                 reverse,
             });
         }
+        #[expect(
+            clippy::expect_used,
+            reason = "the converter pushes a lexical scope before it visits any declaration and pops it after"
+        )]
         self.enum_constants
             .borrow_mut()
             .last_mut()
             .expect("enum declarations are converted inside a lexical scope")
             .insert(enum_name.clone(), constants);
         if declaration.is_const {
+            #[expect(
+                clippy::expect_used,
+                reason = "the converter pushes a lexical scope before it visits any declaration and pops it after"
+            )]
             self.inline_enums
                 .borrow_mut()
                 .last_mut()

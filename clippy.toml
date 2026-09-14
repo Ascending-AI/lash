@@ -5,9 +5,10 @@
 # shadows this file for that crate and repeats the keys below.
 
 # Test code is allowed to panic on a broken assumption; production code is not.
-# The workspace lint table does not deny `unwrap_used`/`expect_used` yet — the
-# current tree carries 286 and 4351 non-test sites — but the exemption these
-# keys express is the settled policy for the round that will, so it is recorded
-# here rather than rediscovered then.
+# The workspace lint table denies `unwrap_used`/`expect_used` (FIG-2784); these
+# keys are the exemption that makes that deny apply to production code only.
+# They reach `#[test]` functions and `#[cfg(test)]` modules, not the setup
+# helpers beside them in an integration-test target, so those targets carry a
+# reasoned crate-root `#![expect(...)]` instead.
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true

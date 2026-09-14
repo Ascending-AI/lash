@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use anyhow::{Context, Result, bail};
 use lash::ProcessId;
 use lash::SessionId;

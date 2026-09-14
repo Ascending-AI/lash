@@ -780,6 +780,10 @@ impl Lowerer {
             (_, internal_name) => internal_name,
         };
         if let (Some(source_name), Some(internal)) = (&function.name, &internal_name) {
+            #[expect(
+                clippy::unwrap_used,
+                reason = "the lowerer pushes the program root scope before any function and never pops past it"
+            )]
             self.scopes.last_mut().unwrap().bindings.insert(
                 source_name.clone(),
                 Binding {
@@ -866,6 +870,10 @@ impl Lowerer {
         prologue.push(tail);
         let body = LashExpr::Block(prologue);
         self.scopes.pop();
+        #[expect(
+            clippy::expect_used,
+            reason = "this is the matching pop for the function context pushed at the top of the same call"
+        )]
         let context = self.functions.pop().expect("function context exists");
         let function = LashExpr::Function(Box::new(FunctionExpr {
             name: internal_name.map(Into::into),

@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Duration;
 

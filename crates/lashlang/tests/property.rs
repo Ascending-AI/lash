@@ -12,6 +12,8 @@
 //! is pinned there against the TypeScript printer rather than here against a
 //! retired one.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;

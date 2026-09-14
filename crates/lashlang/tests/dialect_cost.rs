@@ -23,6 +23,8 @@
 //! the allocator for, and every figure below is allocated bytes per iteration.
 //! Nothing here is a timing assertion, so a loaded box does not move it.
 
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 

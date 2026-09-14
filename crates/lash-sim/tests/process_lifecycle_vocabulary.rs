@@ -15,6 +15,8 @@
 //! inventory, like `scripts/check-substrate-boundary.sh`. It needs no CI wiring
 //! because it runs with the workspace suite.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash_core::{ProcessStatus, WakeDeliveryState};
 use std::path::{Path, PathBuf};
 

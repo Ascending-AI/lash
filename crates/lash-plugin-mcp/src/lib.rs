@@ -19,6 +19,8 @@
 //! that is shared across every session built from the same `LashCore`, so
 //! e.g. stdio servers are spawned once per process rather than per session.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 pub mod config;
 pub mod error;
 pub mod host;

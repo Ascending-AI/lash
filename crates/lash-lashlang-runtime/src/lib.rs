@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;

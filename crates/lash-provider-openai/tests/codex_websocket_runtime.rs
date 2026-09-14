@@ -8,6 +8,11 @@
 //! same injection philosophy as `with_http_transport`: nothing here touches
 //! env vars or serialized provider config.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 

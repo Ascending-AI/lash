@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use serde_json::Value;
 use workflow_graph_roundtrip::{AppState, EditableValue, SaveWorkflowResponse, WorkflowDocument};
 

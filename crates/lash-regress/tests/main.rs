@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
 #![allow(
     clippy::duplicate_mod,
     reason = "upstream test modules load the shared harness as private sibling modules"

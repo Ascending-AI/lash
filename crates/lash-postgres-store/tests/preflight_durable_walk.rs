@@ -10,6 +10,11 @@
 //! nobody checks. The dangling-reference case is here for the same reason: a
 //! walk that errored on one missing blob would lose every finding behind it.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use lash_core::store::SessionCheckpoint;
 use lash_core::{
     BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,

@@ -19,7 +19,6 @@
 //! For the full map of reporting channels, guidance on when to consume which,
 //! and the schema-evolution policy that governs [`TRACE_SCHEMA_VERSION`], see
 //! `docs/reporting.html`; for the attach-a-sink how-to, see `docs/tracing.html`.
-
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;

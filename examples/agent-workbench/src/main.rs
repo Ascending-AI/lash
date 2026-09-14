@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 #[path = "../../shared/ndjson.rs"]
 mod ndjson;
 use ndjson::ndjson_response;

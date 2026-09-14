@@ -736,6 +736,10 @@ impl<'a> Projector<'a> {
             return;
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the `branches.len() != 1` guard above returned, so exactly one branch is left to pop"
+        )]
         let branch = branches.pop().expect("single allOf branch");
         let Value::Object(branch_obj) = branch else {
             obj.insert("allOf".to_string(), Value::Array(vec![branch]));

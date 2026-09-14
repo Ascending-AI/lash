@@ -7,6 +7,8 @@
 //! test. The selected-drain row uses scripted agent-frame work to exercise the
 //! public turn facade without model nondeterminism.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash::ProcessId;
 use lash::SessionId;
 use lash::sync::MutexExt;

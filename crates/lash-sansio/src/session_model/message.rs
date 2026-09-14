@@ -658,6 +658,10 @@ impl MessageSequence {
         }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the block below assigns `Some` on the only path where `owned` was `None`"
+    )]
     pub fn make_mut(&mut self) -> &mut Vec<Message> {
         if self.owned.is_none() {
             let owned = if self.delta.is_empty() {

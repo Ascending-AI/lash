@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 #[path = "advertised_tool_surface.rs"]
 mod advertised_tool_surface;
 #[path = "agent_surface.rs"]

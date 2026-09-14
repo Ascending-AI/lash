@@ -2,6 +2,8 @@
 //! and FIG-2875: 46 SQLite / 47 PostgreSQL.
 //! Like schema_congruence.rs, this ordinary integration test is discovered by
 //! the workspace nextest CI shards. Every new durable table needs a declaration.
+
+#![expect(clippy::unwrap_used, reason = "FIG-2784 pass 2")]
 use std::collections::BTreeSet;
 
 const SQLITE_SCHEMA: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
