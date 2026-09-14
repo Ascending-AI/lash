@@ -91,6 +91,19 @@ fn emit(checkpoint: &Value) {
     println!("{checkpoint}");
 }
 
+/// Every durable message node the session holds, across frames and branches.
+fn durable_messages(view: &lash_core::SessionReadView) -> Vec<lash_core::Message> {
+    fn walk(nodes: &[lash::messages::SessionMessageTreeNode], out: &mut Vec<lash_core::Message>) {
+        for node in nodes {
+            out.push(node.message.clone());
+            walk(&node.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&view.message_tree(), &mut out);
+    out
+}
+
 /// Phases 1-3: overflow, host recovery, continued session.
 ///
 /// Runs for either overflow arm. The two differ only in how the provider states
@@ -152,7 +165,11 @@ async fn overflow_and_recovery(
         .context("the post-recovery turn")?;
     let continued_history = session.read_view().messages().to_vec();
     let continued_history_len = continued_history.len();
-    let overflow_history_after_turn = continued_history;
+    // The recovery's terminal record is durable in the frame the recovery left
+    // behind, so the durable read is the whole message tree, not the active
+    // frame's projection: after the switch the session is resident in the
+    // recovery frame and reads only that frame's messages.
+    let overflow_history_after_turn = durable_messages(&session.read_view());
 
     // The recovery frame exists and the session is resident in it after
     // recovery: the latest frame record carries the compaction reason and the
@@ -386,16 +403,17 @@ fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider:
             // The plugin-owned recovery branch: the out-of-band summarizer
             // carries the standard compaction prompt. It is not a cell, so it
             // must be answered with plain assistant text.
-            let is_recovery_summarizer = matches!(
-                request
-                    .messages
-                    .last()
-                    .and_then(|message| message.blocks.iter().find_map(|block| match block {
-                        lash::provider::LlmContentBlock::Text { text, .. } => Some(text.clone()),
-                        _ => None,
-                    })),
-                Some(text) if text.contains("Provide a detailed summary of the conversation above")
-            );
+            // The compaction prompt can sit behind the protocol's own trailing
+            // messages, so the whole request is scanned for it rather than its
+            // last message alone.
+            let is_recovery_summarizer = request.messages.iter().any(|message| {
+                message.blocks.iter().any(|block| match block {
+                    lash::provider::LlmContentBlock::Text { text, .. } => {
+                        text.contains("Provide a detailed summary of the conversation above")
+                    }
+                    _ => false,
+                })
+            });
             async move {
                 if is_recovery_summarizer {
                     // The out-of-band summarizer runs in the plugin's compaction

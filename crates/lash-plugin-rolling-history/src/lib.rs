@@ -12,7 +12,7 @@ mod recovery;
 
 pub(crate) use recovery::{
     OverflowRecoveryState, emit_recovery_trace, history_recovery_records,
-    overflow_recovery_after_turn, run_overflow_recovery,
+    overflow_recovery_after_turn, recovery_record_kind, run_overflow_recovery,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -448,6 +448,15 @@ pub(crate) fn prepare_compaction_request(
 ) -> Result<(SessionSnapshot, String), ContextError> {
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
+    // The plugin's own overflow-recovery records are control state, not
+    // conversation, and they must never ride into a compaction child's read
+    // state. A child that still derives a pending recovery from them runs the
+    // recovery policy on its own prepare-turn and spawns another summarizer
+    // child: an unbounded `-compaction:` recursion rather than one summary
+    // (FIG-3107). Durable history keeps every record; only the summarizer's
+    // read state drops them, and the prefix a cut point hands the ordinary
+    // compaction policy cannot resurrect a marker its terminal record closed.
+    prefix_messages.retain(|message| recovery_record_kind(message).is_none());
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
