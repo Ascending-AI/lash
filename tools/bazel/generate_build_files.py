@@ -385,6 +385,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             # The warning-capture contract installs a scoped tracing subscriber.
             # Other tests in this libtest process must not emit concurrently.
             test_env["RUST_TEST_THREADS"] = "1"
+        if package["name"] == "lash-internal-lashlang" and target["name"] == "append_cost":
+            # The per-append cost law reads a process-global counting allocator.
+            # Cargo nextest isolates cases by process; serialize libtest so
+            # Bazel observes the same one-at-a-time measurement contract.
+            test_env["RUST_TEST_THREADS"] = "1"
         extra_compile_data = []
         if package["name"] in (
             "agent-service",

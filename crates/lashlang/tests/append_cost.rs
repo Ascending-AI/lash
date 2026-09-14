@@ -24,8 +24,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
-    compile, execute,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Snapshot, State,
+    Value, compile, execute,
 };
 
 #[global_allocator]
@@ -152,4 +152,62 @@ fn push_costs_the_same_at_every_list_length() {
 #[test]
 fn terminal_index_assignment_costs_the_same_at_every_list_length() {
     assert_per_append_cost_is_flat("index append", "    items[items.length] = i");
+}
+
+/// What makes the in-place append cheap is that it charges the appended member
+/// incrementally instead of re-pricing the array, and the figure it charges is
+/// the one the memory limit is decided against. So the charge has to stay equal
+/// to what a fresh measurement of the object would produce: an append that
+/// under-charges buys the program headroom the bound was supposed to refuse,
+/// and one that over-charges refuses a program the bound admits.
+///
+/// The snapshot wire states exactly that equality and states it in release
+/// builds too. `State::snapshot` writes the heap's running charge
+/// (`crates/lashlang/src/runtime/state.rs`, `live_logical_bytes: heap.live_logical_bytes()`,
+/// the sum of the per-entry charges), and `Heap::from_wire` re-measures every
+/// decoded object with `HeapObject::logical_bytes()` and refuses the snapshot
+/// with "heap live logical byte counter does not match its objects" if the two
+/// disagree. In a debug build the heap's own `debug_assert_byte_accounting`
+/// closes the other half — the running charge equals the sum of the entries —
+/// so the appended list's entry is pinned to its object.
+///
+/// The members are deliberately mixed: a small number, a string, and a nested
+/// list, through both spellings. A per-member charge that is wrong by a
+/// constant cannot cancel out against a differently shaped member.
+#[test]
+fn an_append_charges_what_the_object_measures() {
+    let source = "items = []
+for i in range(0, 64) {
+    items[items.length] = \"member-\" + to_string(i)
+    appended = __typescript_stdlib(\"push\", items, [i, \"nested\"])
+    also = __typescript_stdlib(\"push\", items, i)
+}
+finish items.length
+";
+    let compiled = compile(source).expect("byte-accounting probe should compile");
+    let mut state = State::new();
+    let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
+        .expect("byte-accounting probe should execute");
+    assert_eq!(
+        outcome,
+        ExecutionOutcome::Finished(Value::Number(192.0)),
+        "the probe must append through both spellings"
+    );
+
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("state carrying the appended array should encode");
+    // This is the assertion: the decoder re-measures every object and refuses
+    // the snapshot unless the charge the appends accumulated matches.
+    let snapshot = Snapshot::from_canonical_bytes(&bytes)
+        .expect("the charge accumulated by the appends must equal the objects' measured size");
+    let mut restored = State::from_snapshot(snapshot);
+
+    // And the array the charge was accumulated for is still the array that was
+    // built, so the equality was not bought by losing members.
+    let compiled = compile("finish items.length").expect("restored probe should compile");
+    let outcome = futures::executor::block_on(execute(&compiled, &mut restored, &Host))
+        .expect("restored probe should execute");
+    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(192.0)));
 }
