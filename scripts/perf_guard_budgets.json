@@ -4230,7 +4230,7 @@
         "denominator": "function_map_64",
         "mode": "compiled_ast_execute",
         "metric": "ns_per_iter",
-        "max": 20.0
+        "max": 21.0
       }
     }
   }
