@@ -321,6 +321,14 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     );
 }
 
+/// Fixture A's provider script.
+///
+/// The gate this test needs is call 1, the provider call the turn makes *after*
+/// it has journaled the process registration from call 0. Call 0's cell must
+/// therefore register the process and leave the turn open: a cell that calls
+/// `finish` terminates the turn, the driver never asks the provider again, and
+/// the post-registration gate is unreachable. The trailing statement reports
+/// the journal prefix without terminating (FIG-3074).
 fn immutable_deployment_fixture_a_provider(
     calls: Arc<std::sync::atomic::AtomicUsize>,
     retry_entered: mpsc::UnboundedSender<()>,
@@ -347,7 +355,7 @@ const immutable_deployment_probe = defineProcess({
   }
 });
 const handle = start(immutable_deployment_probe, {});
-finish("fixture A journal prefix committed");
+print("fixture A journal prefix committed");
 </typescript>"#,
                     )),
                     1 => {
