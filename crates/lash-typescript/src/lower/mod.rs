@@ -327,169 +327,6 @@ impl Lowerer {
         Ok(())
     }
 
-    fn declare(
-        &mut self,
-        name: &str,
-        kind: BindingKind,
-        initialized: bool,
-        preserve_name: bool,
-    ) -> Result<(), Diagnostic> {
-        if matches!(name, "undefined" | "NaN" | "Infinity") {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ReservedIdentifier,
-                format!(
-                    "`{name}` is a reserved TypeScript value identifier and cannot be shadowed"
-                ),
-                None,
-            ));
-        }
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
-            return Err(reserved_identifier(name));
-        }
-        // Mangling exists to stop an inner scope from overwriting an outer slot
-        // of the same name. Where nothing of that name is visible there is
-        // nothing to protect, and a mangled root-level binding would publish a
-        // generated name into the durable globals and the bound-variables
-        // prompt, so keep the author's name in that case.
-        let preserve_name = preserve_name || !self.has_binding(name);
-        let owner_function = self.current_function();
-        let scope = self.scopes.last_mut().expect("a scope is always active");
-        if scope.bindings.contains_key(name) {
-            return Err(Diagnostic::new(
-                DiagnosticCode::DuplicateBinding,
-                format!("duplicate lexical binding `{name}`"),
-                None,
-            ));
-        }
-        let internal = if preserve_name {
-            name.to_string()
-        } else {
-            let id = self.next_binding;
-            self.next_binding += 1;
-            format!("{GENERATED_BINDING_PREFIX}{id}_{name}")
-        };
-        scope.bindings.insert(
-            name.to_string(),
-            Binding {
-                internal,
-                kind,
-                initialized,
-                owner_function,
-                role: BindingRole::Plain,
-            },
-        );
-        Ok(())
-    }
-
-    /// Records what the binding `name` resolves to *is*.
-    ///
-    /// The role is learned from the initializer, so it is always set after the
-    /// declaration that a lexical scope hoists — the same resolution `binding`
-    /// performs, against the same scope stack, so the fact lands on the
-    /// binding the reads will find and dies when its scope pops.
-    fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
-        let binding = self
-            .scopes
-            .iter_mut()
-            .rev()
-            .find_map(|scope| scope.bindings.get_mut(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    None,
-                )
-            })?;
-        binding.role = role;
-        Ok(())
-    }
-
-    fn clear_process_handle_role(&mut self, name: &str) -> Result<(), Diagnostic> {
-        let binding = self
-            .scopes
-            .iter_mut()
-            .rev()
-            .find_map(|scope| scope.bindings.get_mut(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    None,
-                )
-            })?;
-        if binding.role == BindingRole::ProcessHandle {
-            binding.role = BindingRole::Plain;
-        }
-        Ok(())
-    }
-
-    fn binding(&self, name: &str) -> Result<&Binding, Diagnostic> {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.bindings.get(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    None,
-                )
-            })
-    }
-
-    fn resolve(&mut self, name: &str) -> Result<String, Diagnostic> {
-        let Some(binding) = self
-            .scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.bindings.get(name))
-            .cloned()
-        else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::UnknownBinding,
-                format!("unknown binding `{name}`"),
-                None,
-            ));
-        };
-        let current_function = self.current_function();
-        if current_function == binding.owner_function && !binding.initialized {
-            return Err(Diagnostic::new(
-                DiagnosticCode::TemporalDeadZone,
-                format!("`{name}` is read before initialization"),
-                None,
-            ));
-        }
-        if current_function != binding.owner_function {
-            if !binding.initialized && !self.allow_uninitialized_declaration_capture {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::TemporalDeadZone,
-                    format!(
-                        "captured binding `{name}` is not initialized when the closure is created"
-                    ),
-                    None,
-                ));
-            }
-            let first_capturing_function = self
-                .functions
-                .iter()
-                .position(|function| function.id == binding.owner_function)
-                .map_or(0, |owner| owner + 1);
-            for function in &mut self.functions[first_capturing_function..] {
-                function.captures.insert(binding.internal.clone());
-            }
-        }
-        Ok(binding.internal)
-    }
-
-    fn initialize(&mut self, name: &str) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(binding) = scope.bindings.get_mut(name) {
-                binding.initialized = true;
-                return;
-            }
-        }
-    }
-
     fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Vec<LashExpr>, Diagnostic> {
         Ok(match stmt {
             Stmt::Empty => Vec::new(),
@@ -532,7 +369,7 @@ impl Lowerer {
                             ..
                         } = callee.as_ref()
                     {
-                        let kind = if matches!(object.as_ref(), Expr::Ident(owner) if owner == "Map")
+                        let kind = if matches!(object.as_ref(), Expr::Ident(owner, _) if owner == "Map")
                             && method == "groupBy"
                         {
                             Some(IterableKind::Map)
@@ -1028,29 +865,29 @@ impl Lowerer {
                     LashExpr::String(flags.as_str().into()),
                 ],
             },
-            Expr::Ident(name) if name == "undefined" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "undefined" && !self.has_binding(name) => {
                 LashExpr::Undefined
             }
-            Expr::Ident(name) if name == "NaN" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "NaN" && !self.has_binding(name) => {
                 LashExpr::Number(f64::NAN)
             }
-            Expr::Ident(name) if name == "Infinity" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "Infinity" && !self.has_binding(name) => {
                 LashExpr::Number(f64::INFINITY)
             }
-            Expr::Ident(name)
+            Expr::Ident(name, _)
                 if matches!(name.as_str(), "String" | "Number" | "Boolean")
                     && !self.has_binding(name) =>
             {
                 self.lower_conversion_function(name)
             }
-            Expr::Ident(name) if name == "globalThis" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name) => {
                 return Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: bare globalThis. Use globalThis.identifier for durable session state.",
                     None,
                 ));
             }
-            Expr::Ident(name) if name == "arguments" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "arguments" && !self.has_binding(name) => {
                 return Err(Diagnostic::new(
                     DiagnosticCode::ThisUnsupported,
                     "Unsupported: arguments. Declare an explicit ...rest parameter instead.",
@@ -1065,7 +902,7 @@ impl Lowerer {
                     None,
                 ));
             }
-            Expr::Ident(name) => LashExpr::Variable(self.resolve(name)?.into()),
+            Expr::Ident(name, _) => LashExpr::Variable(self.resolve(name)?.into()),
             Expr::Array(items) => self.lower_array_literal(items)?,
             Expr::Object(entries) => self.lower_object_literal(entries)?,
             Expr::Assign { target, op, value } => self.lower_assignment(target, *op, value)?,
@@ -1080,7 +917,7 @@ impl Lowerer {
                 UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
                 UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
                 UnaryOp::BitNot => self.lower_bit_not(value)?,
-                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name) if !self.has_binding(name)) => {
+                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name, _) if !self.has_binding(name)) => {
                     LashExpr::String("undefined".into())
                 }
                 UnaryOp::TypeOf => js_unary(JavaScriptUnaryOp::TypeOf, self.lower_expr(value)?),
@@ -1364,7 +1201,7 @@ impl Lowerer {
 
     fn member_path(&mut self, expr: &Expr) -> Result<(String, Vec<AssignPathStep>), Diagnostic> {
         match expr {
-            Expr::Ident(name) => Ok((self.resolve(name)?, Vec::new())),
+            Expr::Ident(name, _) => Ok((self.resolve(name)?, Vec::new())),
             Expr::Member {
                 object, property, ..
             } => {
@@ -1395,7 +1232,8 @@ impl Lowerer {
                 None,
             ));
         }
-        if matches!(object, Expr::Ident(name) if name == "globalThis" && !self.has_binding(name)) {
+        if matches!(object, Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name))
+        {
             return match property {
                 MemberProperty::Field(field)
                     if !matches!(field.as_str(), "undefined" | "NaN" | "Infinity") =>
@@ -1418,7 +1256,7 @@ impl Lowerer {
                 )),
             };
         }
-        if let Expr::Ident(owner) = object
+        if let Expr::Ident(owner, _) = object
             && is_known_runtime_global(owner)
             && !self.has_binding(owner)
         {
@@ -1473,7 +1311,7 @@ fn is_define_process_call(expr: &Expr) -> bool {
     matches!(
         expr,
         Expr::Call { callee, .. }
-            if matches!(callee.as_ref(), Expr::Ident(name) if name == "defineProcess")
+            if matches!(callee.as_ref(), Expr::Ident(name, _) if name == "defineProcess")
     )
 }
 
@@ -1577,6 +1415,7 @@ fn source_span(expr: &Expr) -> Option<SourceSpan> {
         Expr::Call { span, .. } | Expr::Member { span, .. } | Expr::Await { span, .. } => {
             Some(*span)
         }
+        Expr::Ident(_, span) => *span,
         _ => None,
     }
 }

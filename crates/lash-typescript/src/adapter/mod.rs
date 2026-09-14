@@ -186,7 +186,10 @@ pub(crate) enum Expr {
         pattern: String,
         flags: String,
     },
-    Ident(String),
+    /// A bare identifier reference. The span is the identifier's own extent in
+    /// the submitted source; it is `None` for identifiers the adapter or the
+    /// lowerer synthesises, which have no source text of their own.
+    Ident(String, Option<SourceSpan>),
     This,
     Array(Vec<ArrayElement>),
     Object(Vec<ObjectProperty>),
@@ -863,7 +866,7 @@ impl Adapter {
         Ok(match pattern {
             swc::Pat::Ident(name) => Pattern::Ident(name.id.sym.to_string()),
             swc::Pat::Expr(expr) => match self.convert_expr(expr)? {
-                Expr::Ident(name) => Pattern::Ident(name),
+                Expr::Ident(name, _) => Pattern::Ident(name),
                 Expr::Member {
                     object, property, ..
                 } => Pattern::Member { object, property },
@@ -1022,12 +1025,12 @@ impl Adapter {
                     && members.contains(&name)
                 {
                     Expr::Member {
-                        object: Box::new(Expr::Ident(enum_name.clone())),
+                        object: Box::new(Expr::Ident(enum_name.clone(), None)),
                         property: MemberProperty::Field(name),
                         span: source_span(expr.span()),
                     }
                 } else {
-                    Expr::Ident(name)
+                    Expr::Ident(name, span)
                 }
             }
             swc::Expr::Lit(lit) => match lit {
@@ -1173,10 +1176,10 @@ impl Adapter {
                         ));
                     }
                 };
-                if matches!(&callee, Expr::Ident(name) if name == "eval") {
+                if matches!(&callee, Expr::Ident(name, _) if name == "eval") {
                     return Err(reject(DiagnosticCode::EvalUnsupported, "eval", span));
                 }
-                if matches!(&callee, Expr::Ident(name) if name == "Function") {
+                if matches!(&callee, Expr::Ident(name, _) if name == "Function") {
                     return Err(reject(
                         DiagnosticCode::FunctionConstructorUnsupported,
                         "Function constructor",
@@ -1312,7 +1315,7 @@ impl Adapter {
         match property.as_ref() {
             swc::Prop::Shorthand(name) => Ok(ObjectProperty::KeyValue(
                 PropertyKey::Static(name.sym.to_string()),
-                Expr::Ident(name.sym.to_string()),
+                Expr::Ident(name.sym.to_string(), Some(source_span(name.span))),
             )),
             swc::Prop::KeyValue(property) => Ok(ObjectProperty::KeyValue(
                 self.convert_property_key(&property.key)?,
@@ -1397,7 +1400,7 @@ impl Adapter {
             return Ok(value.expression());
         }
         let object = self.convert_expr(&member.obj)?;
-        if matches!(&object, Expr::Ident(name) if name == "prototype") {
+        if matches!(&object, Expr::Ident(name, _) if name == "prototype") {
             return Err(reject(
                 DiagnosticCode::PrototypeMutationUnsupported,
                 "prototype access",
@@ -1528,7 +1531,7 @@ impl Adapter {
 
     fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {
         match self.convert_expr(expr)? {
-            Expr::Ident(name) => Ok(AssignTarget::Ident(name)),
+            Expr::Ident(name, _) => Ok(AssignTarget::Ident(name)),
             Expr::Member {
                 object, property, ..
             } => Ok(AssignTarget::Member { object, property }),

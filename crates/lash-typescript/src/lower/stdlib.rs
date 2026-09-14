@@ -3,7 +3,7 @@ use crate::signatures::LiteralReceivers;
 
 pub(super) fn module_path(expr: &Expr) -> Option<Vec<String>> {
     match expr {
-        Expr::Ident(name) => Some(vec![name.clone()]),
+        Expr::Ident(name, _) => Some(vec![name.clone()]),
         Expr::Member {
             object,
             property: MemberProperty::Field(field),
@@ -18,7 +18,7 @@ pub(super) fn module_path(expr: &Expr) -> Option<Vec<String>> {
 }
 
 pub(super) fn static_stdlib_owner(expr: &Expr) -> Option<&str> {
-    let Expr::Ident(name) = expr else {
+    let Expr::Ident(name, _) = expr else {
         return None;
     };
     matches!(

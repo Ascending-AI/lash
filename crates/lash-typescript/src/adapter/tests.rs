@@ -3,11 +3,11 @@ use super::*;
 const CENSUS_MARKER_PREFIX: &str = "child-expression-field:";
 
 fn marker(field: &str) -> Expr {
-    Expr::Ident(format!("{CENSUS_MARKER_PREFIX}{field}"))
+    Expr::Ident(format!("{CENSUS_MARKER_PREFIX}{field}"), None)
 }
 
 fn collect_markers(expr: &Expr, markers: &mut BTreeSet<String>) {
-    if let Expr::Ident(name) = expr
+    if let Expr::Ident(name, _) = expr
         && let Some(field) = name.strip_prefix(CENSUS_MARKER_PREFIX)
     {
         markers.insert(field.to_owned());

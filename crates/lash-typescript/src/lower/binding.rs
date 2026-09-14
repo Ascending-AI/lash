@@ -9,7 +9,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Expr, MemberProperty, Pattern, PropertyKey, Stmt, TsAssignTarget};
+use super::{
+    Expr, GENERATED_BINDING_PREFIX, MemberProperty, Pattern, PropertyKey, Stmt, TsAssignTarget,
+    reserved_identifier,
+};
+use crate::{Diagnostic, DiagnosticCode};
 
 /// Names assigned anywhere in one function owner's statement tree.
 ///
@@ -284,4 +288,178 @@ pub(super) struct Binding {
 #[derive(Clone, Debug, Default)]
 pub(super) struct Scope {
     pub(super) bindings: BTreeMap<String, Binding>,
+}
+
+/// The scope stack's operations: declaring a binding, learning what it holds,
+/// and resolving a read against it.
+///
+/// These live beside the per-binding data they walk rather than in `lower`'s
+/// entry module, which is at its line budget.
+impl super::Lowerer {
+    pub(super) fn declare(
+        &mut self,
+        name: &str,
+        kind: BindingKind,
+        initialized: bool,
+        preserve_name: bool,
+    ) -> Result<(), Diagnostic> {
+        if matches!(name, "undefined" | "NaN" | "Infinity") {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ReservedIdentifier,
+                format!(
+                    "`{name}` is a reserved TypeScript value identifier and cannot be shadowed"
+                ),
+                None,
+            ));
+        }
+        if name.starts_with(GENERATED_BINDING_PREFIX) {
+            return Err(reserved_identifier(name));
+        }
+        // Mangling exists to stop an inner scope from overwriting an outer slot
+        // of the same name. Where nothing of that name is visible there is
+        // nothing to protect, and a mangled root-level binding would publish a
+        // generated name into the durable globals and the bound-variables
+        // prompt, so keep the author's name in that case.
+        let preserve_name = preserve_name || !self.has_binding(name);
+        let owner_function = self.current_function();
+        let scope = self.scopes.last_mut().expect("a scope is always active");
+        if scope.bindings.contains_key(name) {
+            return Err(Diagnostic::new(
+                DiagnosticCode::DuplicateBinding,
+                format!("duplicate lexical binding `{name}`"),
+                None,
+            ));
+        }
+        let internal = if preserve_name {
+            name.to_string()
+        } else {
+            let id = self.next_binding;
+            self.next_binding += 1;
+            format!("{GENERATED_BINDING_PREFIX}{id}_{name}")
+        };
+        scope.bindings.insert(
+            name.to_string(),
+            Binding {
+                internal,
+                kind,
+                initialized,
+                owner_function,
+                role: BindingRole::Plain,
+            },
+        );
+        Ok(())
+    }
+
+    /// Records what the binding `name` resolves to *is*.
+    ///
+    /// The role is learned from the initializer, so it is always set after the
+    /// declaration that a lexical scope hoists — the same resolution `binding`
+    /// performs, against the same scope stack, so the fact lands on the
+    /// binding the reads will find and dies when its scope pops.
+    pub(super) fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
+        let span = self.current_span;
+        let binding = self
+            .scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.bindings.get_mut(name))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::UnknownBinding,
+                    format!("unknown binding `{name}`"),
+                    span,
+                )
+            })?;
+        binding.role = role;
+        Ok(())
+    }
+
+    pub(super) fn clear_process_handle_role(&mut self, name: &str) -> Result<(), Diagnostic> {
+        let span = self.current_span;
+        let binding = self
+            .scopes
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.bindings.get_mut(name))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::UnknownBinding,
+                    format!("unknown binding `{name}`"),
+                    span,
+                )
+            })?;
+        if binding.role == BindingRole::ProcessHandle {
+            binding.role = BindingRole::Plain;
+        }
+        Ok(())
+    }
+
+    pub(super) fn binding(&self, name: &str) -> Result<&Binding, Diagnostic> {
+        let span = self.current_span;
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::UnknownBinding,
+                    format!("unknown binding `{name}`"),
+                    span,
+                )
+            })
+    }
+
+    pub(super) fn resolve(&mut self, name: &str) -> Result<String, Diagnostic> {
+        let span = self.current_span;
+        let Some(binding) = self
+            .scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .cloned()
+        else {
+            return Err(Diagnostic::new(
+                DiagnosticCode::UnknownBinding,
+                format!("unknown binding `{name}`"),
+                span,
+            ));
+        };
+        let current_function = self.current_function();
+        if current_function == binding.owner_function && !binding.initialized {
+            return Err(Diagnostic::new(
+                DiagnosticCode::TemporalDeadZone,
+                format!("`{name}` is read before initialization"),
+                span,
+            ));
+        }
+        if current_function != binding.owner_function {
+            if !binding.initialized && !self.allow_uninitialized_declaration_capture {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::TemporalDeadZone,
+                    format!(
+                        "captured binding `{name}` is not initialized when the closure is created"
+                    ),
+                    span,
+                ));
+            }
+            let first_capturing_function = self
+                .functions
+                .iter()
+                .position(|function| function.id == binding.owner_function)
+                .map_or(0, |owner| owner + 1);
+            for function in &mut self.functions[first_capturing_function..] {
+                function.captures.insert(binding.internal.clone());
+            }
+        }
+        Ok(binding.internal)
+    }
+
+    pub(super) fn initialize(&mut self, name: &str) {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(binding) = scope.bindings.get_mut(name) {
+                binding.initialized = true;
+                return;
+            }
+        }
+    }
 }

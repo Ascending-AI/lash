@@ -516,3 +516,48 @@ fn start_resolves_its_target_through_the_scope_stack() {
     "#;
     lash_typescript::parse(visible).expect("a top-level process binding starts");
 }
+
+/// A top-level typo deep in a cell must be refused before a single effect
+/// runs, *and* the refusal must say where. The location half of this property
+/// used to be pinned on the retired Lashlang front end
+/// (`unknown_top_level_name_on_line_40_fails_at_link`); it is re-pinned here
+/// from a TypeScript cell, which is the only surface that reaches lowering now.
+#[test]
+fn a_top_level_typo_on_line_40_is_refused_before_any_effect_and_says_where() {
+    let mut lines = vec!["console.log(\"an effect that must never run\");".to_string()];
+    lines.extend((2..40).map(|index| format!("const value_{index} = {index};")));
+    lines.push("finish(value_39_typo);".to_string());
+    let source = lines.join("\n");
+
+    let error = lash_typescript::compile(&source).expect_err("the typo must refuse the cell");
+    assert_eq!(error.code, lash_typescript::DiagnosticCode::UnknownBinding);
+
+    let diagnostic = lash_typescript::format_diagnostic(&source, &error);
+    assert!(
+        diagnostic.starts_with("TS_UNKNOWN_BINDING: unknown binding `value_39_typo`"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("\n--> line 40, column 8\nfinish(value_39_typo);\n       ^~~~~~~~~~~~"),
+        "the refusal must point at the identifier itself: {diagnostic}"
+    );
+}
+
+/// The same span plumbing has to reach the other lowering-time binding
+/// refusal: a read that beats its own initializer.
+#[test]
+fn a_temporal_dead_zone_read_says_where_it_read() {
+    let source = "const first = 1;\nconst second = later + first;\nconst later = 2;\n";
+    let error = lash_typescript::compile(source).expect_err("the read beats the declaration");
+    assert_eq!(
+        error.code,
+        lash_typescript::DiagnosticCode::TemporalDeadZone
+    );
+    let diagnostic = lash_typescript::format_diagnostic(source, &error);
+    assert!(
+        diagnostic.contains(
+            "\n--> line 2, column 16\nconst second = later + first;\n               ^~~~~"
+        ),
+        "{diagnostic}"
+    );
+}

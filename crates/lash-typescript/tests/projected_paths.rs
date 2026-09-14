@@ -394,3 +394,116 @@ async fn finished_projection(source: &str, view: &Arc<RecordingView>) -> Project
     };
     value
 }
+
+/// A host list view: it answers the element-count request and hands out
+/// elements one at a time, the shape every real projected collection has. It
+/// deliberately does *not* answer `Field("length")`, because a descriptor has
+/// no reason to: the count request exists for exactly that question.
+struct ProjectedRows {
+    values: Vec<Value>,
+}
+
+impl ProjectedHostDescriptor for ProjectedRows {
+    fn type_name(&self) -> &str {
+        "ProjectedRows"
+    }
+
+    fn read_one(
+        &self,
+        request: ProjectedReadRequest,
+    ) -> ProjectedFuture<'_, Option<ProjectedReadResponse>> {
+        Box::pin(async move {
+            match request {
+                ProjectedReadRequest::Len => Some(ProjectedReadResponse::Len(self.values.len())),
+                ProjectedReadRequest::Empty => {
+                    Some(ProjectedReadResponse::Bool(self.values.is_empty()))
+                }
+                ProjectedReadRequest::Truthy => Some(ProjectedReadResponse::Bool(true)),
+                ProjectedReadRequest::Index(index) => match index {
+                    Value::Number(index) if index >= 0.0 => {
+                        self.values.get(index as usize).cloned().map_or(
+                            Some(ProjectedReadResponse::Value(Value::Undefined)),
+                            |value| Some(ProjectedReadResponse::Value(value)),
+                        )
+                    }
+                    _ => None,
+                },
+                ProjectedReadRequest::Slice { .. } | ProjectedReadRequest::Materialize => Some(
+                    ProjectedReadResponse::Value(Value::List(self.values.clone().into())),
+                ),
+                _ => None,
+            }
+        })
+    }
+}
+
+struct RowsHost;
+
+impl ExecutionHost for RowsHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        match op {
+            AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
+            _ => Err(ExecutionHostError::new(
+                "unsupported projected-rows ability",
+            )),
+        }
+    }
+
+    fn projected_bindings(&self) -> ProjectedBindings {
+        let mut bindings = ProjectedBindings::new();
+        bindings.insert(
+            "rows",
+            ProjectedValue::custom(
+                "rows",
+                Arc::new(ProjectedRows {
+                    values: (1..=4).map(|n| Value::Number(f64::from(n))).collect(),
+                }),
+            ),
+        );
+        bindings
+    }
+}
+
+async fn finished_over_rows(source: &str) -> Value {
+    let globals = BTreeSet::from_iter(["rows".to_string()]);
+    let program = lash_typescript::parse_with_globals(source, &globals)
+        .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
+    let program = lashlang::compile_ast(&program)
+        .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
+    let mut state = State::new();
+    let outcome = lashlang::execute(&program, &mut state, &RowsHost)
+        .await
+        .unwrap_or_else(|error| panic!("`{source}` should execute: {error}"));
+    let ExecutionOutcome::Finished(value) = outcome else {
+        panic!("`{source}` should finish: {outcome:?}")
+    };
+    match value {
+        Value::Projected(projected) => projected.materialize().expect("projection materializes"),
+        other => other,
+    }
+}
+
+/// FIG-3058: `.length` over a projected collection used to lower to an ordinary
+/// field read, which a descriptor answering only the count request cannot
+/// serve, so the count came back `null` — silently, and only for the lazy
+/// route: `rows.slice(0).length` materialized first and answered 4.
+///
+/// The count question is now asked as a count, so the projected route and the
+/// materializing route agree, and they agree after a `.filter` or a `.map` too.
+#[tokio::test(flavor = "current_thread")]
+async fn length_over_a_projection_counts_its_elements() {
+    for (source, expected) in [
+        ("finish(rows.length);", Value::Number(4.0)),
+        ("finish(rows.slice(0).length);", Value::Number(4.0)),
+        (
+            "finish(rows.filter((row: number): boolean => row > 2).length);",
+            Value::Number(2.0),
+        ),
+        (
+            "finish(rows.map((row: number): number => row * 2).length);",
+            Value::Number(4.0),
+        ),
+    ] {
+        assert_eq!(finished_over_rows(source).await, expected, "{source}");
+    }
+}

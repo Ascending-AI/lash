@@ -728,10 +728,26 @@ impl ProjectedValue {
         self.refuse_if_unavailable()?;
         match &self.kind {
             ProjectedKind::Scalar(value) => read_field_ref_direct(value, field).map(Some),
-            ProjectedKind::Custom(value) => Ok(value
-                .read_one(ProjectedReadRequest::Field(field.text.clone()))
-                .await
-                .map(ProjectedReadResponse::into_value)),
+            ProjectedKind::Custom(value) => {
+                if let Some(response) = value
+                    .read_one(ProjectedReadRequest::Field(field.text.clone()))
+                    .await
+                {
+                    return Ok(Some(response.into_value()));
+                }
+                // `.length` is the count question spelled as a field. A
+                // descriptor answers counts through `Len` and has no reason to
+                // also answer a field named `length`, so without this the lazy
+                // route silently produced `undefined` where the materializing
+                // route (`view.slice(0).length`) produced the count (FIG-3058).
+                if field.text.as_ref() == "length"
+                    && let Some(ProjectedReadResponse::Len(len)) =
+                        value.read_one(ProjectedReadRequest::Len).await
+                {
+                    return Ok(Some(Value::Number(len as f64)));
+                }
+                Ok(None)
+            }
         }
     }
 
