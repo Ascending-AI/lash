@@ -134,7 +134,9 @@ impl LashRuntime {
     /// * **The claim absorbs whatever else is already queued.** A direct turn
     ///   claims the head of the pending next-turn queue exactly as a drain
     ///   does, so inputs enqueued earlier join this turn instead of waiting for
-    ///   another one.
+    ///   another one. Only earlier ones: the claim window closes at this turn's
+    ///   own journaled acceptance, so anything admitted after it waits for the
+    ///   next turn (FIG-3078).
     /// * **Live per-turn context stays with this caller.** `protocol_extension`
     ///   and live `TurnContext` plugin inputs are process-local and cannot be
     ///   persisted, so a worker that recovers this accepted row drives its
@@ -174,6 +176,100 @@ impl LashRuntime {
                 std::panic::resume_unwind(payload)
             }
         }
+    }
+
+    /// Claim the queued next-turn rows this acceptance is allowed to drive.
+    ///
+    /// **The claim window closes at journaling (FIG-3078).** A turn drives
+    /// exactly the admitted rows whose `enqueue_seq` is at or before the row
+    /// its own acceptance minted. The acceptance is a journaled effect
+    /// ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md) §6),
+    /// so every execution of the same turn — including a replacement worker
+    /// replaying it — re-derives the identical boundary and materializes the
+    /// identical message block. The claim itself is a live store read and is
+    /// not journaled, so without that bound a row admitted *after* the
+    /// acceptance (the multi-tab `next_turn` that lands between admission and
+    /// worker replacement) joins the replacement's block, which then diverges
+    /// from the block the first execution already journaled
+    /// ([`RuntimeErrorCode::WorkerReplacementAbort`](crate::RuntimeErrorCode::WorkerReplacementAbort)).
+    /// Such a row waits for the next turn instead.
+    ///
+    /// The bound is enforced by re-claiming the admitted prefix rather than by
+    /// dropping rows from a held claim: every backend claims lowest
+    /// `enqueue_seq` first, so a claim capped at the prefix length takes
+    /// exactly that prefix, and the late rows go back to `deferred_next_turn`
+    /// for the next drain instead of sitting claim-pinned until the FIG-1573
+    /// backstop repairs them. Nothing is journaled or encoded differently;
+    /// this is a bound on what the claim may fence.
+    async fn claim_turn_inputs_admitted_through_acceptance(
+        &self,
+        store: &dyn crate::store::RuntimePersistence,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        accepted: &crate::PendingTurnInput,
+        trace_turn_id: &TurnId,
+    ) -> Result<Option<crate::TurnInputClaim>, RuntimeError> {
+        let Some(claim) = store
+            .claim_next_turn_inputs(
+                &self.state.session_id,
+                fence,
+                &self.runtime_lease_owner,
+                MAX_CLAIMED_TURN_INPUTS,
+            )
+            .await
+            .map_err(super::runtime_error_from_store_commit)?
+        else {
+            return Ok(None);
+        };
+        let admitted_through = accepted.enqueue_seq;
+        let late = claim
+            .inputs
+            .iter()
+            .filter(|input| input.enqueue_seq > admitted_through)
+            .map(|input| input.input_id.clone())
+            .collect::<Vec<_>>();
+        if late.is_empty() {
+            return Ok(Some(claim));
+        }
+        let admitted = claim.inputs.len() - late.len();
+        crate::trace::emit_trace(
+            &self.host.core.tracing.trace_sink,
+            &self.host.core.tracing.trace_context,
+            lash_trace::TraceContext::default()
+                .for_session(self.state.session_id.clone())
+                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                .for_turn_index(self.state.turn_index + 1)
+                .for_turn(trace_turn_id.clone()),
+            lash_trace::TraceEvent::Custom {
+                name: "turn_input.claim_window_closed".to_string(),
+                payload: serde_json::json!({
+                    "claim_id": &claim.claim_id,
+                    "accepted_input_id": &accepted.input_id,
+                    "admitted_through_enqueue_seq": admitted_through,
+                    "admitted_input_count": admitted,
+                    "deferred_input_ids": &late,
+                }),
+            },
+            self.host.core.clock.as_ref(),
+        );
+        store
+            .abandon_turn_input_claim(&claim)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        if admitted == 0 {
+            // The acceptance this turn replayed is no longer an admitted row,
+            // so there is no prefix to fence. Fall through to the unclaimed
+            // regime, which probes the row and picks the settlement path.
+            return Ok(None);
+        }
+        store
+            .claim_next_turn_inputs(
+                &self.state.session_id,
+                fence,
+                &self.runtime_lease_owner,
+                admitted,
+            )
+            .await
+            .map_err(super::runtime_error_from_store_commit)
     }
 
     async fn stream_turn_with_agent_frames_holding_lease(
@@ -293,15 +389,14 @@ impl LashRuntime {
                 .as_ref()
                 .map(SessionExecutionLeaseGuard::fence)
                 .expect("a store-backed turn acquires its execution lease before acceptance");
-            let input_claim = store
-                .claim_next_turn_inputs(
-                    &self.state.session_id,
+            let input_claim = self
+                .claim_turn_inputs_admitted_through_acceptance(
+                    store.as_ref(),
                     &fence,
-                    &self.runtime_lease_owner,
-                    MAX_CLAIMED_TURN_INPUTS,
+                    &accepted,
+                    &trace_turn_id,
                 )
-                .await
-                .map_err(super::runtime_error_from_store_commit)?;
+                .await?;
             let claimed_own_row = match input_claim {
                 Some(claim)
                     if claim
