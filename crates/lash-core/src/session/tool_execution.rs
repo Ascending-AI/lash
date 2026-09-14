@@ -777,6 +777,19 @@ impl RuntimeExecutionContext<'_> {
             crate::RuntimeEffectKind::AwaitEvent,
             replay_suffix,
         );
+        // Arm before parking, never after: the resolver the call named is what
+        // makes the wait finishable, and this runs on the redrive too, because
+        // the recorded attempt body that named it does not re-run.
+        if let Err(err) = crate::tool_dispatch::arm_pending_resolver(
+            self.dispatch.processes.as_ref(),
+            &pending.pending,
+            &pending.key,
+            self.process_scope(parent_invocation.clone()),
+        )
+        .await
+        {
+            return Self::unarmed_pending_outcome(pending, err);
+        }
         let cancellation = cancellation.unwrap_or_default();
         let deadline = pending
             .pending
@@ -846,6 +859,35 @@ impl RuntimeExecutionContext<'_> {
     ) {
         for outcome in outcomes {
             self.dispatch.trigger_outcomes.enqueue(outcome);
+        }
+    }
+
+    /// Fails a call whose named resolver could not be armed.
+    ///
+    /// Deliberately a failure and not a park: a wait nobody is going to resolve
+    /// is indistinguishable from a hang, and the turn would hold until it was
+    /// cancelled. Reporting it here keeps the fault at the site that knows what
+    /// it was trying to arm.
+    fn unarmed_pending_outcome(
+        pending: crate::tool_dispatch::PendingToolDispatchOutcome,
+        error: crate::PluginError,
+    ) -> ToolDispatchOutcome {
+        let record = ToolCallRecord {
+            call_id: None,
+            tool: pending.tool_name,
+            args: pending.args,
+            output: ToolCallOutput::failure(ToolFailure::runtime(
+                ToolFailureClass::Internal,
+                "pending_tool_resolver_unarmed",
+                format!("the declared resolver for this call could not be armed: {error}"),
+            )),
+            duration_ms: pending.duration_ms,
+        };
+        ToolDispatchOutcome {
+            record,
+            attempts: pending.attempts,
+            intents: crate::ToolIntents::default(),
+            intent_outcomes: Vec::new(),
         }
     }
 

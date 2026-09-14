@@ -63,6 +63,30 @@ impl PendingAnnouncement {
     }
 }
 
+/// Who delivers the outcome of a parked call.
+///
+/// A plain [`ToolOutcome::Pending`] names nobody: an out-of-band actor holds
+/// the completion key and resolves it whenever it likes (the human-approval
+/// shape). A call that parks on a *runtime-owned* fact names that fact here
+/// instead, and the runtime arms the resolver itself — at the park and again on
+/// every redrive of the parked turn, because a recorded attempt body does not
+/// re-run when the turn is re-driven and an armed watcher does not survive a
+/// crash.
+///
+/// The declaration is journaled with the pending launch, so the arming is
+/// replay-deterministic: the same resolver is re-derived from the same
+/// journaled bytes rather than re-discovered by re-executing the tool.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PendingResolver {
+    /// The terminal of a durable process resolves this wait.
+    ///
+    /// The incarnation rides inside the [`ProcessRef`](crate::ProcessRef): a
+    /// wait armed against one incarnation is never resolved by a later one's
+    /// terminal.
+    ProcessTerminal { process_ref: crate::ProcessRef },
+}
+
 /// Configuration carried by a [`ToolOutcome::Pending`] result: how long the runtime
 /// waits for the deferred outcome, what to do if it times out or is cancelled, and
 /// any process event the runtime announces when the call parks.
@@ -83,6 +107,13 @@ pub struct PendingCompletion {
     /// Process event the runtime appends when this call parks, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub announcement: Option<PendingAnnouncement>,
+    /// Runtime-owned fact that resolves this wait, if the call named one.
+    ///
+    /// `None` is the out-of-band shape: something outside the runtime holds the
+    /// completion key. `Some` makes the runtime responsible for arming the
+    /// resolver on the park and on every redrive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_by: Option<PendingResolver>,
 }
 
 impl Default for PendingCompletion {
@@ -92,6 +123,7 @@ impl Default for PendingCompletion {
             on_timeout: TimeoutBehavior::ErrorAsResult,
             on_cancel: CancelHint::CancelExternalWork,
             announcement: None,
+            resolved_by: None,
         }
     }
 }
@@ -127,6 +159,23 @@ impl PendingCompletion {
     pub fn announcing(mut self, announcement: PendingAnnouncement) -> Self {
         self.announcement = Some(announcement);
         self
+    }
+
+    /// Declares the runtime-owned fact that resolves this wait, making the
+    /// runtime — not the tool — responsible for arming the resolver.
+    ///
+    /// Use it when the outcome is a fact the runtime can already observe
+    /// durably (a process terminal), rather than one an external actor
+    /// delivers. The tool still takes its completion key first: the key is what
+    /// the armed resolver resolves.
+    pub fn resolved_by(mut self, resolver: PendingResolver) -> Self {
+        self.resolved_by = Some(resolver);
+        self
+    }
+
+    /// Declares that the terminal of `process_ref` resolves this wait.
+    pub fn resolved_by_process_terminal(self, process_ref: crate::ProcessRef) -> Self {
+        self.resolved_by(PendingResolver::ProcessTerminal { process_ref })
     }
 }
 

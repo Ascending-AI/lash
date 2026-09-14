@@ -1,5 +1,5 @@
 //! Protocol-stack runtime-control tools (`processes.list`,
-//! `processes.cancel`).
+//! `processes.cancel`, `processes.await`).
 //!
 //! Dedicated plugins register these tools into the normal tool-provider
 //! surface, so protocol crates do not own or duplicate runtime control behavior.
@@ -79,7 +79,16 @@ impl StaticToolExecute for SessionProcessAdminTools {
         ))
     }
 
+    /// `await_process` parks, so the runtime pre-derives the completion key its
+    /// recorded attempt reads. Nothing else in this plugin defers.
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:await_process"
+    }
+
     async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name == "await_process" {
+            return execute_process_await_tool_call(call.context, call.args);
+        }
         if call.name == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
@@ -163,11 +172,51 @@ pub fn process_list_tool_definition() -> ToolDefinition {
 }
 
 fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinition> {
-    let mut definitions = vec![process_list_tool_definition()];
+    let mut definitions = vec![
+        process_list_tool_definition(),
+        process_await_tool_definition(),
+    ];
     if include_cancel_process {
         definitions.push(process_cancel_tool_definition());
     }
     definitions
+}
+
+/// `processes.await(handle)` — park until the process behind `handle` reaches
+/// its terminal, and answer with that terminal.
+///
+/// The argument is typed through `x-lash` rather than as a record: a cell
+/// passes the process handle value itself, whose nominal type is not assignable
+/// to a record, so a `{"type":"object"}` parameter would refuse the call in the
+/// type checker before the handler ever ran.
+///
+/// The kind is `process_unknown` — a process the host can only describe as
+/// callable — because the host has no authoritative call signature for an
+/// arbitrary awaited process. `handle` is the *trigger* handle kind and carries
+/// the payload its trigger delivers, which is a different type and would refuse
+/// a process value here.
+pub fn process_await_tool_definition() -> ToolDefinition {
+    ToolDefinition::raw(
+        "tool:await_process",
+        "await_process",
+        "Wait for a durable process to finish and return its terminal outcome. Pass the handle a process start or `processes.list(...)` returned. The wait is durable: it survives a restart of the waiting turn, and cancelling the turn drops the wait without cancelling the process.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "handle": {
+                    "x-lash": { "kind": "process_unknown" },
+                    "description": "Process handle to wait on, as returned by a process start or `processes.list(...)`."
+                }
+            },
+            "required": ["handle"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({
+            "description": "The process's terminal outcome."
+        }),
+    )
+    .with_examples(vec!["await processes.await({ handle: h })?".into()])
+    .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
 pub fn process_cancel_tool_definition() -> ToolDefinition {
@@ -204,6 +253,37 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
         r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
     ])
     .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
+}
+
+/// Parks the call on the terminal of the handle's process.
+///
+/// It takes the completion key first and names the process terminal as the
+/// resolver, so the runtime — not this tool — is responsible for arming the
+/// wait, both now and on every redrive of the parked turn. That is what makes
+/// the wait durable: nothing here holds a future, a task, or a watcher that a
+/// crash could lose.
+///
+/// Deliberately intent-free. A parking attempt cannot carry tool intents by
+/// construction, and it needs none: the durable act is the journaled arming the
+/// runtime performs from the declaration below, not a side effect this body
+/// requests.
+pub fn execute_process_await_tool_call(
+    context: &lash_core::AttemptContext<'_>,
+    args: &Value,
+) -> lash_core::ToolAttemptOutcome {
+    let Some(handle) = args.get("handle") else {
+        return done_without_intents(ToolOutcome::err_fmt("await_process requires `handle`"));
+    };
+    let process_ref = match lash_core::ProcessRef::from_handle_json(handle) {
+        Ok(process_ref) => process_ref,
+        Err(err) => return done_without_intents(ToolOutcome::err_fmt(err)),
+    };
+    if let Err(err) = context.completion_key() {
+        return done_without_intents(ToolOutcome::err_fmt(err));
+    }
+    lash_core::ToolAttemptOutcome::pending(
+        lash_core::PendingCompletion::new().resolved_by_process_terminal(process_ref),
+    )
 }
 
 pub async fn execute_process_list_tool_call(
@@ -280,7 +360,10 @@ mod tests {
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["list_process_handles", "cancel_process"]);
+        assert_eq!(
+            names,
+            vec!["list_process_handles", "await_process", "cancel_process"]
+        );
         #[cfg(not(feature = "lashlang"))]
         for definition in &definitions {
             assert_eq!(
@@ -351,6 +434,115 @@ mod tests {
         };
         assert_eq!(intent.session_id, "test-session");
         assert_eq!(intent.process_id, "literal-process");
+    }
+
+    fn parked_attempt_context<'run>(
+        tool_context: &lash_core::ToolContext<'run>,
+    ) -> lash_core::AttemptContext<'run> {
+        lash_core::testing::mock_attempt_context_with_completion_key(
+            tool_context,
+            lash_core::AwaitEventKey {
+                scope: lash_core::ExecutionScope::turn("test-session", "test-turn"),
+                wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
+                    tool_call_id: "await-process-call".to_string(),
+                },
+                key_id: "await-process-key".to_string(),
+                signature: "await-process-signature".to_string(),
+            },
+        )
+    }
+
+    /// The process-handle record a cell actually holds, as
+    /// `session::process_handles::process_handle_json` mints it.
+    fn handle_json(id: &str, incarnation: u64) -> serde_json::Value {
+        serde_json::json!({
+            "__handle__": "process",
+            "id": id,
+            "incarnation": incarnation,
+        })
+    }
+
+    #[tokio::test]
+    async fn await_process_parks_naming_the_process_terminal_as_its_resolver() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = parked_attempt_context(&tool_context);
+        let outcome = tools
+            .execute_attempt(ToolCall {
+                name: "await_process",
+                args: &serde_json::json!({ "handle": handle_json("proc-1", 3) }),
+                context: &context,
+            })
+            .await;
+        let lash_core::ToolAttemptOutcome::Pending(pending) = outcome else {
+            panic!("processes.await must park instead of answering inline")
+        };
+        let Some(lash_core::PendingResolver::ProcessTerminal { process_ref }) = pending.resolved_by
+        else {
+            panic!("a parked processes.await must name the process terminal as its resolver")
+        };
+        assert_eq!(process_ref.process_id, "proc-1");
+        assert_eq!(
+            process_ref.incarnation.registration_sequence(),
+            3,
+            "the arming must pin the incarnation the caller held, not the id alone"
+        );
+    }
+
+    /// The park is what makes the wait durable, so a call that cannot be parked
+    /// must fail loudly rather than answer inline: an inline answer would be a
+    /// silent downgrade to a non-durable await.
+    #[tokio::test]
+    async fn await_process_refuses_a_value_that_is_not_a_process_handle() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = parked_attempt_context(&tool_context);
+        for (label, args) in [
+            ("missing handle", serde_json::json!({})),
+            (
+                "a record that is not a handle at all",
+                serde_json::json!({ "handle": { "id": "x", "incarnation": 1 } }),
+            ),
+            (
+                "a handle with no incarnation",
+                serde_json::json!({ "handle": { "__handle__": "process", "id": "x" } }),
+            ),
+        ] {
+            let outcome = tools
+                .execute_attempt(ToolCall {
+                    name: "await_process",
+                    args: &args,
+                    context: &context,
+                })
+                .await;
+            assert!(
+                matches!(outcome, lash_core::ToolAttemptOutcome::Done { .. }),
+                "{label} must be refused, not parked"
+            );
+        }
+    }
+
+    #[test]
+    fn await_process_declares_a_deferring_attempt_and_a_handle_typed_argument() {
+        let definition = process_await_tool_definition();
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        assert!(
+            StaticToolExecute::attempt_may_defer(&tools, definition.id()),
+            "the runtime only pre-derives a completion key for a tool that declares it defers"
+        );
+        // A `{"type":"object"}` parameter would refuse a nominally typed cell
+        // handle in the type checker before the handler ran (FIG-2989), which
+        // is exactly what the `x-lash` keyword exists to avoid.
+        assert_eq!(
+            definition.contract.input_schema.canonical["properties"]["handle"]["x-lash"],
+            serde_json::json!({ "kind": "process_unknown" })
+        );
     }
 
     #[test]

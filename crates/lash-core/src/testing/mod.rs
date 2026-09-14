@@ -612,6 +612,24 @@ pub fn mock_attempt_context_from<'run>(
     )
 }
 
+/// Like [`mock_attempt_context_from`], but with a completion key already
+/// reserved, as the coordinator does for a tool that declared it defers.
+///
+/// A body that parks reads the key before returning `Pending`, so a test of a
+/// parking tool that used the keyless projection would only ever observe the
+/// "did not declare deferred completion" refusal.
+pub fn mock_attempt_context_with_completion_key<'run>(
+    context: &crate::ToolContext<'run>,
+    key: crate::AwaitEventKey,
+) -> crate::AttemptContext<'run> {
+    crate::AttemptContext::from_tool_context(
+        context,
+        "test-turn".to_string(),
+        Some(key),
+        crate::tool_provider::AttemptCompletionSupport::Available,
+    )
+}
+
 /// Like [`mock_attempt_context`], but with the grant execution binding
 /// populated, for provider tests that assert grant-only routing behavior.
 pub fn mock_attempt_context_with_execution_binding(

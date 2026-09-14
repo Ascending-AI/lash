@@ -620,6 +620,21 @@ pub enum ProcessCommand {
     Await {
         process_ref: crate::ProcessRef,
     },
+    /// Arm the process terminal as the resolver of one durable wait, without
+    /// waiting for it here.
+    ///
+    /// This is the command half of
+    /// [`PendingResolver::ProcessTerminal`](crate::PendingResolver::ProcessTerminal).
+    /// It returns as soon as the boundary has taken responsibility for the
+    /// resolution, so the turn that issued it goes on to park on `key` through
+    /// the ordinary [`RuntimeEffectCommand::AwaitEvent`] path. Arming is
+    /// idempotent: the same `(process_ref, key)` may be armed on every redrive
+    /// of the parked turn, and the first terminal to land resolves the wait
+    /// exactly once.
+    AttachTerminal {
+        process_ref: crate::ProcessRef,
+        key: crate::AwaitEventKey,
+    },
     Cancel {
         process_ref: crate::ProcessRef,
         origin: crate::CancelOrigin,
@@ -672,6 +687,10 @@ enum ProcessCommandDecode {
     },
     Await {
         process_ref: crate::ProcessRef,
+    },
+    AttachTerminal {
+        process_ref: crate::ProcessRef,
+        key: crate::AwaitEventKey,
     },
     Cancel {
         process_ref: crate::ProcessRef,
@@ -750,6 +769,9 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 Self::DeleteSession { session_id }
             }
             ProcessCommandDecode::Await { process_ref } => Self::Await { process_ref },
+            ProcessCommandDecode::AttachTerminal { process_ref, key } => {
+                Self::AttachTerminal { process_ref, key }
+            }
             ProcessCommandDecode::Cancel {
                 process_ref,
                 origin,
@@ -843,6 +865,14 @@ impl ProcessCommand {
             // pre-incarnation spelling. The journaled command payload carries
             // the structural ProcessRef and refuses a superseded lifetime.
             Self::Await { process_ref } => format!("process:await:{}", process_ref.process_id),
+            // One arming per (process, wait): a turn may park several
+            // waits on the same process, and each redrive re-issues the
+            // same id so the arming replays against its own journal entry
+            // instead of colliding with the terminal wait above.
+            Self::AttachTerminal { process_ref, key } => format!(
+                "process:attach-terminal:{}:{}",
+                process_ref.process_id, key.key_id
+            ),
             Self::Cancel { process_ref, .. } => {
                 format!("process:cancel:{}", process_ref.process_id)
             }
@@ -897,6 +927,12 @@ pub enum ProcessEffectOutcome {
         // carried through the recursive effect executor.
         output: Box<ProcessAwaitOutput>,
     },
+    /// The boundary has taken responsibility for resolving the armed wait.
+    ///
+    /// Deliberately payload-free: the arming says nothing about the process's
+    /// state, and the resolution itself arrives through the await-event seam,
+    /// not through this outcome.
+    AttachTerminal,
     Cancel {
         record: Box<ProcessRecord>,
     },

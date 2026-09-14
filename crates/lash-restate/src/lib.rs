@@ -89,6 +89,7 @@ mod effect_group;
 mod effect_host;
 mod ingress;
 mod process;
+mod process_attach;
 mod session_administration;
 mod turn;
 
@@ -135,6 +136,10 @@ pub use process::{
     RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
     RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWorkflowInput,
     RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
+};
+pub use process_attach::{
+    LashProcessAttach, LashProcessAttachClient, LashProcessAttachImpl, RestateProcessAttachRequest,
+    ServeLashProcessAttach,
 };
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::{RestateTurnAttach, RestateTurnDeployment};

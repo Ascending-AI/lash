@@ -19,8 +19,8 @@ use lash_core::{
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
     LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowImpl, LashProcessWorkflow, RestateEffectHost, RestateProcessDeployment,
-    RestateRuntimeEffectController,
+    LashDurableWaitWorkflowImpl, LashProcessAttach, LashProcessAttachImpl, LashProcessWorkflow,
+    RestateEffectHost, RestateProcessDeployment, RestateRuntimeEffectController,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::prelude::{Endpoint, WorkflowContext};
@@ -1070,6 +1070,7 @@ async fn async_main() -> Result<()> {
         .bind(process_workflow.serve())
         .bind(LashDurableWaitWorkflowImpl.serve())
         .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashProcessAttachImpl.serve())
         .build();
     restate_sdk::http_server::HttpServer::new(endpoint)
         .listen_and_serve(addr)

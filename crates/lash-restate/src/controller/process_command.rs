@@ -1,4 +1,5 @@
 use super::*;
+use crate::process_attach::RestateProcessAttachRequest;
 use restate_sdk::serde::Json;
 
 const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
@@ -450,6 +451,27 @@ where
                 ProcessEffectOutcome::Await {
                     output: Box::new(output),
                 },
+                lash_core::StoreRealization::Realized,
+            ))
+        }
+        ProcessCommand::AttachTerminal { process_ref, key } => {
+            // Prove the incarnation still exists before claiming the wait is
+            // armed. The same retention exposure the `Await` branch documents
+            // applies: a host that prunes a terminal row out from under a
+            // waiter breaks the wait, and the refusal here is loud rather than
+            // a silent park.
+            registry.get_process_ref(&process_ref).await?;
+            context
+                .attach_process_terminal(RestateProcessAttachRequest { process_ref, key })
+                .await
+                .map_err(|err| {
+                    RuntimeEffectControllerError::new(
+                        RuntimeErrorCode::RestateProcessAwait,
+                        err.to_string(),
+                    )
+                })?;
+            Ok((
+                ProcessEffectOutcome::AttachTerminal,
                 lash_core::StoreRealization::Realized,
             ))
         }

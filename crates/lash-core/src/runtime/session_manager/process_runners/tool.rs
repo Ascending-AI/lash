@@ -189,6 +189,16 @@ impl RuntimeSessionServices {
                         registration.id, pending.tool_name
                     ),
                 );
+                // Same rule as the session turn path: arm the resolver this
+                // call named before parking on it, on the first park and on
+                // every redrive of the enclosing process.
+                crate::tool_dispatch::arm_pending_resolver(
+                    dispatch.processes.as_ref(),
+                    &pending.pending,
+                    &pending.key,
+                    dispatch.process_scope(),
+                )
+                .await?;
                 let resolution = Box::pin(await_pending_process_tool(
                     dispatch.effect_controller.controller(),
                     Arc::clone(&dispatch.clock),
