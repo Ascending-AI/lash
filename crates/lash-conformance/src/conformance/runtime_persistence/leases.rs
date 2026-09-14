@@ -1,6 +1,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_increments_head_and_round_trips_agent_frames(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -72,6 +76,10 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "concurrent-head-cas";
     let lease =
@@ -158,6 +166,10 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     release_session_execution_lease_for_test(&store, &lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
     let alpha = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
@@ -186,6 +198,10 @@ pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersist
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("hydrated"),
@@ -233,6 +249,10 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistenc
     assert_eq!(read.token_ledger[0].usage.input_tokens, 11);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>) {
     let fresh_retry_owner = lease_owner("fresh-retry-owner");
     let fresh_retry_nonce = crate::LeaseClaimNonce::new();
@@ -677,6 +697,10 @@ pub async fn session_execution_lease_contract(store: Arc<dyn RuntimePersistence>
 /// A borrowed commit validates the ordinary current-token fence without
 /// participating in the lease lifecycle. Run through the shared conformance
 /// suite so in-memory, SQLite, PostgreSQL, and perf backends cannot drift.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn RuntimePersistence>) {
     let session_id = "borrowed-commit-fence";
     let owner = lease_owner("borrowed-commit-owner");
@@ -799,6 +823,10 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
     release_session_execution_lease_for_test(&store, &rotated).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn same_incarnation_rotation_gates_claims_not_commits(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -880,6 +908,10 @@ pub async fn same_incarnation_rotation_gates_claims_not_commits(
 /// executor discriminator keeps those opens out of the reentry arm while the
 /// stable host owner remains shared. This law runs unchanged on in-memory,
 /// SQLite, PostgreSQL, and the perf conformance backend.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1014,6 +1046,10 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
 /// same per-session advisory lock. Either linearization is legal, but a renewal
 /// that runs after rotation must return the named refusal rather than fabricate
 /// success for the stale token.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1087,6 +1123,10 @@ pub async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_l
     release_session_execution_lease_for_test(&store, &successor).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_expires_by_ttl_contract<F>(
     make: &F,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -1221,6 +1261,10 @@ pub(super) async fn claim_session_execution_lease_until_acquired(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn claim_queued_work_under_short_lease(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -1261,6 +1305,10 @@ pub(super) async fn claim_queued_work_under_short_lease(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn claim_turn_input_under_short_lease(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -1299,6 +1347,10 @@ pub(super) async fn claim_turn_input_under_short_lease(
 /// reports the exact holder facts, a lapsed row is still reported (expiry is not
 /// filtered), and a takeover is visible as a strictly higher generation under a
 /// different holder.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn RuntimePersistence>) {
     assert!(
         store
@@ -1413,6 +1465,10 @@ pub async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Run
 /// stands in for, and one that restarts the fence after release reissues a
 /// generation that stale claims still pin, which stops fencing working at all.
 /// Callers pass a session id they own, because a claim mutates the lane.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_displacement(
     store: &(dyn crate::store::SessionExecutionLeaseStore + '_),
     session_id: &SessionId,
@@ -1542,6 +1598,10 @@ pub async fn session_execution_lease_displacement(
 /// store so no implementation can weaken one term locally. Queued-work and
 /// leading-command paths receive this coverage transitively through their
 /// shared fence-ensure helper rather than duplicating the vector three times.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_fence_authority(store: &dyn RuntimePersistence) {
     let session_id = "lease-fence-authority";
     let owner = lease_owner("lease-fence-owner");
@@ -1672,6 +1732,10 @@ pub async fn session_execution_lease_displacement_contract(store: Arc<dyn Runtim
         .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
     let root = sample_session_node(&SessionId::from("branchy"), "root-node", None);
     let root_node_id = root.node_id.clone();

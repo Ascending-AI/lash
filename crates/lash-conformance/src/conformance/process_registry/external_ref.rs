@@ -12,6 +12,10 @@ use pretty_assertions::assert_eq;
 /// carries a strictly later ordinal; an equal or earlier ordinal on the same
 /// backend is an idempotent no-op, which is what lets a resubmitting sweep
 /// coalesce without rewriting the row it coalesced onto.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
     registry: Arc<dyn ProcessRegistry>,
 ) {

@@ -87,6 +87,10 @@ pub trait TriggerOccurrenceListingFaultInjector: Send + Sync {
 
 /// A corrupt occurrence row makes the whole list unreliable, while a failure
 /// to query the backend retains its separate infrastructure classification.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn trigger_occurrence_listing_corruption_law(
     store: Arc<dyn crate::TriggerStore>,
     injector: &dyn TriggerOccurrenceListingFaultInjector,
@@ -143,6 +147,11 @@ pub trait LegacyTriggerMutationReceiptInjector: Send + Sync {
 
 /// Proves for conformance-suite embedders that an old receipt whose JSON names
 /// no owner survives both deleted-session reconciliation and the host cutoff.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn legacy_ownerless_trigger_receipt_is_retained_law(
     store: Arc<dyn crate::TriggerStore>,
     injector: &dyn LegacyTriggerMutationReceiptInjector,
@@ -195,6 +204,10 @@ pub async fn legacy_ownerless_trigger_receipt_is_retained_law(
 
 /// Proves that a mid-pass host-lever delete failure is `Err` with completed
 /// work in its partial report, never a forged `NothingToDo` success.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn trigger_occurrence_retention_failure_law(
     store: Arc<dyn crate::TriggerStore>,
     fault: &dyn TriggerOccurrenceRetentionFaultInjector,
@@ -244,6 +257,10 @@ pub async fn trigger_occurrence_retention_failure_law(
 
 /// Proves that reconciliation delete failure rolls the whole trigger-retention
 /// transaction back and that the same decision succeeds when retried.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn trigger_retention_reconciliation_failure_law(
     store: Arc<dyn crate::TriggerStore>,
     fault: &dyn TriggerOccurrenceRetentionFaultInjector,
@@ -293,6 +310,10 @@ pub async fn trigger_retention_reconciliation_failure_law(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -403,6 +424,11 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     assert_eq!(recreated.revision, 1, "the old receipt was reclaimed");
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::TriggerStore>) {
     let owner_scope = crate::TriggerOwnerScope::host("retention-host").unwrap();
     let mut draft = sample_draft(
@@ -468,6 +494,10 @@ async fn host_tombstone_remains_a_permanent_revive_fence(store: Arc<dyn crate::T
     assert_eq!(revived.revision, 3);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn zero_match_occurrence_reconciles_without_deliveries(store: Arc<dyn crate::TriggerStore>) {
     store
         .ingest_occurrence(button_occurrence(
@@ -490,6 +520,10 @@ async fn zero_match_occurrence_reconciles_without_deliveries(store: Arc<dyn crat
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn occurrence_with_live_delivery_survives_reconciliation(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -661,6 +695,10 @@ fn revision_command(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn execute(
     store: &Arc<dyn crate::TriggerStore>,
     operation_id: &str,
@@ -672,6 +710,10 @@ async fn execute(
         .expect("trigger store command")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn mutate(
     store: &Arc<dyn crate::TriggerStore>,
     operation_id: &str,
@@ -712,6 +754,10 @@ fn trigger_source_key_and_subscription_identity_are_stable() {
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerStore>) {
     let draft = sample_draft(
         &SessionId::from("session-a"),
@@ -743,6 +789,10 @@ async fn same_owner_key_definition_is_idempotent(store: Arc<dyn crate::TriggerSt
     assert_eq!(rows.len(), 1);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::TriggerStore>) {
     let key = "cas-key";
     let original = sample_draft(&SessionId::from("session-a"), key, "v1", "worker");
@@ -794,6 +844,10 @@ async fn changed_register_conflicts_and_update_is_cas(store: Arc<dyn crate::Trig
     assert_eq!(usize::from(left.is_err()) + usize::from(right.is_err()), 1);
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate::TriggerStore>) {
     let key = "receipt-key";
     mutate(
@@ -832,6 +886,10 @@ async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate
     assert!(!current[0].enabled);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn conflicting_mutation_receipt_survives_later_revision(store: Arc<dyn crate::TriggerStore>) {
     let key = "conflict-receipt-key";
     mutate(
@@ -859,6 +917,10 @@ async fn conflicting_mutation_receipt_survives_later_revision(store: Arc<dyn cra
     assert_eq!(retried, original, "retry returns the original conflict");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) {
     let key = "unreceipted-list-key";
     mutate(
@@ -912,6 +974,11 @@ async fn list_operations_are_not_receipted(store: Arc<dyn crate::TriggerStore>) 
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn for_session_filter_is_canonical_and_scoped(store: Arc<dyn crate::TriggerStore>) {
     for session_id in ["canonical-session", "canonical-neighbor"] {
         mutate(
@@ -950,6 +1017,11 @@ async fn for_session_filter_is_canonical_and_scoped(store: Arc<dyn crate::Trigge
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerStore>) {
     let key = "receipt-retention-key";
     let command = register_command(
@@ -996,6 +1068,11 @@ async fn mutation_receipts_follow_owner_retention(store: Arc<dyn crate::TriggerS
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::TriggerStore>) {
     for session_id in ["prune-owner", "prune-neighbor"] {
         mutate(
@@ -1055,6 +1132,10 @@ async fn explicit_prune_is_journaled_and_owner_scoped(store: Arc<dyn crate::Trig
     assert_eq!(neighbor[0].subscription_key, "shared-key");
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::TriggerStore>) {
     let key = "snapshot-key";
     let source_key = "snapshot-v1";
@@ -1110,6 +1191,10 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn disable_preserves_reserved_work_and_requires_explicit_enable(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -1180,6 +1265,11 @@ async fn disable_preserves_reserved_work_and_requires_explicit_enable(
 /// `execute_command`: the fence rejects a stale revision, the accepted enable
 /// advances the revision and flips the record, its receipt replays byte-for-byte
 /// afterwards, and occurrences reach the target again.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -1330,6 +1420,10 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -1395,6 +1489,10 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
     assert_eq!(revived.revision, 3);
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -1475,6 +1573,10 @@ async fn owner_namespaces_are_exact_and_session_cleanup_is_scoped(
 /// `as i64` cast of a huge bound wraps to a negative value and inverts the
 /// comparison, so a host filtering with `u64::MAX` would get the complement of
 /// the in-memory answer instead of the same answer.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn occurrence_time_bounds_match_the_rust_predicate(store: Arc<dyn crate::TriggerStore>) {
     for (index, source_key) in ["bounds-source-a", "bounds-source-b"].iter().enumerate() {
         store
@@ -1541,6 +1643,10 @@ async fn occurrence_time_bounds_match_the_rust_predicate(store: Arc<dyn crate::T
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn occurrence_and_reservations_are_atomic_and_idempotent(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -1576,6 +1682,10 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
 
 /// Law: ingest accounting arms a zero-match fan-out immediately, so the host
 /// lever can reclaim it without any timer or delivery transition.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn zero_match_occurrence_is_immediately_reclaimable(store: Arc<dyn crate::TriggerStore>) {
     let ingress = store
         .ingest_occurrence(button_occurrence(
@@ -1611,6 +1721,10 @@ async fn zero_match_occurrence_is_immediately_reclaimable(store: Arc<dyn crate::
 /// matched occurrence while its delivery fan-out remains live. Deleting the
 /// final terminal delivery arms the parent, after which the same host lever can
 /// reclaim it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::TriggerStore>) {
     mutate(
         &store,
@@ -1680,6 +1794,10 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
 
 /// Law: the cutoff delays eligibility that was already armed. Moving the
 /// cutoff forward can reclaim that row, but still cannot arm a live fan-out.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn crate::TriggerStore>) {
     store
         .ingest_occurrence(button_occurrence(
@@ -1741,6 +1859,10 @@ async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn cra
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crate::TriggerStore>) {
     let owner_scope = crate::TriggerOwnerScope::session("tick-outcome-session");
     mutate(
@@ -1860,6 +1982,10 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
 /// (`reclaim_trigger_occurrences`, `reconcile_trigger_retention`) still cannot
 /// touch a non-fired row at any cutoff. Audit rows are also reported as
 /// retained history, never as stuck fan-out.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -2009,6 +2135,10 @@ async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn occurrence_ids(store: &Arc<dyn crate::TriggerStore>) -> Vec<String> {
     store
         .list_occurrences(crate::TriggerOccurrenceFilter::default())
@@ -2019,6 +2149,10 @@ async fn occurrence_ids(store: &Arc<dyn crate::TriggerStore>) -> Vec<String> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::TriggerStore>) {
     let request = crate::TriggerOccurrenceRequest::new(
         "ui.button.pressed",
@@ -2041,6 +2175,10 @@ async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::Trigg
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn first_ingress_and_replay_share_canonical_subscription_order(
     store: Arc<dyn crate::TriggerStore>,
 ) {
@@ -2087,6 +2225,10 @@ async fn first_ingress_and_replay_share_canonical_subscription_order(
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTriggerStore) {
     let draft = sample_draft(
         &SessionId::from("session-a"),
@@ -2131,6 +2273,10 @@ async fn same_identity_and_receipt_survive_store_reopen(factory: ReopenableTrigg
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
     for raw in ["", " ", "nul\0operation"] {
         let command = register_command(

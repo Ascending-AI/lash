@@ -48,6 +48,10 @@ where
     assert_fresh_instances(&first, &second, "store_recovery");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn recovery_timings() -> crate::LeaseTimings {
     crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
         .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
@@ -71,6 +75,10 @@ fn queued_work(session_id: &SessionId, source: &str) -> crate::QueuedWorkBatchDr
     .with_source_key(format!("{session_id}:{source}"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn seed_and_claim(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -109,6 +117,10 @@ async fn seed_and_claim(
     (lease, claim)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn acquire_successor<F>(
     make: &F,
     session_id: &SessionId,
@@ -166,6 +178,10 @@ fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<lash_core::BatchId> 
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_no_parallel_reclaim(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -190,6 +206,10 @@ async fn assert_no_parallel_reclaim(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_settled_once(
     make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -206,6 +226,10 @@ async fn assert_settled_once(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn expired_claim_is_recoverable_once<F>(
     make: &F,
     prefix: &str,
@@ -264,6 +288,10 @@ pub async fn expired_claim_is_recoverable_once<F>(
     assert_settled_once(make, &session_id).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_survives_before_claim_settlement<F>(
     make: &F,
     prefix: &str,
@@ -345,6 +373,10 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     assert_settled_once(make, &session_id).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
@@ -390,6 +422,10 @@ where
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,

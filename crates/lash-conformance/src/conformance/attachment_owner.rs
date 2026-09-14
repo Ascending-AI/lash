@@ -29,6 +29,10 @@ pub struct AttachmentOwnerColdReplayBackend {
 /// FIG-546 owner-binding vector: ordinary JSON and typed tool outputs survive a
 /// cold replay, turn finalization stamps by owner, superseding turns release
 /// dead intents, and process intents remain roots exactly until process prune.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplayBackend) {
     const SESSION_ID: &str = "attachment-owner-cold-replay";
     const TURN_ID: &str = "attachment-owner-turn";
@@ -257,6 +261,10 @@ fn failing_executor(calls: Arc<AtomicUsize>) -> crate::RuntimeEffectLocalExecuto
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn tool_attempt_envelope(
     effect_id: &str,
     call_id: &str,
@@ -343,6 +351,10 @@ fn assert_typed_outcome(outcome: &crate::RuntimeEffectOutcome, id: &crate::Attac
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     const SESSION_ID: &str = "attachment-owner-superseded";
     let request = session_request(&SessionId::from(SESSION_ID));
@@ -397,6 +409,10 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     const PROCESS_ID: &str = "attachment-owner-process";
     const SESSION_ID: &str = "attachment-owner-process-session";
@@ -516,6 +532,10 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn final_turn_commit(
     store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &SessionId,
@@ -538,6 +558,10 @@ async fn final_turn_commit(
     commit
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_with_lease(
     store: &Arc<dyn crate::RuntimePersistence>,
     commit: crate::RuntimeCommit,
@@ -561,6 +585,10 @@ async fn commit_with_lease(
         .expect("commit runtime state")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -578,6 +606,10 @@ fn session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 fn attachment_meta(label: &str) -> crate::AttachmentCreateMeta {
     crate::AttachmentCreateMeta::new(
         crate::MediaType::parse("image/png").unwrap(),
@@ -586,6 +618,10 @@ fn attachment_meta(label: &str) -> crate::AttachmentCreateMeta {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_blob(
     store: &dyn crate::AttachmentStore,
     id: &crate::AttachmentId,
@@ -599,6 +635,10 @@ async fn assert_blob(
 
 /// An unwired authority retains process intents and reports incomplete proof,
 /// including when there is no physical attachment to reclaim.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStoreFactory>) {
     use crate::store::MaintenanceReport;
     assert!(!factory.can_prove_process_owner_death());

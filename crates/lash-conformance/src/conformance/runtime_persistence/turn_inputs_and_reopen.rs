@@ -1,6 +1,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -142,6 +146,10 @@ pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_pending_turn_input(
@@ -318,6 +326,10 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -514,6 +526,10 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations(
         .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -637,6 +653,10 @@ pub async fn turn_input_claims_supersede_across_session_lease_generations_with_t
 /// A checkpoint executor can durably move an active input to `accepted` and
 /// crash before its effect outcome journals the claim. The successor must be
 /// able to reacquire that same turn/input pair under its newer generation.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -729,6 +749,10 @@ pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
         .expect("successor settles reacquired active input");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -832,6 +856,10 @@ pub async fn accepted_turn_input_with_dead_lease_is_cancelled_and_vacuumed(
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -943,6 +971,10 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1139,6 +1171,10 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 /// the caller names as still resumable. Nothing else may move, so a row pinned
 /// to a turn that can still deliver stays put, and a caller whose lane has been
 /// superseded repairs nothing at all.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1417,6 +1453,10 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     release_session_execution_lease_for_test(&store, &successor).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         pending_observer_intents: Vec::new(),
@@ -1442,6 +1482,10 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
 /// commit orphaned, while preserving the live one. Generalizes the SQLite-only
 /// `gc_unreachable_keeps_rooted_checkpoint_blobs` test to every reclaiming
 /// backend via the [`GcReport`](crate::GcReport) counters plus a post-GC load.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
     let store = factory.open;
     // First commit writes a live checkpoint blob.
@@ -1521,6 +1565,10 @@ pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
 }
 
 /// Manifest rows are GC roots, not read authorization (FIG-653).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1601,6 +1649,10 @@ pub(super) fn sha256_of(bytes: &[u8]) -> impl std::fmt::LowerHex {
     Sha256::digest(bytes)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -1635,6 +1687,10 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     session_execution_lease_first_claim_excludes_concurrent_reopen_handles(&factory).await;
 
@@ -1801,6 +1857,10 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_execution_lease_first_claim_excludes_concurrent_reopen_handles(
     factory: &ReopenableRuntimePersistence,
 ) {
@@ -1859,6 +1919,10 @@ pub(super) async fn session_execution_lease_first_claim_excludes_concurrent_reop
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1980,6 +2044,10 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -2062,6 +2130,10 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2133,6 +2205,10 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2171,6 +2247,10 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2242,6 +2322,10 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
     assert_eq!(reason.as_str(), "original");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2279,6 +2363,10 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersi
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2319,6 +2407,10 @@ pub async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -2354,6 +2446,10 @@ pub async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),

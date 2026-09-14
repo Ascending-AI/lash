@@ -48,6 +48,10 @@ use pretty_assertions::assert_eq;
 /// A caller's whole interaction with one group: open, await, close.
 type Host = Arc<dyn EffectHost>;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -136,6 +140,10 @@ pub async fn wrong_scope_groups_are_refused_before_any_child_runs<F: Fn() -> Hos
 ///
 /// Run it from each store's own tests, alongside that store's journal
 /// assertions.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_group_cancelled_child_terminal_is_durable<F>(make: F)
 where
     F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
@@ -219,6 +227,10 @@ where
 /// Returns the retired and in-flight scopes' journal identity keys so a store's
 /// own test can count, behind the contract, the group, child, and fence rows
 /// each scope is left with.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_group_runtime_operation_retirement_is_atomic<F>(make: F) -> (String, String)
 where
     F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
@@ -342,6 +354,10 @@ where
 /// once the drain has settled — after which the scope is fenced like any
 /// other retirement (FIG-2499 fix round 1). Returns the scope's journal key
 /// so a store suite can count its rows and fence.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_group_quiescent_retirement_waits_for_live_children<F>(make: F) -> String
 where
     F: Fn(Option<Arc<dyn GroupExecutors>>) -> Host,
@@ -460,6 +476,10 @@ where
 /// answering `close` with `Ok(())` would tell an operator to fix the group when
 /// the deployment is what is unwired — and a caller could not tell "this
 /// deployment does not do groups" from "this group is malformed".
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() -> Host>(
     unwired: &F,
     prefix: &str,
@@ -524,6 +544,10 @@ pub async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn(
 /// behind shows up as rank 1 already allocated. On the native substrate, which
 /// journals nothing, both halves are true by construction and the law still pins
 /// the refusal.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
     unwired: &U,
     make: &F,
@@ -600,6 +624,10 @@ pub async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
 ///
 /// The third act proves the key really is untouched: once every child has a
 /// runner the same key opens as a *first* open, with rank 1 still unallocated.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -685,6 +713,10 @@ pub async fn a_child_with_no_runner_refuses_the_open_and_refuses_the_retry<F: Fn
 /// `NoExecutor` case. Refusing here would deny a resuming caller the settlements
 /// the group already recorded — a replayed frame would fail where the original
 /// succeeded, which is the one thing a durable group may never do.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -756,6 +788,10 @@ pub async fn a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal<F
 /// A host that forwarded the flag but left the methods on their fail-closed
 /// defaults would advertise support and then refuse every group, so the flag is
 /// asserted through the same object that runs the group.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -799,6 +835,10 @@ pub async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(
 /// The second half is what makes this a law about hosts rather than about a
 /// constructor: the same key opens cleanly afterwards, so the refusal happened
 /// before anything was written under it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -852,6 +892,10 @@ pub async fn duplicate_replay_keys_are_refused_before_a_host_sees_them<F: Fn() -
 ///
 /// Asserted on the loser's own gate rather than on wall time — "the caller did
 /// not wait for it" is then a fact about the host, not about the scheduler.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -892,6 +936,10 @@ pub async fn the_first_settlement_wakes_the_caller_while_the_loser_still_runs<F:
 /// `WhenQuiescent` refuses it with `effect_scope_not_quiescent` while the
 /// child runs, leaves the scope unfenced, and retires it once every child
 /// has settled and the group is closed (FIG-2499 fix round 3, ruling 4).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -950,6 +998,10 @@ pub async fn a_scope_with_a_live_group_child_is_not_quiescent<F: Fn() -> Host>(
 /// The re-read arrives through [`EffectGroupHandle::restored`], the path a
 /// durable continuation actually takes, which pins the reopen rule too: the
 /// caller's cursor wins and the host keeps no consumption state of its own.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "stable")).expect("a scope binds");
@@ -999,6 +1051,10 @@ pub async fn settlement_n_is_stable_across_re_reads<F: Fn() -> Host>(make: &F, p
 /// The failing child is what makes the last clause more than an assertion about
 /// arity: a host that reported a loser's failure as the group's failure, or
 /// swallowed it, disagrees here.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "order")).expect("a scope binds");
@@ -1045,6 +1101,10 @@ pub async fn every_child_is_delivered_once_in_rank_order<F: Fn() -> Host>(make: 
 
 /// Exhaustion is the caller's arithmetic; awaiting past it is a shape refusal
 /// rather than a hang.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "past")).expect("a scope binds");
@@ -1075,6 +1135,10 @@ pub async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, 
 
 /// A cancelled await leaves the cursor and the durable rank untouched, so a
 /// later await resumes at the same settlement.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -1118,6 +1182,10 @@ pub async fn a_cancelled_await_leaves_the_rank_to_be_read_again<F: Fn() -> Host>
 /// The structural claim underneath is that children do not run inside the
 /// caller's future — a host that owned its leaves there would drop this loser at
 /// the close.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -1179,6 +1247,10 @@ pub async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() ->
 /// [`effect_group_cancelled_child_terminal_is_durable`] from each store's own
 /// tests. What every tier owes here is that the loser does not go on to
 /// complete.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "cancel")).expect("a scope binds");
@@ -1217,6 +1289,10 @@ pub async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
 /// Close may narrow the declared disposition and may never widen it: a
 /// crash-drain applies the *declared* one, so permitting a widening close would
 /// make the losers' fate depend on whether the caller reached its close at all.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "narrow")).expect("a scope binds");
@@ -1276,6 +1352,10 @@ pub async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefi
 
 /// Close is idempotent, because a crash between a successful close and the
 /// continuation commit replays it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host
@@ -1306,6 +1386,10 @@ pub async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make:
 /// Both halves matter for the same reason: a shrunk child vec under one key
 /// renumbers every rank above the truncation, and a second dispatch doubles
 /// every side effect the first is still producing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -1383,6 +1467,10 @@ pub async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host
 /// happen. A resuming host reopens the group, re-derives what it needs from the
 /// group it was handed, and reads rank 1 back — including a rank recorded by a
 /// child the *first* host is still running.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -> Host>(
     make: &F,
     prefix: &str,
@@ -1492,6 +1580,10 @@ fn group_key(prefix: &str, label: &str) -> String {
     format!("{prefix}:group:{label}:0")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn child(
     execution_scope: &ExecutionScope,
     group_key: &str,
@@ -1515,6 +1607,10 @@ fn child(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn group(
     execution_scope: &ExecutionScope,
     key: &str,
@@ -1539,6 +1635,10 @@ fn group(
     .expect("a group with at least one child assembles")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn group_with_scopes(
     header_scope: &ExecutionScope,
     child_scope: &ExecutionScope,
@@ -1740,12 +1840,20 @@ impl Gate {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn wait_until_waiting(&self) {
         tokio::time::timeout(CHILD_EXIT_BUDGET, self.waiting.notified())
             .await
             .expect("the gated child waits for its release");
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn wait_until_exited(&self) {
         tokio::time::timeout(CHILD_EXIT_BUDGET, self.exited.notified())
             .await
@@ -1807,6 +1915,10 @@ fn gated(position: usize) -> (RuntimeEffectLocalExecutor<'static>, Arc<Gate>) {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
@@ -1858,6 +1970,10 @@ async fn close(
 
 /// Waits for a condition a host reaches on its own tasks, so a law never
 /// depends on how many yields a settlement happens to take.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn until(mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(AWAIT_BUDGET, async {
         while !condition() {

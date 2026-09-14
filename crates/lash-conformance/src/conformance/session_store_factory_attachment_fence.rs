@@ -15,6 +15,10 @@ use pretty_assertions::assert_eq;
 /// the same protocol is a conformance failure. Authorities that report
 /// [`AttachmentGcFence::BestEffort`](crate::AttachmentGcFence::BestEffort)
 /// implement no fence and are skipped.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {

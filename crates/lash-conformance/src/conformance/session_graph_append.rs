@@ -34,6 +34,10 @@ pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::Sessio
 /// Reddens if the precondition is tightened into a head compare-and-swap
 /// (`leaf_node_id == Some(required)`): the append would be refused as
 /// `StaleBranch` and the derivation silently discarded.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_graph_append_tolerates_an_advanced_head(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -82,6 +86,10 @@ async fn session_graph_append_tolerates_an_advanced_head(
 
 /// Same contract through the plugin seam, where the service captured its
 /// snapshot before the head moved — the shape a post-turn hook actually has.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_graph_service_append_tolerates_an_advanced_head(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -134,6 +142,10 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
 /// Reddens if the precondition is dropped: the append would commit onto the
 /// branch's leaf, moving the head and durably recording a node derived from an
 /// abandoned line of history.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_graph_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -159,6 +171,10 @@ async fn session_graph_append_rejects_an_abandoned_branch(
 }
 
 /// Same refusal through the plugin seam.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_graph_service_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -200,6 +216,10 @@ struct AbandonedBranchScenario {
     abandoned_base: String,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn abandoned_branch_scenario(
     factory: &Arc<dyn crate::SessionStoreFactory>,
     prefix: &str,
@@ -283,6 +303,10 @@ async fn abandoned_branch_scenario(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_appended_onto_current_leaf(
     store: &Arc<dyn crate::RuntimePersistence>,
     result: crate::AppendSessionNodesOutcome,
@@ -402,6 +426,10 @@ async fn assert_stale_branch_changed_nothing(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn append_conformance_runtime(
     store: &Arc<dyn crate::RuntimePersistence>,
     request: &crate::SessionStoreCreateRequest,
@@ -476,6 +504,10 @@ pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
 /// the receipt's request identity intact so the public replay path is exercised.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
     store: Arc<dyn crate::RuntimePersistence>,
     rewrite_receipt: F,
@@ -539,6 +571,10 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
 }
 
 /// Append one plugin node through the runtime and return its durable id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn append_conformance_plugin_node(
     runtime: &mut crate::LashRuntime,
     operation_id: &str,
@@ -568,6 +604,10 @@ async fn append_conformance_plugin_node(
 
 /// Commit one node straight to the store, so the runtime's resident head is
 /// behind the durable head without the runtime ever observing the writer.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn advance_durable_head_behind_the_runtime(
     store: &Arc<dyn crate::RuntimePersistence>,
 ) -> String {
@@ -605,6 +645,10 @@ fn derived_append_request(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn read_conformance_session(
     store: &Arc<dyn crate::RuntimePersistence>,
 ) -> crate::store::PersistedSessionRead {

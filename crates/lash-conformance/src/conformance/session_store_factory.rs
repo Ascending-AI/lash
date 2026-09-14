@@ -131,6 +131,10 @@ pub(crate) async fn superseded_config_settlement_adopts_the_newer_head() {
 /// handle owns the live execution lease. Reading must leave that writer's
 /// authority intact, and deleting the session must produce the same absent
 /// read disposition as the ordinary live-open surface.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionStoreFactory>) {
     const SESSION_ID: &str = "read-only-session-view";
     let expected_relation = crate::SessionRelation::Child {
@@ -285,6 +289,10 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
 ///
 /// `make` must return a fresh handle bound (when the backend requires explicit
 /// identity binding) to the supplied session id, without admitting that id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn fresh_session_admission_returns_created<F>(make: F)
 where
     F: FnOnce(&str) -> Arc<dyn crate::RuntimePersistence>,
@@ -309,6 +317,10 @@ where
 
 /// The notification fast path reads durable claimable work without creating a
 /// session or hydrating runtime state. Future-only and empty queues are idle.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_claimable_queued_work_peek(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -582,6 +594,10 @@ async fn session_store_factory_claimable_queued_work_peek(
 /// stale handle can still read retained state or write, backend behavior
 /// depends on object lifetime and the delete can be undone after the host
 /// retired the id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_store_factory_delete_fences_stale_handles(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
@@ -756,6 +772,10 @@ pub async fn session_store_factory_delete_fences_stale_handles(
 /// wins the prune race and retains the terminal process. Once the exact owner
 /// consumes that authorization, pruning releases attachment intents and
 /// removes both durable session stores before the process row disappears.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_deletes_owned_session_stores(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -992,6 +1012,11 @@ pub async fn attachment_reference_lifecycle(factory: Arc<dyn crate::SessionStore
 
 /// Run [`attachment_reference_lifecycle`] against a concrete flat byte backend,
 /// combining manifest reference tracking with the shared physical layout.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_reference_lifecycle_with_store(
     factory: Arc<dyn crate::SessionStoreFactory>,
     backend: Arc<dyn crate::AttachmentStore>,
@@ -1149,6 +1174,10 @@ fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStore
 
 /// A session handle's identity is explicit and independent of how many other
 /// sessions exist in the durable catalog.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_binding_is_catalog_cardinality_independent<F>(make: &F)
 where
     F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
@@ -1212,6 +1241,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_never_used_delete_is_noop(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1230,6 +1263,10 @@ async fn session_store_factory_never_used_delete_is_noop(
         .expect("never-used id remains admissible after no-op delete");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_rejects_writes_after_delete(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1350,6 +1387,10 @@ fn assert_deleted_write<T>(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_open_missing_returns_none(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1368,6 +1409,10 @@ async fn session_store_factory_open_missing_returns_none(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_create_seeds_and_reopens_meta(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1401,6 +1446,10 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
     assert_meta_matches_request(&reopened_meta, &request);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_round_trips_every_relation_shape(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1588,6 +1637,10 @@ async fn session_store_factory_round_trips_every_relation_shape(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {
     let initial = session_store_request(
         &SessionId::from("stable-session"),
@@ -1631,6 +1684,10 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_rejects_cross_session_graph_parents(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1743,6 +1800,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
 /// pins are roots, past unpinned checkpoints are normally unavailable,
 /// forks write no graph nodes, and deleting either sibling cannot reclaim the
 /// prefix still reachable from the other.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionStoreFactory>) {
     let source_request = session_store_request(
         &SessionId::from("fork-source"),
@@ -2041,6 +2102,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     assert_session_id_was_used_and_deleted(fork_reuse_error, &source_request.session_id);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_delete_removes_store_and_is_idempotent(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -2192,6 +2257,10 @@ fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: 
 /// A fenced sweep still collects real garbage, reports itself fenced, records
 /// the terminal reclaimed fact, and — the fence's whole claim — deletes nothing
 /// that a root existed for.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -2277,6 +2346,10 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
 /// 2. `has_live_attachment_ref(id, cutoff)` reports `false` for uncommitted aged intents with dead/no owners, and `true` for committed refs.
 /// 3. `condemn_attachment(id, cutoff)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
 /// 4. `live_attachment_refs(cutoff)` forgets uncommitted aged intents and retains committed refs.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_store_factory_attachment_large_cutoff_conformance(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {

@@ -21,6 +21,10 @@ fn owned_registration(id: &str) -> ProcessRegistration {
     ))))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn read(
     reader: &Arc<dyn crate::ConformanceProcessRegistry>,
     process_ref: &ProcessRef,
@@ -32,6 +36,11 @@ async fn read(
         .expect("retained process")
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn contract(
     writer: Arc<dyn crate::ConformanceProcessRegistry>,
     reader: Arc<dyn crate::ConformanceProcessRegistry>,

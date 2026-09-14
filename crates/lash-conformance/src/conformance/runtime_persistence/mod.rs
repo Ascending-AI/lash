@@ -83,6 +83,10 @@ impl RuntimePersistenceLeaseTiming {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn delayed_queue_row_available_at_ms(&self) -> u64 {
         match self {
             Self::Realtime => {

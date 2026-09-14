@@ -62,6 +62,10 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders** run this law
 /// against custom process registries and session-store backends.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -160,6 +164,10 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
 /// batch can tombstone a node owned by a session *outside* the batch. When that
 /// owner is already deleted, its id is unbindable and no session-scoped vacuum
 /// can ever reach the row again — the prune itself has to reclaim it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -216,6 +224,10 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
 /// session's later delete. Draining it then depends on the prune having recorded
 /// the process-owned id in the deleted set — the frontier every delete-time
 /// reclaim arm reads.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_records_deletions_for_later_reclaim(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -284,6 +296,10 @@ async fn create_store(
 }
 
 /// Commit one root node and return its node id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_root_node(
     store: &dyn crate::RuntimePersistence,
     session_id: &SessionId,
@@ -308,6 +324,10 @@ async fn commit_root_node(
 
 /// Fork `child_session_id` at `node_id` and grow one node of its own, so
 /// `node_id` gains a live child owned by another session.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn fork_and_advance(
     factory: &Arc<dyn crate::SessionStoreFactory>,
     node_id: &str,
@@ -366,6 +386,10 @@ async fn fork_and_advance(
         .expect("advance the forked child");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &ProcessId) {
     registry
         .register_process(crate::ProcessRegistration::new(
@@ -384,6 +408,10 @@ async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &Pr
         .expect("register the pruned process");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn prune_completed_process(registry: &dyn crate::ProcessRegistry, process_id: &ProcessId) {
     let terminal = registry
         .complete_process(

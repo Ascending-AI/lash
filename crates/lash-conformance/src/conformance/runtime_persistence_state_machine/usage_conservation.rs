@@ -373,6 +373,10 @@ fn usage_by_source_model<'a>(
     totals
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn accumulate(total: &mut crate::TokenUsage, usage: &crate::TokenUsage) {
     *total = total
         .checked_add(usage)

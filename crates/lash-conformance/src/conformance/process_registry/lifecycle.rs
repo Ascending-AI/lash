@@ -2,6 +2,10 @@ use super::*;
 use lash_core::{OnParentEnd, ParentScope, ProcessLifecyclePolicy};
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
     let parent = registry
         .register_process(registration(&ProcessId::from("lifecycle-parent")))
@@ -103,6 +107,10 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn empty_tool_call_identifiers_leave_no_row(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {

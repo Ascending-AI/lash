@@ -43,6 +43,10 @@ fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
         .into_handle()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn acceptance_runtime(
     store: &Arc<dyn crate::RuntimePersistence>,
     effect_host: &Arc<dyn crate::EffectHost>,
@@ -107,6 +111,10 @@ fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 /// is durable before anything executes, is
 /// [`orphaned_direct_turn_input_is_drivable_by_another_worker`], where the drive
 /// aborts before committing and the row is still there.)
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn direct_turn_accepts_before_driving(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -220,6 +228,10 @@ pub async fn direct_turn_accepts_before_driving(
 /// worker leaves behind. The successor claims it under ADR 0029's generation
 /// fence with no repair step, no TTL, and no knowledge that the input was ever
 /// direct.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -330,6 +342,10 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
 /// Direct ingress inherits queued identity exactly: two direct turns carrying
 /// the same content are two admissions, because neither named an identity Lash
 /// could recognise them by.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -395,6 +411,10 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
 /// Refusal precedes provider execution and durable input acceptance. After the
 /// holder releases the lane, the identical input can be admitted and driven by
 /// a successor exactly once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -517,6 +537,10 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
 /// The losing settlements carry no lease generation, so they are never dropped
 /// and retried the way a superseded *claimed* settlement is: they are their own
 /// error, and the driver that raises one retires at its first commit attempt.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
     prefix: &str,
     store: Arc<dyn crate::RuntimePersistence>,

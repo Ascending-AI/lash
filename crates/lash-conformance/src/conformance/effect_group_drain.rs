@@ -143,6 +143,10 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
 /// `RunToCompletion`, and reclaiming one of those would be the host stealing
 /// from itself. Both refusals are checked before anything else, so the executors
 /// are never even consulted — which is what the invocation counts assert.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_group_this_process_is_still_working_is_refused(make: &DrainWorldFactory, prefix: &str) {
     let executors = RecordingExecutors::settling();
     let world = make(spec(LIVE_LEASE_MS, &executors)).await;
@@ -205,6 +209,10 @@ async fn a_group_this_process_is_still_working_is_refused(make: &DrainWorldFacto
 /// The drain applies the disposition the group declared, so a group the journal
 /// does not hold has no disposition for it to apply — and it refuses rather than
 /// picking one.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_group_the_journal_does_not_hold_is_refused(make: &DrainWorldFactory, prefix: &str) {
     let executors = RecordingExecutors::settling();
     let world = make(spec(LIVE_LEASE_MS, &executors)).await;
@@ -234,6 +242,10 @@ async fn a_group_the_journal_does_not_hold_is_refused(make: &DrainWorldFactory, 
 /// The draining host has never seen this group, so its local guard says nothing;
 /// what protects the live group's children is the lease each of them is running
 /// under. The drain reports them and moves on rather than queueing behind them.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_live_lease_is_left_to_the_executor_that_holds_it(
     make: &DrainWorldFactory,
     prefix: &str,
@@ -299,6 +311,10 @@ async fn a_live_lease_is_left_to_the_executor_that_holds_it(
 /// once, and a second drain pass finds nothing to do: the count is the proof,
 /// and the ranks read back through the group surface are the journal-visible
 /// half of it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn orphaned_losers_settle_exactly_once_across_a_restart(
     make: &DrainWorldFactory,
     prefix: &str,
@@ -405,6 +421,10 @@ async fn orphaned_losers_settle_exactly_once_across_a_restart(
 /// law holds the pass inside a child's execution, cancels, and requires the call
 /// to return; then it requires that nothing was damaged by stopping, by draining
 /// the same group to completion afterwards with each child run exactly once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_cancelled_pass_stops_at_the_child_it_was_running(
     make: &DrainWorldFactory,
     prefix: &str,
@@ -487,6 +507,10 @@ async fn a_cancelled_pass_stops_at_the_child_it_was_running(
 /// child 1, whose claim is now busy. Both hosts' passes are real passes over a
 /// real substrate, so this is also the only integration exercise of the
 /// end-of-pass confirm read against a genuine concurrent writer.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_child_another_drain_holds_is_reported_contested(make: &DrainWorldFactory, prefix: &str) {
     let key = group_key(prefix, "contested");
     let scope = scope(prefix, "contested");
@@ -612,6 +636,10 @@ async fn a_child_another_drain_holds_is_reported_contested(make: &DrainWorldFact
 /// at all and the children are simply orphaned. Even then the drain declines,
 /// which is the point — the refusal is read off the group's declared
 /// disposition, not off what happened to the children.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFactory, prefix: &str) {
     let key = group_key(prefix, "cancel-declared");
     let scope = scope(prefix, "cancel-declared");
@@ -673,6 +701,10 @@ async fn a_cancel_group_is_never_re_executed_by_the_drain(make: &DrainWorldFacto
 ///
 /// The alternative — an executor that fabricates an outcome — would journal a
 /// terminal no effect ever produced, at the rank a real one would have taken.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_child_this_host_cannot_run_is_reported_not_invented(
     make: &DrainWorldFactory,
     prefix: &str,
@@ -743,6 +775,10 @@ async fn a_child_this_host_cannot_run_is_reported_not_invented(
 /// unsettled children — which is a reclamation signal, so the group's journal
 /// would be retired around work nobody ran. `NoExecutor` is the accurate
 /// answer: the queue is real, this host cannot finish it, and another one can.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(
     make: &DrainWorldFactory,
     prefix: &str,
@@ -840,6 +876,10 @@ fn unwired_spec(lease_ttl_ms: u64) -> DrainWorldSpec {
 /// including the host-owned tasks a group's children run on, and it drops the
 /// host's substrate handles with them. What is left behind is what a killed
 /// process leaves: journal rows under leases nobody renews.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn crashed_process<P>(make: &DrainWorldFactory, phase: P)
 where
     P: FnOnce(DrainWorld) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + 'static,
@@ -876,6 +916,10 @@ where
 /// The starting state every drain law that is not about a *live* group needs,
 /// and the one a crash actually produces: the caller closed and was released,
 /// the children never settled, and the process that claimed them is gone.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn orphan_two_losers(make: &DrainWorldFactory, key: &str, scope: &ExecutionScope) {
     crashed_process(make, {
         let key = key.to_string();
@@ -929,6 +973,10 @@ async fn pass(
 /// — expiry is the substrate's clock — and cannot poll with a settling host,
 /// which would drain the very children the law is about. A refusing host asks
 /// the same question and answers `NoExecutor`, which writes nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str) {
     let probe = make(spec(CRASH_LEASE_MS, &RecordingExecutors::refusing())).await;
     tokio::time::timeout(AWAIT_BUDGET, async {
@@ -950,6 +998,10 @@ async fn until_leases_lapse(make: &DrainWorldFactory, group_key: &str) {
     .expect("a dead process's claims lapse");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn drain_until_no_live_lease(world: &DrainWorld, group_key: &str) -> GroupDrainReport {
     tokio::time::timeout(AWAIT_BUDGET, async {
         loop {
@@ -984,6 +1036,10 @@ fn child_replay_key(group_key: &str, position: usize) -> String {
     format!("{group_key}:child:{position}")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn child(
     execution_scope: &ExecutionScope,
     group_key: &str,
@@ -1005,6 +1061,10 @@ fn child(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn group(
     execution_scope: &ExecutionScope,
     key: &str,
@@ -1042,6 +1102,10 @@ fn staged_executors() -> &'static StagedGroupExecutors {
     STAGED.get_or_init(StagedGroupExecutors::new)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn open(
     scoped: &ScopedEffectController<'_>,
     key: &str,
@@ -1104,6 +1168,10 @@ async fn close(
         .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn until(mut condition: impl FnMut() -> bool) {
     tokio::time::timeout(AWAIT_BUDGET, async {
         while !condition() {
@@ -1276,6 +1344,10 @@ impl RecordingExecutors {
 }
 
 impl GroupExecutors for RecordingExecutors {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,

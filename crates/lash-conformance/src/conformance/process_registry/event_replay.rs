@@ -1,6 +1,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("canonical-process-event-payload-replay");
     registry
@@ -32,6 +36,10 @@ pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn Pro
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn long_cancellation_requester_replay_is_backend_safe(
     registry: Arc<dyn ProcessRegistry>,
 ) {

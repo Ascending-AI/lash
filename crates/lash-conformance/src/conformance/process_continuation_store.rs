@@ -10,6 +10,10 @@ use crate::{
     ProcessRegistry, ProjectionWatermark, RecoveryContract, SegmentHandover,
 };
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_continuation_store(
     registry: Arc<dyn ProcessRegistry>,
     store: Arc<dyn ProcessContinuationStore>,

@@ -9,6 +9,10 @@ use super::*;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -87,6 +91,10 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -297,6 +305,10 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
 /// handle — must be what physically drops the rows. Every backend has to report
 /// the same post-delete vacuum count for this order, otherwise a stale handle is
 /// load-bearing for reclaim on some backends and inert on others.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -355,6 +367,10 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
 /// police here and report `None`. `None` is a claim about the backend — it is
 /// always bound, so it owns reclaim itself and offers no unbound sweep to fence
 /// — so the skip is a named `tracing` warning rather than a silent pass.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_unbound_vacuum_is_typed_error(
     backend: &str,
     unbound: Option<Arc<dyn crate::store::StoreMaintenance>>,

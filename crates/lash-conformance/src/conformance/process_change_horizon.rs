@@ -9,6 +9,10 @@ use pretty_assertions::assert_eq;
 /// Test-consumer model for the typed Process Change Feed recovery contract:
 /// a pruned cursor requires a complete relist before resuming at the reported
 /// Tombstone Compaction horizon.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn changes_after_full_relist_if_required(
     registry: &Arc<dyn ProcessRegistry>,
     limit: usize,
@@ -37,6 +41,10 @@ pub(super) async fn changes_after_full_relist_if_required(
 
 /// Prove Tombstone Compaction records a read-side horizon even when the host
 /// explicitly declares that no projector constrains deletion.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused(
     registry: Arc<dyn ProcessRegistry>,
 ) {

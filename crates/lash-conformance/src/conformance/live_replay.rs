@@ -44,6 +44,10 @@ where
 /// `make` must return a fresh store configured to retain exactly one event per
 /// session. Stores with a fixed larger capacity should expose a test
 /// configuration rather than weakening this contract.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn live_replay_store_capacity_trim<F>(make: F)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
@@ -124,6 +128,10 @@ where
 /// `make` must return a fresh store whose event TTL expires within
 /// `expiration_wait`. The suite explicitly calls [`LiveReplayStore::trim_session`]
 /// after waiting so implementations can keep trimming lazy and local.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn live_replay_store_ttl_trim<F>(make: F, expiration_wait: Duration)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
@@ -191,6 +199,10 @@ where
 /// deliberately creates the same numeric position in `fresh`, so a backend
 /// which compares offsets but not incarnation returns a forbidden clean empty
 /// replay and fails deterministically.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn incarnation_change_invalidates_cursor(
     original: Arc<dyn LiveReplayStore>,
     fresh: Arc<dyn LiveReplayStore>,
@@ -257,6 +269,10 @@ pub async fn incarnation_change_invalidates_cursor(
     assert_live_replay_labels(&continuation, &["text:preserved continuation"]);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(7);
     let start_a = store.current_cursor(&SessionId::from("session-a"), revision);
@@ -379,6 +395,10 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn live_replay_store_cursor_preserves_newer_revisions(store: Arc<dyn LiveReplayStore>) {
     publish_one(
         &store,
@@ -400,6 +420,10 @@ async fn live_replay_store_cursor_preserves_newer_revisions(store: Arc<dyn LiveR
     assert_live_replay_labels(&replay, &["text:newer worker commit"]);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn live_replay_store_subscribe_replays_then_yields_live_events(
     store: Arc<dyn LiveReplayStore>,
 ) {
@@ -445,6 +469,10 @@ async fn live_replay_store_subscribe_replays_then_yields_live_events(
     assert_live_replay_labels(&[live], &["text:live three"]);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn live_replay_store_rejects_malformed_cursors(store: Arc<dyn LiveReplayStore>) {
     let malformed: crate::SessionCursor =
         serde_json::from_value(serde_json::json!("not-a-session-cursor"))
@@ -469,6 +497,10 @@ async fn live_replay_store_rejects_malformed_cursors(store: Arc<dyn LiveReplaySt
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveReplayStore>) {
     let revision = SessionRevision::new(4);
     let existing = publish_one(
@@ -517,6 +549,10 @@ async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveRepla
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn replay_cut_and_live_registration_are_linearizable<F>(make: &F)
 where
     F: Fn() -> Arc<dyn LiveReplayStore>,
@@ -612,6 +648,10 @@ fn publish_one(
     Ok(event)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn assert_event_readers_match_cursor(
     event: &SessionObservationEvent,
     expected_session_id: &SessionId,
@@ -625,6 +665,10 @@ fn assert_event_readers_match_cursor(
     assert_eq!(event.revision(), parsed.revision);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn expect_live_replay_replayed(
     result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     context: &str,
@@ -637,6 +681,10 @@ fn expect_live_replay_replayed(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn expect_live_replay_gap(
     result: Result<LiveReplayOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,
@@ -653,6 +701,10 @@ fn expect_live_replay_gap(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn expect_live_replay_subscribed(
     result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     context: &str,
@@ -665,6 +717,10 @@ fn expect_live_replay_subscribed(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn expect_live_replay_subscribe_gap(
     result: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
     expected: LiveReplayGapReason,

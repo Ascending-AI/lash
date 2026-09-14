@@ -26,6 +26,10 @@ pub struct SessionExecutionLeaseRenewalZeroRowHandles {
 
 /// ADR 0053 law: a conditional renewal write affecting no row is a named
 /// refusal, never a successful renewal.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_execution_lease_zero_row_renewal_is_refused(
     handles: SessionExecutionLeaseRenewalZeroRowHandles,
 ) {

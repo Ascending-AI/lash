@@ -21,6 +21,10 @@ use pretty_assertions::assert_eq;
 /// arm proper; the observable contract is the same either way, and asserting it
 /// per entry point is what catches a floor advance or an event row escaping
 /// onto a path that persisted nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
@@ -201,6 +205,10 @@ pub async fn process_event_append_arms_are_ordered(
 
 /// The durable footprint of a process's appends: how many event rows exist, and
 /// where the sender floor for `target_session_id` stands.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn append_arm_footprint(
     registry: &Arc<dyn crate::ConformanceProcessRegistry>,
     process_id: &ProcessId,
@@ -218,6 +226,10 @@ async fn append_arm_footprint(
     (events, floor)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn terminal_sequence(
     registry: &Arc<dyn crate::ConformanceProcessRegistry>,
     process_id: &ProcessId,

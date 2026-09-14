@@ -1,6 +1,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -129,6 +133,10 @@ pub async fn same_generation_claim_scans_reach_rows_beyond_the_scan_surplus(
     release_session_execution_lease_for_test(&store, &input_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sessions(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -354,6 +362,10 @@ pub async fn queued_work_respects_membership_limits_exclusivity_reclaim_and_sess
     assert_eq!(remaining.batches[0].batch_id, limited_third.batch_id);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -457,6 +469,10 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -606,6 +622,10 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     release_session_execution_lease_for_test(&store, &third_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_generations(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -782,6 +802,10 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
 /// state machine, and a host reading one as the other either abandons intact
 /// work or waits forever on a queue that will never fill. Every backend must
 /// tell them apart identically.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -864,6 +888,10 @@ pub async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
     release_session_execution_lease_for_test(&store, &lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -987,6 +1015,10 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1125,6 +1157,10 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
 /// still redrive that exact committed composition: the policy runs pre-request
 /// and its selection is journaled with the claim, so replay serves history
 /// instead of re-deciding it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1217,6 +1253,10 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn RuntimePersistence>) {
     let session_id = "interrupted-batch-row-limit";
     for (source_key, label) in [
@@ -1349,6 +1389,10 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
     release_session_execution_lease_for_test(&store, &selected_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1527,6 +1571,10 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
     release_session_execution_lease_for_test(&store, &successor_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
     let merged_wakes = [
         policy_test_wake(
@@ -1637,6 +1685,10 @@ pub(super) fn policy_test_wake(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_queued_work(
@@ -1723,6 +1775,10 @@ pub async fn queued_work_completion_is_lease_guarded(store: Arc<dyn RuntimePersi
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn RuntimePersistence>) {
     let batch = store
         .enqueue_queued_work(queued_draft(

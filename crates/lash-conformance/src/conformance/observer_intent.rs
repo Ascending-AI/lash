@@ -7,6 +7,10 @@ use lash_sansio::SessionId;
 /// A transient registry failure during fork-observer publication is best
 /// effort: it does not fail session creation and the durable intent is
 /// consumed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::SessionStoreFactory>) {
     const SESSION_ID: &str = "fork-observer-transient-session";
     const PROCESS_ID: &str = "fork-observer-transient-process";

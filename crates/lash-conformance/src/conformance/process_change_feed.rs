@@ -10,6 +10,10 @@ use super::process_registry::{plain_event_type, registration};
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
     registry: Arc<dyn ProcessRegistry>,
 ) {

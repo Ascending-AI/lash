@@ -48,6 +48,10 @@ where
     outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -178,6 +182,10 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
         .expect("receipt-only operation is re-evaluated after owner cascade");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -212,6 +220,10 @@ async fn zero_match_occurrence_is_reclaimed_at_delivery_reconciliation(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn delivery_delete_is_bound_to_observed_row_identity(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -290,6 +302,10 @@ async fn delivery_delete_is_bound_to_observed_row_identity(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -484,6 +500,10 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn register_trigger(
     triggers: &Arc<dyn TriggerStore>,
     session_id: &SessionId,
@@ -505,6 +525,10 @@ async fn register_trigger(
         .expect("register trigger succeeds");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn process_prune_preserves_trigger_mutation_receipts(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -551,6 +575,10 @@ async fn process_prune_preserves_trigger_mutation_receipts(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn prune_with_trigger_cleanup(handles: &ProcessTriggerRetentionHandles) {
     handles
         .registry
@@ -566,6 +594,10 @@ async fn prune_with_trigger_cleanup(handles: &ProcessTriggerRetentionHandles) {
     .expect("reconcile pruned trigger deliveries");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn process_prune_only_deletes_deliveries_for_pruned_processes(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -661,6 +693,10 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn pruned_delivery_process_is_not_a_recovery_candidate(
     handles: ProcessTriggerRetentionHandles,
 ) {
@@ -740,6 +776,10 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn reregistered_between_classification_and_delete_preserves_delivery(
     handles: ProcessTriggerRetentionHandles,
 ) {

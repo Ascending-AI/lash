@@ -53,6 +53,10 @@ where
 
 /// SQL-only write-direction checks for public `u64` values that must fit the
 /// durable signed domain before any query can observe a wrapped negative.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::RuntimePersistence>) {
     let too_large = (i64::MAX as u64) + 1;
     let available_error = store
@@ -149,6 +153,10 @@ fn queued_draft(session_id: &SessionId, label: &str) -> crate::QueuedWorkBatchDr
     .with_merge_key("fence-integrity")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn claim_lease(
     store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &SessionId,
@@ -194,6 +202,10 @@ fn assert_overflow(error: crate::StoreError, counter: &'static str) {
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn negative_claim_fence(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-claim";
     let batch = handles
@@ -215,6 +227,10 @@ async fn negative_claim_fence(handles: FenceIntegrityHandles) {
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-head";
     handles
@@ -245,6 +261,10 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn negative_session_lease_fence(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-lease";
     let _ = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
@@ -262,6 +282,10 @@ async fn negative_session_lease_fence(handles: FenceIntegrityHandles) {
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) {
     let session_id = "fence-divergent-rows";
     let first = handles
@@ -315,6 +339,10 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: bool) {
     let session_id = if exhausted_head {
         "fence-exhausted-head"
@@ -370,6 +398,10 @@ async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: b
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn exhausted_trigger_revision(handles: FenceIntegrityHandles) {
     let session_id = "fence-exhausted-trigger";
     let owner_scope = crate::TriggerOwnerScope::session(session_id);

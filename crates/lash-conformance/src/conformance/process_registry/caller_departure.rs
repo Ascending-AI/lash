@@ -5,6 +5,10 @@ use super::*;
 /// Nothing may ever honestly terminalize such a row, so excluding it from
 /// retention would leak rows without bound. Reclaiming is not an outcome
 /// claim: the tombstone records the label the row actually carried.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn caller_departed_rows_are_reclaimed_by_retention(
     registry: Arc<dyn ProcessRegistry>,
 ) {

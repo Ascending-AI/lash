@@ -37,6 +37,10 @@ pub struct ReopenableArtifactStore {
 ///
 /// The fixture only has to be a publishable module; what it computes is never
 /// read.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
     let program = b::module(
         vec![b::process_returning(
@@ -194,6 +198,10 @@ where
 }
 
 /// The two typed keyspaces multiplexed onto a durable backend stay disjoint.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn artifact_store_cross_namespace_isolation<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,

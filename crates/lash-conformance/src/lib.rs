@@ -1,7 +1,5 @@
 //! Backend certification laws shared by store implementations.
 
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 use lash_core::*;
 mod conformance;
 pub use conformance::*;
@@ -31,6 +29,13 @@ pub fn helper_executable(name: &str) -> std::path::PathBuf {
     )
 }
 
+/// Three steps below only fail if the process was not launched from a real
+/// executable path, which cannot happen for the Cargo-launched test binaries
+/// this helper supports; the Bazel runfile branch above returns without them.
+#[expect(
+    clippy::expect_used,
+    reason = "the running test executable always has the Cargo deps/profile layout (FIG-3111)"
+)]
 fn resolve_helper_executable(
     name: &str,
     exact_override: Option<std::path::PathBuf>,

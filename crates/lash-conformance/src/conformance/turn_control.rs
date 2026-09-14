@@ -43,6 +43,10 @@ async fn driver_for_session(
 }
 
 /// Wait until a host exposes one genuinely registered durable waiter.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn await_event_registration_observed(
     host: Arc<dyn EffectHost>,
     session_id: SessionId,
@@ -86,6 +90,10 @@ pub async fn turn_work_driver<RegistrationBarrier, RegistrationBarrierFuture>(
 /// effective until a step boundary. A stronger request upgrades it through
 /// the reserved escalation promise and reports `Escalated`; the owner then
 /// observes the abort at its next peek, before any boundary.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn EffectHost>) {
     let address = address("escalation");
     let (host, driver) = driver_for_session(host, &address).await;
@@ -199,6 +207,10 @@ async fn after_step_request_defers_until_immediate_escalates_it(host: Arc<dyn Ef
 /// only there: the honoured evidence names the iteration; a start gate honours
 /// it without one; a replaying owner reaches the same evidence at the same
 /// identity.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn EffectHost>) {
     let address = address("boundary");
     let (host, driver) = driver_for_session(host, &address).await;
@@ -291,6 +303,10 @@ async fn after_step_request_is_honoured_at_the_step_boundary(host: Arc<dyn Effec
     assert_eq!(refused.honoured_after_step, None);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn EffectHost>) {
     let address = address("before-start");
     let (host, driver) = driver_for_session(host, &address).await;
@@ -387,6 +403,10 @@ async fn cancel_before_start_duplicate_replay_and_terminal_attach(host: Arc<dyn 
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost>) {
     let address = address("race");
     let (host, driver) = driver_for_session(host, &address).await;
@@ -445,6 +465,10 @@ async fn completion_seal_vs_cancel_is_first_writer_wins(host: Arc<dyn EffectHost
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, RegistrationBarrierFuture>(
     host: Arc<dyn EffectHost>,
     registration_barrier: RegistrationBarrier,
@@ -535,6 +559,10 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_deletion_revokes_control_promises(host: Arc<dyn EffectHost>) {
     let address = address("revoke");
     let (host, driver) = driver_for_session(host, &address).await;

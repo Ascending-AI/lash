@@ -1,6 +1,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_manifest_records_intent_and_commit_stamps(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -63,6 +67,10 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -127,6 +135,10 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -193,6 +205,10 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(
     assert!(listed[0].enqueue_seq < listed[1].enqueue_seq);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -243,6 +259,10 @@ pub async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_
     assert_eq!(left.batch().batch_id, right.batch().batch_id);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -284,6 +304,10 @@ pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
 /// the boundary and nothing here may assert a relationship between them. Only
 /// `enqueued_at_ms` may reorder the families; equal timestamps leave the
 /// previous winner in place.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn pending_session_work_ordering_agrees_across_ingress_families(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -363,6 +387,10 @@ pub async fn pending_session_work_ordering_agrees_across_ingress_families(
     assert!(ordering.session_command_precedes_turn_input());
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn concurrent_queue_and_turn_input_claims_have_one_owner(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -506,6 +534,10 @@ pub async fn concurrent_queue_and_turn_input_claims_have_one_owner(
     release_session_execution_lease_for_test(&store, &lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn RuntimePersistence>) {
     let cancellable = store
         .enqueue_queued_work(queued_draft(
@@ -606,6 +638,10 @@ pub async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn Ru
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_queued_work(queued_draft(
@@ -756,6 +792,10 @@ pub async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn Runt
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -839,6 +879,10 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
     release_session_execution_lease_for_test(&store, &lease).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn RuntimePersistence>) {
     let command = store
         .enqueue_queued_work(queued_session_command_draft(
@@ -999,6 +1043,10 @@ pub async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn Run
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1136,6 +1184,10 @@ pub async fn queued_work_claims_supersede_across_session_lease_generations(
         .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn queued_work_claims_supersede_across_session_lease_generations_with_timing(
     store: Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -1333,6 +1385,10 @@ pub(super) fn persisted_session_read_snapshot(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn claim_both_generation_fenced_lanes(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -1391,6 +1447,10 @@ pub(super) async fn claim_both_generation_fenced_lanes(
     (batch, input, lease, queue_claim, input_claim)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn assert_both_retained_claims_are_visible_and_cancellable(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,

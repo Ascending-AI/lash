@@ -30,6 +30,10 @@ pub trait StoreMaintenanceFaultInjector: Send + Sync {
 
 /// A completed report with failed or deferred destructive steps is incomplete,
 /// never a healthy empty pass or a clean sweep.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub fn report_failure_channels_are_incomplete(backend: &str) {
     let failed_id =
         crate::AttachmentId::parse("maintenance-failed").expect("valid failed attachment id");
@@ -63,6 +67,10 @@ pub fn report_failure_channels_are_incomplete(backend: &str) {
 /// fails with [`StoreError::UnsupportedStoreOperation`](crate::StoreError::UnsupportedStoreOperation),
 /// because reporting an empty sweep it never performed is a lie the counters
 /// cannot be distinguished from.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn store_maintenance_unimplemented_levers_fail(
     backend: &str,
     store: &dyn crate::store::StoreMaintenance,
@@ -93,6 +101,10 @@ pub async fn store_maintenance_unimplemented_levers_fail(
 
 /// An idle session's levers complete and report zero: emptiness that was
 /// *observed*, not emptiness standing in for a failure.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn idle_store_reports_witnessed_nothing_to_do(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -133,6 +145,10 @@ pub async fn idle_store_reports_witnessed_nothing_to_do(
 /// Superseding a checkpoint orphans its blob, and the next sweep reports the
 /// reclaim as a sweep — the arm a backend that swallows errors could never be
 /// told apart from.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn superseded_checkpoint_is_a_witnessed_sweep(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -175,6 +191,10 @@ pub async fn superseded_checkpoint_is_a_witnessed_sweep(
 
 /// A refused sweep hands back the report it accumulated before refusing, and
 /// destroys nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn empty_root_set_refusal_returns_its_partial_report(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -234,6 +254,10 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
 /// A broken sweep fails and says so. This is the law ADR 0067 §4 names: a
 /// backend that catches its own error and answers `Ok(GcReport::default())` is
 /// indistinguishable from a healthy store with nothing to do, and reds here.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn sweep_failure_is_not_an_empty_report(
     backend: &str,
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -270,6 +294,10 @@ pub async fn sweep_failure_is_not_an_empty_report(
 
 /// Commit a checkpoint carrying `generation`-specific content, returning the
 /// new head revision.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_generation(
     store: &Arc<dyn crate::RuntimePersistence>,
     session_id: &SessionId,
