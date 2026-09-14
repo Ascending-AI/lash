@@ -272,11 +272,37 @@ impl StallingProvider {
         }
     }
 
-    async fn wait_until_in_flight(&self) -> Result<()> {
-        tokio::time::timeout(GATE_TIMEOUT, self.entered.notified())
-            .await
-            .context("provider effect did not enter")?;
-        Ok(())
+    /// Wait for the provider to park, but never outlive the turn that is
+    /// supposed to reach it. A turn that fails or finishes first would
+    /// otherwise leave this gate waiting for a notification nobody will send,
+    /// and the real error would be discarded with the task: every such defect
+    /// reported itself only as `provider effect did not enter: deadline has
+    /// elapsed`.
+    async fn wait_until_in_flight<S, E>(
+        &self,
+        turn: &mut tokio::task::JoinHandle<(S, std::result::Result<lash::TurnOutput, E>)>,
+    ) -> Result<()>
+    where
+        S: Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        tokio::select! {
+            entered = tokio::time::timeout(GATE_TIMEOUT, self.entered.notified()) => {
+                entered.context("provider effect did not enter")?;
+                Ok(())
+            }
+            joined = &mut *turn => {
+                let (_session, output) = joined.context("in-flight turn task panicked")?;
+                match output {
+                    Ok(output) => bail!(
+                        "the in-flight turn ended before entering the provider effect: {:?}",
+                        output.result.outcome
+                    ),
+                    Err(err) => Err(anyhow::Error::new(err))
+                        .context("in-flight turn failed before entering the provider effect"),
+                }
+            }
+        }
     }
 
     fn release(&self) {
@@ -366,12 +392,6 @@ impl RuntimeEffectController for JournalController {
     ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
     {
         Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
-    }
-
-    async fn turn_control_participation(
-        &self,
-    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
-        Ok(lash_core::TurnControlParticipation::DurableJournaled)
     }
 
     async fn execute_effect(
@@ -634,7 +654,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let session = { core.session(TURN_SESSION_ID).open().await? };
     let journal = Arc::new(JournalController::default());
     let task_journal = Arc::clone(&journal);
-    let turn = tokio::spawn(async move {
+    let mut turn = tokio::spawn(async move {
         let output = session
             .turn(lash::TurnInput::text("finish the in-flight effect"))
             .turn_id("graceful-drain-in-flight")
@@ -642,7 +662,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
             .await;
         (session, output)
     });
-    provider.wait_until_in_flight().await?;
+    provider.wait_until_in_flight(&mut turn).await?;
     let active_before_drain = journal.active();
     ensure!(
         !active_before_drain.is_empty(),
@@ -1058,4 +1078,62 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "pending_marker_retained_on_terminal": terminal.abandon_request.is_some(),
     }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A controller that answers `DurableJournaled` must also name the durable
+    /// authority that minted its await-event keys, or the runtime refuses the
+    /// turn with `invalid_turn_cancel_request` before it reaches the provider
+    /// (#1226). This fixture's journal wraps the in-process native controller
+    /// and owns no durable authority, so the two answers have to stay
+    /// coherent: claiming durable turn control here is what made the drain
+    /// flow fail with nothing but `provider effect did not enter`.
+    #[tokio::test]
+    async fn the_drain_journal_never_claims_durable_turn_control_without_an_authority() {
+        let journal = JournalController::default();
+        if matches!(
+            journal
+                .turn_control_participation()
+                .await
+                .expect("participation"),
+            lash_core::TurnControlParticipation::DurableJournaled
+        ) {
+            assert!(
+                journal.await_event_authority_binding_id().is_some(),
+                "a durable-journaled controller must name its await-event authority"
+            );
+        }
+    }
+
+    /// The in-flight gate must never outlive the turn it waits on. A turn that
+    /// fails before reaching the provider used to leave the gate parked on a
+    /// notification nobody would send, so every such defect reported itself
+    /// only as `provider effect did not enter: deadline has elapsed` after the
+    /// full 30 s budget.
+    #[tokio::test]
+    async fn the_in_flight_gate_reports_a_turn_that_failed_before_the_provider() {
+        let provider = StallingProvider::new();
+        let mut turn = tokio::spawn(async {
+            let failure: std::result::Result<lash::TurnOutput, std::io::Error> = Err(
+                std::io::Error::other("the turn failed before entering the provider"),
+            );
+            ((), failure)
+        });
+        let error = provider
+            .wait_until_in_flight(&mut turn)
+            .await
+            .expect_err("a failed turn must fail the gate");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("failed before entering the provider effect"),
+            "the gate must name the turn's own failure, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("the turn failed before entering the provider"),
+            "the gate must carry the turn's error, got: {rendered}"
+        );
+    }
 }
