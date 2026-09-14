@@ -19,14 +19,25 @@ impl RuntimeExecutionContext<'_> {
         Self::process_handle_json(process_ref)
     }
 
-    /// Encodes the minimal stable process handle for code-executor implementors returning a process
-    /// reference through JSON.
+    /// Encodes the one process handle for code-executor implementors returning a
+    /// process reference through JSON.
+    ///
+    /// The incarnation rides inside the id rather than beside it, so a handle
+    /// cannot name an incarnation it was not taken against, and the coordinator
+    /// no longer has to back-fill one onto a handle a plugin returned.
+    ///
+    /// `process_id` rides beside the opaque id for the same reason
+    /// [`ProcessHandleView`](crate::ProcessHandleView) carries it: the process
+    /// tools take a `process_id`, and reading one out of the handle id is
+    /// exactly what the opaque id forbids.
     pub fn process_handle_json(process_ref: &crate::ProcessRef) -> serde_json::Value {
-        json!({
-            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
-            "id": process_ref.process_id,
-            "incarnation": process_ref.incarnation.registration_sequence(),
-        })
+        let mut record =
+            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                process_ref.process_id.as_str(),
+                process_ref.incarnation.registration_sequence(),
+            ));
+        record["process_id"] = json!(process_ref.process_id.as_str());
+        record
     }
 
     pub(super) fn process_status_value(status: &crate::ProcessRecord) -> serde_json::Value {
@@ -689,9 +700,25 @@ mod tests {
         let crate::ToolCallOutcome::Success(_handle) = started.output.outcome else {
             panic!("expected process handle output");
         };
+        // The minted handle is the one record: an opaque id that names the
+        // process and the incarnation it was taken against, not a copy of the
+        // process id beside a separate incarnation field.
         assert_eq!(
-            handle_json.get("id").and_then(|value| value.as_str()),
-            Some("async-call-1")
+            handle_json,
+            serde_json::json!({
+                "__handle__": "lash",
+                "id": lash_sansio::handle::HandleId::process("async-call-1", 1).as_str(),
+                "process_id": "async-call-1",
+            })
+        );
+        assert_eq!(
+            lash_sansio::handle::parse_handle_json(&handle_json)
+                .as_ref()
+                .and_then(lash_sansio::handle::HandleId::target),
+            Some(lash_sansio::handle::HandleTarget::Process {
+                process_id: "async-call-1".to_string(),
+                incarnation: 1,
+            })
         );
         assert_eq!(prepares.load(Ordering::SeqCst), 1);
         let record = host
@@ -828,11 +855,11 @@ mod tests {
             crate::TurnContext::default(),
         );
 
-        let handle = json!({
-            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
-            "id": "target-process",
-            "incarnation": target_process.incarnation.registration_sequence()
-        });
+        let handle =
+            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                "target-process",
+                target_process.incarnation.registration_sequence(),
+            ));
         let signalled = context
             .signal_process_handle(
                 "signal-1".to_string(),
@@ -936,11 +963,11 @@ mod tests {
             None,
             crate::TurnContext::default(),
         );
-        let handle = json!({
-            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
-            "id": "hidden-process",
-            "incarnation": hidden_process.incarnation.registration_sequence()
-        });
+        let handle =
+            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                "hidden-process",
+                hidden_process.incarnation.registration_sequence(),
+            ));
 
         let awaited = context
             .await_process_handle("await-hidden-process".to_string(), handle.clone())
@@ -1034,14 +1061,13 @@ mod tests {
             .await
             .expect("complete run-local await process");
         let local_handle = |process_id: &ProcessId| {
-            json!({
-                "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
-                "id": process_id,
-                "incarnation": local_incarnations
+            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                process_id.as_str(),
+                local_incarnations
                     .get(process_id.as_str())
                     .expect("registered process incarnation")
                     .registration_sequence(),
-            })
+            ))
         };
         let local_signal = context
             .signal_process_handle(

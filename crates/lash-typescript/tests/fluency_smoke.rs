@@ -25,7 +25,7 @@ impl ExecutionHost for FluencyHost {
             }
             AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(process_handle("fluency-run"))),
             AbilityOp::Await(Value::Record(handle))
-                if handle.get("id") == Some(&Value::String("fluency-run".into())) =>
+                if handle.get("process_id") == Some(&Value::String("fluency-run".into())) =>
             {
                 Ok(AbilityResult::Value(Value::Number(2.0)))
             }
@@ -41,9 +41,9 @@ impl ExecutionHost for FluencyHost {
 /// is a resolved value, and awaiting one is a guest error.
 fn process_handle(id: &str) -> Value {
     let mut handle = lashlang::Record::new();
-    handle.insert("__handle__".to_string(), Value::String("process".into()));
-    handle.insert("id".to_string(), Value::String(id.into()));
-    handle.insert("incarnation".to_string(), Value::Number(1.0));
+    handle.insert("__handle__".to_string(), Value::String("lash".into()));
+    handle.insert("id".to_string(), Value::String(format!("p.1.{id}").into()));
+    handle.insert("process_id".to_string(), Value::String(id.into()));
     Value::Record(std::sync::Arc::new(handle))
 }
 

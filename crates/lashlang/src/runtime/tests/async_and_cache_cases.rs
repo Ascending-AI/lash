@@ -79,12 +79,18 @@ impl ExecutionHost for AsyncHost {
             }
             AbilityOp::StartProcess(start) => {
                 let mut record = Record::default();
-                record.insert("__handle__".to_string(), Value::String("process".into()));
+                record.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
                 record.insert(
                     "id".to_string(),
-                    Value::String(start.process_name.clone().into()),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process(&start.process_name, 1)
+                            .as_str()
+                            .into(),
+                    ),
                 );
-                record.insert("incarnation".to_string(), Value::Number(1.0));
                 record.insert(
                     "process".to_string(),
                     Value::String(start.process_name.into()),
@@ -246,8 +252,20 @@ async fn start_process_returns_raw_handle_and_passes_explicit_input() {
         panic!("expected finish");
     };
     let handle = value.as_record().expect("start should return a handle");
-    assert_eq!(handle["__handle__"], Value::String("process".into()));
-    assert_eq!(handle["id"], Value::String("proc-1".into()));
+    // The one handle record: a marker field naming the one kind, and an opaque
+    // id that carries the process and the incarnation it was taken against.
+    assert_eq!(
+        handle[lash_sansio::handle::HANDLE_FIELD],
+        Value::String(lash_sansio::handle::HANDLE_KIND.into())
+    );
+    assert_eq!(
+        handle["id"],
+        Value::String(
+            lash_sansio::handle::HandleId::process("proc-1", 1)
+                .as_str()
+                .into()
+        )
+    );
 
     let starts = host.starts.lock_recover();
     assert_eq!(starts.len(), 1);
@@ -441,9 +459,18 @@ async fn value_position_while_leaves_null() {
 async fn process_lifecycle_controls_sleep_wait_and_signal() {
     let host = RecordingProcessHost::default();
     let mut handle = Record::new();
-    handle.insert("__handle__".to_string(), Value::String("process".into()));
-    handle.insert("id".to_string(), Value::String("target".into()));
-    handle.insert("incarnation".to_string(), Value::Number(1.0));
+    handle.insert(
+        lash_sansio::handle::HANDLE_FIELD.to_string(),
+        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+    );
+    handle.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process("target", 1)
+                .as_str()
+                .into(),
+        ),
+    );
     let program = Program::block(vec![
         Expr::SleepFor(Box::new(Expr::Number(5.0))),
         Expr::Assign {

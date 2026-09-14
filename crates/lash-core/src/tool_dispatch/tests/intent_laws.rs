@@ -220,9 +220,12 @@ fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId
         crate::ToolIntentExecutionOutcome::Executed {
             identity, result, ..
         } => (
+            // The outcome carries the handle and the parts it names. The
+            // process id is `process_id`; `id` is the opaque handle (ADR 0095)
+            // and reading it here is what the one handle kind stops.
             ProcessId::from(
                 result
-                    .get("id")
+                    .get("process_id")
                     .and_then(serde_json::Value::as_str)
                     .expect("a start outcome names its process id")
                     .to_string(),

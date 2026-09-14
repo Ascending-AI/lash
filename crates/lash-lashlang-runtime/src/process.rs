@@ -1491,14 +1491,20 @@ fn process_id_from_lashlang_handle(handle: &lashlang::Value) -> Result<String, E
     let Some(object) = value.as_object() else {
         return Err(LashlangHostError::InvalidProcessHandle.into());
     };
-    if object.get("__handle__").and_then(serde_json::Value::as_str) != Some("process") {
-        return Err(LashlangHostError::InvalidProcessHandle.into());
+    // The one parse (ADR 0095). Reading the marker field and the id separately
+    // here is what let this reader disagree with the VM's about what a handle
+    // was; it now asks the same question core and the language ask.
+    let Some(id) = lash_sansio::handle::parse_handle_json(&value) else {
+        return Err(if object.contains_key("__handle__") {
+            LashlangHostError::ProcessHandleMissingId.into()
+        } else {
+            LashlangHostError::InvalidProcessHandle.into()
+        });
+    };
+    match id.target() {
+        Some(lash_sansio::handle::HandleTarget::Process { process_id, .. }) => Ok(process_id),
+        _ => Err(LashlangHostError::InvalidProcessHandle.into()),
     }
-    object
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| LashlangHostError::ProcessHandleMissingId.into())
 }
 
 pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {

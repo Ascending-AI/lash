@@ -1336,9 +1336,10 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
 #[test]
 pub(super) fn process_handle_derivation_matches_runtime_await_authority() {
     let globals = lashlang::from_json(serde_json::json!({
-        // FIG-2996 part 2 moves this to `{ __handle__: "lash", id }`; the
-        // incarnation rides inside the id from then on.
-        "canonical": { "__handle__": "process", "id": "p1", "incarnation": 1 },
+        "canonical": { "__handle__": "lash", "id": "p.1.p1" },
+        // The record part 1 still minted: the incarnation beside the id, and a
+        // kind of its own. Part 2 retires both.
+        "retired_process_record": { "__handle__": "process", "id": "p1", "incarnation": 1 },
         "no_incarnation": { "__handle__": "process", "id": "p1" },
         "alternate": { "handle": "p2" },
         "empty_id": { "__handle__": "process", "id": "", "incarnation": 1 },
@@ -2185,7 +2186,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
                       run: async () => { return "done"; }
                     });
                     const handle = start(worker);
-                    const processId = handle.id;
+                    const processId = handle.process_id;
                     const status = await status_tool.inspect({ process_id: processId });
                     finish({ id: processId, status: status });
                 "#

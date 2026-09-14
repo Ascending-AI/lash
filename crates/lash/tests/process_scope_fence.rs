@@ -730,7 +730,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
                 )
                 .await
                 .expect("the session registers the pruned id again");
-            assert_eq!(view.id, process_id);
+            assert_eq!(view.process_id, process_id);
         }
         RegistrationPath::TriggerRouter => {
             let report = core

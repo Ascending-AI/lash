@@ -63,9 +63,18 @@ impl ExecutionHost for RecordingProcessHost {
             AbilityOp::StartProcess(start) => {
                 self.starts.lock_recover().push(*start);
                 let mut handle = Record::new();
-                handle.insert("__handle__".to_string(), Value::String("process".into()));
-                handle.insert("id".to_string(), Value::String("proc-1".into()));
-                handle.insert("incarnation".to_string(), Value::Number(1.0));
+                handle.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
+                handle.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process("proc-1", 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::ProcessEvent(event) => {

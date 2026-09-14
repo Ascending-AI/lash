@@ -196,7 +196,7 @@ pub use usage_activity::*;
 // require `source_capture`, and a window-76 peer writes neither, so its
 // subscriptions have no contract to validate a delivery against and no route to
 // restore; such a record is refused rather than defaulted. Peers must adopt 77.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 77;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 78;
 
 /// One versioned remote-protocol message.
 ///

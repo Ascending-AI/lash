@@ -69,15 +69,7 @@ pub fn parse_handle_record(record: &Record) -> Option<lash_sansio::handle::Handl
     let Some(Value::String(id)) = record.get("id") else {
         return None;
     };
-    lash_sansio::handle::parse_handle(
-        kind.as_str(),
-        id.as_str(),
-        // The pre-part-2 process record carries its incarnation beside the id.
-        match record.get("incarnation") {
-            Some(Value::Number(value)) if value.is_finite() && *value >= 0.0 => Some(*value as u64),
-            _ => None,
-        },
-    )
+    lash_sansio::handle::parse_handle(kind.as_str(), id.as_str())
 }
 
 /// Returns whether a record is handled by the process-await path.

@@ -98,7 +98,6 @@ impl From<RemoteObservedProcessEvent> for lash_core::facade_support::ObservedPro
 impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
     fn from(value: lash_core::ProcessHandleView) -> Self {
         let lash_core::ProcessHandleView {
-            handle_type,
             id,
             process_id,
             incarnation,
@@ -106,10 +105,11 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
             label,
             definition,
             status,
+            ..
         } = value;
         Self {
-            handle_type,
-            id,
+            handle_kind: (),
+            id: id.to_string(),
             process_id,
             incarnation: incarnation.registration_sequence(),
             kind: kind.into(),
@@ -126,7 +126,6 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
     fn try_from(value: RemoteProcessHandleView) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessHandleView")?;
         let RemoteProcessHandleView {
-            handle_type,
             id,
             process_id,
             incarnation,
@@ -134,17 +133,29 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
             label,
             definition,
             status,
+            ..
         } = value;
-        Ok(Self {
-            handle_type,
-            id,
+        // The view is rebuilt from its parts rather than adopting the peer's
+        // `id` text, so a handle that arrives naming a different process or
+        // incarnation than the fields beside it cannot survive the crossing.
+        let rebuilt = lash_core::ProcessHandleView::new(
             process_id,
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            kind: kind.into(),
-            label,
-            definition: definition.map(Into::into),
-            status: status.into(),
-        })
+            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+            lash_core::ProcessIdentity {
+                kind: kind.into(),
+                label,
+                definition: definition.map(Into::into),
+            },
+            status.into(),
+        );
+        if rebuilt.id.as_str() != id {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessHandleView",
+                message: "handle id does not name the process and incarnation beside it"
+                    .to_string(),
+            });
+        }
+        Ok(rebuilt)
     }
 }
 
