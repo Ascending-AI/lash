@@ -1,6 +1,6 @@
 # 0087: TypeScript aggregates evaluate runtime arrays
 
-Status: Superseded by [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) (FIG-2990, 2026-09-13)
+Status: Superseded by [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) (FIG-2990, 2026-09-13); the replacement landed 2026-09-14 (FIG-2996)
 
 ## Context
 
@@ -24,12 +24,38 @@ Nested Lashlang comprehensions in tuples, lists, records, or another comprehensi
 
 Array shape is determined at runtime rather than by syntax. The host still receives one resource-operation batch for the tool leaves, and all of them settle before TypeScript reports the first-settled rejection; process leaves are awaited only after that batch succeeded. Existing continuation blobs require their original format and compiled program; this version does not reinterpret them.
 
-## Superseded (2026-09-13, FIG-2990)
+## Superseded (2026-09-13, FIG-2990); replaced (2026-09-14, FIG-2996)
 
 [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) makes `processes.await` a Durable Wait on the work-driver seam and
 the VM keeps one handle kind, so a mixed aggregate is one resource-operation
 batch settling on one recorded order. The two-phase tool-then-process rule
 above, the process-leaf settlement walk, and the execution-nonce-stamped
 second handle encoding are deleted; the runtime-array evaluation rule and the
-journaled-order selection rule survive in that ADR. Every law asserted here
-has a replacement asserted under the single batch order.
+journaled-order selection rule survive in that ADR.
+
+That replacement has landed. What is true now, in place of the two-phase rule:
+
+- **One batch, one recorded order.** An awaited aggregate settles as a single
+  resource-operation batch. The host's recorded settlement order over its
+  leaves is authoritative and decides which rejection an unwrapping aggregate
+  reports, whichever leaf it came from. There is no phase ordering left for a
+  tool rejection to win by: `Promise.all([tools.x.op(), processes.await(h)])`
+  reports the failure the batch recorded first.
+- **A durable wait is a leaf.** `processes.await` is a leaf tool that parks on
+  a Durable Wait, and a parked leaf takes its place in the recorded order at
+  the moment its completion arrives, not at the position it was launched in.
+  It is not a batch child with a cancel grace, which is why the wait may last
+  days without the aggregate losing its ordering.
+- **A process handle is not an aggregate leaf.** Writing a raw handle at an
+  element position was how a process reached the retired second phase. It is
+  now refused with a repair naming `processes.await(handle)`. A handle *inside*
+  a value bound to a name is still carried through untouched: settlement is
+  shallow over element positions (ADR 0096), a rule this ADR's recursive
+  process-leaf walk had already lost.
+- **One handle encoding.** `{__handle__: "lash", id}` with the execution nonce
+  folded into the id, and `AwaitedValue` is `{Leaf, Plain}`: a value handed to
+  `await` is a handle record or it is not, and what the id names decides which
+  repair a handle that names no live request gets.
+
+Every law this ADR asserted has a replacement asserted under the single batch
+order; the replacement table is on the FIG-2996 part-4 pull request.

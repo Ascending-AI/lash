@@ -1708,6 +1708,15 @@ pub struct MockSessionManager {
     pub created: Mutex<Vec<SessionCreateRequest>>,
     pub closed: Mutex<Vec<String>>,
     pub turns: Mutex<Vec<RecordedSessionTurn>>,
+    /// Process terminals armed through
+    /// [`ProcessService::attach_process_terminal`](crate::ProcessService::attach_process_terminal),
+    /// in arming order.
+    ///
+    /// This mock cannot observe a real terminal, so it records the arming and
+    /// leaves the resolution to the test standing in for the process: a test
+    /// that resolves the recorded key is the terminal, and one that never does
+    /// is a process that never ended.
+    pub terminal_attachments: Mutex<Vec<(crate::ProcessRef, crate::AwaitEventKey)>>,
 }
 
 impl Default for MockSessionManager {
@@ -1724,6 +1733,7 @@ impl Default for MockSessionManager {
             created: Mutex::new(Vec::new()),
             closed: Mutex::new(Vec::new()),
             turns: Mutex::new(Vec::new()),
+            terminal_attachments: Mutex::new(Vec::new()),
         }
     }
 }
@@ -1855,6 +1865,18 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 
 #[async_trait::async_trait]
 impl crate::ProcessService for MockSessionManager {
+    async fn attach_process_terminal(
+        &self,
+        process_ref: &crate::ProcessRef,
+        key: &crate::AwaitEventKey,
+        _scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), PluginError> {
+        self.terminal_attachments
+            .lock_recover()
+            .push((process_ref.clone(), key.clone()));
+        Ok(())
+    }
+
     async fn start_from_recorded_intent(
         &self,
         session_id: &SessionId,

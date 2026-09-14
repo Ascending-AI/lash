@@ -986,73 +986,20 @@ async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
     );
 }
 
-/// A process handle written next to module operations in one `await [...]`
-/// is awaited after the tool batch, in written order (ADR 0087): the leaf
-/// yields the same result record a direct `await handle` does, never the raw
-/// handle record.
+/// A process handle written at an element position of an awaited aggregate is
+/// refused, wherever it is written and whatever is beside it.
+///
+/// This replaces ADR 0087's phase two, where such a handle settled after the
+/// tool batch and a tool rejection therefore always won it. There is one
+/// recorded settlement order now, so a wait that wants a place in it has to be
+/// a leaf of the batch: `processes.await(handle)`, the tool that parks on it.
+/// The repair says so, in both written positions, including beside a leaf that
+/// would itself have rejected.
 #[tokio::test(flavor = "current_thread")]
-async fn aggregate_await_settles_process_handles_after_module_operations() {
-    // process echo(value: str) { finish value }
-    // h = start echo(value: "left")
-    // results = await [h, tools.echo({ value: "right" })]
-    // finish [(results[0])?, (results[1])?]
-    let program = builders::module(
-        vec![echo_process()],
-        vec![
-            builders::assign("h", start_echo("left")),
-            builders::assign(
-                "results",
-                builders::await_expr(builders::list(vec![
-                    builders::var("h"),
-                    tools_echo("right"),
-                ])),
-            ),
-            builders::finish(builders::list(vec![unwrap_result(0), unwrap_result(1)])),
-        ],
-    );
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect("program should run");
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(Value::List(
-            vec![Value::String("left".into()), Value::String("right".into())].into()
-        ))
-    );
-
-    // A failing process settles as a result record; the leaf's `?` reports it.
+async fn a_process_handle_is_not_an_aggregate_leaf() {
     // process echo(value: str) { finish value }
     // h = start echo(value: "fail")
-    // results = await [tools.echo({ value: "ok" }), h]
-    // finish (results[1])?
-    let program = builders::module(
-        vec![echo_process()],
-        vec![
-            builders::assign("h", start_echo("fail")),
-            builders::assign(
-                "results",
-                builders::await_expr(builders::list(vec![tools_echo("ok"), builders::var("h")])),
-            ),
-            builders::finish(unwrap_result(1)),
-        ],
-    );
-    let mut state = State::new();
-    let error = execute_program(&program, &mut state, &AsyncHost)
-        .await
-        .expect_err("the failing process leaf must be reported");
-    assert!(error.to_string().contains("process failed"), "{error}");
-}
-
-/// A module-operation rejection wins over a failing process wherever the two
-/// are written: the tool batch settles first and its rejection ends the await
-/// before any process handle is touched.
-#[tokio::test(flavor = "current_thread")]
-async fn aggregate_await_reports_module_rejections_before_process_failures() {
-    // process echo(value: str) { finish value }
-    // h = start echo(value: "fail")
-    // results = await [tools.err({})?, h]   /   await [h, tools.err({})?]
-    // finish results
+    // await [h, <leaf>]   /   await [<leaf>, h]
     let rejecting_leaf = || {
         builders::unwrap(builders::receiver_call(
             builders::resource(&["tools"]),
@@ -1065,24 +1012,33 @@ async fn aggregate_await_reports_module_rejections_before_process_failures() {
             vec![echo_process()],
             vec![
                 builders::assign("h", start_echo("fail")),
-                builders::assign("results", builders::await_expr(builders::list(leaves))),
-                builders::finish(builders::var("results")),
+                builders::finish(builders::await_expr(builders::list(leaves))),
             ],
         )
     };
-    for program in [
-        aggregate(vec![rejecting_leaf(), builders::var("h")]),
-        aggregate(vec![builders::var("h"), rejecting_leaf()]),
-    ] {
-        let mut state = State::new();
-        let error = execute_program(&program, &mut state, &AsyncHost)
-            .await
-            .expect_err("the unwrapped module leaf rejects the aggregate");
-        let rendered = error.to_string();
-        assert!(rendered.contains("boom"), "{rendered}");
-        assert!(!rendered.contains("process failed"), "{rendered}");
+    for leaf in [tools_echo("right"), rejecting_leaf()] {
+        for program in [
+            aggregate(vec![builders::var("h"), leaf.clone()]),
+            aggregate(vec![leaf.clone(), builders::var("h")]),
+        ] {
+            let mut state = State::new();
+            let error = execute_program(&program, &mut state, &AsyncHost)
+                .await
+                .expect_err("a process handle is not a leaf of the batch");
+            assert!(
+                error.to_string().contains("processes.await(handle)"),
+                "the refusal must name the tool that parks on the wait: {error}"
+            );
+        }
     }
 }
+
+// Which rejection an aggregate reports is the batch's recorded settlement
+// order, and is pinned where that order is produced (`lash-core`'s
+// `session::settlement_latency_tests`). ADR 0087's rule that a module
+// rejection always beat a failing process is gone with the phase it described:
+// both are leaves of one batch now, and a durable process wait reaches that
+// batch as `processes.await`.
 
 // ------------------------------------------------------------------
 //  Type literals: syntactic signatures with enum, list, nested, ref,

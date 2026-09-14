@@ -53,7 +53,7 @@ pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 #[cfg(feature = "rlm")]
 pub use lashlang::{
     BYTECODE_FORMAT_VERSION, HEAP_SIZE_SCHEDULE_VERSION, LASHLANG_SNAPSHOT_VERSION,
-    LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION,
+    LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION, WORKFLOW_GRAPH_SCHEMA_VERSION,
 };
 
 /// One durable format whose version decides whether stored bytes open under
@@ -91,6 +91,9 @@ pub enum DurableFormat {
     LashlangSegmentHandover,
     /// The RLM snapshot envelope stored behind a checkpoint component.
     RlmSnapshotEnvelope,
+    /// The serialized workflow-graph contract a persisted graph projection
+    /// carries.
+    WorkflowGraphSchema,
     /// The Lashlang VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
@@ -112,6 +115,7 @@ impl DurableFormat {
             DurableFormat::HeapSizeSchedule => "heap size schedule",
             DurableFormat::LashlangSegmentHandover => "Lashlang segment handover",
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
+            DurableFormat::WorkflowGraphSchema => "workflow graph schema",
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
@@ -280,6 +284,14 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(RLM_SNAPSHOT_VERSION),
             owning_crate: "lash-protocol-rlm",
             constant: "RLM_SNAPSHOT_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
+            format: DurableFormat::WorkflowGraphSchema,
+            version: FormatVersion::Counter(WORKFLOW_GRAPH_SCHEMA_VERSION),
+            owning_crate: "lashlang",
+            constant: "WORKFLOW_GRAPH_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]

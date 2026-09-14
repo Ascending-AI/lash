@@ -233,12 +233,43 @@ async fn aggregate_process_finish(host: &AggregateProcessHost, program: Program)
     }
 }
 
-/// A handle written at an element position of an awaited literal settles
-/// through the durable process-await seam, however deeply the literal nests.
+/// A handle written at an element position of an awaited literal, beside a
+/// module leaf, is refused.
+///
+/// ADR 0087 settled such a handle through the process-await seam in a second
+/// phase after the tool batch. There is one recorded batch order now, so the
+/// handle is not settled at all: the repair names `processes.await(handle)`,
+/// the tool that parks on the durable wait and therefore is a leaf of that one
+/// batch. The seam is never reached.
 #[tokio::test(flavor = "current_thread")]
-async fn literal_process_containers_use_process_await_seam() {
-    for (label, program, expected) in [(
-        "handle nested one level inside an awaited literal",
+async fn a_literal_process_handle_element_is_refused_before_the_process_seam() {
+    let host = AggregateProcessHost::default();
+    let compiled = comprehension_compile(comprehension_module(vec![
+        started_handle(),
+        builders::finish(builders::await_expr(builders::list(vec![
+            builders::var("h"),
+            op("tools", "echo", Vec::new()),
+        ]))),
+    ]));
+    let error = execute_compiled(&compiled, &mut State::new(), &host)
+        .await
+        .expect_err("a process handle is not an aggregate leaf");
+    assert!(
+        error.to_string().contains("processes.await(handle)"),
+        "{error}"
+    );
+    assert_eq!(host.awaits.load(Ordering::SeqCst), 0);
+}
+
+/// A handle nested *inside* an element is not at an element position, so it is
+/// carried through as data rather than refused — and no batch settles it
+/// either. ADR 0087's recursive process-leaf walk reached it; ADR 0096's
+/// shallow element semantics, which the single batch order inherits, do not.
+#[tokio::test(flavor = "current_thread")]
+async fn a_handle_nested_inside_a_literal_element_is_carried_through() {
+    let host = AggregateProcessHost::default();
+    let value = aggregate_process_finish(
+        &host,
         comprehension_module(vec![
             started_handle(),
             builders::finish(builders::await_expr(builders::list(vec![
@@ -246,32 +277,13 @@ async fn literal_process_containers_use_process_await_seam() {
                 op("tools", "echo", Vec::new()),
             ]))),
         ]),
-        r#"[[{"ok":true,"value":42}],7]"#,
-    )] {
-        let host = AggregateProcessHost::default();
-        let value = aggregate_process_finish(&host, program).await;
-        assert_eq!(value.to_string(), expected, "{label}");
-        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{label}");
-    }
-}
-
-/// Awaiting a bound list directly still settles its elements: that is the
-/// `Promise.all` shape, one level deep, through the durable process-await
-/// seam. Only the elements settle (ADR 0096), never what they contain.
-#[tokio::test(flavor = "current_thread")]
-async fn awaiting_a_bound_list_settles_its_handle_elements() {
-    let host = AggregateProcessHost::default();
-    let value = aggregate_process_finish(
-        &host,
-        comprehension_module(vec![
-            started_handle(),
-            builders::assign("hs", builders::list(vec![builders::var("h")])),
-            builders::finish(builders::await_expr(builders::var("hs"))),
-        ]),
     )
     .await;
-    assert_eq!(value.to_string(), r#"[{"ok":true,"value":42}]"#);
-    assert_eq!(host.awaits.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        value.to_string(),
+        r#"[[{"__handle__":"lash","id":"p.1.h"}],7]"#
+    );
+    assert_eq!(host.awaits.load(Ordering::SeqCst), 0);
 }
 
 /// A container bound to a name is a plain value in an awaited aggregate: only
@@ -334,8 +346,12 @@ async fn bound_process_containers_are_carried_through_unsettled() {
     }
 }
 
+/// A carried handle is data, so a rejecting leaf rejects the aggregate exactly
+/// as it would with any other value beside it, and the process seam is never
+/// reached. Under ADR 0087 this passed for a different reason: the tool batch
+/// was phase one and its rejection ended the await before phase two ran.
 #[tokio::test(flavor = "current_thread")]
-async fn bound_failing_process_waits_until_module_leaves_settle() {
+async fn a_rejecting_leaf_rejects_the_aggregate_beside_a_carried_handle() {
     let host = AggregateProcessHost {
         reject_await: true,
         ..AggregateProcessHost::default()

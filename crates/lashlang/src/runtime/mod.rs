@@ -95,6 +95,7 @@ pub use vm::{
 // reachable via `use super::*` from sibling submodules + via `super::name`
 // from `vm.rs` / `compiler.rs`. These look "unused" from mod.rs's POV but
 // are load-bearing for the rest of the runtime crate.
+pub(crate) use access::value_contains_tool_handle;
 #[allow(unused_imports)]
 pub(crate) use access::{
     add_assign_index_number, add_assign_value_number, assign_index, assign_path, assign_path_steps,
@@ -106,7 +107,6 @@ pub(crate) use access::{
     resolve_existing_list_assignment_index, resolve_index, unwrap_tool_result,
 };
 pub use access::{is_process_handle, parse_handle_record};
-pub(crate) use access::{is_runtime_process_handle, value_contains_tool_handle};
 #[allow(unused_imports)]
 pub(crate) use format::*;
 #[allow(unused_imports)]

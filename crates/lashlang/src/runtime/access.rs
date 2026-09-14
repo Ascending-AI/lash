@@ -93,12 +93,6 @@ fn is_tool_handle_record(record: &Record) -> bool {
     )
 }
 
-/// Returns whether a value is a process handle the host awaits, as opposed to
-/// a pending-tool handle the VM settles itself.
-pub(crate) fn is_runtime_process_handle(value: &Value) -> bool {
-    matches!(value, Value::Record(record) if is_process_handle(record))
-}
-
 /// Whether a materialized value carries a pending-tool handle at any depth.
 ///
 /// Used where a handle must not travel: into a tool argument (the host would

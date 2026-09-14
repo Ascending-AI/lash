@@ -13,13 +13,13 @@ use super::super::ops::value_type_name;
 use super::super::{
     CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
     CompiledResourceOperationBatchLeaf, ExecutionHost, ExecutionHostError, RuntimeError, Value,
-    execution_host_error_value, is_process_handle, is_runtime_process_handle, record_with_capacity,
-    success, unwrap_tool_result,
+    execution_host_error_value, is_process_handle, record_with_capacity, success,
+    unwrap_tool_result,
 };
 use super::control::VmOutcome;
 use super::pending_tools::{
-    AwaitedValue, FOREIGN_HANDLE, ProcessLeafSettlement, SETTLED_HANDLE,
-    ensure_no_tool_handle_arguments, plain_value_awaited,
+    AwaitedValue, ensure_no_tool_handle_arguments, is_runtime_process_handle_id,
+    plain_value_awaited,
 };
 use super::{ActiveLashlangExecutionNode, Vm};
 
@@ -124,11 +124,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::AwaitPending => {
                 let value = self.pop_stack()?;
                 match self.classify_awaited(&value) {
-                    AwaitedValue::LocalToolHandle(id) => {
-                        if self.pending_tools.get(&id).is_none_or(Option::is_none) {
-                            return Err(RuntimeError::PendingTool {
-                                problem: SETTLED_HANDLE.into(),
-                            });
+                    // A process handle that reached the tool-await path (a
+                    // runtime value the lowerer could not type) awaits the
+                    // process the way the typed form does. Only an aggregate
+                    // element position refuses it, because only there did the
+                    // retired second phase settle it out of the batch order.
+                    AwaitedValue::Leaf(id) if is_runtime_process_handle_id(&id) => {
+                        let value = self.await_value_unwrap(value).await?;
+                        self.stack.push(value);
+                    }
+                    AwaitedValue::Leaf(id) => {
+                        if !self.live_pending_request(&id) {
+                            return Err(self.unsettleable_handle(&id));
                         }
                         self.stack.push(Value::List(vec![value].into()));
                         self.await_pending_array(false).await?;
@@ -136,18 +143,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             unreachable!()
                         };
                         self.stack.push(values[0].clone());
-                    }
-                    AwaitedValue::ForeignToolHandle => {
-                        return Err(RuntimeError::PendingTool {
-                            problem: FOREIGN_HANDLE.into(),
-                        });
-                    }
-                    // A process handle that reached the tool-await path (a
-                    // runtime value the lowerer could not type) awaits the
-                    // process the way the typed form does.
-                    AwaitedValue::ProcessHandle => {
-                        let value = self.await_value_unwrap(value).await?;
-                        self.stack.push(value);
                     }
                     AwaitedValue::Plain => {
                         return Err(RuntimeError::PendingTool {
@@ -337,47 +332,39 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: batch.aggregate_unwrap,
             first_settled_rejection: batch.first_settled_rejection,
         };
-        self.resolve_batch_spec(&expanded, expanded_values, ProcessLeafSettlement::Result)
-            .await
+        self.resolve_batch_spec(&expanded, expanded_values).await
     }
 
-    /// Settles one aggregate await in two phases: every tool leaf as one host
-    /// batch, then every process handle among the plain values in written
-    /// order (ADR 0087). The shape is built once both phases are in.
+    /// Settles one aggregate await as a single host batch.
+    ///
+    /// Every leaf the aggregate has to settle is a resource operation, so there
+    /// is one recorded settlement order for the whole aggregate and no second
+    /// phase to sequence against it. Non-leaf positions are plain values and
+    /// are carried through untouched (ADR 0096: settlement is shallow, over
+    /// element positions only).
     pub(super) async fn resolve_batch_spec(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
-        mut values: Vec<Value>,
-        process_leaves: ProcessLeafSettlement,
+        values: Vec<Value>,
     ) -> Result<(), RuntimeError> {
+        // Element positions are the only ones that could have settled, so they
+        // are the only ones where a handle is a mistake rather than data. A
+        // handle here named the retired second phase; the repair names the tool
+        // that parks on the durable wait instead.
+        for index in element_value_positions(&batch.shape) {
+            let Some(value) = values.get(index) else {
+                return Err(RuntimeError::AggregateAwaitValueOutOfRange);
+            };
+            if let AwaitedValue::Leaf(id) = self.classify_awaited(value) {
+                return Err(self.unsettleable_handle(&id));
+            }
+        }
+
         let leaf_values = if batch.leaves.is_empty() {
             Vec::new()
         } else {
             self.settle_tool_leaves(batch, &values).await?
         };
-
-        // Phase two: process handles written into the aggregate settle after
-        // the tool batch, in written order, through the same durable
-        // process-await seam a direct `await` uses. Settlement is shallow:
-        // only a handle written at an element position settles, matching
-        // Promise's element semantics (ADR 0096). Reaching this point
-        // means no tool leaf rejected, so the first failing process is the
-        // rejection an unwrapping aggregate reports.
-        let mut process_positions = Vec::new();
-        collect_value_positions(&batch.shape, &mut process_positions);
-        for index in process_positions {
-            let Some(value) = values.get(index) else {
-                return Err(RuntimeError::AggregateAwaitValueOutOfRange);
-            };
-            let handle = value.clone();
-            if !is_runtime_process_handle(&handle) {
-                continue;
-            }
-            values[index] = match process_leaves {
-                ProcessLeafSettlement::Unwrap => self.await_value_unwrap(handle).await?,
-                ProcessLeafSettlement::Result => self.await_value(handle).await?,
-            };
-        }
 
         let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
         if batch.aggregate_unwrap {
@@ -387,9 +374,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// Phase one of an aggregate await: every tool leaf as one host batch.
-    /// Returns each leaf's value in leaf order, or the rejection the batch
-    /// reports (first settled for `Promise.all`, first written otherwise).
+    /// Runs the aggregate's leaves as one host batch. Returns each leaf's value
+    /// in leaf order, or the rejection the batch reports (first settled for
+    /// `Promise.all`, first written otherwise).
     async fn settle_tool_leaves(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
@@ -758,22 +745,27 @@ struct SettledResourceOperationBatch {
     selection: Vec<usize>,
 }
 
-/// Every stack-value position an aggregate shape reads, in written order.
-fn collect_value_positions(shape: &CompiledAggregateAwaitShape, positions: &mut Vec<usize>) {
-    match shape {
-        CompiledAggregateAwaitShape::Comprehension { .. } => {
-            unreachable!("batch shape expands before settlement")
-        }
-        CompiledAggregateAwaitShape::BatchLeaf(_) => {}
-        CompiledAggregateAwaitShape::Value(index) => positions.push(*index),
+/// The stack-value positions written at the aggregate's own element positions.
+///
+/// Only the direct children of the awaited container are elements. Anything
+/// deeper is a value *inside* an element, which settlement never reaches
+/// (ADR 0096) and which this walk therefore must not descend into.
+fn element_value_positions(shape: &CompiledAggregateAwaitShape) -> Vec<usize> {
+    let elements = match shape {
         CompiledAggregateAwaitShape::Tuple(values)
         | CompiledAggregateAwaitShape::List(values)
-        | CompiledAggregateAwaitShape::Record { values, .. } => {
-            for value in values.iter() {
-                collect_value_positions(value, positions);
-            }
-        }
-    }
+        | CompiledAggregateAwaitShape::Record { values, .. } => values,
+        CompiledAggregateAwaitShape::Comprehension { .. }
+        | CompiledAggregateAwaitShape::BatchLeaf(_)
+        | CompiledAggregateAwaitShape::Value(_) => return Vec::new(),
+    };
+    elements
+        .iter()
+        .filter_map(|element| match element {
+            CompiledAggregateAwaitShape::Value(index) => Some(*index),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Expand captured comprehension lists recursively, preserving source traversal
