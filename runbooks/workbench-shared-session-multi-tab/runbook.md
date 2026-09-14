@@ -160,11 +160,18 @@ order.
   `session_id = <S> AND tombstoned = 0`, `kind = "event"` nodes whose
   `event.Conversation.role` is `User` or `Assistant`; the projection `GET
   /api/state?session_id=<S>.messages`; and `<data-dir>/product-events.json` keyed by
-  `<S>`. **The store runs in WAL mode** — snapshot `durable-core.db` together with its
+  `<S>`. **Reconcile counts, never id sets.** The graph holds every RLM protocol
+  `Conversation` event too — `m_rlm_<turn>_<n>_assistant_content|prose` rows the projection
+  does not surface — and the projection relabels some committed user rows
+  `workbench-user:<turn-id>` while their durable node keeps `m_ingress_ti:<hash>`. An id-set
+  comparison therefore reports phantom absences in both directions; the committed user rows
+  are the `m_ingress_ti` nodes, and the assistant count the page renders is a subset of the
+  graph's assistant `Conversation` nodes. **The store runs in WAL mode** — snapshot `durable-core.db` together with its
   `-wal` and `-shm` siblings, or read the live file with `mode=ro`. Copying the main file
   alone reads as an empty graph and manufactures a phantom three-layer mismatch in every
   phase.
-- **Layer 3 — logs:** `<data-dir>/trace.jsonl`, records with `context.session_id == <S>`;
+- **Layer 3 — logs:** the run's trace (`<data-dir>/trace.jsonl` unless
+  `AGENT_WORKBENCH_TRACE` points elsewhere), records with `context.session_id == <S>`;
   count `type == "turn_completed"`. `context.turn_id` distinguishes a composer turn
   (`workbench-turn-…`) from a wake or drained queued turn (`workbench-queued-…`).
 - Layers 2 and 3 are **shared truth**: they answer "how many messages exist", and the
@@ -252,9 +259,11 @@ Save `02b-work-a.json`, `02b-work-b.json`, `02b-work-api.json`; screenshot
 Assert the contract above and record the **actual** behavior, one sub-gate per line: what
 was promised, what was observed.
 
-**3a — a composer turn from A.** Start a long turn from A. Require A's pill `running` with
-subtitle `turn running · restored` / `running · Ns`, `runningActions` shown,
-`aria-busy="true"`.
+**3a — a composer turn from A.** Start a long turn from A. Require A's pill `running` with subtitle `turn running · restored` / `running · Ns`,
+`runningActions` shown, and `aria-busy="true"` **on `#timeline`** (that is the element
+`setBusy` writes). The subtitle element is `#streamState`; a long generation may also
+paint `reconnecting · a turn was running` there, which is the shell availability banner
+rather than a busy write — record it and read the busy log, not the sampled pill.
 Require B renders the turn it did not start (its timeline grows while `active_turns` is
 non-empty).
 
@@ -266,12 +275,21 @@ non-empty).
 - both tabs' busy writes carry `turn running · restored`; neither tab may record an
   optimistic `starting turn` or `agent running` write;
 - each busy write follows an accepted `/api/state` response through `applyBusySnapshot`.
-  Capture state-request start order and the `setBusy` stack in both tabs. Require applied
-  request sequences to increase monotonically and every ignored response to have a lower
-  sequence than the latest request. Asserting the mechanism, not just the pill, is what
-  makes this phase a regression gate rather than a screenshot.
-- B's client-side concurrency guard arms on convergence: B's **send** control becomes
-  disabled and its **inject now** / **queue next** controls become enabled.
+  The snapshot sequence itself is **not browser-reachable**: `projectionState` and
+  `applySequencedBusySnapshot` are module-closure private and the page exposes no test
+  hook, so a browser row cannot read applied-sequence monotonicity. Gate on the reachable
+  fingerprint instead: wrap `window.fetch` to record every `/api/state` request in start
+  order with its response's `active_turns` length, observe `#busyText` / `#streamState` for
+  every transition, and require that each busy transition is preceded by a state response
+  whose `active_turns` agrees with it, that the running label is exactly
+  `turn running · restored` (written only by `applyBusySnapshot`), and that neither tab
+  ever writes `starting turn` or `agent running`. Monotonic applied sequences stay a
+  deterministic-companion claim.
+- B's client-side concurrency guard arms on convergence: B's **send** control is swapped
+  out and its **inject now** / **queue next** controls become available. The swap is by
+  `hidden`, not by `disabled` — `setBusy` hides `#idleActions` and shows `#runningActions`
+  — so gate on `#idleActions.hidden === true` and `#runningActions.hidden === false`, never
+  on a `disabled` attribute that the send button never carries.
 
 Screenshot side-by-side `03ab-inflight-both.png` with both pills and both subtitles
 legible; save `03-watcher-convergence.json` (latency, both shells) and
