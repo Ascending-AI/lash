@@ -385,10 +385,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             # The warning-capture contract installs a scoped tracing subscriber.
             # Other tests in this libtest process must not emit concurrently.
             test_env["RUST_TEST_THREADS"] = "1"
-        if package["name"] == "lash-internal-lashlang" and target["name"] == "append_cost":
-            # The per-append cost law reads a process-global counting allocator.
-            # Cargo nextest isolates cases by process; serialize libtest so
-            # Bazel observes the same one-at-a-time measurement contract.
+        if package["name"] == "lash-internal-lashlang" and target["name"] in (
+            "append_cost",
+            "dialect_cost",
+        ):
+            # These cost laws read a process-global counting allocator. Cargo
+            # nextest isolates cases by process; serialize libtest so Bazel
+            # observes the same one-at-a-time measurement contract.
             test_env["RUST_TEST_THREADS"] = "1"
         extra_compile_data = []
         if package["name"] in (
@@ -398,6 +401,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "toolbench",
         ):
             extra_compile_data.append("//examples:shared_rust_sources")
+        if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
+            # It holds the dialect to the corpus's own checked-in budget by
+            # reading the budget file with `include_str!`, the way lash-perf
+            # does, so the file is a compile input of this test.
+            extra_compile_data.append("//:perf_guard_budgets")
         if package["name"] in (
             "lash-internal-postgres-store",
             "lash-internal-sqlite-store",

@@ -2,11 +2,10 @@
 //!
 //! ADR 0096 makes TypeScript the sole authored RLM dialect, but this corpus
 //! measures the IR and the VM, which the ADR keeps. Authoring it in TypeScript
-//! would change what is measured rather than how it is spelled: the dialect has
-//! no O(1) list append (FIG-3063), so every accumulating loop in the corpus
-//! becomes quadratic and the per-step-cost laws the heap scenarios exist to pin
-//! stop holding. The scenarios are therefore built straight from the AST, which
-//! is the layer they were always about.
+//! would change what is measured rather than how it is spelled, so the
+//! scenarios are built straight from the AST, which is the layer they were
+//! always about. The dialect is measured beside the corpus instead, in
+//! `crates/lashlang/tests/dialect_cost.rs`.
 //!
 //! Every helper here is a plain constructor. Nothing parses, nothing accepts a
 //! string DSL, and nothing supplies a default for a field a scenario measures.
