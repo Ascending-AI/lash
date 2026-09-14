@@ -88,7 +88,7 @@ impl BenchmarkRuntime {
                 .min_by_key(|process| {
                     (
                         process.created_at_ms,
-                        !process.terminal,
+                        !process.terminal(),
                         process.process_id.clone(),
                     )
                 })
@@ -100,7 +100,7 @@ impl BenchmarkRuntime {
             }
             tokio::task::yield_now().await;
         };
-        if !delivery.terminal {
+        if !delivery.terminal() {
             session
                 .admin()
                 .processes()
@@ -121,7 +121,7 @@ impl BenchmarkRuntime {
                 .count() as u64,
             terminal_count: terminal_processes
                 .iter()
-                .filter(|process| process.terminal)
+                .filter(|process| process.terminal())
                 .count() as u64,
         };
         if observation.durable_claim_count != observation.process_count

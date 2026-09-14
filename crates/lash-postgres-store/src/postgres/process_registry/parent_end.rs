@@ -176,7 +176,7 @@ pub(crate) static UNRECORDED_TURN_PARENTS_SQL: LazyLock<String> = LazyLock::new(
         "SELECT DISTINCT child.parent_scope_id FROM lash_processes AS child
          WHERE child.parent_scope_kind = 'turn'
            AND child.on_parent_end = 'cancel'
-           AND NOT child.cancel_requested
+           AND child.cancel_requested_at_ms IS NULL
            AND {live}
            AND NOT EXISTS (
                SELECT 1 FROM lash_parent_end_plans AS plan
@@ -222,7 +222,7 @@ pub(crate) static PARENT_END_CHILDREN_SQL: LazyLock<String> = LazyLock::new(|| {
          WHERE parent_scope_kind = $1
            AND parent_scope_id = $2
            AND on_parent_end = 'cancel'
-           AND NOT cancel_requested
+           AND cancel_requested_at_ms IS NULL
            AND {live}
            AND ($3::text IS NULL OR process_id > $3::text)
          ORDER BY process_id ASC

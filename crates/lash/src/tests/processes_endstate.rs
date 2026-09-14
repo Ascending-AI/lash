@@ -939,7 +939,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         .prune(
             u64::MAX,
             Some(&lash_core::ProcessListFilter {
-                originator_id: Some("some-session".to_string()),
+                originator: Some(lash_core::ProcessOriginatorFilter::session("some-session")),
                 ..lash_core::ProcessListFilter::default()
             }),
             lash_core::ProjectionWatermark::NoProjector,
@@ -2374,7 +2374,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         |process| process.lifecycle == lash_core::ProcessStatus::Completed,
     )
     .await;
-    assert!(completed.terminal);
+    assert!(completed.terminal());
 
     reopened_artifact_store.set_unavailable(true);
     let failed_reads_before_replay = reopened_artifact_store.failed_reads();

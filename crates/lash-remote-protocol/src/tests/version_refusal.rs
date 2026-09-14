@@ -126,7 +126,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 73,
+            expected: 74,
         })
     ));
 }
@@ -151,11 +151,14 @@ fn historical_remote_protocol_generation_67_is_refused() {
     ));
 }
 
-/// Windows 68-70 are claimed by other bump members that have not landed here,
-/// so a peer speaking any of them is refused by this build too.
+/// Windows 68-70 are claimed by bump members that never landed here, so a peer
+/// speaking any of them is refused by this build too. 72 and 73 are the two
+/// generations this window replaced, and they are refused for the same reason:
+/// exact-match negotiation accepts one number and refuses every other, landed
+/// or not.
 #[test]
 fn unlanded_intermediate_remote_protocol_generations_are_refused() {
-    for predecessor in [68, 69, 70] {
+    for predecessor in [68, 69, 70, 72, 73] {
         assert!(
             matches!(
                 decode_empty_envelope(predecessor),

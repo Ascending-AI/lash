@@ -100,7 +100,9 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id.clone().to_string()),
+                originator: Some(ProcessOriginatorFilter::session(
+                    originator.session_id.clone(),
+                )),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -208,7 +210,9 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator.session_id.to_string()),
+                originator: Some(ProcessOriginatorFilter::session(
+                    originator.session_id.clone(),
+                )),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -278,7 +282,9 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
 
     let filter = ProcessListFilter {
         status: ProcessStatusFilter::Any,
-        originator_id: Some(originator.session_id.clone().to_string()),
+        originator: Some(ProcessOriginatorFilter::session(
+            originator.session_id.clone(),
+        )),
         ..ProcessListFilter::default()
     };
     registry

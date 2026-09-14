@@ -346,11 +346,15 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // rejected and recreated rather than adopted without proof.
 // Version 93 makes the parent scope a registration fact and the end of a scope
 // one ledger row: `lash_processes` gains parent_scope_kind, parent_scope_id,
-// on_parent_end and cancel_requested under named CHECKs, and
+// on_parent_end and a cancel-request column under named CHECKs, and
 // `lash_process_parent_end_plans` is replaced by scope-keyed
 // `lash_parent_end_plans`. Component-92 stores carry children with no parent
 // scope and plans keyed by a process id, so they are rejected and recreated.
-const SCHEMA_VERSION: i32 = 93;
+// Version 94 replaces the boolean cancel_requested column on `lash_processes`
+// with cancel_requested_at_ms, the timestamp of the first accepted cancel, and
+// adds the partial index a pending-cancel list reads. Component-93 stores carry
+// a boolean this schema no longer has, so they are rejected and recreated.
+const SCHEMA_VERSION: i32 = 94;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

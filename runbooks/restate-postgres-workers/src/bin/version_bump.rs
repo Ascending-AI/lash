@@ -58,35 +58,44 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 91;
-/// Cancellation authority tables absent from component 91.
-const POST_FLOOR_TABLES: [&str; 4] = [
-    "lash_turn_cancellation_bindings",
-    "lash_turn_cancel_closure_authorizations",
-    "lash_turn_cancel_retired_scopes",
-    "lash_turn_cancel_closure_participants",
+const MIGRATION_FLOOR_VERSION: i32 = 92;
+/// The scope-keyed parent-end ledger, absent from component 92.
+const POST_FLOOR_TABLES: [&str; 1] = ["lash_parent_end_plans"];
+/// The post-floor indexes the fixture must drop by name. The ledger's own
+/// index goes with its table, but its `CREATE INDEX` is not in the sources the
+/// checker reads, so it is named here too and dropped `IF EXISTS`.
+const POST_FLOOR_INDEXES: [&str; 4] = [
+    "idx_lash_parent_end_plans_pending",
+    "idx_lash_processes_parent_scope",
+    "idx_lash_processes_parent_end_pending",
+    "idx_lash_processes_pending_cancel",
 ];
-/// Component 92 adds no independent index on a predecessor table.
-const POST_FLOOR_INDEXES: [&str; 0] = [];
-/// The intent-revision column absent from the preceding cancellation shape.
-const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [("lash_turn_cancel_requests", "intent_revision")];
+/// The process columns absent from component 92.
+const POST_FLOOR_COLUMNS: [(&str, &str); 4] = [
+    ("lash_processes", "parent_scope_kind"),
+    ("lash_processes", "parent_scope_id"),
+    ("lash_processes", "on_parent_end"),
+    ("lash_processes", "cancel_requested_at_ms"),
+];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 4] = [
-    "lash_turn_cancellation_bindings",
-    "lash_turn_cancel_closure_authorizations",
-    "lash_turn_cancel_retired_scopes",
-    "lash_turn_cancel_closure_participants",
+const POST_FLOOR_ARTIFACTS: [&str; 5] = [
+    "lash_parent_end_plans",
+    "idx_lash_parent_end_plans_pending",
+    "idx_lash_processes_parent_scope",
+    "idx_lash_processes_parent_end_pending",
+    "idx_lash_processes_pending_cancel",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 4] = [
-    "lash_turn_cancellation_bindings",
-    "lash_turn_cancel_closure_authorizations",
-    "lash_turn_cancel_retired_scopes",
-    "lash_turn_cancel_closure_participants",
+const DIVERGENT_ARTIFACTS: [&str; 5] = [
+    "lash_parent_end_plans",
+    "idx_lash_parent_end_plans_pending",
+    "idx_lash_processes_parent_scope",
+    "idx_lash_processes_parent_end_pending",
+    "idx_lash_processes_pending_cancel",
 ];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation

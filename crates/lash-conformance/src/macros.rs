@@ -410,6 +410,7 @@ macro_rules! process_registry_tests {
                 (waiting_processes_remain_in_the_recovery_worklist, "waiting-worklist"),
                 (list_processes_filters_by_enriched_fields, "enriched-filters"),
                 (list_processes_bounds_retired_rows_without_hiding_live_rows, "retired-bounds"),
+                (list_processes_filters_by_parent_scope_and_pending_cancel, "parent-scope-cancel-filters"),
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
                 (process_lease_fencing_contract, "lease-fencing"),
                 (process_lease_batch_read_matches_point_reads, "lease-batch-read"),

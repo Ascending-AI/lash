@@ -407,7 +407,7 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     parent_scope_kind text NOT NULL,
     parent_scope_id text COLLATE pg_catalog."C",
     on_parent_end text NOT NULL,
-    cancel_requested boolean DEFAULT false NOT NULL,
+    cancel_requested_at_ms bigint,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_on_parent_end CHECK ((on_parent_end = ANY (ARRAY['abandon'::text, 'cancel'::text]))),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((((parent_scope_kind = 'host'::text) AND (parent_scope_id IS NULL)) OR ((parent_scope_kind = ANY (ARRAY['turn'::text, 'process'::text])) AND (parent_scope_id IS NOT NULL)))),
@@ -1075,7 +1075,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 93);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 94);
 
 
 --
@@ -1839,7 +1839,7 @@ CREATE INDEX idx_lash_processes_originator ON lash_durable_read_fixture.lash_pro
 -- Name: idx_lash_processes_parent_end_pending; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id) WHERE ((on_parent_end = 'cancel'::text) AND (NOT cancel_requested) AND (status = ANY (ARRAY['running'::text, 'waiting'::text])));
+CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id) WHERE ((on_parent_end = 'cancel'::text) AND (cancel_requested_at_ms IS NULL) AND (status = ANY (ARRAY['running'::text, 'waiting'::text])));
 
 
 --
@@ -1847,6 +1847,13 @@ CREATE INDEX idx_lash_processes_parent_end_pending ON lash_durable_read_fixture.
 --
 
 CREATE INDEX idx_lash_processes_parent_scope ON lash_durable_read_fixture.lash_processes USING btree (parent_scope_kind, parent_scope_id, process_id);
+
+
+--
+-- Name: idx_lash_processes_pending_cancel; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_pending_cancel ON lash_durable_read_fixture.lash_processes USING btree (cancel_requested_at_ms, process_id) WHERE ((cancel_requested_at_ms IS NOT NULL) AND (status <> ALL (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text])));
 
 
 --

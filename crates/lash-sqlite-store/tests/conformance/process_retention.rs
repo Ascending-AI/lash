@@ -237,6 +237,18 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         ),
         ("schema.rs", include_str!("../../src/schema.rs")),
     ];
+    // The third site kind: the pending-cancel index excludes the terminal
+    // statuses rather than naming the live ones, because `caller_departed` is
+    // neither live nor terminal and a departed caller's row still owes its
+    // cancel. Its literal is generated, so the expectation here is the
+    // generator's own output rather than a second spelling of it.
+    let nonterminal =
+        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
+    let terminal = nonterminal
+        .strip_prefix("status NOT IN ")
+        .expect("the nonterminal predicate is spelled as a NOT IN list")
+        .to_string();
+    let mut nonterminal_sites = 0usize;
     let mut live_sites = 0usize;
     let mut parameterized_sites = 0usize;
     let mut vocabulary_sites = 0usize;
@@ -252,6 +264,10 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
                         || site.starts_with("(SELECT value FROM json_each(?2))"))
                 {
                     parameterized_sites += 1;
+                    continue;
+                }
+                if delimiter == "status NOT IN " && site.starts_with(terminal.as_str()) {
+                    nonterminal_sites += 1;
                     continue;
                 }
                 let prefix = &source[..offset];
@@ -305,5 +321,11 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     assert_eq!(
         vocabulary_sites, 1,
         "expected exactly one `ck_processes_status` vocabulary literal in the SQLite DDL"
+    );
+    assert_eq!(
+        nonterminal_sites, 1,
+        "expected exactly one nonterminal-status literal in the SQLite DDL: the \
+         pending-cancel partial index, whose predicate must stay byte-identical to \
+         the generated fragment the query uses"
     );
 }

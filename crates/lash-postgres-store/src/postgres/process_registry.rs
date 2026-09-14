@@ -9,6 +9,9 @@ mod continuation_store;
 mod leases;
 #[path = "process_registry/lifecycle.rs"]
 mod lifecycle;
+#[cfg(test)]
+#[path = "process_registry/list_plan_tests.rs"]
+mod list_plan_tests;
 #[path = "process_registry/parent_end.rs"]
 pub(crate) mod parent_end;
 mod prune;
@@ -17,11 +20,18 @@ pub(crate) mod prune_api;
 mod retention;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
-use crate::process_lifecycle_sql::{live_process_status, wake_delivery_state};
+use crate::process_lifecycle_sql::{
+    live_process_status, nonterminal_process_status, wake_delivery_state,
+};
 use lash_core::WakeDeliveryState;
 use std::sync::LazyLock;
 
-pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> = LazyLock::new(|| {
+/// The always-bound filters. `{{extra}}` is where the optional, index-served
+/// clauses land: they are spelled as bare conjuncts rather than as
+/// `($n IS NULL OR ...)` because an `OR` over a parameter costs the planner
+/// the partial index those filters exist to use, so an absent filter must
+/// leave no predicate behind at all.
+static LIST_PROCESSES_SQL_TEMPLATE: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT record_json FROM lash_processes
              WHERE ($1::TEXT[] IS NULL OR status = ANY($1))
@@ -37,11 +47,52 @@ pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> = LazyLock::new(|| {
                AND ($8::BIGINT IS NULL OR created_at_ms >= $8)
                AND ($9::BIGINT IS NULL OR created_at_ms < $9)
                AND ($10::BIGINT IS NULL OR {live}
-                    OR updated_at_ms >= $10)
+                    OR updated_at_ms >= $10){{extra}}
              ORDER BY process_id ASC",
         live = live_process_status("status"),
     )
 });
+
+pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> =
+    LazyLock::new(|| LIST_PROCESSES_SQL_TEMPLATE.replace("{extra}", ""));
+
+/// The optional clauses and the parameter numbers they read, rendered
+/// together so a clause and its bind cannot drift apart.
+fn list_processes_extra_sql(filter: &lash_core::ProcessListFilter) -> String {
+    let mut next = 10;
+    let mut extra = String::new();
+    if filter.parent_scope.is_some() {
+        let kind = next + 1;
+        let id = next + 2;
+        next += 2;
+        // `IS NOT DISTINCT FROM` rather than `=`: a Host scope stores a NULL
+        // id, tied to the kind by the check constraint, so the pair is still
+        // an equality lookup on `idx_lash_processes_parent_scope`.
+        extra.push_str(&format!(
+            "\n               AND parent_scope_kind = ${kind}\n               AND parent_scope_id IS NOT DISTINCT FROM ${id}::TEXT"
+        ));
+    }
+    if filter.cancel_pending_before_ms.is_some() {
+        let before = next + 1;
+        extra.push_str(&format!(
+            "\n               AND cancel_requested_at_ms IS NOT NULL\n               AND cancel_requested_at_ms < ${before}\n               AND {nonterminal}",
+            nonterminal = nonterminal_process_status("status"),
+        ));
+    }
+    extra
+}
+
+/// The exact statement this build sends for `filter`, so a planner witness
+/// cannot drift from the query it claims to exercise.
+pub(crate) fn list_processes_sql(filter: &lash_core::ProcessListFilter) -> String {
+    let extra = list_processes_extra_sql(filter);
+    // The unnarrowed statement is the common case, so it is rendered once and
+    // reused rather than rebuilt per call.
+    if extra.is_empty() {
+        return LIST_PROCESSES_SQL.clone();
+    }
+    LIST_PROCESSES_SQL_TEMPLATE.replace("{extra}", &extra)
+}
 
 pub(crate) static LIST_OBSERVED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -168,9 +219,10 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
             .map(serde_json::to_value)
             .transpose()
             .map_err(process_decode_error)?;
-        let rows = sqlx::query(LIST_PROCESSES_SQL.as_str())
+        let sql = list_processes_sql(filter);
+        let mut query = sqlx::query(&sql)
             .bind(filter.status.labels())
-            .bind(filter.originator_id.as_deref())
+            .bind(filter.originator.as_ref().map(|o| o.originator_id()))
             .bind(filter.identity_kind.as_deref())
             .bind(filter.identity_label.as_deref())
             .bind(definition)
@@ -178,7 +230,14 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
             .bind(filter.caused_by_subscription_id.as_deref())
             .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
             .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
-            .bind(filter.retired_since_ms.map(clamp_epoch_ms))
+            .bind(filter.retired_since_ms.map(clamp_epoch_ms));
+        if let Some(parent) = &filter.parent_scope {
+            query = query.bind(parent.storage_kind()).bind(parent.storage_id());
+        }
+        if let Some(before_ms) = filter.cancel_pending_before_ms {
+            query = query.bind(clamp_epoch_ms(before_ms));
+        }
+        let rows = query
             .fetch_all(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -353,7 +412,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status,
-                parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested,
+                parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
                 record_json
              )
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
@@ -373,7 +432,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .bind(record.lifecycle.parent.storage_kind())
         .bind(record.lifecycle.parent.storage_id())
         .bind(record.lifecycle.on_parent_end.storage_label())
-        .bind(record.cancel_request.is_some())
+        .bind(cancel_requested_at_ms(&record))
         .bind(record_json)
         .execute(&mut *tx)
         .await

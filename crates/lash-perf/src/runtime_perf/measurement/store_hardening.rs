@@ -579,7 +579,9 @@ async fn measure_process_prune(
                 u64::MAX,
                 Some(lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
-                    originator_id: Some(format!("host:{prune_scope}")),
+                    originator: Some(lash_core::ProcessOriginatorFilter::Host {
+                        scope: Some(prune_scope.to_string()),
+                    }),
                     ..lash_core::ProcessListFilter::default()
                 }),
                 lash_core::ProjectionWatermark::NoProjector,
@@ -700,7 +702,9 @@ mod store_hardening_tests {
         let remaining = registry
             .list_processes(&lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
-                originator_id: Some("host:unrelated".to_string()),
+                originator: Some(lash_core::ProcessOriginatorFilter::Host {
+                    scope: Some("unrelated".to_string()),
+                }),
                 ..lash_core::ProcessListFilter::default()
             })
             .await

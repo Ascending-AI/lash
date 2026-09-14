@@ -199,69 +199,9 @@ fn remote_process_cancel_receipt_rejects_status_that_contradicts_its_record() {
     );
 }
 
-fn observed_process(lifecycle: RemoteProcessStatus, terminal: bool) -> RemoteObservedProcess {
-    RemoteObservedProcess {
-        process_id: ProcessId::from("process:1"),
-        incarnation: 1,
-        last_event_sequence: 1,
-        graph_key: "process:process:1:incarnation:1".to_string(),
-        kind: "external".to_string(),
-        identity: RemoteProcessIdentity {
-            kind: "external".to_string(),
-            label: Some("Import".to_string()),
-            definition: None,
-        },
-        lifecycle,
-        status_label: match lifecycle {
-            RemoteProcessStatus::Running => "running",
-            RemoteProcessStatus::Waiting => "waiting",
-            RemoteProcessStatus::Completed => "completed",
-            RemoteProcessStatus::Failed => "failed",
-            RemoteProcessStatus::Cancelled => "cancelled",
-            RemoteProcessStatus::Abandoned => "abandoned",
-            RemoteProcessStatus::CallerDeparted => "caller_departed",
-        }
-        .to_string(),
-        terminal,
-        disposition: RemoteRecoveryContract::ExternallyOwned,
-        error: None,
-        created_at_ms: 1,
-        updated_at_ms: 2,
-        first_started: None,
-        lease_holder: None,
-        lease_expires_at_ms: None,
-        abandon_request: None,
-        cancel_request: None,
-        input: RemoteProcessInput::External {
-            metadata: serde_json::json!({ "label": "Import" }),
-        },
-        originator: RemoteProcessOriginator::Host { scope: None },
-        env_ref: None,
-        caused_by: None,
-        external_ref: None,
-        wait: None,
-        child_session_id: None,
-        label: "Import".to_string(),
-    }
-}
-
-#[test]
-fn remote_observed_process_rejects_terminal_flag_that_contradicts_lifecycle() {
-    assert!(
-        observed_process(RemoteProcessStatus::Running, true)
-            .validate("RemoteObservedProcess")
-            .expect_err("non-terminal lifecycle with terminal=true must be rejected")
-            .to_string()
-            .contains("contradicts lifecycle")
-    );
-    assert!(
-        observed_process(RemoteProcessStatus::Failed, false)
-            .validate("RemoteObservedProcess")
-            .expect_err("terminal lifecycle with terminal=false must be rejected")
-            .to_string()
-            .contains("contradicts lifecycle")
-    );
-    observed_process(RemoteProcessStatus::Failed, true)
-        .validate("RemoteObservedProcess")
-        .expect("matching terminal flag and lifecycle must be accepted");
-}
+// FIG-2965 deleted the observed-process terminal-flag agreement test with
+// the flag it policed: `terminal` and `status_label` were encoded copies of
+// the lifecycle beside them, so a record could contradict itself on the wire
+// and the validator existed only to catch that. They are derived from the
+// lifecycle on the reader side now, and a contradiction has no way to be
+// expressed, so there is nothing left to reject.

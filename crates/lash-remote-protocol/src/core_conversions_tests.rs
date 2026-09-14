@@ -792,8 +792,6 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 record_sequence: 0,
                 event_tail_sequence: 1,
             },
-            kind: "external".to_string(),
-            label: "External".to_string(),
         }],
     };
     let remote = RemoteProcessWorkSnapshot::try_from(snapshot.clone()).expect("remote snapshot");
@@ -895,7 +893,12 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
         definition: Some(process_definition_identity("main")),
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
-        originator_id: Some("test".to_string()),
+        originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
+        parent_scope: Some(lash_core::ParentScope::Turn {
+            session_id: lash_sansio::SessionId::from("test".to_string()),
+            turn_id: lash_core::TurnId::from("turn-1".to_string()),
+        }),
+        cancel_pending_before_ms: Some(99),
         identity_kind: Some("engine".to_string()),
         identity_label: Some("Main".to_string()),
         caused_by_occurrence_id: Some("occurrence-1".to_string()),
@@ -908,7 +911,12 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     remote.validate().expect("valid list filter");
     let core = lash_core::ProcessListFilter::try_from(remote).expect("core filter");
     assert_eq!(core.status, filter.status);
-    assert_eq!(core.originator_id, filter.originator_id);
+    assert_eq!(core.originator, filter.originator);
+    assert_eq!(core.parent_scope, filter.parent_scope);
+    assert_eq!(
+        core.cancel_pending_before_ms,
+        filter.cancel_pending_before_ms
+    );
     assert_eq!(core.identity_kind, filter.identity_kind);
     assert_eq!(core.identity_label, filter.identity_label);
     assert_eq!(core.caused_by_occurrence_id, filter.caused_by_occurrence_id);
@@ -2065,97 +2073,6 @@ fn assert_process_start_roundtrip(request: lash_core::ProcessStartRequest) {
     remote.validate().expect("valid remote start");
     let core = lash_core::ProcessStartRequest::try_from(remote).expect("core start");
     assert_eq!(serde_json::to_value(&core).expect("core json"), before);
-}
-
-#[test]
-fn observed_process_decode_rejects_terminal_that_contradicts_lifecycle() {
-    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
-    remote.terminal = true;
-
-    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
-        .expect_err("a running process marked terminal by its peer must be rejected");
-    assert!(
-        error.to_string().contains("terminal"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_process_decode_rejects_kind_that_contradicts_identity() {
-    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
-    remote.kind = "workflow".to_string();
-
-    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
-        .expect_err("a peer kind that contradicts process identity must be rejected");
-    assert!(
-        error.to_string().contains("kind"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_process_decode_rejects_status_label_that_is_not_a_lifecycle_label() {
-    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
-    remote.status_label = "still going".to_string();
-
-    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
-        .expect_err("a peer status label outside the lifecycle vocabulary must be rejected");
-    assert!(
-        error.to_string().contains("status label"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_process_decode_rejects_graph_key_that_contradicts_process_id() {
-    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
-    remote.graph_key = "process:someone-else".to_string();
-
-    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
-        .expect_err("a peer graph key that contradicts process id must be rejected");
-    assert!(
-        error.to_string().contains("graph key"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_process_decode_rejects_label_that_contradicts_identity() {
-    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
-    remote.label = "Peer Override".to_string();
-
-    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
-        .expect_err("a peer label that contradicts process identity must be rejected");
-    assert!(
-        error.to_string().contains("label"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_work_item_decode_rejects_kind_that_contradicts_process() {
-    let mut remote = RemoteProcessWorkItem::try_from(observed_work_item()).expect("remote item");
-    remote.kind = "workflow".to_string();
-
-    let error = lash_core::facade_support::ObservedWorkItem::try_from(remote)
-        .expect_err("a peer work-item kind that contradicts its process must be rejected");
-    assert!(
-        error.to_string().contains("work-item kind"),
-        "unexpected error: {error}"
-    );
-}
-
-#[test]
-fn observed_work_item_decode_rejects_label_that_contradicts_process() {
-    let mut remote = RemoteProcessWorkItem::try_from(observed_work_item()).expect("remote item");
-    remote.label = "Peer Override".to_string();
-
-    let error = lash_core::facade_support::ObservedWorkItem::try_from(remote)
-        .expect_err("a peer work-item label that contradicts its process must be rejected");
-    assert!(
-        error.to_string().contains("work-item label"),
-        "unexpected error: {error}"
-    );
 }
 
 #[test]

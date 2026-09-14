@@ -1,6 +1,6 @@
 use super::*;
 use crate::process_lifecycle_sql::{
-    live_process_status, retired_process_status, wake_delivery_state,
+    live_process_status, nonterminal_process_status, retired_process_status, wake_delivery_state,
 };
 use lash_core::ProcessQuery as _;
 use lash_core::WakeDeliveryState;
@@ -26,12 +26,18 @@ mod tool_intent_submission;
 mod wake_delivery;
 pub(crate) mod worklist;
 
+use support::cancel_requested_at_ms;
 use support::process_scope_fence_key;
 use support::process_status_label;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
 
-const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
+/// The always-bound filters. `{extra}` is where the optional, index-served
+/// clauses land: they are spelled as bare conjuncts rather than as
+/// `(?n IS NULL OR ...)` because an `OR` over a parameter defeats the partial
+/// indexes those filters exist to use, so an absent filter must leave no
+/// predicate behind at all.
+const LIST_PROCESSES_SQL_TEMPLATE: &str = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
        AND (?2 IS NULL OR originator_id = ?2)
        AND (?3 IS NULL OR identity_kind = ?3)
@@ -46,8 +52,15 @@ const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
        AND (?7 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
        AND (?8 IS NULL OR created_at_ms >= ?8)
-       AND (?9 IS NULL OR created_at_ms < ?9)
+       AND (?9 IS NULL OR created_at_ms < ?9){extra}
      ORDER BY process_id ASC";
+
+pub(crate) static LIST_PROCESSES_SQL: LazyLock<String> =
+    LazyLock::new(|| render_list_sql(LIST_PROCESSES_SQL_TEMPLATE, ""));
+
+#[path = "process_registry/list_sql.rs"]
+mod list_sql;
+use list_sql::{list_processes_query, render_list_sql};
 
 pub(crate) static SETTLE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -170,7 +183,7 @@ pub(crate) static DISCARD_TARGET_GONE_WAKES_SQL: LazyLock<String> = LazyLock::ne
     )
 });
 
-pub(crate) static LIST_PROCESSES_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock::new(|| {
+static LIST_PROCESSES_RECENT_RETIRED_SQL_TEMPLATE: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
@@ -189,7 +202,7 @@ pub(crate) static LIST_PROCESSES_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock
            AND (?7 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
            AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?9 IS NULL OR created_at_ms < ?9){{extra}}
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {retired}
@@ -208,12 +221,15 @@ pub(crate) static LIST_PROCESSES_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock
            AND (?7 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?7)
            AND (?8 IS NULL OR created_at_ms >= ?8)
-           AND (?9 IS NULL OR created_at_ms < ?9)
+           AND (?9 IS NULL OR created_at_ms < ?9){{extra}}
      ) ORDER BY process_id ASC",
         live = live_process_status("status"),
         retired = retired_process_status("status"),
     )
 });
+
+pub(crate) static LIST_PROCESSES_RECENT_RETIRED_SQL: LazyLock<String> =
+    LazyLock::new(|| render_list_sql(&LIST_PROCESSES_RECENT_RETIRED_SQL_TEMPLATE, ""));
 
 pub(crate) static LIST_OBSERVED_RECENT_RETIRED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -331,31 +347,10 @@ impl lash_core::ProcessQuery for SqliteProcessRegistry {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let sql = if filter.retired_since_ms.is_some() {
-                        LIST_PROCESSES_RECENT_RETIRED_SQL.as_str()
-                    } else {
-                        LIST_PROCESSES_SQL
-                    };
-                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
-                    let created_at_start_ms = filter.created_at_start_ms.map(crate::clamp_epoch_ms);
-                    let created_at_end_ms = filter.created_at_end_ms.map(crate::clamp_epoch_ms);
-                    let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
-                    let mut values: Vec<&dyn rusqlite::ToSql> = vec![
-                        &status,
-                        &filter.originator_id,
-                        &filter.identity_kind,
-                        &filter.identity_label,
-                        &definition,
-                        &filter.caused_by_occurrence_id,
-                        &filter.caused_by_subscription_id,
-                        &created_at_start_ms,
-                        &created_at_end_ms,
-                    ];
-                    if retired_since_ms.is_some() {
-                        values.push(&retired_since_ms);
-                    }
+                    let (sql, values) = list_processes_query(&filter, status, definition);
+                    let mut stmt = conn.prepare(&sql).map_err(process_sqlite_error)?;
                     let rows = stmt
-                        .query_map(rusqlite::params_from_iter(values), |row| {
+                        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             row.get::<_, String>(0)
                         })
                         .map_err(process_sqlite_error)?;

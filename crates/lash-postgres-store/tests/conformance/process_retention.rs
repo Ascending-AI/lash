@@ -155,6 +155,18 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         ),
         ("schema.sql", include_str!("../../schema.sql")),
     ];
+    // The third site kind: the pending-cancel index excludes the terminal
+    // statuses rather than naming the live ones, because `caller_departed` is
+    // neither live nor terminal and a departed caller's row still owes its
+    // cancel. Its literal is generated, so the expectation here is the
+    // generator's own output rather than a second spelling of it.
+    let nonterminal =
+        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
+    let terminal = nonterminal
+        .strip_prefix("status NOT IN ")
+        .expect("the nonterminal predicate is spelled as a NOT IN list")
+        .to_string();
+    let mut nonterminal_sites = 0usize;
     let mut live_sites = 0usize;
     let mut vocabulary_sites = 0usize;
     let mut foreign_sites = 0usize;
@@ -162,6 +174,10 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         for delimiter in ["status IN ", "status NOT IN "] {
             for (offset, _) in source.match_indices(delimiter) {
                 let site = &source[offset + delimiter.len()..];
+                if delimiter == "status NOT IN " && site.starts_with(terminal.as_str()) {
+                    nonterminal_sites += 1;
+                    continue;
+                }
                 let prefix = &source[..offset];
                 if delimiter == "status IN " && prefix.ends_with(FOREIGN_VOCABULARY_SITE) {
                     foreign_sites += 1;
@@ -208,5 +224,11 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     assert_eq!(
         vocabulary_sites, 1,
         "expected exactly one `ck_processes_status` vocabulary literal in schema.sql"
+    );
+    assert_eq!(
+        nonterminal_sites, 1,
+        "expected exactly one nonterminal-status literal in schema.sql: the \
+         pending-cancel partial index, whose predicate must stay byte-identical to \
+         the generated fragment the query uses, or the planner refuses the index"
     );
 }

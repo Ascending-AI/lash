@@ -57,7 +57,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             identity_kind, identity_label,
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status,
-                            parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested,
+                            parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
                             record_json
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
@@ -77,7 +77,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             record.lifecycle.parent.storage_kind(),
                             record.lifecycle.parent.storage_id(),
                             record.lifecycle.on_parent_end.storage_label(),
-                            i64::from(record.cancel_request.is_some()),
+                            cancel_requested_at_ms(&record),
                             process_encode_json(&record)?,
                         ],
                     )

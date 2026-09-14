@@ -82,3 +82,112 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
         "observer history must use keyed probes: {plan:?}"
     );
 }
+
+#[test]
+fn pending_cancel_query_seeks_the_partial_cancel_index() {
+    let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
+    conn.execute_batch(crate::schema::PROCESS_SCHEMA)
+        .expect("install process schema");
+    let (sql, values) = list_processes_query(
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            cancel_pending_before_ms: Some(1_700_000_000_000),
+            ..lash_core::ProcessListFilter::default()
+        },
+        None,
+        None,
+    );
+    let mut stmt = conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .expect("prepare pending-cancel query plan");
+    let plan = stmt
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            row.get::<_, String>(3)
+        })
+        .expect("explain pending-cancel query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect pending-cancel query plan");
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("idx_processes_pending_cancel")),
+        "a populated pending-cancel bound must seek the partial index, plan: {plan:?}"
+    );
+}
+
+#[test]
+fn parent_scope_query_seeks_the_parent_scope_index() {
+    let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
+    conn.execute_batch(crate::schema::PROCESS_SCHEMA)
+        .expect("install process schema");
+    let (sql, values) = list_processes_query(
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            parent_scope: Some(lash_core::ParentScope::Turn {
+                session_id: lash_sansio::SessionId::from("plan-session"),
+                turn_id: lash_core::TurnId::from("plan-turn"),
+            }),
+            ..lash_core::ProcessListFilter::default()
+        },
+        None,
+        None,
+    );
+    let mut stmt = conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .expect("prepare parent-scope query plan");
+    let plan = stmt
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            row.get::<_, String>(3)
+        })
+        .expect("explain parent-scope query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect parent-scope query plan");
+    assert!(
+        plan.iter()
+            .any(|step| step.contains("idx_processes_parent_scope")),
+        "a populated parent scope must seek the scope index, plan: {plan:?}"
+    );
+    assert!(
+        plan.iter().all(|step| !step.contains("SCAN processes")),
+        "the scope lookup must not degrade to a table scan, plan: {plan:?}"
+    );
+}
+
+#[test]
+fn an_absent_scope_filter_emits_no_scope_predicate() {
+    let (sql, values) = list_processes_query(
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        },
+        None,
+        None,
+    );
+    assert_eq!(sql, LIST_PROCESSES_SQL.as_str());
+    assert!(
+        !sql.contains("parent_scope_kind") && !sql.contains("cancel_requested_at_ms"),
+        "an unpopulated filter must not widen the statement: {sql}"
+    );
+    assert_eq!(
+        values.len(),
+        9,
+        "only the fixed bindings are present when neither new filter is populated"
+    );
+}
+
+/// The partial index is spelled as a literal in `schema.rs` (the lifecycle
+/// vocabulary gate exempts that file), so nothing but this assertion keeps it
+/// equal to the fragment the query generates.
+#[test]
+fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
+    let predicate = nonterminal_process_status("status");
+    assert_eq!(
+        predicate,
+        "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"
+    );
+    assert!(
+        crate::schema::PROCESS_SCHEMA.contains(&format!(
+            "WHERE cancel_requested_at_ms IS NOT NULL\n      AND {predicate}"
+        )),
+        "the index predicate must be byte-identical to the query predicate"
+    );
+}

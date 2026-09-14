@@ -343,13 +343,13 @@ pub enum RemoteProcessStatus {
 }
 
 impl RemoteProcessStatus {
-    pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
-        )
-    }
-
+    /// The wire label for this status.
+    ///
+    /// Nothing on the encode path reads it: the derived `status_label` field
+    /// this used to validate is gone, and the label now lives only in
+    /// `lash_core::ProcessStatus`. It is kept so the agreement test below can
+    /// still prove the two vocabularies have not diverged.
+    #[cfg(test)]
     fn label(self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -360,6 +360,13 @@ impl RemoteProcessStatus {
             Self::Abandoned => "abandoned",
             Self::CallerDeparted => "caller_departed",
         }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
+        )
     }
 }
 
@@ -628,8 +635,6 @@ pub struct RemoteProcessWorkItem {
     pub events: Vec<RemoteObservedProcessEvent>,
     pub event_tail_sequence: u64,
     pub state: RemoteObservedWorkItemState,
-    pub kind: String,
-    pub label: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -686,32 +691,6 @@ impl RemoteProcessWorkItem {
                 }
             }
         }
-        require_non_empty(type_name, "kind", &self.kind)?;
-        if self.kind != self.process.identity.kind {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "work-item kind `{}` contradicts process identity kind `{}`",
-                    self.kind, self.process.identity.kind
-                ),
-            });
-        }
-        require_non_empty(type_name, "label", &self.label)?;
-        let expected_label = self
-            .process
-            .identity
-            .label
-            .as_deref()
-            .unwrap_or(self.process.identity.kind.as_str());
-        if self.label != expected_label {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "work-item label `{}` contradicts process identity; expected `{expected_label}`",
-                    self.label
-                ),
-            });
-        }
         Ok(())
     }
 }
@@ -721,12 +700,11 @@ pub struct RemoteObservedProcess {
     pub process_id: ProcessId,
     pub incarnation: u64,
     pub last_event_sequence: u64,
-    pub graph_key: String,
-    pub kind: String,
     pub identity: RemoteProcessIdentity,
     pub lifecycle: RemoteProcessStatus,
-    pub status_label: String,
-    pub terminal: bool,
+    /// Declared parent scope and parent-end action, distinct from the
+    /// `lifecycle` status fold above.
+    pub policy: RemoteProcessLifecyclePolicy,
     pub disposition: RemoteRecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -754,78 +732,18 @@ pub struct RemoteObservedProcess {
     pub wait: Option<RemoteProcessWaitState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
-    pub label: String,
 }
 
 impl RemoteObservedProcess {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        require_non_empty(type_name, "graph_key", &self.graph_key)?;
         RemoteProcessRef {
             process_id: self.process_id.clone(),
             incarnation: self.incarnation,
         }
         .validate(type_name)?;
-        let expected_graph_key = format!(
-            "process:{}:incarnation:{}",
-            self.process_id, self.incarnation
-        );
-        if self.graph_key != expected_graph_key {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "process graph key `{}` contradicts process id `{}`; expected `{expected_graph_key}`",
-                    self.graph_key, self.process_id
-                ),
-            });
-        }
-        require_non_empty(type_name, "kind", &self.kind)?;
         self.identity.validate(type_name)?;
-        if self.kind != self.identity.kind {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "process kind `{}` contradicts identity kind `{}`",
-                    self.kind, self.identity.kind
-                ),
-            });
-        }
-        require_non_empty(type_name, "label", &self.label)?;
-        let expected_label = self
-            .identity
-            .label
-            .as_deref()
-            .unwrap_or(self.identity.kind.as_str());
-        if self.label != expected_label {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "process label `{}` contradicts identity; expected `{expected_label}`",
-                    self.label
-                ),
-            });
-        }
-        require_non_empty(type_name, "status_label", &self.status_label)?;
-        if self.status_label != self.lifecycle.label() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "process status label `{}` contradicts lifecycle `{:?}`; expected `{}`",
-                    self.status_label,
-                    self.lifecycle,
-                    self.lifecycle.label()
-                ),
-            });
-        }
-        if self.terminal != self.lifecycle.is_terminal() {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: format!(
-                    "process terminal flag `{}` contradicts lifecycle `{:?}`",
-                    self.terminal, self.lifecycle
-                ),
-            });
-        }
+        self.policy.validate(type_name, &self.originator)?;
         self.input.validate(type_name)?;
         self.originator.validate(type_name)?;
         if let Some(lease_holder) = &self.lease_holder {
@@ -1515,7 +1433,14 @@ pub struct RemoteProcessListFilter {
     #[serde(default)]
     pub status: RemoteProcessStatusFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub originator_id: Option<String>,
+    pub originator: Option<RemoteProcessOriginatorFilter>,
+    /// Selects the children of one durable parent scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_scope: Option<RemoteParentScope>,
+    /// Selects nonterminal rows whose cancellation request predates this
+    /// timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_pending_before_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1539,7 +1464,33 @@ impl RemoteProcessListFilter {
         if let Some(definition) = &self.definition {
             definition.validate("RemoteProcessListFilter")?;
         }
+        if let Some(originator) = &self.originator {
+            originator.validate("RemoteProcessListFilter")?;
+        }
         Ok(())
+    }
+}
+
+/// Wire mirror of the typed originator selector.
+///
+/// A `Session` selector with no `agent_frame_id` selects every process the
+/// session started; one naming a frame selects only that frame's processes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteProcessOriginatorFilter {
+    Host {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
+    Session(RemoteSessionScope),
+}
+
+impl RemoteProcessOriginatorFilter {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Host { .. } => Ok(()),
+            Self::Session(scope) => scope.validate(type_name),
+        }
     }
 }
 

@@ -244,7 +244,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(deleted.session_id.clone().to_string()),
+                originator: Some(ProcessOriginatorFilter::session(deleted.session_id.clone())),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,
@@ -291,7 +291,9 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             u64::MAX,
             Some(ProcessListFilter {
                 status: ProcessStatusFilter::any_of([ProcessStatus::Failed]),
-                originator_id: Some(surviving.session_id.clone().to_string()),
+                originator: Some(ProcessOriginatorFilter::session(
+                    surviving.session_id.clone(),
+                )),
                 ..ProcessListFilter::default()
             }),
             crate::ProjectionWatermark::NoProjector,

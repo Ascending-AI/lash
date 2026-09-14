@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 93.
+-- lash-postgres-store schema, component version 94.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     parent_scope_kind TEXT NOT NULL,
     parent_scope_id TEXT COLLATE "C",
     on_parent_end TEXT NOT NULL,
-    cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+    cancel_requested_at_ms BIGINT,
     record_json TEXT NOT NULL,
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
     CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
@@ -384,6 +384,17 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
     ON lash_processes(updated_at_ms);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
     ON lash_processes(wake_session_id);
+-- The pending-cancel sweep's scan: rows whose cancel request is older than a
+-- horizon and whose outcome is still open. The predicate is the negation of
+-- the terminal statuses, so `caller_departed` is in: nothing may ever
+-- terminalize such a row, so a cancel request on it stays unanswered forever
+-- and is exactly what an operator asks this index for. It must stay
+-- byte-identical to `nonterminal_process_status("status")`, or the planner
+-- refuses the partial index.
+CREATE INDEX IF NOT EXISTS idx_lash_processes_pending_cancel
+    ON lash_processes(cancel_requested_at_ms, process_id)
+    WHERE cancel_requested_at_ms IS NOT NULL
+      AND status NOT IN ('completed', 'failed', 'cancelled', 'abandoned');
 CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_scope
     ON lash_processes(parent_scope_kind, parent_scope_id, process_id);
 -- The parent-end sweep's only scan. The predicate names the live statuses
@@ -394,7 +405,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_scope
 CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_end_pending
     ON lash_processes(parent_scope_kind, parent_scope_id, process_id)
     WHERE on_parent_end = 'cancel'
-      AND NOT cancel_requested
+      AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
 CREATE TABLE IF NOT EXISTS lash_process_events (
@@ -706,7 +717,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 93)
+VALUES ('lash-postgres-store', 94)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

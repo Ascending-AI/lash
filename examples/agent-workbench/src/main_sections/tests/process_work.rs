@@ -755,7 +755,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
 
     let filter = ProcessListFilter::decode(&json!({
         "status": {"in":["running"]},
-        "originator_id": "session-finance",
+        "originator": {"type": "session", "session_id": "session-finance"},
         "identity_kind": "report-export",
         "identity_label": "Nightly invoice export",
         "caused_by_occurrence_id": "occurrence-42",

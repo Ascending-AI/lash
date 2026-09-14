@@ -889,7 +889,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "checkpoint": "seeded_request_abandon_deployment",
         "process_id": REQUEST_PROCESS_ID,
         "status": format!("{:?}", seeded.lifecycle),
-        "terminal": seeded.terminal,
+        "terminal": seeded.terminal(),
         "first_started": seeded.first_started,
         "lease_holder_owner_id": seeded.lease_holder.as_ref().map(|owner| owner.owner_id.clone()),
         "lease_token": live_lease.lease_token,
@@ -939,7 +939,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "checkpoint": "pending_abandon_request_visible",
         "process_id": REQUEST_PROCESS_ID,
         "returned_status": format!("{:?}", returned.lifecycle),
-        "returned_terminal": returned.terminal,
+        "returned_terminal": returned.terminal(),
         "requested_by": pending_request.requested_by,
         "requested_at_ms": pending_request.requested_at_ms,
         "reason": pending_request.reason,
@@ -986,7 +986,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
             .get(&ProcessId::from(REQUEST_PROCESS_ID))
             .await?
             .context("reconciled process vanished")?;
-        if observed.terminal {
+        if observed.terminal() {
             break observed;
         }
         ensure!(
@@ -1029,7 +1029,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         observed_terminal.iter().any(|process| {
             process.process_id == REQUEST_PROCESS_ID
                 && process.lifecycle == ProcessStatus::Abandoned
-                && process.terminal
+                && process.terminal()
         }),
         "observer did not see the reconciled terminal"
     );
@@ -1045,11 +1045,11 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "sweep_worker_faults": sweep_faults.len(),
         "process_id": REQUEST_PROCESS_ID,
         "lapsed_before_sweep_status": format!("{:?}", lapsed_observation.lifecycle),
-        "lapsed_before_sweep_terminal": lapsed_observation.terminal,
+        "lapsed_before_sweep_terminal": lapsed_observation.terminal(),
         "lapsed_lease_expires_at_ms": lapsed_observation.lease_expires_at_ms,
         "observed_after_expiry_at_ms": now_epoch_ms(),
         "terminal_status": format!("{:?}", terminal.lifecycle),
-        "terminal": terminal.terminal,
+        "terminal": terminal.terminal(),
         "abandon_writer": format!("{:?}", evidence.writer),
         "lapsed_owner_id": evidence.owner.as_ref().map(|owner| owner.owner_id.clone()),
         "observer_terminal_visible": true,
