@@ -1092,7 +1092,6 @@ fn remote_turn_result_maps_core_semantics() {
         },
         kind: RemoteToolIntentKind::EmitProcessEvent,
         result: serde_json::json!({"sequence": 3}),
-        parent_end: None,
     };
     let remote = RemoteTurnReport::from_core(
         "session",

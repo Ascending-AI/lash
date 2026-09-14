@@ -14,6 +14,16 @@ pub enum OnParentEnd {
     Cancel,
 }
 
+impl OnParentEnd {
+    /// Storage discriminant, as written to the `on_parent_end` column.
+    pub fn storage_label(self) -> &'static str {
+        match self {
+            Self::Abandon => "abandon",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
 /// Durable scope whose end controls a child's lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -27,6 +37,66 @@ pub enum ParentScope {
         incarnation: ProcessIncarnation,
     },
     Host,
+}
+
+impl ParentScope {
+    /// Storage discriminant for the scope, as written to `parent_scope_kind`.
+    pub fn storage_kind(&self) -> &'static str {
+        match self {
+            Self::Turn { .. } => "turn",
+            Self::Process { .. } => "process",
+            Self::Host => "host",
+        }
+    }
+
+    /// Storage identity for the scope, as written to `parent_scope_id`.
+    ///
+    /// This rendering and [`Self::from_storage`] are the only codec for the
+    /// column: a turn is `<session_id>/<turn_id>` and a process is
+    /// `<process_id>#<incarnation>`, so a scope stays comparable by equality
+    /// across every tier and an index on the pair serves a parent-scope
+    /// query directly. `Host` has no identity; the column is `NULL`, which
+    /// the storage check constraint ties to the kind.
+    pub fn storage_id(&self) -> Option<String> {
+        match self {
+            Self::Turn {
+                session_id,
+                turn_id,
+            } => Some(format!("{session_id}/{turn_id}")),
+            Self::Process {
+                process_id,
+                incarnation,
+            } => Some(format!("{process_id}#{incarnation}")),
+            Self::Host => None,
+        }
+    }
+
+    /// Rebuilds a scope from the two stored columns.
+    ///
+    /// Returns `None` for any pair the storage check constraint forbids: an
+    /// unknown kind, a `host` carrying an id, a non-`host` missing one, or an
+    /// id whose separator or incarnation does not parse.
+    pub fn from_storage(kind: &str, id: Option<&str>) -> Option<Self> {
+        match (kind, id) {
+            ("host", None) => Some(Self::Host),
+            ("turn", Some(id)) => {
+                let (session_id, turn_id) = id.split_once('/')?;
+                (!session_id.is_empty() && !turn_id.is_empty()).then(|| Self::Turn {
+                    session_id: SessionId::from(session_id.to_string()),
+                    turn_id: crate::TurnId::from(turn_id.to_string()),
+                })
+            }
+            ("process", Some(id)) => {
+                let (process_id, incarnation) = id.rsplit_once('#')?;
+                let incarnation = incarnation.parse::<u64>().ok()?;
+                (!process_id.is_empty()).then(|| Self::Process {
+                    process_id: ProcessId::from(process_id.to_string()),
+                    incarnation: ProcessIncarnation::from_registration_sequence(incarnation),
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Required lifecycle facts selected by the process's author or host.

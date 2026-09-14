@@ -78,7 +78,6 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         event_sequence: 5,
         signal_send_sequence: 7,
         signal_wait_ordinals: [("ready".to_string(), 11)].into(),
-        parent_end_actions: Vec::new(),
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
     };
@@ -199,7 +198,6 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
         event_sequence: 0,
         signal_send_sequence: 0,
         signal_wait_ordinals: Default::default(),
-        parent_end_actions: Vec::new(),
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
     };
@@ -248,7 +246,6 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
         event_sequence: 0,
         signal_send_sequence: 0,
         signal_wait_ordinals: Default::default(),
-        parent_end_actions: Vec::new(),
         started_process_ids: Vec::new(),
         child_max_attempts: recorded,
     };

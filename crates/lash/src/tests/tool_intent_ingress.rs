@@ -162,7 +162,6 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
             lash_core::ToolIntentExecutionOutcome::Executed {
                 kind: lash_core::ToolIntentKind::EmitTrigger,
                 result,
-                parent_end: None,
                 ..
             },
         replayed: false,
@@ -1725,66 +1724,6 @@ fn ingress_start_without_lifecycle_is_refused_before_submission() {
     let error = serde_json::from_value::<lash_core::ToolIntent>(payload)
         .expect_err("missing lifecycle must not decode");
     assert!(error.to_string().contains("lifecycle"));
-}
-
-#[tokio::test]
-async fn ingress_start_process_cancel_is_retained_and_settled_after_scope_rebind() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
-    let parent = registry
-        .get_process(&ProcessId::from(PROCESS))
-        .await?
-        .expect("registered parent process");
-    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
-    let key = ingress.key("parent-end-retention", 0);
-    let child_id = key.identity().replay_key.clone();
-    let mut intent = start_intent(&SessionId::from(SESSION));
-    let lash_core::ToolIntent::StartProcess(start) = &mut intent else {
-        unreachable!("start_intent always returns StartProcess")
-    };
-    start.request.lifecycle = lash_core::ProcessLifecyclePolicy::new(
-        lash_core::ParentScope::Process {
-            process_id: parent.id,
-            incarnation: parent.incarnation,
-        },
-        lash_core::OnParentEnd::Cancel,
-    );
-
-    let started = ingress.submit(key, intent).await;
-    assert!(matches!(
-        started,
-        crate::tools::ToolIntentIngressOutcome::Admitted {
-            outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                parent_end: Some(lash_core::ToolIntentParentEnd {
-                    policy: lash_core::ProcessParentEndPolicy::Cancel,
-                    ..
-                }),
-                ..
-            },
-            ..
-        }
-    ));
-    drop(ingress);
-
-    let redriven_scope = core.tool_intents(SESSION, lash_core::ExecutionScope::process(PROCESS))?;
-    let settled = redriven_scope.settle_parent_end().await?;
-    assert!(matches!(
-        settled.as_slice(),
-        [lash_core::ToolIntentParentEndOutcome::Cancelled { process_id, .. }]
-            if process_id == &child_id
-    ));
-    assert!(
-        registry
-            .events_after(&ProcessId::from(child_id), 0)
-            .await?
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"),
-        "Process/Cancel reaches the child after rebuilding the ingress scope"
-    );
-    assert!(
-        redriven_scope.settle_parent_end().await?.is_empty(),
-        "settlement is durable and idempotent"
-    );
-    Ok(())
 }
 
 const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";

@@ -268,67 +268,6 @@ impl ProcessLocalExecution {
             ProcessCommand::CancelRefused { refusal, .. } => {
                 Ok(ProcessEffectOutcome::CancelRefused { refusal })
             }
-            ProcessCommand::ParentEnd {
-                identity,
-                process_id,
-                policy,
-            } => {
-                let outcome = match policy {
-                    crate::ProcessParentEndPolicy::Abandon => {
-                        crate::ToolIntentParentEndOutcome::Abandoned {
-                            identity,
-                            process_id,
-                        }
-                    }
-                    crate::ProcessParentEndPolicy::Cancel => {
-                        let cancel = async {
-                            let process_ref = registry.resolve_process_ref(&process_id).await?;
-                            let record =
-                                registry
-                                    .get_process_ref(&process_ref)
-                                    .await?
-                                    .ok_or_else(|| {
-                                        crate::PluginError::Session(format!(
-                                            "unknown process `{process_id}`"
-                                        ))
-                                    })?;
-                            if record.is_terminal() || record.cancel_request.is_some() {
-                                return Ok(record);
-                            }
-                            let requester = serde_json::to_string(&record.lifecycle.parent)
-                                .expect("parent scopes contain only serializable identities");
-                            NativeRuntimeEffectController::request_process_cancel_ref(
-                                registry,
-                                &process_ref,
-                                crate::CancelOrigin::ParentEnded,
-                                requester,
-                                Some(crate::RuntimeReplayAttribution::ToolIntent(
-                                    identity.clone(),
-                                )),
-                            )
-                            .await
-                        };
-                        match cancel.await {
-                            Ok(_) => crate::ToolIntentParentEndOutcome::Cancelled {
-                                identity,
-                                process_id,
-                            },
-                            Err(error) => {
-                                let error = RuntimeEffectControllerError::from(error);
-                                crate::ToolIntentParentEndOutcome::Refused {
-                                    identity,
-                                    process_id,
-                                    code: error.code.as_str().to_string(),
-                                    message: error.message,
-                                }
-                            }
-                        }
-                    }
-                };
-                Ok(ProcessEffectOutcome::ParentEnd {
-                    outcome: Box::new(outcome),
-                })
-            }
             ProcessCommand::Signal {
                 process_ref,
                 signal_name,

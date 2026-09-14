@@ -43,8 +43,8 @@ pub use crate::store::{
     PersistedSessionRead, SessionHeadMeta, SessionHeadPayload, load_persisted_session_state,
 };
 pub use crate::tool_dispatch::{
-    CheckpointMessageBuffer, RecordedToolIntentOutcomeBuffer, ToolCallLaunch,
-    ToolTriggerOutcomeBuffer, execute_final_tool_intents, resolve_callable_manifest_by_id,
+    CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
+    resolve_callable_manifest_by_id,
 };
 pub use crate::tool_dispatch::{
     coordinate_prepared_tool_call_launch_with_execution_context, execute_once,

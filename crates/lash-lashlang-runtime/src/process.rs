@@ -44,13 +44,16 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v10 drops the parent-end action list: child lifecycle is settled from the
+/// registry's scope-keyed parent-end ledger, so a parked segment no longer
+/// carries per-child actions a replay would have to reconcile. v8 was reserved
+/// for this change and went unused: the TypeScript cutover landed first and
+/// took the next generation, so this one takes the one after it.
 /// v9 carries VM continuation v14. TypeScript is the only RLM language
 /// (ADR 0096), so the instruction set loses the deep-copy instructions the
 /// retired surface compiled to: a segment parked before the cutover holds a
 /// continuation over an instruction stream this reader cannot reproduce, so the
 /// boundary is a version rather than a decode failure.
-/// v8 is held by the in-flight process-definition codec change (FIG-2962), so
-/// this cutover takes the next generation rather than sharing one.
 /// v7 pins the attempt bound this segment stamps onto the children it starts,
 /// so a redrive after a host config change re-registers the recorded bound
 /// instead of conflicting with the fingerprint the first attempt wrote.
@@ -58,7 +61,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 9;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 10;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -87,7 +90,6 @@ struct LashlangSegmentState {
     event_sequence: u64,
     signal_send_sequence: u64,
     signal_wait_ordinals: BTreeMap<String, u64>,
-    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
     started_process_ids: Vec<ProcessId>,
     /// Attempt bound resolved from the host config when this run's first
     /// segment began. Carried forward so every segment of the run, and every
@@ -332,7 +334,6 @@ pub async fn run_lashlang_process(
         (ctx, guard, state)
     };
     if let Some(segment_state) = segment_state.as_ref() {
-        ctx.restore_parent_end_actions(&segment_state.parent_end_actions);
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
     }
     let sleep_sequence = segment_state
@@ -366,7 +367,7 @@ pub async fn run_lashlang_process(
     let env = lashlang::ExecutionEnvironment::new(&host)
         .process()
         .with_execution_bounds(engine.execution_bounds);
-    let mut output = {
+    let output = {
         let _phase = host.ctx.named_phase("rlm_process.execute");
         execute_lashlang(
             compiled,
@@ -378,15 +379,6 @@ pub async fn run_lashlang_process(
             (segment_state, current_program_hash),
         )
         .await
-    };
-    output = match output {
-        lash_core::ProcessRunOutcome::Terminal { output, .. } => {
-            lash_core::ProcessRunOutcome::Terminal {
-                output,
-                actions: host.ctx.parent_end_actions(),
-            }
-        }
-        other => other,
     };
     drop(env);
     drop(host);
@@ -500,7 +492,6 @@ async fn execute_lashlang(
                             event_sequence: host.event_sequence.load(Ordering::Relaxed),
                             signal_send_sequence: host.signal_send_sequence.load(Ordering::Relaxed),
                             signal_wait_ordinals: host.signal_wait_ordinals.lock().await.clone(),
-                            parent_end_actions: host.ctx.parent_end_actions(),
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                         };

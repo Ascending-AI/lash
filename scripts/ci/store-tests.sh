@@ -135,19 +135,21 @@ case "${suite}" in
     fi
     ;;
 
-  # crates/lash currently has one Agent Scenario gated by the shared
-  # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the test
-  # that caught a real identity-version mutation, so keep it stable and focused
-  # instead of scheduling tests by parsing changed source literals.
+  # The per-PR PostgreSQL agent-scenario slot. It used to name the facade
+  # Agent Scenario that drove a Lashlang process graph through a ParentEnd
+  # fault; the parent-end ledger replaced that scenario, and the property now
+  # lives in the store's own crash-recovery test. Keep this leg stable and
+  # focused on one named test: a libtest filter that matches nothing exits 0,
+  # so the name must always be a test that exists.
   pg-agent-scenario)
     if [ "${trusted}" = true ]; then
       bazel_test \
-        --test_arg=agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres \
-        //crates/lash:lash__unit_test
+        --test_arg=public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres \
+        //crates/lash-postgres-store:integration__test
     else
-      cargo nextest run --profile ci -p lash-runtime --features rlm \
-        --locked -E \
-        'test(agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres)'
+      cargo nextest run --profile ci -p lash-internal-postgres-store \
+        --test integration --locked -E \
+        'test(public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres)'
     fi
     ;;
 

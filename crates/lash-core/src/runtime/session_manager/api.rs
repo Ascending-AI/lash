@@ -455,26 +455,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn finish_recorded_intent_parent(
-        &self,
-        _session_id: &SessionId,
-        identity: crate::ToolIntentIdentity,
-        process_id: ProcessId,
-        policy: crate::ProcessParentEndPolicy,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        self.services
-            .processes
-            .finish_recorded_intent_parent(
-                &self.services.current,
-                identity,
-                process_id,
-                policy,
-                scope,
-            )
-            .await
-    }
-
     async fn signal_recorded_intent(
         &self,
         _session_id: &SessionId,

@@ -512,17 +512,6 @@ impl TurnActivitySink for TurnScopedActivitySink<'_> {
     }
 }
 
-async fn emit_parent_end_events(
-    parent_end_events: Vec<SessionStreamEvent>,
-    assembler: &mut TurnAssembler,
-    events: &dyn EventSink,
-) {
-    for event in parent_end_events {
-        assembler.push(&event);
-        emit_session_event_to_sink(events, event).await;
-    }
-}
-
 async fn publish_terminal_after_commit(
     turn_control: &ActiveTurnControl,
     resolver: &dyn AwaitEventResolver,

@@ -75,9 +75,9 @@ pub use registry::reconcile_pruned_trigger_deliveries_interleaved;
 #[cfg(any(test, feature = "testing"))]
 pub use registry::{ConformanceProcessRegistry, ProcessRegistryTestSupport};
 pub use registry::{
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ProcessClockRebind, ProcessContinuationStore, ProcessEventLog,
-    ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessParentEndPlan,
-    ProcessPruneReport, ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistry,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ParentEndPlan, ProcessClockRebind, ProcessContinuationStore,
+    ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport,
+    ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistry,
     ProcessRegistryBinding, ProcessRetention, ProcessScopeFenceHosts, ProcessToolIntents,
     ProcessWakeOutbox, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
     WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,

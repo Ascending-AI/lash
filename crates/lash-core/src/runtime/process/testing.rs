@@ -683,48 +683,6 @@ impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
         }
         Ok(submission.clone())
     }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &SessionId,
-        execution_scope_id: &str,
-    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut pending = self
-            .tool_intent_submissions
-            .lock()
-            .await
-            .values()
-            .filter(|submission| {
-                submission.identity.session_id == session_id
-                    && submission.identity.execution_scope_id == execution_scope_id
-                    && !submission.parent_end_settled
-                    && matches!(
-                        submission.outcome,
-                        Some(crate::ToolIntentExecutionOutcome::Executed {
-                            parent_end: Some(_),
-                            ..
-                        })
-                    )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        pending.sort_by_key(|submission| submission.identity.intent_index);
-        Ok(pending)
-    }
-
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        if let Some(submission) = self
-            .tool_intent_submissions
-            .lock()
-            .await
-            .get_mut(replay_key)
-        {
-            submission.parent_end_settled = true;
-        }
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -962,7 +920,6 @@ impl TestLocalProcessRegistry {
             .filter(|(_, record)| filter.is_none_or(|filter| filter.matches_record(&record.record)))
             .filter(|(_, record)| max_change_seq.is_none_or(|max| record.change_seq <= max))
             .filter(|(id, _)| !processes_with_pending_deliveries.contains(*id))
-            .filter(|(_, record)| record.parent_end_actions.is_none())
             .map(|(id, _)| id.clone())
             .collect();
         prunable.sort();

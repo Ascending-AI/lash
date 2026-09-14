@@ -383,7 +383,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     },
                     kind: ToolIntentKind::StartProcess,
                     result: json!({"process_id": "p-1"}),
-                    parent_end: None,
                 },
             },
             json!({

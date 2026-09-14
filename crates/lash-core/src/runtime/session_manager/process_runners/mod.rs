@@ -134,8 +134,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::clone(
                 &self.services.current.host.core.durability.attachment_store,
             ),

@@ -104,6 +104,10 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().load_session_head_meta().await
     }
 
+    async fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError> {
+        self.inner().committed_turn_exists(turn_id).await
+    }
+
     async fn load_node(
         &self,
         node_id: &str,
@@ -656,6 +660,10 @@ where
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         RuntimePersistenceDecorator::load_session_head_meta(self).await
+    }
+
+    async fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::committed_turn_exists(self, turn_id).await
     }
 
     async fn load_node(

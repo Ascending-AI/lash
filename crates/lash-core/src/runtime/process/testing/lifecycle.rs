@@ -8,17 +8,6 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         await_output: ProcessAwaitOutput,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
-        self.complete_process_with_parent_end(process_id, await_output, authority, Vec::new())
-            .await
-    }
-
-    async fn complete_process_with_parent_end(
-        &self,
-        process_id: &ProcessId,
-        await_output: ProcessAwaitOutput,
-        authority: ProcessCompletionAuthority,
-        actions: Vec<crate::ToolIntentParentEndAction>,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
         let _transaction = self.transaction.lock().await;
         // Hold the `managed` lock across load→validate→append so no other
         // completion can complete, prune, and re-register the row with a
@@ -96,7 +85,7 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
                     .await;
                 record.record = projected_record;
                 record.change_seq = self.next_change_seq().await;
-                record.parent_end_actions = (!actions.is_empty()).then_some(actions);
+                parent_end::record_terminal_locked(self, &record.record).await;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
@@ -111,16 +100,6 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        self.complete_process_with_lease_and_parent_end(lease, await_output, Vec::new())
-            .await
-    }
-
-    async fn complete_process_with_lease_and_parent_end(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-        actions: Vec<crate::ToolIntentParentEndAction>,
     ) -> Result<ProcessCompletionOutcome, PluginError> {
         if let Some(error) = self.process_terminal_write_error.lock().await.clone() {
             return Err(error);
@@ -224,7 +203,7 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
                 )
                 .await;
                 record.record = projected_record;
-                record.parent_end_actions = (!actions.is_empty()).then_some(actions);
+                parent_end::record_terminal_locked(self, &record.record).await;
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
                 }
@@ -239,22 +218,43 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         Ok(ProcessCompletionOutcome::Committed(record.record.clone()))
     }
 
+    async fn record_parent_end(&self, parent: &crate::ParentScope) -> Result<(), PluginError> {
+        parent_end::record(self, parent).await
+    }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::ProcessParentEndPlan>, PluginError> {
-        parent_end::list(self, limit).await
+    ) -> Result<Vec<crate::ParentEndPlan>, PluginError> {
+        parent_end::list_pending(self, limit).await
     }
 
-    async fn get_pending_parent_end_plan(
+    async fn get_parent_end_plan(
         &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<crate::ProcessParentEndPlan>, PluginError> {
-        parent_end::get(self, process_id).await
+        parent: &crate::ParentScope,
+    ) -> Result<Option<crate::ParentEndPlan>, PluginError> {
+        parent_end::get(self, parent).await
     }
 
-    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError> {
-        parent_end::complete(self, process_id).await
+    async fn list_parent_end_children(
+        &self,
+        parent: &crate::ParentScope,
+        after: Option<&ProcessId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        parent_end::children(self, parent, after, limit).await
+    }
+
+    async fn settle_parent_end_plan(&self, parent: &crate::ParentScope) -> Result<(), PluginError> {
+        parent_end::settle(self, parent).await
+    }
+
+    async fn list_unrecorded_turn_parents(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ParentScope>, PluginError> {
+        parent_end::list_unrecorded_turn_parents(self, after, limit).await
     }
 
     async fn record_first_started_with_authority(

@@ -469,7 +469,6 @@ impl Session {
         turn_context: crate::TurnContext,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-        recorded_intent_outcomes: crate::tool_dispatch::RecordedToolIntentOutcomeBuffer,
         attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     ) -> Result<RuntimeExecutionContext<'run>, crate::PluginError> {
         let tool_surface = self.active_tool_surface_entry(session_id)?;
@@ -492,7 +491,6 @@ impl Session {
             event_tx,
             checkpoint_messages,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes,
             attachment_store: Arc::clone(&self.services.attachment_store),
             attachment_source_policy,
             turn_context: turn_context.clone(),

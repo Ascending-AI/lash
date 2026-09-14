@@ -18,7 +18,6 @@ pub(super) async fn complete_process(
     process_id: &ProcessId,
     await_output: ProcessAwaitOutput,
     authority: lash_core::ProcessCompletionAuthority,
-    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     let now = registry.clock.timestamp_ms();
@@ -57,7 +56,6 @@ pub(super) async fn complete_process(
                     now,
                     wake_delivery_config,
                     ProcessEventWriteAuthorization::Preauthorized,
-                    &parent_end_actions,
                 )?;
                 Ok(match arm {
                     ProcessEventAppendArm::Replayed { .. } => {
@@ -77,7 +75,6 @@ pub(super) async fn complete_process_with_lease(
     registry: &SqliteProcessRegistry,
     lease: &ProcessLease,
     await_output: ProcessAwaitOutput,
-    parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
 ) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
@@ -117,7 +114,6 @@ pub(super) async fn complete_process_with_lease(
                     now,
                     wake_delivery_config,
                     ProcessEventWriteAuthorization::Lease(&lease),
-                    &parent_end_actions,
                 )?;
                 if matches!(arm, ProcessEventAppendArm::Replayed { .. }) {
                     return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {

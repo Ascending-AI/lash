@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 71,
+  "source_commit": "bb852f91649248da0e07374746fa1090d482243f",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2962/FIG-2963 schema-72 parent-end ledger cutover",
+  "artifacts": {
+    "postgres-expected.json": "a0f566652862ed336c13a63cdbacbb5307a046f012233d856fe95c870cd6ffc0",
+    "sqlite-expected.json": "3f18cebf469606171bea7d5ade6067056da8db26e2e638e835ae5840eae173d8"
+  }
+}

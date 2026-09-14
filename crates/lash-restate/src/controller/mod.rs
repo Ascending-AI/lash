@@ -1474,10 +1474,7 @@ pub(crate) fn restate_effect_execution(
     } = envelope;
     Ok(match command {
         RuntimeEffectCommand::Process { command }
-            if matches!(
-                command.as_ref(),
-                ProcessCommand::ParentEnd { .. } | ProcessCommand::Signal { .. }
-            ) =>
+            if matches!(command.as_ref(), ProcessCommand::Signal { .. }) =>
         {
             refuse_unhonored_group_membership(group.as_deref(), "restate durable process command")?;
             RestateEffectExecution::DurableProcessCommand {

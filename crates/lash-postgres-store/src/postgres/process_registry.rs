@@ -313,15 +313,25 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 registration.id, existing.registration_fingerprint, registration_fingerprint
             )));
         }
-        // FIG-2963: ledger-based refusal replaces this
+        // Late-registration fencing: a `Cancel` child whose parent scope
+        // already has a ledger row can never be swept, so it is refused here
+        // rather than left to outlive its parent.
+        //
+        // The read and this transaction's insert are one decision, so it is
+        // taken under the parent scope's advisory lock. Without it the pair is
+        // a check-then-act against a ledger write that runs in its own
+        // transaction on another connection: the child would read "no row",
+        // the row would commit, the sweep would page children without seeing
+        // this uncommitted one, and the child would land live under an ended
+        // scope. Holding the lock orders the two writes either way round.
         if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
-            && let lash_core::ParentScope::Process {
-                process_id,
-                incarnation,
-            } = &registration.lifecycle.parent
-            && let Some(parent) = load_process_tx(&mut tx, process_id).await?.as_ref()
-            && parent.incarnation == *incarnation
-            && parent.is_terminal()
+            && !matches!(registration.lifecycle.parent, lash_core::ParentScope::Host)
+        {
+            parent_end::lock_parent_scope_tx(&mut tx, &registration.lifecycle.parent).await?;
+        }
+        if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
+            && !matches!(registration.lifecycle.parent, lash_core::ParentScope::Host)
+            && parent_end::plan_exists_tx(&mut tx, &registration.lifecycle.parent).await?
         {
             return Err(lash_core::PluginError::ParentEnded {
                 process_id: registration.id.clone(),
@@ -342,9 +352,11 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
-                change_seq, status, record_json
+                change_seq, status,
+                parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested,
+                record_json
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
         )
         .bind(record.id.as_str())
         .bind(record.incarnation.registration_sequence() as i64)
@@ -358,6 +370,10 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .bind(record.last_event_sequence as i64)
         .bind(change_seq as i64)
         .bind(process_status_label(&record))
+        .bind(record.lifecycle.parent.storage_kind())
+        .bind(record.lifecycle.parent.storage_id())
+        .bind(record.lifecycle.on_parent_end.storage_label())
+        .bind(record.cancel_request.is_some())
         .bind(record_json)
         .execute(&mut *tx)
         .await
@@ -981,18 +997,6 @@ impl lash_core::ProcessToolIntents for PostgresProcessRegistry {
         outcome: lash_core::ToolIntentExecutionOutcome,
     ) -> Result<lash_core::ToolIntentSubmissionRecord, PluginError> {
         tool_intent_submission::complete(&self.pool, replay_key, outcome).await
-    }
-
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &SessionId,
-        execution_scope_id: &str,
-    ) -> Result<Vec<lash_core::ToolIntentSubmissionRecord>, PluginError> {
-        tool_intent_submission::pending_parent_end(&self.pool, session_id, execution_scope_id).await
-    }
-
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError> {
-        tool_intent_submission::complete_parent_end(&self.pool, replay_key).await
     }
 }
 

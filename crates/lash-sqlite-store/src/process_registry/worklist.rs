@@ -188,10 +188,12 @@ mod tests {
                      INSERT INTO processes (
                          process_id, incarnation, registration_fingerprint, originator_id,
                          identity_kind, created_at_ms, updated_at_ms,
-                         last_event_sequence, change_seq, status, record_json
+                         last_event_sequence, change_seq, status,
+                         parent_scope_kind, parent_scope_id, on_parent_end, record_json
                      )
                      SELECT printf('plan-%05d', i), i, 'fp', 'host', 'test', 0, 0, 0, i,
                             CASE WHEN i <= 100 THEN 'running' ELSE 'completed' END,
+                            'host', NULL, 'abandon',
                             '{}'
                      FROM n;
                      ANALYZE;",

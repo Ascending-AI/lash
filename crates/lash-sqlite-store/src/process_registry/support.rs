@@ -421,7 +421,7 @@ impl SqliteProcessRegistry {
         conn.execute(
             "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 last_event_sequence = ?5, record_json = ?6
+                 last_event_sequence = ?5, cancel_requested = ?6, record_json = ?7
              WHERE process_id = ?1",
             params![
                 record.id.as_str(),
@@ -429,6 +429,7 @@ impl SqliteProcessRegistry {
                 change_seq as i64,
                 process_status_label(record),
                 record.last_event_sequence as i64,
+                i64::from(record.cancel_request.is_some()),
                 process_encode_json(record)?
             ],
         )
@@ -504,7 +505,6 @@ impl SqliteProcessRegistry {
         occurred_at_ms: u64,
         wake_delivery_config: lash_core::WakeDeliveryConfig,
         authorization: ProcessEventWriteAuthorization<'_>,
-        parent_end_actions: &[lash_core::ToolIntentParentEndAction],
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core::PluginError> {
         let process_id = record.id.clone();
         let replay_lookup =
@@ -587,16 +587,19 @@ impl SqliteProcessRegistry {
                 .map_err(process_sqlite_error)?;
                 *record = projected_record;
                 Self::save_process_conn(conn, record)?;
-                if !parent_end_actions.is_empty() {
-                    conn.execute(
-                        "INSERT INTO process_parent_end_plans (process_id, actions_json)
-                         VALUES (?1, ?2)",
-                        params![
-                            process_id.as_str(),
-                            process_encode_json(&parent_end_actions)?
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
+                // A process that just reached a terminal status is an ended
+                // parent scope: its ledger row rides the same transaction as
+                // the terminal append, so no child can be stranded by a crash
+                // between the two.
+                if record.is_terminal() {
+                    super::parent_end::record_conn(
+                        conn,
+                        &lash_core::ParentScope::Process {
+                            process_id: process_id.clone(),
+                            incarnation: record.incarnation,
+                        },
+                        occurred_at_ms,
+                    )?;
                 }
                 Self::insert_wake_delivery_conn(
                     conn,
@@ -635,7 +638,6 @@ impl SqliteProcessRegistry {
             occurred_at_ms,
             wake_delivery_config,
             ProcessEventWriteAuthorization::Preauthorized,
-            &[],
         )?;
         Ok((receipt, arm.record_changed()))
     }

@@ -88,7 +88,6 @@ async fn process_family_columns_and_worklist_index_pin_c_collation() {
         "lash_process_tombstones",
         "lash_process_leases",
         "lash_process_segment_handovers",
-        "lash_process_parent_end_plans",
     ] {
         let collation: String = sqlx::query_scalar(
             "SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
@@ -103,6 +102,20 @@ async fn process_family_columns_and_worklist_index_pin_c_collation() {
             "{table} process identifiers require byte order"
         );
     }
+    // The parent-end ledger is keyed by scope, not by a process row, so its
+    // identifier column is `parent_id`. It is paged in byte order by the same
+    // sweep, so it carries the same collation requirement.
+    let ledger: String = sqlx::query_scalar(
+        "SELECT c.collname FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
+         WHERE a.attrelid = 'lash_parent_end_plans'::regclass AND a.attname = 'parent_id'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("parent-end ledger column collation");
+    assert_eq!(
+        ledger, "C",
+        "lash_parent_end_plans parent identifiers require byte order"
+    );
     let index: String = sqlx::query_scalar(
         "SELECT c.collname FROM pg_index i JOIN pg_collation c ON c.oid = i.indcollation[0]
          WHERE i.indexrelid = 'idx_lash_processes_live_worklist'::regclass",

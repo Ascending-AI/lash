@@ -140,20 +140,6 @@ impl RuntimeExecutionTracing {
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
-    pub(crate) async fn finish_parent_end_actions(&self) -> Result<(), crate::PluginError> {
-        crate::tool_dispatch::execute_parent_end_actions(self.dispatch.as_ref()).await
-    }
-
-    /// Restore crash-retained teardown actions for protocol and process-engine implementors.
-    pub fn restore_parent_end_actions(&self, actions: &[crate::ToolIntentParentEndAction]) {
-        self.dispatch.recorded_intent_outcomes.restore(actions);
-    }
-
-    /// Snapshot teardown actions for protocol and process-engine implementors before persistence.
-    pub fn parent_end_actions(&self) -> Vec<crate::ToolIntentParentEndAction> {
-        self.dispatch.recorded_intent_outcomes.snapshot()
-    }
-
     /// Restore run-local child possession for a resumed process-engine segment.
     pub fn restore_started_process_ids(&self, process_ids: &[ProcessId]) {
         self.started_process_ids
@@ -1441,8 +1427,6 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
@@ -1507,8 +1491,6 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),

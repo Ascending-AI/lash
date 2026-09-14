@@ -27,9 +27,9 @@ use super::model::{
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
-    ProcessParentEndPlan, ProcessPruneReport, ProcessRegistry, ProcessWorklistCursor,
-    ProcessWorklistPage, ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    ParentEndPlan, ProcessPruneReport, ProcessRegistry, ProcessWorklistCursor, ProcessWorklistPage,
+    ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
 };
 
 /// Point reads and scans over registered processes.
@@ -501,24 +501,6 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// Complete without a Lash lease and atomically retain parent-end work.
-    async fn complete_process_with_parent_end(
-        &self,
-        process_id: &ProcessId,
-        await_output: ProcessAwaitOutput,
-        authority: ProcessCompletionAuthority,
-        actions: Vec<crate::ToolIntentParentEndAction>,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        if !actions.is_empty() {
-            return Err(PluginError::Session(format!(
-                "process registry cannot durably retain {} parent-end actions for `{process_id}`",
-                actions.len()
-            )));
-        }
-        self.complete_process(process_id, await_output, authority)
-            .await
-    }
-
     /// Atomically append the terminal output while the supplied process lease
     /// is still current, then release that lease in the same transaction.
     ///
@@ -533,37 +515,81 @@ pub trait ProcessLifecycle: Send + Sync {
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// Lease-fenced terminal completion with an atomically retained parent-end plan.
-    async fn complete_process_with_lease_and_parent_end(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-        actions: Vec<crate::ToolIntentParentEndAction>,
-    ) -> Result<ProcessCompletionOutcome, PluginError> {
-        if !actions.is_empty() {
-            return Err(PluginError::Session(format!(
-                "process registry cannot durably retain {} parent-end actions for `{}`",
-                actions.len(),
-                lease.process_id
-            )));
-        }
-        self.complete_process_with_lease(lease, await_output).await
-    }
+    /// Record that one parent scope has ended.
+    ///
+    /// This is the single durable parent-end fact, written for a turn, a
+    /// process and nothing else: a `Host` scope never ends, and implementations
+    /// refuse it. The row carries no action list. On the SQL tiers the write
+    /// must ride the same transaction as the fact that ended the scope, so a
+    /// child either commits before the row and is swept, or after it and is
+    /// refused at registration. Repetition on an existing row is an idempotent
+    /// no-op that preserves the first `ended_at_ms`, including on a row that
+    /// is already settled.
+    async fn record_parent_end(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
 
-    /// Return a bounded stable set of terminal parents whose teardown remains pending.
+    /// Return a bounded stable page of parent scopes whose sweep remains pending.
     async fn list_pending_parent_end_plans(
         &self,
         limit: NonZeroUsize,
-    ) -> Result<Vec<ProcessParentEndPlan>, PluginError>;
+    ) -> Result<Vec<ParentEndPlan>, PluginError>;
 
-    /// Load the durable post-terminal teardown plan for one process, if any.
-    async fn get_pending_parent_end_plan(
+    /// Load the ledger row for one parent scope, settled or not.
+    ///
+    /// Registration reads this to fence a late `Cancel` child: a child whose
+    /// parent has already ended is refused rather than left unvisited.
+    async fn get_parent_end_plan(
         &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<ProcessParentEndPlan>, PluginError>;
+        parent: &crate::ParentScope,
+    ) -> Result<Option<ParentEndPlan>, PluginError>;
 
-    /// Clear one plan after all replay-keyed commands settle. Repetition is idempotent.
-    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError>;
+    /// Page the children this parent-end sweep still has to cancel.
+    ///
+    /// Returns nonterminal rows whose lifecycle names `parent` and whose
+    /// `on_parent_end` is `Cancel` and that do not already carry a cancel
+    /// request, ordered by process id and resumed after `after`. A terminal
+    /// child and a child already carrying a request are settled by definition,
+    /// so two concurrent sweeps converge instead of conflicting.
+    async fn list_parent_end_children(
+        &self,
+        parent: &crate::ParentScope,
+        after: Option<&ProcessId>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<ProcessRecord>, PluginError>;
+
+    /// Mark one ledger row settled. Repetition is idempotent.
+    async fn settle_parent_end_plan(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
+
+    /// Page turn parent scopes that still owe a ledger row.
+    ///
+    /// A turn's ledger row is written immediately after the turn commit rather
+    /// than inside it, because a session store and a process registry are
+    /// separate stores on every SQL tier. A crash between the two leaves live
+    /// children naming a turn that will never end again, so recovery re-derives
+    /// the row: these are the candidates, and the caller decides which of them
+    /// actually committed before writing anything.
+    ///
+    /// Returns distinct `ParentScope::Turn` scopes named by at least one
+    /// nonterminal child row and carrying no ledger row, ordered by scope id,
+    /// resumed strictly after `after` and bounded by `limit`.
+    ///
+    /// The cursor is what keeps the sweep from head-of-line blocking: a
+    /// candidate can be unresolvable for a long time — an uncommitted turn
+    /// that is never redriven, a session whose store this worker cannot open —
+    /// and without a cursor a full page of such scopes would occupy every pass
+    /// forever, so no later turn's row would ever be re-derived.
+    ///
+    /// The default is the empty page, which is the correct answer for a tier
+    /// whose turn commit and ledger row are steps of one durable execution:
+    /// the substrate replays the second step, so there is no window to
+    /// re-derive and no candidate to report.
+    async fn list_unrecorded_turn_parents(
+        &self,
+        after: Option<&str>,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<crate::ParentScope>, PluginError> {
+        let _ = (after, limit);
+        Ok(Vec::new())
+    }
 
     /// Record the durable, lease-fenced "execution started" fact (ADR 0019).
     ///
@@ -664,22 +690,6 @@ pub trait ProcessToolIntents: Send + Sync {
         replay_key: &str,
         outcome: crate::ToolIntentExecutionOutcome,
     ) -> Result<crate::ToolIntentSubmissionRecord, PluginError>;
-
-    /// Load unsettled ingress parent-end actions for one owning scope.
-    ///
-    /// This is an **integrator class 3: store implementor** seam used by hosts
-    /// to reconstruct teardown after a crash.
-    async fn pending_tool_intent_parent_end(
-        &self,
-        session_id: &SessionId,
-        execution_scope_id: &str,
-    ) -> Result<Vec<crate::ToolIntentSubmissionRecord>, PluginError>;
-
-    /// Mark one durable ingress parent-end action settled.
-    ///
-    /// This is an **integrator class 3: store implementor** seam. Repetition is
-    /// idempotent so a crash after replay-keyed teardown can redrive safely.
-    async fn complete_tool_intent_parent_end(&self, replay_key: &str) -> Result<(), PluginError>;
 }
 
 /// The wake-delivery outbox.

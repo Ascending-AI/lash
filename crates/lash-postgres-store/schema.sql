@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 91.
+-- lash-postgres-store schema, component version 93.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -357,8 +357,15 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     last_event_sequence BIGINT NOT NULL,
     change_seq BIGINT NOT NULL,
     status TEXT NOT NULL,
+    parent_scope_kind TEXT NOT NULL,
+    parent_scope_id TEXT COLLATE "C",
+    on_parent_end TEXT NOT NULL,
+    cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
     record_json TEXT NOT NULL,
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)),
+    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel')),
     UNIQUE(process_id, incarnation)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_processes_status
@@ -377,6 +384,18 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
     ON lash_processes(updated_at_ms);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
     ON lash_processes(wake_session_id);
+CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_scope
+    ON lash_processes(parent_scope_kind, parent_scope_id, process_id);
+-- The parent-end sweep's only scan. The predicate names the live statuses
+-- rather than a NOT IN so a status added later cannot silently widen the
+-- index; it is exactly LIVE_PROCESS_STATUS_LABELS, so `caller_departed` is out
+-- for the reason it is out of every other worklist: lash may never act on such
+-- a row nor assert an outcome for it, and a cancel request is both.
+CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_end_pending
+    ON lash_processes(parent_scope_kind, parent_scope_id, process_id)
+    WHERE on_parent_end = 'cancel'
+      AND NOT cancel_requested
+      AND status IN ('running', 'waiting');
 
 CREATE TABLE IF NOT EXISTS lash_process_events (
     process_id TEXT COLLATE "C" NOT NULL,
@@ -472,10 +491,20 @@ CREATE TABLE IF NOT EXISTS lash_process_segment_handovers (
     PRIMARY KEY (process_id, segment_ordinal)
 );
 
-CREATE TABLE IF NOT EXISTS lash_process_parent_end_plans (
-    process_id TEXT COLLATE "C" PRIMARY KEY REFERENCES lash_processes(process_id) ON DELETE CASCADE,
-    actions_json TEXT NOT NULL
+-- One row per ended parent scope, keyed by the scope itself rather than by a
+-- process row: a turn-scoped parent has no process row at all, and a
+-- process-scoped parent's row may be pruned before its children settle.
+CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
+    parent_kind TEXT NOT NULL,
+    parent_id TEXT COLLATE "C" NOT NULL,
+    ended_at_ms BIGINT NOT NULL,
+    settled_at_ms BIGINT,
+    PRIMARY KEY (parent_kind, parent_id),
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'process'))
 );
+CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_pending
+    ON lash_parent_end_plans(ended_at_ms, parent_kind, parent_id)
+    WHERE settled_at_ms IS NULL;
 
 CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     replay_key TEXT PRIMARY KEY,
@@ -677,7 +706,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 92)
+VALUES ('lash-postgres-store', 93)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

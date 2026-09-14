@@ -194,7 +194,7 @@ pub(crate) async fn save_process_tx(
     sqlx::query(
         "UPDATE lash_processes
          SET updated_at_ms = $2, change_seq = $3, status = $4,
-             last_event_sequence = $5, record_json = $6
+             last_event_sequence = $5, cancel_requested = $6, record_json = $7
          WHERE process_id = $1",
     )
     .bind(record.id.as_str())
@@ -202,6 +202,7 @@ pub(crate) async fn save_process_tx(
     .bind(change_seq as i64)
     .bind(process_status_label(record))
     .bind(record.last_event_sequence as i64)
+    .bind(record.cancel_request.is_some())
     .bind(serde_json::to_string(record).map_err(process_decode_error)?)
     .execute(&mut **tx)
     .await
@@ -338,7 +339,6 @@ pub(crate) async fn apply_process_event_append_tx(
     occurred_at_ms: u64,
     wake_delivery_config: lash_core::WakeDeliveryConfig,
     authorization: ProcessEventWriteAuthorization<'_>,
-    parent_end_actions: &[lash_core::ToolIntentParentEndAction],
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
@@ -411,8 +411,20 @@ pub(crate) async fn apply_process_event_append_tx(
             .map_err(plugin_sqlx_error)?;
             *record = projected_record;
             save_process_tx(tx, record).await?;
-            crate::process_registry::parent_end::insert(tx, &process_id, parent_end_actions)
+            // A process that just reached a terminal status is an ended parent
+            // scope: its ledger row rides the same transaction as the terminal
+            // append, so no child can be stranded by a crash between the two.
+            if record.is_terminal() {
+                crate::process_registry::parent_end::record_tx(
+                    tx,
+                    &lash_core::ParentScope::Process {
+                        process_id: process_id.clone(),
+                        incarnation: record.incarnation,
+                    },
+                    occurred_at_ms,
+                )
                 .await?;
+            }
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
             advance_wake_allocation_floor_tx(tx, wake_session_id.as_ref(), &process_id, sequence)
                 .await?;
@@ -442,7 +454,6 @@ pub(crate) async fn append_process_event_tx(
         occurred_at_ms,
         wake_delivery_config,
         ProcessEventWriteAuthorization::Preauthorized,
-        &[],
     )
     .await
     .map(|(receipt, _)| receipt)

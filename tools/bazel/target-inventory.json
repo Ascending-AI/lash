@@ -201,9 +201,7 @@
       ],
       "manifest": "crates/lash-lashlang-runtime/Cargo.toml",
       "package": "lash-internal-lashlang-runtime",
-      "resolved_features": [
-        "testing"
-      ],
+      "resolved_features": [],
       "targets": [
         {
           "cargo": "lash_lashlang_runtime",
@@ -415,7 +413,6 @@
       "dependencies": [
         "async-trait",
         "lash-internal-core",
-        "lash-internal-lashlang-runtime",
         "lash-internal-tool-support",
         "serde_json",
         "tokio"
@@ -506,7 +503,6 @@
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-lashlang",
-        "lash-internal-lashlang-runtime",
         "lash-internal-plugin-process-controls",
         "lash-internal-postgres-store",
         "lash-internal-protocol-standard",

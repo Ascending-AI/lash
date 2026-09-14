@@ -363,16 +363,15 @@ impl DurableProcessWorker {
         process_id: &ProcessId,
         output: ProcessAwaitOutput,
     ) -> RecoveryCompletionDisposition {
-        self.complete_and_release_with_parent_end(lease, process_id, output, Vec::new())
+        self.complete_and_release_inner(lease, process_id, output)
             .await
     }
 
-    pub(super) async fn complete_and_release_with_parent_end(
+    async fn complete_and_release_inner(
         &self,
         lease: &ProcessLease,
         process_id: &ProcessId,
         output: ProcessAwaitOutput,
-        actions: Vec<crate::ToolIntentParentEndAction>,
     ) -> RecoveryCompletionDisposition {
         let fenced = match self
             .config
@@ -408,7 +407,7 @@ impl DurableProcessWorker {
         match self
             .config
             .process_registry()
-            .complete_process_with_lease_and_parent_end(&fenced, output, actions)
+            .complete_process_with_lease(&fenced, output)
             .await
         {
             Ok(crate::ProcessCompletionOutcome::Committed(_)) => {

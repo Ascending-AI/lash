@@ -334,8 +334,6 @@ fn tool_context_with_provider<'run>(
         event_tx,
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        recorded_intent_outcomes:
-            lash_core::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
         attachment_store: Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),
         attachment_source_policy: Arc::new(lash_core::attachments::OpenAttachmentSourcePolicy),
         turn_context: lash_core::TurnContext::default(),

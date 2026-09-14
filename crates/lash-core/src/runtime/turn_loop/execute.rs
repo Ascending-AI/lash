@@ -737,8 +737,6 @@ impl LashRuntime {
             pending_turn_input_claims: initial_claims.turn_inputs,
             pending_checkpoint_turn_input_claim: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
@@ -782,12 +780,6 @@ impl LashRuntime {
                     }
                     if turn_control.evidence().is_some() {
                         let cancellation_messages = driver.turn_pipeline.message_sequence();
-                        emit_parent_end_events(
-                            driver.finish_parent_end_actions().await?,
-                            &mut assembler,
-                            events,
-                        )
-                        .await;
                         let driver = driver.reclaim();
                         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                         return Box::pin(self.finish_cancelled_turn_after_effect_abort(
@@ -810,12 +802,6 @@ impl LashRuntime {
                         .await;
                     }
                 }
-                emit_parent_end_events(
-                    driver.finish_parent_end_actions().await?,
-                    &mut assembler,
-                    events,
-                )
-                .await;
                 let driver = driver.reclaim();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let TurnDriverRemainder {
@@ -830,12 +816,6 @@ impl LashRuntime {
                 return Err(err);
             }
         };
-        emit_parent_end_events(
-            driver.finish_parent_end_actions().await?,
-            &mut assembler,
-            events,
-        )
-        .await;
         let driver = driver.reclaim();
         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
         tracing::debug!(

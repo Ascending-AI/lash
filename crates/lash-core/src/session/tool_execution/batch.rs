@@ -425,9 +425,6 @@ impl RuntimeExecutionContext<'_> {
             // survive both the local run and its replay: the enclosing effect
             // boundary drains this buffer in turn.
             self.restore_tool_trigger_outcomes(std::mem::take(&mut outcome.triggers));
-            self.dispatch
-                .recorded_intent_outcomes
-                .record_launches(&outcome.launches);
             // The batch reports settlement in prepared-entry positions; the
             // caller counts in original call positions.
             let batch_call_indices = prepared_entries
@@ -641,8 +638,6 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
@@ -1050,8 +1045,6 @@ mod tests {
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-            recorded_intent_outcomes:
-                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),

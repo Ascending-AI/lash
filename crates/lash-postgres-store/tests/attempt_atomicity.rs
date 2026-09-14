@@ -542,10 +542,26 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
     fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
 
     fn begin_named(&self, phase: &str) {
-        if phase == "tool_intent.parent_end" {
-            panic!("injected crash after ToolBatch commit and before parent-end teardown");
+        if phase == "turn.parent_end" {
+            panic!("injected crash after the turn commit and before the parent-end ledger row");
         }
     }
+}
+
+/// Crash between the ToolBatch commit and the turn's own final commit: the
+/// admission phase runs immediately before the commit the turn is redriven for.
+struct PanicBeforeTurnCommit;
+
+impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
+    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
+        if phase == lash_core::runtime::RuntimeTurnPhase::EffectLoop {
+            panic!("injected crash after ToolBatch commit and before the turn commit");
+        }
+    }
+
+    fn begin_named(&self, _phase: &str) {}
 }
 
 fn public_runtime_policy() -> lash_core::SessionPolicy {
@@ -1152,6 +1168,10 @@ async fn reset(storage: &PostgresStorage) {
     for statement in [
         "DELETE FROM lash_runtime_effect_replay WHERE scope_id LIKE '%pg-attempt-atomicity%'",
         "DELETE FROM lash_processes WHERE process_id = 'pg-public-intent-target' OR record_json LIKE '%pg-public-caller%'",
+        // Every public turn in this binary ends the same SESSION/TURN scope, so
+        // a sibling's turn-exit ledger row would otherwise be waiting for the
+        // recovery test that asserts the crash preempted the write.
+        "DELETE FROM lash_parent_end_plans WHERE parent_kind = 'turn' AND parent_id LIKE '%pg-attempt-atomicity%'",
     ] {
         sqlx::query(statement)
             .execute(storage.pool())
@@ -1224,7 +1244,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         postgres_state.clone(),
     )
     .await;
-    first.set_turn_phase_probe(Arc::new(PanicAtParentEnd));
+    first.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
     let crashed =
         tokio::spawn(async move { run_fig1293_turn(&mut first, first_effect_host.as_ref()).await })
             .await
@@ -2314,7 +2334,8 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_postgres() {
+async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres()
+ {
     let Some(database_url) = database_url() else {
         eprintln!(
             "skipping the PostgreSQL public parent-end law: LASH_POSTGRES_DATABASE_URL is not set"
@@ -2375,61 +2396,26 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
             .await
     })
     .await
-    .expect_err("the phase probe crashes after ToolBatch commit");
+    .expect_err("the phase probe crashes after the turn commit and before the ledger row");
     assert!(crashed.is_panic());
-    let before_parent_end: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay
-         WHERE session_id = $1 AND replay_key LIKE '%:parent-end:%'",
-    )
-    .bind(SESSION)
-    .fetch_one(storage.pool())
-    .await
-    .expect("count parent-end frames before redrive");
-    assert_eq!(
-        before_parent_end, 0,
-        "the injected crash lands before the parent-end command"
-    );
-    let committed_batches: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay
-         WHERE session_id = $1
-           AND replay_key ~ ':tool_batch:[0-9]+$'
-           AND outcome_json LIKE '%parent_end%'",
-    )
-    .bind(SESSION)
-    .fetch_one(storage.pool())
-    .await
-    .expect("count committed ToolBatch parent-end evidence");
-    assert_eq!(
-        committed_batches, 1,
-        "the durable ToolBatch outcome commits the parent-end metadata before the crash"
-    );
 
-    let replay_host = Arc::new(storage.effect_host());
-    let mut replay = public_signal_runtime(
-        replay_host.clone(),
-        Arc::clone(&registry),
-        Arc::clone(&provider_calls),
-        Arc::clone(&model_calls),
-        PublicIntentKind::ParentEnd,
-    )
-    .await;
-    let replay_scope = postgres_public_turn_scope(&storage, Arc::new(Mutex::new(Vec::new())));
-    let redriven = replay
-        .stream_turn(
-            public_runtime_input(),
-            lash_core::facade_support::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                replay_scope,
-            ),
-        )
-        .await
-        .expect("redrive PostgreSQL parent-end turn");
-    assert!(matches!(
-        redriven.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
-    ));
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(model_calls.load(Ordering::SeqCst), 2);
+    let parent = lash_core::ParentScope::Turn {
+        session_id: SessionId::from(SESSION.to_string()),
+        turn_id: TurnId::from(TURN.to_string()),
+    };
+    let page = std::num::NonZeroUsize::new(16).expect("page bound");
+
+    // The crash lands in the exact window recovery exists for: the turn's own
+    // commit is durable, the `Cancel` child the ToolBatch started is registered,
+    // and the ledger row that ends the scope was never written.
+    assert!(
+        registry
+            .get_parent_end_plan(&parent)
+            .await
+            .expect("read the parent-end ledger row after the crash")
+            .is_none(),
+        "the crash preempts the turn-exit ledger write"
+    );
     let processes = registry
         .list_processes(&lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
@@ -2446,27 +2432,53 @@ async fn public_provider_parent_end_cancel_survives_crash_after_tool_batch_on_po
                     if metadata == &serde_json::json!({"source": "parent-end"})
             )
         })
-        .expect("find the parent-end child reconstructed from ToolBatch outcome");
-    let cancel_events = registry
-        .events_after(&child.id, 0)
-        .await
-        .expect("read redriven parent-end cancellation")
-        .into_iter()
-        .filter(|event| event.event_type == "process.cancel_requested")
-        .count();
-    assert_eq!(
-        cancel_events, 1,
-        "redrive applies the recorded Cancel policy exactly once"
+        .expect("find the Cancel child the ToolBatch started");
+    assert!(
+        child.cancel_request.is_none(),
+        "no cancel is requested while the ledger row is missing"
     );
-    let after_parent_end: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_runtime_effect_replay
-         WHERE session_id = $1 AND replay_key LIKE '%:parent-end:%'",
-    )
-    .bind(SESSION)
-    .fetch_one(storage.pool())
-    .await
-    .expect("count parent-end frames after redrive");
-    assert_eq!(after_parent_end, 1);
+    assert_eq!(
+        registry
+            .list_unrecorded_turn_parents(None, page)
+            .await
+            .expect("page turn parents that still owe a ledger row"),
+        vec![parent.clone()],
+        "the PostgreSQL candidate query reports the turn whose row the crash lost"
+    );
+
+    // Recovery writes the row the turn owed, through the same idempotent
+    // registry write the turn itself makes.
+    registry
+        .record_parent_end(&parent)
+        .await
+        .expect("recovery re-derives the missing ledger row");
+    assert!(
+        registry
+            .get_parent_end_plan(&parent)
+            .await
+            .expect("read the re-derived ledger row")
+            .is_some(),
+        "the re-derived row is the scope-end fact"
+    );
+    assert_eq!(
+        registry
+            .list_parent_end_children(&parent, None, page)
+            .await
+            .expect("page the ended scope's cancel children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![child.id.clone()],
+        "the sweep finds the child by its own parent scope"
+    );
+    assert!(
+        registry
+            .list_unrecorded_turn_parents(None, page)
+            .await
+            .expect("re-page turn parents after the row lands")
+            .is_empty(),
+        "a turn with a ledger row is no longer a recovery candidate"
+    );
 
     reset(&storage).await;
 }

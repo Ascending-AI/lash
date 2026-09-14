@@ -886,24 +886,39 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     let process_envelope = RuntimeEffectEnvelope::new(
         process_invocation,
         RuntimeEffectCommand::Process {
-            command: Box::new(ProcessCommand::ParentEnd {
-                identity: lash_core::ToolIntentIdentity {
-                    session_id: SessionId::from("fig1767"),
-                    execution_scope_id: "scope".to_string(),
-                    tool_call_id: "call".to_string(),
-                    intent_index: 0,
-                    replay_key: "key".to_string(),
-                    minting_emission_replay_key: None,
-                },
-                process_id: ProcessId::from("fig1767-proc"),
-                policy: lash_core::ProcessParentEndPolicy::Cancel,
+            command: Box::new(ProcessCommand::Signal {
+                process_ref: lash_core::ProcessRef::new(
+                    ProcessId::from("fig1767-proc"),
+                    lash_core::ProcessIncarnation::from_registration_sequence(1),
+                ),
+                signal_name: "resume".to_string(),
+                signal_id: "fig1767-signal".to_string(),
+                request: lash_core::ProcessEventAppendRequest::new(
+                    "signal.resume",
+                    serde_json::json!({"source": "fig1767"}),
+                ),
             }),
         },
     );
+    // The sample command signals a real row: the command names an exact process
+    // lifetime, so the registry must hold it for the effect to reach the journal.
+    let process_registry = process_registry();
+    process_registry
+        .register_process(
+            external_registration("fig1767-proc").with_extra_event_types([
+                lash_core::ProcessEventType {
+                    name: "signal.resume".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                },
+            ]),
+        )
+        .await
+        .expect("register the process the sample command signals");
     controller
         .execute_effect(
             process_envelope.clone(),
-            registry_local_executor(process_registry()),
+            registry_local_executor(process_registry),
         )
         .await
         .expect("process command effect execution");
@@ -913,31 +928,21 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
 
     {
         let process_verdict_key = "lash:fig1767-process-cmd.journal-budget";
-        let parent_end_decision_key = "lash:fig1767-process-cmd.parent-end-cancel-decision:v1";
         let process_record_key = "lash:fig1767-process-cmd";
 
         let records = context.records.lock_recover();
         let process_verdict_bytes = records
             .get(process_verdict_key)
             .expect("process budget verdict journal entry");
-        let parent_end_decision_bytes = records
-            .get(parent_end_decision_key)
-            .expect("parent-end cancellation decision journal entry");
         let process_record_bytes = records
             .get(process_record_key)
             .expect("process effect record journal entry");
 
         let process_record: serde_json::Value =
             serde_json::from_slice(process_record_bytes).expect("decode process effect record");
-        let refusal = &process_record["outcome"]["Ok"]["result"]["outcome"];
-        assert_eq!(refusal["process_id"], "fig1767-proc");
-        assert_eq!(
-            refusal["message"],
-            lash_core::PluginError::ProcessUnknown {
-                process_id: ProcessId::from("fig1767-proc"),
-            }
-            .to_string()
-        );
+        let signal = &process_record["outcome"]["Ok"]["result"];
+        assert_eq!(signal["op"], "signal");
+        assert_eq!(signal["event"]["event_type"], "signal.resume");
 
         // Pin verdict entry byte sequence: JournaledBudgetVerdict::Proceed serializes as "Proceed"
         assert_eq!(
@@ -945,14 +950,25 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
             b"\"Proceed\"",
             "process command budget verdict byte sequence mismatch"
         );
-        assert_eq!(
-            parent_end_decision_bytes.as_slice(),
-            br##"{"Ok":{"identity":{"policy":"cancel","process_id":"fig1767-proc","tool_intent_identity":{"execution_scope_id":"scope","intent_index":0,"replay_key":"key","session_id":"fig1767","tool_call_id":"call"}},"result":{"Err":{"message":{"process_id":"fig1767-proc"},"type":"process_unknown"}},"version":1}}"##,
-            "parent-end cancellation decision byte sequence mismatch"
+        // The signal append stamps a wall clock, so the one timestamp is
+        // normalized and every other byte is pinned exactly.
+        let process_record_text =
+            String::from_utf8(process_record_bytes.clone()).expect("process record is UTF-8");
+        let stamp = process_record_text
+            .find("\"occurred_at\":")
+            .expect("the appended signal event carries its append timestamp");
+        let stamp_end = stamp
+            + process_record_text[stamp..]
+                .find('}')
+                .expect("the append timestamp closes its object");
+        let normalized_record = format!(
+            "{}\"occurred_at\":0{}",
+            &process_record_text[..stamp],
+            &process_record_text[stamp_end..]
         );
         assert_eq!(
-            process_record_bytes,
-            br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\"}}}","hash":"a5dc0aa07d15348d4931a296d8ea95daa3aad6d2c0cc8d5f886e75fcf40d2232"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
+            normalized_record,
+            r##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1012,7 +1028,6 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         context.runs.lock_recover().as_slice(),
         [
             "lash:fig1767-process-cmd.journal-budget",
-            "lash:fig1767-process-cmd.parent-end-cancel-decision:v1",
             "lash:fig1767-process-cmd",
             "lash:fig1767-tool-batch.journal-budget",
             "lash:fig1767-tool-batch"
@@ -1040,28 +1055,43 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     let process_envelope = RuntimeEffectEnvelope::new(
         process_invocation,
         RuntimeEffectCommand::Process {
-            command: Box::new(ProcessCommand::ParentEnd {
-                identity: lash_core::ToolIntentIdentity {
-                    session_id: SessionId::from("fig1767"),
-                    execution_scope_id: "scope".to_string(),
-                    tool_call_id: "call".to_string(),
-                    intent_index: 0,
-                    replay_key: "key".to_string(),
-                    minting_emission_replay_key: None,
-                },
-                process_id: ProcessId::from("fig1767-proc"),
-                policy: lash_core::ProcessParentEndPolicy::Cancel,
+            command: Box::new(ProcessCommand::Signal {
+                process_ref: lash_core::ProcessRef::new(
+                    ProcessId::from("fig1767-proc"),
+                    lash_core::ProcessIncarnation::from_registration_sequence(1),
+                ),
+                signal_name: "resume".to_string(),
+                signal_id: "fig1767-signal".to_string(),
+                request: lash_core::ProcessEventAppendRequest::new(
+                    "signal.resume",
+                    serde_json::json!({"source": "fig1767"}),
+                ),
             }),
         },
     );
 
+    // The sample command signals a real row: the command names an exact process
+    // lifetime, so the registry must hold it for the effect to reach the journal.
+    let recorded_registry = process_registry();
+    recorded_registry
+        .register_process(
+            external_registration("fig1767-proc").with_extra_event_types([
+                lash_core::ProcessEventType {
+                    name: "signal.resume".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                },
+            ]),
+        )
+        .await
+        .expect("register the process the sample command signals");
     let recorded_proc_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
     )
     .execute_effect(
         process_envelope.clone(),
-        registry_local_executor(process_registry()),
+        registry_local_executor(recorded_registry),
     )
     .await
     .expect_err("process command over budget must give up");
@@ -1077,7 +1107,15 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     context.replaying.store(true, Ordering::SeqCst);
     let replay_registry = process_registry();
     replay_registry
-        .register_process(external_registration("fig1767-proc"))
+        .register_process(
+            external_registration("fig1767-proc").with_extra_event_types([
+                lash_core::ProcessEventType {
+                    name: "fig1767.sample".to_string(),
+                    payload_schema: lash_core::LashSchema::any(),
+                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                },
+            ]),
+        )
         .await
         .expect("register process for redrive witness");
     let process_executed = Arc::new(AtomicBool::new(false));

@@ -570,7 +570,6 @@ async fn settle_terminal_attempt(
     )
     .await?;
     project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
-    context.recorded_intent_outcomes.record(&intent_outcomes);
     // Discharges the drain slot, where both former bodies called
     // `complete_final_drain`. Written out so the release point stays explicit
     // even though the guard would do it at the end of this scope anyway.
@@ -802,7 +801,6 @@ mod projection_tests {
             },
             kind: crate::ToolIntentKind::SignalProcess,
             result: serde_json::json!({ "sequence": sequence }),
-            parent_end: None,
         }
     }
 

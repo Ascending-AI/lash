@@ -1567,57 +1567,6 @@ pub(super) struct CasSurvivorIntentTools {
     pub(super) calls: Arc<AtomicUsize>,
 }
 
-pub(super) struct ParentEndFailureIntentTool;
-
-pub(super) fn parent_end_failure_intent_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        "tool:parent_end_failure_intent",
-        "parent_end_failure_intent",
-        "Start a process whose parent-end action exercises cancelled-turn teardown.",
-        lash_core::ToolDefinition::default_input_schema(),
-        serde_json::json!({"type": "object", "additionalProperties": true}),
-    )
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for ParentEndFailureIntentTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![parent_end_failure_intent_tool().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "parent_end_failure_intent")
-            .then(|| Arc::new(parent_end_failure_intent_tool().contract()))
-    }
-
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        panic!("the parent-end failure witness must use AttemptContext")
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolAttemptOutcome::done(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
-            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                lash_core::StartProcessIntent {
-                    session_id: SessionId::from(call.context.session_id()),
-                    request: lash_core::ProcessStartRequest::external(
-                        "cancelled-turn-parent-end-child",
-                        lash_core::ProcessOriginator::host_scoped("parent-end-failure-witness"),
-                        serde_json::json!({"witness": true}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
-                    ),
-                },
-            ))]),
-        )
-    }
-}
-
 pub(super) fn cas_survivor_intent_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:cas_survivor_intent",

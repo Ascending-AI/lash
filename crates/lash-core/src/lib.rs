@@ -96,6 +96,26 @@ pub mod store_backend_support {
         .storage_key()
     }
 
+    /// Durable receipt identity of one turn's final commit.
+    ///
+    /// A turn's runtime commits are receipted under the turn's own execution
+    /// scope, and the last of them carries the reserved `final` operation key,
+    /// so this string is present in the receipt table exactly when the turn
+    /// committed. Backends implementing
+    /// [`SessionCommitStore::committed_turn_exists`](crate::store::SessionCommitStore::committed_turn_exists)
+    /// must test membership with this key rather than deriving one of their
+    /// own, so the committed-turn fact cannot drift between tiers.
+    pub fn turn_commit_receipt_storage_key(
+        session_id: &SessionId,
+        turn_id: &lash_sansio::TurnId,
+    ) -> Result<String, crate::StoreError> {
+        crate::OperationId::new(
+            crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
+            "final",
+        )
+        .storage_key()
+    }
+
     /// Construct queued-work claim data with the predecessor identity that an
     /// abandoning store must restore. Store implementors pass `None` for fresh
     /// work and the interrupted `claim_id` for a redrive.
@@ -774,9 +794,8 @@ pub use lash_sansio::{
     ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
     ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure,
     ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
-    ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
-    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
-    ToolValue, TurnCause, TurnId, TurnOutputSource,
+    ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy,
+    ToolRetryStatus, ToolValue, TurnCause, TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -1196,25 +1215,25 @@ pub use runtime::{
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
     NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
     NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance, OnParentEnd,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentScope, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessEffectOutcome, ProcessEngine,
-    ProcessEngineAdmission, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdentity, ProcessIncarnation, ProcessInfraError, ProcessInput, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
-    ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-    ProcessOriginator, ProcessOutcome, ProcessOutcomeObserver, ProcessParentEndPlan,
-    ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRef,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationProbe, ProcessRegistry,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessEventLog, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInfraError,
+    ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle, ProcessLifecyclePolicy,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOutcome,
+    ProcessOutcomeObserver, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
+    ProcessRef, ProcessRegistrar, ProcessRegistration, ProcessRegistrationProbe, ProcessRegistry,
     ProcessRegistryBinding, ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts,
     ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions,
     ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
@@ -1316,11 +1335,11 @@ pub(crate) use store::{
     SessionHeadPayload, ensure_supported_schema_version, load_persisted_session_state,
 };
 pub use tool_intent::{
-    CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, ProcessParentEndPolicy,
-    SignalProcessIntent, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
-    TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, ToolAttemptOutcome,
-    ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
-    ToolOutcomeDone, derive_tool_intent_identity, rederive_tool_intent_identity,
+    CancelProcessIntent, EmitProcessEventIntent, EmitTriggerIntent, SignalProcessIntent,
+    StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+    TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V2, ToolAttemptOutcome, ToolIntent,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolOutcomeDone,
+    derive_tool_intent_identity, rederive_tool_intent_identity,
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{

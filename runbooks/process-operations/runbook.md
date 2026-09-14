@@ -54,43 +54,42 @@ artifacts are the backend truth for this judged runbook.
    process-replay shape on Restate exactly as it does on in-memory and PostgreSQL. Any
    FIG-1127 ordinal-tier refusal from those public tools is a regression. The legacy
    journal-capable `ToolContext` routes remain fenced until their aggregate removal.
-7. **Parent teardown is a typed durable plan, not terminal-state cleanup.** A terminal parent may
-   retain multiple ordered `ParentEnd` commands. Each command must record a literal
-   `ToolIntentParentEndOutcome`; a crash after the child side effect, between commands, or before
-   plan clear must redrive without duplicating the child event. Concurrent startup scans may
-   race, but only one durable cancellation may remain for each child.
+7. **Parent teardown is a registry ledger row, not terminal-state cleanup.** An ended parent
+   scope leaves exactly one unsettled `parent_end_plans` row keyed by `(parent_kind, parent_id)`.
+   The row carries no action list: the process worker's sweep derives the work by querying the
+   children that name that Parent Scope with a `Cancel` policy, requests `ParentEnded` cancel on
+   each, and only then stamps the row settled. A crash anywhere in that sweep redrives without
+   duplicating a child event, because a child already carrying a cancel request is no longer
+   returned by the children query. Concurrent sweeps may race, but only one durable
+   cancellation may remain for each child.
 8. **Selected drains are closed over the requested batches.** A successful selected drain may
    settle only its exact batch set. Unselected pending rows remain pending, absent selected ids
    report `AlreadySatisfied`, and a present row that cannot join the exact composition retains its
    typed refusal without provider execution or queue mutation.
 
-## FIG-1292 parent-end atomicity preflight
+## Parent-end ledger preflight
 
-Before a live process-operations judgment, run the focused laws against a disposable PostgreSQL
-database with the production-required gate enabled:
+Before a live process-operations judgment, run the registry conformance laws against a disposable
+PostgreSQL database with the production-required gate enabled:
 
 ```sh
 LASH_POSTGRES_DATABASE_URL=<disposable-url> LASH_REQUIRE_POSTGRES=1 \
-  cargo test -p lash-internal-postgres-store --test process_parent_atomicity --locked \
-  -- --nocapture --test-threads=1
-cargo test -p lash-internal-restate \
-  restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit \
-  --locked -- --nocapture --test-threads=1
+  cargo test -p lash-internal-postgres-store --features testing --test conformance \
+  parent_end --locked -- --nocapture --test-threads=1
 ```
 
-The PostgreSQL law must reach the public durable worker path for a `ToolCall` parent with a
-retained cancel action. It must settle concurrent startup scans by ensuring racing workers observe
-the literal `Cancelled` outcome, the pending plan clears, exactly one `process.cancel_requested`
-event is appended to the child, and no provider calls occur during settlement. (Coverage for
-segmented Lashlang parents, mid-plan crash intervals, and post-clear redrive is not implemented in
-this law; that honest gap is recorded in History). The Restate law must replay a committed
-tool-intent batch, crash after the child cancellation but before its typed outcome is journaled,
-and then record the literal command frame and literal `Cancelled` outcome exactly once.
+The PostgreSQL tier is the one this preflight judges: `lash-internal-conformance` runs the
+laws on the in-memory tier only, so the fail condition below can only fire from the store's own
+conformance binary. The laws must show: a terminal parent writes exactly one unsettled ledger
+row; the children query is index-served and returns only the `Cancel` children that still owe a
+cancel; a `Cancel` child that registers after the row exists is refused `ParentEnded`; a child
+that already carries a cancel request leaves the page; settlement is idempotent and stamps the
+row rather than deleting it; and the row outlives the retention prune of the parent process row,
+because the ledger is keyed by parent scope and not by process id.
 
-**Fail if:** PostgreSQL is skipped, either law uses a private registration runner, expected
-identities or outcomes are derived from observed production values, the pending plan clears
-before every action is durably represented, or any redrive appends a second
-`process.cancel_requested` event.
+**Fail if:** PostgreSQL is skipped, the ledger row is written without the terminal append, a
+child is cancelled before the parent fact is durable, settlement deletes the row instead of
+stamping it, or any redrive appends a second `process.cancel_requested` event.
 
 ## FIG-1293 migrated-tool atomicity judgment
 

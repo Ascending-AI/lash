@@ -8,17 +8,6 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         await_output: ProcessAwaitOutput,
         authority: lash_core::ProcessCompletionAuthority,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
-        self.complete_process_with_parent_end(process_id, await_output, authority, Vec::new())
-            .await
-    }
-
-    async fn complete_process_with_parent_end(
-        &self,
-        process_id: &ProcessId,
-        await_output: ProcessAwaitOutput,
-        authority: lash_core::ProcessCompletionAuthority,
-        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
-    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's declared
         // disposition, and append the terminal event as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
@@ -53,7 +42,6 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             occurred_at_ms,
             self.wake_delivery_config,
             ProcessEventWriteAuthorization::Preauthorized,
-            &parent_end_actions,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -71,16 +59,6 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
-        self.complete_process_with_lease_and_parent_end(lease, await_output, Vec::new())
-            .await
-    }
-
-    async fn complete_process_with_lease_and_parent_end(
-        &self,
-        lease: &ProcessLease,
-        await_output: ProcessAwaitOutput,
-        parent_end_actions: Vec<lash_core::ToolIntentParentEndAction>,
     ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let process_id = lease.process_id.as_str();
@@ -114,7 +92,6 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             now,
             self.wake_delivery_config,
             ProcessEventWriteAuthorization::Lease(lease),
-            &parent_end_actions,
         )
         .await?;
         if arm == ProcessEventAppendArm::Replayed {
@@ -153,22 +130,46 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         Ok(lash_core::ProcessCompletionOutcome::Committed(record))
     }
 
+    async fn record_parent_end(&self, parent: &lash_core::ParentScope) -> Result<(), PluginError> {
+        parent_end::record(&self.pool, parent, self.clock.timestamp_ms()).await
+    }
+
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core::ProcessParentEndPlan>, PluginError> {
-        parent_end::list(&self.pool, limit).await
+    ) -> Result<Vec<lash_core::ParentEndPlan>, PluginError> {
+        parent_end::list_pending(&self.pool, limit).await
     }
 
-    async fn get_pending_parent_end_plan(
+    async fn get_parent_end_plan(
         &self,
-        process_id: &ProcessId,
-    ) -> Result<Option<lash_core::ProcessParentEndPlan>, PluginError> {
-        parent_end::get(&self.pool, process_id).await
+        parent: &lash_core::ParentScope,
+    ) -> Result<Option<lash_core::ParentEndPlan>, PluginError> {
+        parent_end::get(&self.pool, parent).await
     }
 
-    async fn complete_parent_end_plan(&self, process_id: &ProcessId) -> Result<(), PluginError> {
-        parent_end::complete(&self.pool, process_id).await
+    async fn list_parent_end_children(
+        &self,
+        parent: &lash_core::ParentScope,
+        after: Option<&ProcessId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        parent_end::children(&self.pool, parent, after, limit).await
+    }
+
+    async fn settle_parent_end_plan(
+        &self,
+        parent: &lash_core::ParentScope,
+    ) -> Result<(), PluginError> {
+        parent_end::settle(&self.pool, parent, self.clock.timestamp_ms()).await
+    }
+
+    async fn list_unrecorded_turn_parents(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core::ParentScope>, PluginError> {
+        parent_end::list_unrecorded_turn_parents(&self.pool, after, limit).await
     }
 
     async fn record_first_started_with_authority(

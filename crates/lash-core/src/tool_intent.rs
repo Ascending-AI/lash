@@ -1,7 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::{ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason};
-pub use lash_sansio::ProcessParentEndPolicy;
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
@@ -111,9 +110,6 @@ pub struct ToolIntentSubmissionRecord {
     /// First typed realization outcome, absent while admission is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<crate::ToolIntentExecutionOutcome>,
-    /// Whether the retained parent-end action has reached a typed outcome.
-    #[serde(default)]
-    pub parent_end_settled: bool,
 }
 
 impl ToolIntentSubmissionRecord {
@@ -135,7 +131,6 @@ impl ToolIntentSubmissionRecord {
             payload_hash,
             intent,
             outcome: None,
-            parent_end_settled: false,
         })
     }
 }
@@ -149,8 +144,6 @@ struct ToolIntentSubmissionRecordWire {
     intent: ToolIntent,
     #[serde(default)]
     outcome: Option<crate::ToolIntentExecutionOutcome>,
-    #[serde(default)]
-    parent_end_settled: bool,
 }
 
 impl<'de> Deserialize<'de> for ToolIntentSubmissionRecord {
@@ -169,7 +162,6 @@ impl<'de> Deserialize<'de> for ToolIntentSubmissionRecord {
             payload_hash: wire.payload_hash,
             intent: wire.intent,
             outcome: wire.outcome,
-            parent_end_settled: wire.parent_end_settled,
         })
     }
 }
@@ -540,30 +532,6 @@ mod tests {
         assert_ne!(turn_7.replay_key, turn_8.replay_key);
         assert_ne!(turn_7.replay_key, process.replay_key);
         assert_ne!(turn_8.replay_key, process.replay_key);
-    }
-
-    #[test]
-    fn parent_end_policy_defaults_to_cancel_and_rejects_unreleased_terminate_bytes() {
-        assert_eq!(
-            ProcessParentEndPolicy::default(),
-            ProcessParentEndPolicy::Cancel
-        );
-        assert_eq!(
-            serde_json::from_str::<ProcessParentEndPolicy>(r#""cancel""#)
-                .expect("decode the v1 default policy"),
-            ProcessParentEndPolicy::Cancel
-        );
-        assert_eq!(
-            serde_json::from_str::<ProcessParentEndPolicy>(r#""abandon""#)
-                .expect("decode the v1 abandon policy"),
-            ProcessParentEndPolicy::Abandon
-        );
-        assert_eq!(
-            serde_json::from_str::<ProcessParentEndPolicy>(r#""terminate""#)
-                .expect_err("the unreleased terminate byte shape must stay fenced")
-                .to_string(),
-            "unknown variant `terminate`, expected `abandon` or `cancel` at line 1 column 11"
-        );
     }
 
     #[test]

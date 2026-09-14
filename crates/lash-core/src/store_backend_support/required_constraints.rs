@@ -129,6 +129,36 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     ),
     sqlite_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
+        "processes",
+        "ck_processes_parent_scope_kind",
+        "parent_scope_kind IN ('turn', 'process', 'host')",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::ProcessRegistry,
+        "processes",
+        "ck_processes_parent_scope_id",
+        "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::ProcessRegistry,
+        "processes",
+        "ck_processes_on_parent_end",
+        "on_parent_end IN ('abandon', 'cancel')",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::ProcessRegistry,
+        "processes",
+        "ck_processes_cancel_requested",
+        "cancel_requested IN (0, 1)",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::ProcessRegistry,
+        "parent_end_plans",
+        "ck_parent_end_plans_kind",
+        "parent_kind IN ('turn', 'process')",
+    ),
+    sqlite_constraint(
+        SqliteConstraintDatabase::ProcessRegistry,
         "process_wake_deliveries",
         "ck_process_wake_deliveries_state",
         "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
@@ -220,6 +250,26 @@ pub const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         "lash_processes",
         "ck_processes_status",
         "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+    ),
+    expected_constraint(
+        "lash_processes",
+        "ck_processes_parent_scope_kind",
+        "parent_scope_kind IN ('turn', 'process', 'host')",
+    ),
+    expected_constraint(
+        "lash_processes",
+        "ck_processes_parent_scope_id",
+        "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+    ),
+    expected_constraint(
+        "lash_processes",
+        "ck_processes_on_parent_end",
+        "on_parent_end IN ('abandon', 'cancel')",
+    ),
+    expected_constraint(
+        "lash_parent_end_plans",
+        "ck_parent_end_plans_kind",
+        "parent_kind IN ('turn', 'process')",
     ),
     expected_constraint(
         "lash_process_wake_deliveries",

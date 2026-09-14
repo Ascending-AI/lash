@@ -644,7 +644,14 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// database can hold rows in a phase this schema forbids and manifest rows with
 /// no upload evidence for bytes that are present, so it is rejected at open and
 /// recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 61;
+/// Bumped to 62 for FIG-2962/FIG-2963: the parent scope is a registration fact
+/// and the end of a scope is one ledger row. `processes` gains
+/// `parent_scope_kind`, `parent_scope_id`, `on_parent_end` and
+/// `cancel_requested`, and `process_parent_end_plans` is replaced by the
+/// scope-keyed `parent_end_plans`. A pre-62 catalog holds children with no
+/// parent scope and plans keyed by a process id, so it is rejected at open and
+/// recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 62;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -707,9 +714,17 @@ CREATE TABLE IF NOT EXISTS processes (
     last_event_sequence   INTEGER NOT NULL,
     change_seq            INTEGER NOT NULL,
     status                TEXT NOT NULL,
+    parent_scope_kind     TEXT NOT NULL,
+    parent_scope_id       TEXT,
+    on_parent_end         TEXT NOT NULL,
+    cancel_requested      INTEGER NOT NULL DEFAULT 0,
     record_json           TEXT NOT NULL,
     UNIQUE(process_id, incarnation),
-    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
+    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
+    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)),
+    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel')),
+    CONSTRAINT ck_processes_cancel_requested CHECK (cancel_requested IN (0, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
@@ -742,6 +757,19 @@ CREATE INDEX IF NOT EXISTS idx_processes_recent_retired
     WHERE status NOT IN ('running', 'waiting');
 CREATE INDEX IF NOT EXISTS idx_processes_wake_session
     ON processes(wake_session_id);
+-- The parent-end sweep's only scan: children of one ended parent scope that
+-- still owe a cancel. The predicate names the live statuses rather than a NOT
+-- IN so a status added later cannot silently widen the index; it is exactly
+-- `LIVE_PROCESS_STATUS_LABELS`, so `caller_departed` is out for the reason it
+-- is out of every other worklist - lash may never act on such a row nor
+-- assert an outcome for it, and a cancel request is both.
+CREATE INDEX IF NOT EXISTS idx_processes_parent_scope
+    ON processes(parent_scope_kind, parent_scope_id, process_id);
+CREATE INDEX IF NOT EXISTS idx_processes_parent_end_pending
+    ON processes(parent_scope_kind, parent_scope_id, process_id)
+    WHERE on_parent_end = 'cancel'
+      AND cancel_requested = 0
+      AND status IN ('running', 'waiting');
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
     singleton    INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -850,11 +878,20 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS process_parent_end_plans (
-    process_id       TEXT PRIMARY KEY,
-    actions_json     TEXT NOT NULL,
-    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
+-- One row per ended parent scope, keyed by the scope itself rather than by a
+-- process row: a turn-scoped parent has no process row at all, and a
+-- process-scoped parent's row may be pruned before its children settle.
+CREATE TABLE IF NOT EXISTS parent_end_plans (
+    parent_kind      TEXT NOT NULL,
+    parent_id        TEXT NOT NULL,
+    ended_at_ms      INTEGER NOT NULL,
+    settled_at_ms    INTEGER,
+    PRIMARY KEY (parent_kind, parent_id),
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'process'))
 );
+CREATE INDEX IF NOT EXISTS idx_parent_end_plans_pending
+    ON parent_end_plans(ended_at_ms, parent_kind, parent_id)
+    WHERE settled_at_ms IS NULL;
 
 CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     replay_key          TEXT PRIMARY KEY,
@@ -932,7 +969,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 36 makes Process Prune retain exact artifact-release evidence until
 /// every configured artifact store acknowledges owner severance. Version-35
 /// registries are rejected rather than inventing cleanup acknowledgements.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 36;
+/// Version 37 replaces the process-keyed parent-end plan table with a ledger
+/// keyed by the parent scope itself, and folds the parent scope, the
+/// on-parent-end policy and the cancel request into indexed process columns so
+/// the sweep selects children by index instead of decoding every record.
+/// Version-36 registries are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 37;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1545,21 +1587,63 @@ mod check_constraint_tests {
             .expect("create process constraint fixture");
         let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
             identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
-            status, record_json";
+            status, parent_scope_kind, parent_scope_id, on_parent_end, record_json";
         assert_check_rejects(
             &process,
             &format!(
                 "INSERT INTO processes ({process_columns}) VALUES
                  ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
-                  'paused', '{{}}')"
+                  'paused', 'host', NULL, 'abandon', '{{}}')"
             ),
             "ck_processes_status",
+        );
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('bad-parent-kind', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', 'session', 'scope', 'abandon', '{{}}')"
+            ),
+            "ck_processes_parent_scope_kind",
+        );
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('host-with-id', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', 'host', 'scope', 'abandon', '{{}}')"
+            ),
+            "ck_processes_parent_scope_id",
+        );
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('turn-without-id', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', 'turn', NULL, 'abandon', '{{}}')"
+            ),
+            "ck_processes_parent_scope_id",
+        );
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('bad-on-parent-end', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', 'host', NULL, 'detach', '{{}}')"
+            ),
+            "ck_processes_on_parent_end",
+        );
+        assert_check_rejects(
+            &process,
+            "INSERT INTO parent_end_plans (parent_kind, parent_id, ended_at_ms)
+             VALUES ('host', 'scope', 0)",
+            "ck_parent_end_plans_kind",
         );
         process
             .execute_batch(&format!(
                 "INSERT INTO processes ({process_columns}) VALUES
                  ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
-                  'running', '{{}}')"
+                  'running', 'host', NULL, 'abandon', '{{}}')"
             ))
             .expect("insert valid wake parent");
         assert_check_rejects(

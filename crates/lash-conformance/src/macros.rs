@@ -226,6 +226,7 @@ macro_rules! runtime_persistence_tests {
             (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),
             (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
             (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
+            (committed_turn_receipt_answers_the_parent_end_recovery_read, "root"),
             ]
             store_refs [
             (session_execution_lease_fence_authority, "lease-fence-authority"),
@@ -423,6 +424,7 @@ macro_rules! process_registry_tests {
                 (caller_departure_state_machine, "caller-departure"),
                 (caller_departed_rows_are_reclaimed_by_retention, "caller-departed-retention"),
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
+                (settled_parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
             ]

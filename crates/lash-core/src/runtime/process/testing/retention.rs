@@ -158,6 +158,7 @@ impl super::super::registry::ProcessRetention for TestLocalProcessRegistry {
             }
             prunable.into_iter().collect()
         };
+        super::parent_end::reclaim_settled_plans_locked(self, cutoff_epoch_ms).await;
         self.pause_prune_after_managed_removal().await;
         {
             let mut observers = self.observers.lock().await;

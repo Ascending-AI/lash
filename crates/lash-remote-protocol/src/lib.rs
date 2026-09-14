@@ -166,7 +166,11 @@ pub use usage_activity::*;
 // `RemoteTurnStop::ContextOverflow`, instead of collapsing it into
 // `ProviderError`. A window-67 peer decoding a window-71 turn report would
 // reject the unknown stop tag, so peers must adopt 71.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 71;
+// Window 72: FIG-2962/FIG-2963 removes the per-intent parent-end policy from the
+// turn result. Child lifecycle is settled from the registry's scope-keyed
+// parent-end ledger, so the field carried no fact a peer could act on; removing
+// it narrows the accepted record set, so peers must adopt 72.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 72;
 
 /// One versioned remote-protocol message.
 ///

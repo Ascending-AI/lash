@@ -38,9 +38,9 @@ use lash::plugins::{
     TurnHookReport, TurnPreparation,
 };
 use lash::process::{
-    ObserverInheritance, ProcessChange, ProcessCompletionOutcome, ProcessEventSemantics,
-    ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
-    ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
+    ObserverInheritance, ParentEndPlan, ProcessChange, ProcessCompletionOutcome,
+    ProcessEventSemantics, ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority,
+    ProcessOutcome, ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec,
     ProcessTombstone, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
     WakeDiscardReason,

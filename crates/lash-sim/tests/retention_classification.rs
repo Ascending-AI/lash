@@ -246,9 +246,9 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
-        "process_parent_end_plans",
+        "parent_end_plans",
         LifecycleOwned {
-            scope: "completion and process; pending plan blocks process prune",
+            scope: "parent scope end; retention reclaims a settled row once no live child names it",
         },
     ),
     ("tool_intent_submissions", KnownGap { issue: "FIG-1509" }),

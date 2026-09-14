@@ -620,7 +620,7 @@ class PostgresMatrixTests(unittest.TestCase):
                 "Test PostgreSQL catalog compatibility",
             ),
             (
-                "agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres",
+                "public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres",
                 "Test runtime Postgres agent scenarios",
             ),
         ):

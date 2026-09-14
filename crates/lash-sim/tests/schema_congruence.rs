@@ -74,7 +74,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("process_events", "lash_process_events"),
     pair("process_leases", "lash_process_leases"),
     pair("process_observers", "lash_process_observers"),
-    pair("process_parent_end_plans", "lash_process_parent_end_plans"),
+    pair("parent_end_plans", "lash_parent_end_plans"),
     pair("process_artifact_cleanup", "lash_process_artifact_cleanup"),
     pair(
         "process_segment_handovers",
@@ -563,7 +563,7 @@ fn schema_congruence_rejects_a_dropped_registered_constraint() {
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
             SQLITE_EXPECTED_CONSTRAINTS,
-            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))\n",
+            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),\n",
         ),
         (
             "Postgres",

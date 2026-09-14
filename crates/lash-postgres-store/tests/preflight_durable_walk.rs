@@ -495,10 +495,11 @@ async fn seed_process(
             "INSERT INTO lash_processes (
                  process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                  identity_kind, identity_label, created_at_ms, updated_at_ms,
-                 last_event_sequence, change_seq, status, record_json
+                 last_event_sequence, change_seq, status, parent_scope_kind, on_parent_end,
+                 record_json
              ) VALUES (
                  '{process_id}', 1, 'fingerprint', 'originator', {wake},
-                 'program', NULL, 0, 0, 0, 1, '{status}',
+                 'program', NULL, 0, 0, 0, 1, '{status}', 'host', 'abandon',
                  '{{\"process\":\"{process_id}\"}}'
              )",
         ))
