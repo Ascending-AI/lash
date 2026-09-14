@@ -1567,12 +1567,8 @@ fn settled_type_kind(ty: &TypeExpr) -> Option<&'static str> {
     }
 }
 
-// Ask the runtime's handle authority about the known keys rather than
-// independently defining which record shapes are handles in the linker.
+// Ask the one handle authority which record shapes are handles rather than
+// defining it again in the linker (ADR 0095).
 fn is_handle_shape<'a>(names: impl Iterator<Item = &'a str>) -> bool {
-    let mut record = crate::runtime::Record::new();
-    for name in names {
-        record.insert(name.to_string(), crate::runtime::Value::Null);
-    }
-    crate::runtime::is_process_handle(&record)
+    lash_sansio::handle::is_handle_shape(names)
 }

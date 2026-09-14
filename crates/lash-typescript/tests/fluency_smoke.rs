@@ -43,6 +43,7 @@ fn process_handle(id: &str) -> Value {
     let mut handle = lashlang::Record::new();
     handle.insert("__handle__".to_string(), Value::String("process".into()));
     handle.insert("id".to_string(), Value::String(id.into()));
+    handle.insert("incarnation".to_string(), Value::Number(1.0));
     Value::Record(std::sync::Arc::new(handle))
 }
 

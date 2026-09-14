@@ -3,6 +3,7 @@ pub mod causal;
 pub mod core_support;
 mod effect_identity;
 mod frame_key;
+pub mod handle;
 pub mod identity;
 pub mod llm;
 pub mod plugin;
@@ -22,7 +23,7 @@ pub mod turn_driver;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v10";
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v11";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
@@ -33,6 +34,9 @@ pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
 pub use frame_key::{FrameKey, FrameKeyError};
+pub use handle::{
+    HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget, is_handle_shape, parse_handle,
+};
 pub use identity::{
     BatchId, InputId, NodeId, ProcessId, SessionId, TurnId, session_owner_namespace,
 };

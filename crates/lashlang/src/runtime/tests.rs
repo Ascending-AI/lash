@@ -65,6 +65,7 @@ impl ExecutionHost for RecordingProcessHost {
                 let mut handle = Record::new();
                 handle.insert("__handle__".to_string(), Value::String("process".into()));
                 handle.insert("id".to_string(), Value::String("proc-1".into()));
+                handle.insert("incarnation".to_string(), Value::Number(1.0));
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::ProcessEvent(event) => {

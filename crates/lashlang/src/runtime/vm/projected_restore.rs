@@ -53,7 +53,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         if let Some(value) = self.last_value.as_mut() {
             projected_refresh::refresh_value(value, bindings);
         }
-        projected_refresh::refresh_optional_values(&mut self.pending_tools, bindings);
+        for entry in self.pending_tools.values_mut().flatten() {
+            projected_refresh::refresh_value(entry, bindings);
+        }
         self.slots.refresh_projected(
             match self.active_function {
                 Some(_) => None,

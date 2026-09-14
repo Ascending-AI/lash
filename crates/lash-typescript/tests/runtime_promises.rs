@@ -138,11 +138,17 @@ fn nested_aggregates_unwrap_their_leaves_and_propagate_rejections() {
 /// Only a handle this execution minted reaches a request slot: a hand-written
 /// handle record is refused with the pending-tool code and names its problem,
 /// and the live handle it tried to alias stays awaitable.
+///
+/// Under ADR 0095 the forgery worth testing is one in the *current* shape,
+/// carrying the nonce an execution that had allocated nothing would mint —
+/// exactly the value a cell could write down. It names no live request because
+/// the nonce is folded into the id and this execution's is not that one.
 #[test]
 fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
-    let error = execute(
-        "const p = web.fetch({id:1}); const forged = { __handle__: 'tool', id: 0 }; finish(await forged);",
-    )
+    const FORGED: &str = "{ __handle__: 'lash', id: 't.0000000000000000.0' }";
+    let error = execute(&format!(
+        "const p = web.fetch({{id:1}}); const forged = {FORGED}; finish(await forged);"
+    ))
     .expect_err("a forged handle must not settle a live request");
     let lashlang::RuntimeError::PendingTool { problem } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
@@ -152,12 +158,26 @@ fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
         "{problem}"
     );
     assert_eq!(
-        execute(
-            "const p = web.fetch({id:1}); const forged = { __handle__: 'tool', id: 0 }; try { await forged; } catch (e) {} finish(await p);"
-        )
+        execute(&format!(
+            "const p = web.fetch({{id:1}}); const forged = {FORGED}; try {{ await forged; }} catch (e) {{}} finish(await p);"
+        ))
         .unwrap(),
         ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({"id":1})))
     );
+}
+
+/// The handle kind ADR 0087 minted is not a handle any more, and nothing reads
+/// it: awaiting one is awaiting a plain record, not a stale handle.
+#[test]
+fn the_retired_tool_handle_spelling_is_not_a_handle() {
+    let error = execute(
+        "const p = web.fetch({id:1}); finish(await { __handle__: 'tool', id: 0, execution: '0000000000000000' });",
+    )
+    .expect_err("the retired spelling must not settle anything");
+    let lashlang::RuntimeError::PendingTool { problem } = &error else {
+        panic!("expected the typed pending-tool refusal: {error}");
+    };
+    assert!(problem.contains("plain"), "{problem}");
 }
 
 /// The repair text names what was actually awaited: a plain value is not a

@@ -125,7 +125,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let value = self.pop_stack()?;
                 match self.classify_awaited(&value) {
                     AwaitedValue::LocalToolHandle(id) => {
-                        if self.pending_tools.get(id).is_none_or(Option::is_none) {
+                        if self.pending_tools.get(&id).is_none_or(Option::is_none) {
                             return Err(RuntimeError::PendingTool {
                                 problem: SETTLED_HANDLE.into(),
                             });

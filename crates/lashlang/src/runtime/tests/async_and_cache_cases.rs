@@ -81,6 +81,11 @@ impl ExecutionHost for AsyncHost {
                 let mut record = Record::default();
                 record.insert("__handle__".to_string(), Value::String("process".into()));
                 record.insert(
+                    "id".to_string(),
+                    Value::String(start.process_name.clone().into()),
+                );
+                record.insert("incarnation".to_string(), Value::Number(1.0));
+                record.insert(
                     "process".to_string(),
                     Value::String(start.process_name.into()),
                 );
@@ -438,6 +443,7 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
     let mut handle = Record::new();
     handle.insert("__handle__".to_string(), Value::String("process".into()));
     handle.insert("id".to_string(), Value::String("target".into()));
+    handle.insert("incarnation".to_string(), Value::Number(1.0));
     let program = Program::block(vec![
         Expr::SleepFor(Box::new(Expr::Number(5.0))),
         Expr::Assign {

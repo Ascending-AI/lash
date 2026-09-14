@@ -203,7 +203,7 @@
     "exports": {
       "processes": {
         "remember": {
-          "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
+          "component": "2a91e993948e60cd4d9ea59a4a1853c204d8a1c192e4621805171082f8474d32",
           "pos": 0
         }
       }
@@ -335,26 +335,26 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
-    "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067"
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:5c0e9feac82cd5a95d734b71f5353ea28e06a712012bf46e40bccafdee19d7f9",
+    "module_ref": "lashlang:v2:blake3:e4b8304b82a37c2934a7a0c975d5040f43c43912b3bb441b5523eda681ac2e4c"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
       "remember": {
-        "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
+        "component": "2a91e993948e60cd4d9ea59a4a1853c204d8a1c192e4621805171082f8474d32",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
-  "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:5c0e9feac82cd5a95d734b71f5353ea28e06a712012bf46e40bccafdee19d7f9",
+  "module_ref": "lashlang:v2:blake3:e4b8304b82a37c2934a7a0c975d5040f43c43912b3bb441b5523eda681ac2e4c",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
-    "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:5c0e9feac82cd5a95d734b71f5353ea28e06a712012bf46e40bccafdee19d7f9",
+    "module_ref": "lashlang:v2:blake3:e4b8304b82a37c2934a7a0c975d5040f43c43912b3bb441b5523eda681ac2e4c",
     "process_name": "remember",
     "process_ref": {
-      "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
+      "component": "2a91e993948e60cd4d9ea59a4a1853c204d8a1c192e4621805171082f8474d32",
       "pos": 0
     }
   },
@@ -420,11 +420,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
-        "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:5c0e9feac82cd5a95d734b71f5353ea28e06a712012bf46e40bccafdee19d7f9",
+        "module_ref": "lashlang:v2:blake3:e4b8304b82a37c2934a7a0c975d5040f43c43912b3bb441b5523eda681ac2e4c",
         "process_name": "remember",
         "process_ref": {
-          "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
+          "component": "2a91e993948e60cd4d9ea59a4a1853c204d8a1c192e4621805171082f8474d32",
           "pos": 0
         }
       },
@@ -434,11 +434,11 @@
       "definition": {
         "definition": {
           "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
-          "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
+          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:5c0e9feac82cd5a95d734b71f5353ea28e06a712012bf46e40bccafdee19d7f9",
+          "module_ref": "lashlang:v2:blake3:e4b8304b82a37c2934a7a0c975d5040f43c43912b3bb441b5523eda681ac2e4c",
           "process_name": "remember",
           "process_ref": {
-            "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
+            "component": "2a91e993948e60cd4d9ea59a4a1853c204d8a1c192e4621805171082f8474d32",
             "pos": 0
           }
         },

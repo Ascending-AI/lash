@@ -286,6 +286,8 @@ impl ExecutionHost for StackBudgetHost {
                 // only appears once the guest awaits it.
                 let mut handle = Record::new();
                 handle.insert("__handle__".to_string(), Value::String("process".into()));
+                handle.insert("id".to_string(), Value::String("stack-budget".into()));
+                handle.insert("incarnation".to_string(), Value::Number(1.0));
                 handle.insert("value".to_string(), Value::String(value));
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }

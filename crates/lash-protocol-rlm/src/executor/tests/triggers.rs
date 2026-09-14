@@ -1731,18 +1731,18 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 /// name order rather than the order the old Rust literal happened to write;
 /// the fields, their types and their optionality are identical, and the hashes
 /// moved because that ordering is inside the hashed host requirements.
-#[test]
-fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "fixtures/trigger_inputs_retired_record_form.json"
-    ))
-    .expect("the captured fixture is valid JSON");
-
-    block_on(async {
-        let controller = CapturingTriggerEffectController::default();
-        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-        let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
-            r#"
+///
+/// They were re-pinned once more by FIG-2996 part 1, which collapsed the VM's
+/// two handle encodings onto one `HandleId` and moved
+/// `LASHLANG_SEMANTIC_HASH_VERSION` to `v11` to announce it. Only the derived
+/// hashes moved: the canonical IR, the exports structure, the compiled program
+/// and the registration draft are byte-identical to the previous capture, which
+/// is what a version move is supposed to look like. Regenerated with
+/// `cargo nextest run -p lash-internal-protocol-rlm -E
+/// 'test(repin_trigger_inputs_retired_record_form)' --run-ignored all`.
+/// The arrow spelling under test. The capture's own `source` field records the
+/// *retired* record form it was taken from, so a re-pin compiles this one.
+const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
 const remember = defineProcess({
   name: "remember",
   signals: {},
@@ -1759,7 +1759,20 @@ const handle = await registerTrigger({
   subscription_key: "remembered-key"
 });
 finish(handle);
-"#,
+"#;
+
+#[test]
+fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/trigger_inputs_retired_record_form.json"
+    ))
+    .expect("the captured fixture is valid JSON");
+
+    block_on(async {
+        let controller = CapturingTriggerEffectController::default();
+        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
+            TRIGGER_INPUTS_ARROW_SOURCE,
             controller.clone(),
             store.clone(),
         ))
@@ -1825,6 +1838,73 @@ finish(handle);
             fixture["registration_draft"],
             "the registration payload the runtime sends must be unchanged"
         );
+    });
+}
+
+/// Re-pins the capture above after a deliberate identity move.
+///
+/// Ignored, so it never runs as part of a suite; the re-pinning lane runs it
+/// by name and reviews the diff. It re-measures only the derived fields — the
+/// `source` is the authored cell and is never rewritten — so a structural
+/// drift still shows up as a diff a reviewer reads, not as a silent pass.
+#[test]
+#[ignore = "re-pins the trigger-inputs capture; run by name after a deliberate identity move"]
+fn repin_trigger_inputs_retired_record_form() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/executor/tests/fixtures/trigger_inputs_retired_record_form.json");
+    let mut fixture: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("the capture is readable"))
+            .expect("the captured fixture is valid JSON");
+
+    block_on(async {
+        let controller = CapturingTriggerEffectController::default();
+        let store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let response = Box::pin(execute_typescript_with_capturing_trigger_effects(
+            TRIGGER_INPUTS_ARROW_SOURCE,
+            controller.clone(),
+            store.clone(),
+        ))
+        .await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+
+        let drafts = controller.register_drafts();
+        let [draft] = drafts.as_slice() else {
+            panic!("exactly one registration, got {}", drafts.len());
+        };
+        let identity = draft
+            .target_identity
+            .definition
+            .clone()
+            .expect("the target carries a process definition identity")
+            .definition
+            .into_json();
+        let identity: lashlang::ProcessDefinitionIdentity =
+            serde_json::from_value(identity).expect("a process definition identity");
+        let artifact = lashlang::LashlangArtifactStore::get_module_artifact(
+            store.as_ref(),
+            &identity.module_ref,
+        )
+        .await
+        .expect("the store is readable")
+        .expect("the registered module was stored");
+        let compiled =
+            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
+
+        fixture["artifact"] =
+            serde_json::from_slice(&artifact.to_store_bytes().expect("artifact serializes"))
+                .expect("artifact bytes are JSON");
+        fixture["module_ref"] = serde_json::json!(artifact.module_ref.to_string());
+        fixture["host_requirements_ref"] =
+            serde_json::json!(artifact.host_requirements_ref.to_string());
+        fixture["exports"] = serde_json::to_value(&artifact.exports).expect("exports serialize");
+        fixture["process_definition_identity"] =
+            serde_json::to_value(&identity).expect("identity serializes");
+        fixture["compiled_program_debug"] = serde_json::json!(format!("{compiled:?}"));
+        fixture["registration_draft"] = serde_json::to_value(draft).expect("the draft serializes");
+
+        let mut text = serde_json::to_string_pretty(&fixture).expect("the capture serializes");
+        text.push('\n');
+        std::fs::write(&path, text).expect("the capture is writable");
     });
 }
 

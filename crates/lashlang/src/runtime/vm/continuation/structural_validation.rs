@@ -475,7 +475,7 @@ pub(super) fn validate_continuation(
     }
     let validator = ContinuationValidator::new(continuation);
     validator.validate_stack_and_last()?;
-    for value in continuation.pending_tools.iter().flatten() {
+    for value in continuation.pending_tools.values().flatten() {
         validate_value(value, "pending tool")?;
         validate_heap_references(validator.heap, std::slice::from_ref(value))?;
         if !matches!(value, Value::List(call) if call.len() >= 3 && call[..2].iter().all(|v| matches!(v, Value::Number(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0)))

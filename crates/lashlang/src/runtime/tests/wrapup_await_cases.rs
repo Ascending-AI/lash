@@ -119,7 +119,9 @@ impl ExecutionHost for AggregateProcessHost {
             )),
             AbilityOp::StartProcess(_) => {
                 let mut handle = Record::new();
-                handle.insert("handle".to_string(), Value::String("h".into()));
+                handle.insert("__handle__".to_string(), Value::String("process".into()));
+                handle.insert("id".to_string(), Value::String("h".into()));
+                handle.insert("incarnation".to_string(), Value::Number(1.0));
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::Await(_) => {
@@ -286,12 +288,12 @@ async fn bound_process_containers_are_carried_through_unsettled() {
         (
             "list of one handle",
             awaited("hs", builders::list(vec![builders::var("h")])),
-            r#"[[{"handle":"h"}],7]"#,
+            r#"[[{"__handle__":"process","id":"h","incarnation":1}],7]"#,
         ),
         (
             "record holding a handle",
             awaited("hr", builders::record(vec![("child", builders::var("h"))])),
-            r#"[{"child":{"handle":"h"}},7]"#,
+            r#"[{"child":{"__handle__":"process","id":"h","incarnation":1}},7]"#,
         ),
         (
             "handle nested three lists deep",
@@ -301,7 +303,7 @@ async fn bound_process_containers_are_carried_through_unsettled() {
                     builders::var("h"),
                 ])])]),
             ),
-            r#"[[[[{"handle":"h"}]]],7]"#,
+            r#"[[[[{"__handle__":"process","id":"h","incarnation":1}]]],7]"#,
         ),
         (
             "handle beside plain values",
@@ -313,7 +315,7 @@ async fn bound_process_containers_are_carried_through_unsettled() {
                     builders::record(vec![("note", builders::string("kept"))]),
                 ]),
             ),
-            r#"[[1,{"handle":"h"},{"note":"kept"}],7]"#,
+            r#"[[1,{"__handle__":"process","id":"h","incarnation":1},{"note":"kept"}],7]"#,
         ),
     ] {
         let host = AggregateProcessHost::default();
@@ -386,14 +388,28 @@ fn awaiting_a_settled_literal_is_a_link_diagnostic() {
 }
 
 #[test]
-fn awaiting_a_handle_record_shape_is_not_rejected_as_settled() {
-    for field in ["handle", "__handle__"] {
-        let program = builders::program(vec![builders::finish(builders::await_expr(
-            builders::record(vec![(field, builders::string("h"))]),
-        ))]);
-        crate::LinkedModule::link(program, runtime_test_environment())
-            .expect("handle shape should link");
-    }
+fn awaiting_the_handle_record_shape_is_not_rejected_as_settled() {
+    let program = builders::program(vec![builders::finish(builders::await_expr(
+        builders::record(vec![("__handle__", builders::string("h"))]),
+    ))]);
+    crate::LinkedModule::link(program, runtime_test_environment())
+        .expect("handle shape should link");
+}
+
+#[test]
+fn a_bare_handle_field_is_an_ordinary_record_and_awaiting_it_is_visibly_settled() {
+    // Before ADR 0095 the loose reader accepted a bare `handle` key as a
+    // handle, which is how a plain record could reach the process-await path.
+    // There is one handle kind now, and it is marked by `__handle__` alone.
+    let program = builders::program(vec![builders::finish(builders::await_expr(
+        builders::record(vec![("handle", builders::string("h"))]),
+    ))]);
+    let error = crate::LinkedModule::link(program, runtime_test_environment())
+        .expect_err("a bare `handle` field is not a handle");
+    assert!(
+        format!("{error:?}").contains("record"),
+        "expected a visibly-settled record diagnostic, got: {error:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -8,6 +8,7 @@
 //! `assign_path_steps` walk a `CompiledAssignPath` to mutate nested
 //! structures in place.
 
+use lash_sansio::handle::HandleId;
 use std::sync::Arc;
 
 use compact_str::ToCompactString;
@@ -54,28 +55,56 @@ pub(crate) fn unwrap_tool_result(value: Value) -> Result<Value, RuntimeError> {
     }
 }
 
-/// Returns whether a record is handled by the process-await path.
+/// Reads a handle out of a runtime record, through the one parse
+/// `lash-sansio` owns (ADR 0095).
 ///
-/// This is the runtime's single process-handle authority. Callers that derive
-/// process-handle metadata must use this predicate so the parser and VM keep
-/// the same representation contract.
+/// This is the runtime's single handle authority. Every caller that used to
+/// decide for itself what a handle was — the lowerer, the RLM executor, the
+/// VM's await classification — goes through here, so the language and core
+/// cannot drift apart on the representation again.
+pub fn parse_handle_record(record: &Record) -> Option<lash_sansio::handle::HandleId> {
+    let Some(Value::String(kind)) = record.get(lash_sansio::handle::HANDLE_FIELD) else {
+        return None;
+    };
+    let Some(Value::String(id)) = record.get("id") else {
+        return None;
+    };
+    lash_sansio::handle::parse_handle(
+        kind.as_str(),
+        id.as_str(),
+        // The pre-part-2 process record carries its incarnation beside the id.
+        match record.get("incarnation") {
+            Some(Value::Number(value)) if value.is_finite() && *value >= 0.0 => Some(*value as u64),
+            _ => None,
+        },
+    )
+}
+
+/// Returns whether a record is handled by the process-await path.
 pub fn is_process_handle(record: &Record) -> bool {
-    record.get("__handle__").is_some() || record.get("handle").is_some()
+    matches!(
+        parse_handle_record(record)
+            .as_ref()
+            .and_then(HandleId::target),
+        Some(lash_sansio::handle::HandleTarget::Process { .. })
+    )
 }
 
-/// Returns whether a record is a TypeScript pending-tool handle, whichever
-/// execution minted it. The handle-kind marker is the one field every tool
-/// handle carries; the execution nonce that makes it *this* execution's handle
-/// is checked by the VM.
-pub(crate) fn is_tool_handle_record(record: &Record) -> bool {
-    matches!(record.get("__handle__"), Some(Value::String(kind)) if kind.as_str() == "tool")
+/// Returns whether a record is a pending-tool handle, whichever execution
+/// minted it. Which execution it belongs to is the VM's check, not this one.
+fn is_tool_handle_record(record: &Record) -> bool {
+    matches!(
+        parse_handle_record(record)
+            .as_ref()
+            .and_then(HandleId::target),
+        Some(lash_sansio::handle::HandleTarget::Tool { .. })
+    )
 }
 
-/// Returns whether a record is a process handle the host awaits, as opposed to
-/// a pending-tool handle the VM settles itself. Both carry `__handle__`, so the
-/// process-await path must exclude tool handles explicitly.
+/// Returns whether a value is a process handle the host awaits, as opposed to
+/// a pending-tool handle the VM settles itself.
 pub(crate) fn is_runtime_process_handle(value: &Value) -> bool {
-    matches!(value, Value::Record(record) if is_process_handle(record) && !is_tool_handle_record(record))
+    matches!(value, Value::Record(record) if is_process_handle(record))
 }
 
 /// Whether a materialized value carries a pending-tool handle at any depth.

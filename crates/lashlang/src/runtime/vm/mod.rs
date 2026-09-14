@@ -258,7 +258,7 @@ pub struct Vm<'a, H> {
     /// written once, when the VM is built or restored, and only read after that.
     extras_heapified: bool,
     assigned_globals: std::collections::BTreeSet<String>,
-    pending_tools: Vec<Option<Value>>,
+    pending_tools: std::collections::BTreeMap<lash_sansio::handle::HandleId, Option<Value>>,
     /// Identity of this execution, stamped into every pending-tool handle it
     /// mints and required back at await, so a handle kept from an earlier
     /// execution (or written by hand) cannot alias this execution's requests.
