@@ -92,9 +92,7 @@
           "cargo": "lash_core",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
-          "tags": [
-            "no-remote-exec"
-          ]
+          "tags": []
         },
         {
           "cargo": "integration_boundary",
