@@ -430,7 +430,7 @@ fn search_tool_definition() -> ToolDefinition {
         }),
     )
     .with_examples(vec![
-        "await tools.search({ query: \"text checksum\", limit: 3 })?".to_string(),
+        "await tools.search({ query: \"text checksum\", limit: 3 });".to_string(),
     ])
     .with_tool_binding(ToolBinding::new(["tools"], "search"))
 }
@@ -440,7 +440,7 @@ fn deferred_call_path(definition: &ToolDefinition) -> String {
         .manifest()
         .tool_binding()
         .expect("deferred binding serializes")
-        .expect("deferred workbench tools have Lashlang bindings")
+        .expect("deferred workbench tools have call-path bindings")
         .executable_for(definition.name())
         .expect("deferred workbench binding is executable")
         .call_path()

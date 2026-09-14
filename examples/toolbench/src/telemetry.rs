@@ -316,16 +316,16 @@ mod tests {
 
     #[test]
     fn cells_keep_source_and_unicode_observations_with_explicit_truncation() {
-        let source = "let x = kv.get({key: \"project\"}); x";
+        let source = "const x = await kv.get({ key: \"project\" });\nfinish(x);";
         let fields = execution_fields(
             &[
                 activity(TurnEvent::CodeBlockStarted {
-                    language: "lashlang".into(),
+                    language: "typescript".into(),
                     code: source.into(),
                     graph_key: None,
                 }),
                 activity(TurnEvent::CodeBlockCompleted {
-                    language: "lashlang".into(),
+                    language: "typescript".into(),
                     output: "é".repeat(2_001),
                     error: None,
                     success: true,

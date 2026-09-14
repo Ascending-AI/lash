@@ -161,11 +161,11 @@ Configuration is read from `.env` or the process environment:
   then recovery), `rate-limit-once` (one pre-output 429 with `Retry-After`, then success),
   `partial-output-failure` (paid partial output followed by a retryable stream failure), `failed-process`
   (starts a Runtime Process that reports a deterministic failure), and `exec-blocked`
-  (parks the first foreground Lashlang execution for break-glass practice, then lets the
+  (parks the first foreground cell execution for break-glass practice, then lets the
   next turn prove recovery), and `tool-value` (calls a dev-only terminal control tool so the
   live stream carries a deterministic `tool_value`). Rendered-surface gates also use
   `rendered-surface` (reasoning plus a structured final value), `code-failure` (a failing
-  Lashlang block), and `retry-reset-partial` (partial text, correlated reset, visible retry,
+  cell), and `retry-reset-partial` (partial text, correlated reset, visible retry,
   then replacement output). These scenarios make
   no provider network calls, print a startup warning, and use the visible
   `dev/failure-paths` model id. Unknown values fail startup.
@@ -189,7 +189,7 @@ center pane opens a dedicated mock-email view (see below). The buttons emit
 `ui.button.pressed` trigger occurrences. The cron card is
 backed by Restate: ask the agent to schedule something and it can construct a
 typed `cron.Schedule` source whose registrations sync to Restate virtual
-objects. Started Lashlang background processes appear in the right rail. The rail is a
+objects. Started background processes appear in the right rail. The rail is a
 runtime-wide view, so a process remains visible after the session that started it is
 deleted or reset. Non-terminal cards expose **cancel**, which submits cooperative
 cancellation through `POST /api/work/{process_id}/cancel`; the resulting
@@ -408,16 +408,16 @@ The **accounts** tab is a mocked multi-account inbox world you control live.
 Type a name (for example `Work`) and press **add account** to connect one;
 **delete** disconnects it. Each account card has a compose form that delivers a
 message into its inbox and shows that inbox inline, with a per-message delete.
-Each account is projected into the RLM Lashlang host environment as a typed module
+Each account is projected into the RLM host environment as a typed module
 authority of type `Inbox` at `inbox.<slug>`, exposing three operations — a
 message is just a title and text, with no recipient address:
 
 ```text
-<lashlang>
-await inbox.work.send({ title: "Standup", text: "Notes attached." })?
-listed = await inbox.work.list({})?            // { account, messages: [{ id, title, text }] }
-await inbox.work.delete({ id: listed.messages[0].id })?
-</lashlang>
+<typescript>
+await inbox.work.send({ title: "Standup", text: "Notes attached." });
+const listed = await inbox.work.list({});      // { account, messages: [{ id, title, text }] }
+await inbox.work.delete({ id: listed.messages[0].id });
+</typescript>
 ```
 
 Because every account shares the `Inbox` authority type, one account-parametric
@@ -425,17 +425,21 @@ process can be started against any account, which is the point of the
 multi-account showcase:
 
 ```text
-<lashlang>
-process triage(box: Inbox) {
-  items = await box.list({})?
-  wake { kind: "triage", account: items.account, count: len(items.messages) }
-  finish true
-}
+<typescript>
+const triage = defineProcess({
+  name: "triage",
+  signals: {},
+  run: async (box: Inbox) => {
+    const items = await box.list({});
+    wake({ kind: "triage", account: items.account, count: items.messages.length });
+    return true;
+  }
+});
 
-work = start triage(box: inbox.work)
-personal = start triage(box: inbox.personal)
-results = await { work: work, personal: personal }
-</lashlang>
+const work = start(triage, { box: inbox.work });
+const personal = start(triage, { box: inbox.personal });
+finish(await Promise.all([work, personal]));
+</typescript>
 ```
 
 Adding or removing an account enqueues a durable tool-catalog refresh that a
@@ -454,23 +458,33 @@ button, the emission runs inside a Restate execution scope
 process. Register an inbox concierge once and it fires on every delivery:
 
 ```text
-<lashlang>
-process on_mail(event: mail.Received) {
-  work = start inbox.work.list({})
-  personal = start inbox.personal.list({})
-  inboxes = await { work: work, personal: personal }
-  wake { kind: "mail_brief", arrived_in: event.account, title: event.title }
-  finish true
-}
+<typescript>
+const onMail = defineProcess({
+  name: "on_mail",
+  signals: {},
+  run: async (event: mail.Received) => {
+    const [work, personal] = await Promise.all([
+      inbox.work.list({}),
+      inbox.personal.list({})
+    ]);
+    wake({
+      kind: "mail_brief",
+      arrived_in: event.account,
+      title: event.title,
+      waiting: work.messages.length + personal.messages.length
+    });
+    return true;
+  }
+});
 
-handle = await triggers.register({
+const handle = await triggers.register({
   source: mail.received({}),
-  target: on_mail,
-  inputs: { event: trigger.event },
+  target: onMail,
+  inputs: (event) => ({ event }),
   name: "inbox concierge"
-})?
-finish format("Inbox concierge registered as `{}`.", handle)
-</lashlang>
+});
+finish(`Inbox concierge registered as \`${handle}\`.`);
+</typescript>
 ```
 
 This gives the demo three kinds of trigger source — a UI button trigger
@@ -484,45 +498,60 @@ The button source config is `{}`. Red/blue selection arrives in the event
 payload:
 
 ```text
-<lashlang>
-process on_button(event: ui.button.Pressed) {
-  wake { kind: "button_pressed", button: event.button, message: event.message }
-  finish true
-}
+<typescript>
+const onButton = defineProcess({
+  name: "on_button",
+  signals: {},
+  run: async (event: ui.button.Pressed) => {
+    wake({ kind: "button_pressed", button: event.button, message: event.message });
+    return true;
+  }
+});
 
-handle = await triggers.register({
+const handle = await triggers.register({
   source: ui.button.pressed({}),
-  target: on_button,
-  inputs: { event: trigger.event },
+  target: onButton,
+  inputs: (event) => ({ event }),
   name: "button watcher"
-})?
-registrations = await triggers.list({ name: "button watcher" })?
-finish format("Registered button watcher `{}`. Active matching registrations: {}.", handle, len(registrations))
-</lashlang>
+});
+const registrations = await triggers.list({ name: "button watcher" });
+finish(
+  `Registered button watcher \`${handle}\`. ` +
+  `Active matching registrations: ${registrations.length}.`
+);
+</typescript>
 ```
 
-The cron card is the schedule reference integration: there is no Lashlang
-`schedule` syntax and no UI tick button. In this example, Restate owns the timer
-policy. The workbench plugin declares the `cron.Schedule` source; Lashlang builds a
-`cron.Schedule` value and registers it with the runtime trigger registry:
+The cron card is the schedule reference integration: there is no `schedule`
+syntax in the language and no UI tick button. In this example, Restate owns the
+timer policy. The workbench plugin declares the `cron.Schedule` source; the cell
+builds a `cron.Schedule` value and registers it with the runtime trigger
+registry:
 
 ```text
-<lashlang>
-process daily_digest(tick: cron.Tick) {
-  wake { kind: "daily_digest_due", tick: tick }
-  finish true
-}
+<typescript>
+const dailyDigest = defineProcess({
+  name: "daily_digest",
+  signals: {},
+  run: async (tick: cron.Tick) => {
+    wake({ kind: "daily_digest_due", tick });
+    return true;
+  }
+});
 
-source = cron.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-handle = await triggers.register({
-  source: source,
-  target: daily_digest,
-  inputs: { tick: trigger.event },
+const source = cron.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+const handle = await triggers.register({
+  source,
+  target: dailyDigest,
+  inputs: (tick) => ({ tick }),
   name: "daily_digest"
-})?
-registrations = await triggers.list({ target: daily_digest })?
-finish format("Registered daily digest `{}`. Active matching registrations: {}.", handle, len(registrations))
-</lashlang>
+});
+const registrations = await triggers.list({ target: dailyDigest });
+finish(
+  `Registered daily digest \`${handle}\`. ` +
+  `Active matching registrations: ${registrations.length}.`
+);
+</typescript>
 ```
 
 After a Restate-backed turn registers an enabled `cron.Schedule`, the workbench

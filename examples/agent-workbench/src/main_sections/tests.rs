@@ -185,7 +185,7 @@ fn append_started_graph(store: &TraceLashlangGraphStore, graph: &TraceLashlangGr
         .append(&TraceRecord::new(
             context,
             TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 event: TraceLanguageExecution {
                     event_key: format!("{}:start", graph.graph_key),
                     identity,
@@ -290,7 +290,7 @@ fn lashlang_graph_store_builds_graph_state() {
             .append(&TraceRecord::new(
                 context.clone(),
                 TraceEvent::LanguageExecution {
-                    language: "lashlang".to_string(),
+                    language: "typescript".to_string(),
                     event,
                 },
             ))

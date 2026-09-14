@@ -1470,8 +1470,8 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
         .emit(test_activity(
             "code-1",
             TurnEvent::CodeBlockStarted {
-                language: "lashlang".to_string(),
-                code: "x = await tools.app_lookup({})?".to_string(),
+                language: "typescript".to_string(),
+                code: "const x = await tools.app_lookup({});".to_string(),
                 graph_key: None,
             },
         ))
@@ -1494,7 +1494,7 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
         .emit(test_activity(
             "code-1",
             TurnEvent::CodeBlockCompleted {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 output: String::new(),
                 error: None,
                 success: true,
@@ -1510,7 +1510,7 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
     assert!(matches!(
         &activities[0].event,
         TurnEvent::CodeBlockStarted { language, code, .. }
-            if language == "lashlang" && code == "x = await tools.app_lookup({})?"
+            if language == "typescript" && code == "const x = await tools.app_lookup({});"
     ));
     assert!(matches!(
         &activities[1].event,
@@ -1521,7 +1521,7 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
     assert!(matches!(
         &activities[2].event,
         TurnEvent::CodeBlockCompleted { language, success, .. }
-            if language == "lashlang" && *success
+            if language == "typescript" && *success
     ));
     Ok(())
 }
