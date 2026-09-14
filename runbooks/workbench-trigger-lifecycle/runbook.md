@@ -32,10 +32,18 @@ and work registry are.
 
 1. **Capture the registration reference key.** After registration, save
    `GET /api/triggers`. Every lifecycle mutation must affect that same
-   `subscription_key`; a replacement registration is not evidence of re-enable.
+   `subscription_key` and `subscription_id`; a replacement registration is not evidence of
+   re-enable. Disable and re-enable advance the record's `revision` (1 → 2 → 3) while both
+   identities stay fixed, so compare identities across a mutation and reserve
+   byte-for-byte equality for the unrelated-turn probe in Phase 1.
 2. **Silence means no delivery and no work.** For disabled and deleted probes, require
    both no personal-inbox copy and no new process id. Use the completed causal-fence turn
-   described below; never use a blind sleep as evidence of absence.
+   described below; never use a blind sleep as evidence of absence. **Read the process-id
+   set from the session-scoped `GET /api/work?session_id=<session-id>`.** The default,
+   unscoped form serves the runtime-wide snapshot with `retired_since_ms = now - 10_000`
+   (`list_work` in [`routes.rs`](../../examples/agent-workbench/src/main_sections/routes.rs)),
+   so it drops terminal rows about ten seconds after they settle and a baseline taken from
+   it shrinks on its own between probes.
 3. **Count copies, not prose.** Each enabled work-inbox marker must produce exactly one
    personal-inbox copy. The concierge may also run once for its own personal-inbox
    emission and no-op on its account filter. That bounded extra run is the loop-breaker
@@ -107,10 +115,11 @@ The companion must show these cases green:
 - `deferred_and_resident_definitions_build_equivalent_link_surfaces` proves one deferred
   constructor and its named event schema fold to the same link surface as the resident
   definition;
-- `deferred_trigger_constructor_and_event_schema_link_for_both_frontends` and
-  `deferred_trigger_references_inside_helpers_and_processes_are_gathered` prove Lashlang
-  and TypeScript gather direct, helper, and process-body receiver calls before target
-  mapping is typechecked;
+- `deferred_trigger_constructor_and_event_schema_link` and
+  `deferred_trigger_references_inside_helpers_and_processes_are_gathered` prove the
+  frontend gathers direct, helper, and process-body receiver calls before target mapping is
+  typechecked (the case lost its `_for_both_frontends` suffix with
+  [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md));
 - `deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping` proves missing
   and ambiguous source definitions are reported before a downstream mapping error; and
 - `recorded_grant_masks_changed_ambient_and_preserves_route_without_activation` proves
@@ -179,8 +188,11 @@ an account filter so the personal emission is a no-op. Wait for the turn to sett
 Poll `GET /api/triggers` until it returns exactly one enabled registration named
 `lifecycle-forwarder`. Save `02-registration.json`, record its `subscription_key`,
 `subscription_id`, source type, and source configuration, and require the registrations
-rail to show the target and source (e.g. `lifecycle_forwarder ← mail.received`) with the
-registration alias in its details/title and a **disable** action. Screenshot `02-registered.png`.
+rail to show the target and source with the registration alias in its details/title and a
+**disable** action. The rendered name is the **process label**, not the trigger alias —
+a concierge registered as `lifecycle-forwarder` whose process is `on_mail_forward` renders
+as `on_mail_forward ← mail.received`, with `trigger key lifecycle-forwarder` and
+`alias lifecycle-forwarder` in the row's title. Screenshot `02-registered.png`.
 
 Send one unrelated calculation turn that declares no trigger and wait for it to settle.
 Poll `GET /api/triggers` again and require the captured registration to be byte-for-byte
@@ -249,7 +261,10 @@ running pill and new work item visible.
 
 Then poll until the original turn commits and `active_turns` empties, the new process is
 terminal, exactly one personal copy exists, and any resulting queued wake has been
-claimed at either `active_turn_checkpoint` or `idle`. Both boundaries are a PASS:
+claimed at either `active_turn_checkpoint` or `idle`. A forwarding concierge that only
+copies mail emits **no** session wake — `queued_work` stays empty and the trace carries no
+`agent_workbench.queued_work.*` record for the phase — so record "no wake produced" and
+pass the claim gate vacuously rather than hunting for a boundary that was never reached. Both boundaries are a PASS:
 `active_turn_checkpoint` means the wake joined the current turn, while `idle` means it
 was claimed as the next turn. Save `09-midturn-settled-state.json` and
 `09-midturn-work.json`; screenshot the newest transcript and work rail as
