@@ -327,6 +327,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             extras_heapified: self.extras_heapified,
             return_target,
         };
+        if self.frames.is_empty() {
+            // `CallFrame` is close to the 1 KiB raw-vec capacity step, so the
+            // default first growth of four frames reserves 2.5 KiB up front for
+            // every program that never calls again. One frame covers the
+            // non-recursive case; growth from here follows the usual policy.
+            self.frames.reserve_exact(1);
+        }
         self.frames.push(frame);
         self.active_function = Some(function_index);
         self.ip = function.entry_ip;
