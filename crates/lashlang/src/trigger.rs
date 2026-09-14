@@ -965,6 +965,13 @@ pub fn is_resolved_type_assignable(source: &TypeExpr, target: &TypeExpr) -> bool
         (TypeExpr::Enum(sources), TypeExpr::Enum(targets)) => {
             sources.iter().all(|source| targets.contains(source))
         }
+        // An empty list literal has no elements to type, so `union_type`
+        // gives it the empty-list sentinel `list[null]` (see
+        // `linker/type_helpers.rs`). `[]` is the most natural spelling of
+        // "no items" and must fit a `list[T]` parameter for every `T`;
+        // rejecting it turned a documented `edits: []` example into a link
+        // error in five of eight live episodes (FIG-1421).
+        (TypeExpr::List(source), TypeExpr::List(_)) if **source == TypeExpr::Null => true,
         (TypeExpr::List(source), TypeExpr::List(target)) => {
             is_resolved_type_assignable(source, target)
         }
@@ -1185,6 +1192,32 @@ mod tests {
         assert!(is_resolved_type_assignable(&TypeExpr::Dict, &object));
         assert!(is_resolved_type_assignable(&object, &TypeExpr::Dict));
         assert!(!is_resolved_type_assignable(&TypeExpr::Int, &object));
+    }
+
+    /// `[]` is how a caller spells "no items", and `union_type` types it as
+    /// the empty-list sentinel `list[null]`. It has to reach a `list[T]`
+    /// parameter for every `T`, including through a union target such as
+    /// `list[dict] | null` (FIG-1421). A populated list keeps its real
+    /// element check.
+    #[test]
+    fn resolved_type_assignability_lets_an_empty_list_reach_any_list_target() {
+        let empty = TypeExpr::List(Box::new(TypeExpr::Null));
+
+        assert!(is_resolved_type_assignable(
+            &empty,
+            &TypeExpr::List(Box::new(TypeExpr::Dict))
+        ));
+        assert!(is_resolved_type_assignable(
+            &empty,
+            &TypeExpr::Union(vec![
+                TypeExpr::List(Box::new(TypeExpr::Dict)),
+                TypeExpr::Null
+            ])
+        ));
+        assert!(!is_resolved_type_assignable(
+            &TypeExpr::List(Box::new(TypeExpr::Int)),
+            &TypeExpr::List(Box::new(TypeExpr::Dict))
+        ));
     }
 
     #[test]
