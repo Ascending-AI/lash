@@ -1,4 +1,54 @@
 use super::*;
+use crate::ast::{BinaryOp, UnaryOp};
+
+/// The lashlang spelling of the language-operation parity fixture, kept as the
+/// label the divergence assertions quote.
+const LANGUAGE_OPERATION_PARITY_SOURCE: &str = r#"
+out = {
+  exact_smoke: slice(input.context, 2, 7),
+  field: input.record.a,
+  index: input.items[input.start],
+  len_context: len(input.context),
+  empty_items: empty(input.items),
+  keys_record: keys(input.record),
+  values_record: values(input.record),
+  contains_text: contains(input.context, "beta"),
+  contains_list: contains(input.items, "green"),
+  contains_record: contains(input.record, "a"),
+  find_text: find(input.context, "beta"),
+  grep_text: grep_text(input.context, "beta"),
+  starts: starts_with(trim(input.context), "alpha"),
+  ends: ends_with(trim(input.context), "gamma"),
+  split: split(trim(input.context), ","),
+  joined: join(input.items, "|"),
+  trimmed: trim(input.context),
+  list_slice: slice(input.items, 0, 2),
+  pushed: push(input.items, "yellow"),
+  as_int: to_int(input.n),
+  as_float: to_float(input.n),
+  parsed: json_parse(input.json),
+  plus: input.record.a + 1,
+  neg: -input.record.a,
+  cmp: input.record.a < input.record.b,
+  truthy: input.record.a ? "yes" : "no",
+  formatted: format("ctx={}", input.context),
+  text: to_string(input.record)
+}
+finish out
+"#;
+
+/// The lashlang spelling of the range/validation/iteration parity fixture.
+const RANGE_PARITY_SOURCE: &str = r#"
+total = 0
+for i in range(input.start, input.end) {
+  total = total + i
+}
+finish {
+  range_values: range(input.start, input.end),
+  total: total,
+  validated: validate(input.item, Type { name: str, version: str })
+}
+"#;
 
 fn test_image() -> Value {
     Value::Image(Box::new(ImageValue::new(
@@ -11,8 +61,11 @@ fn test_image() -> Value {
     )))
 }
 
-async fn exec_with_global(name: &str, value: Value, source: &str) -> Result<Value, RuntimeError> {
-    let program = crate::parse(source).expect("program should parse");
+async fn exec_with_global(
+    name: &str,
+    value: Value,
+    program: Program,
+) -> Result<Value, RuntimeError> {
     let mut state = State::new();
     state.globals.insert(name.to_string(), value);
     match execute_program(&program, &mut state, &Host).await? {
@@ -382,9 +435,8 @@ fn projected_custom_binding(
 async fn exec_with_global_state(
     name: &str,
     value: Value,
-    source: &str,
+    program: Program,
 ) -> Result<(Value, State), RuntimeError> {
-    let program = crate::parse(source).expect("program should parse");
     let mut state = State::new();
     state.globals.insert(name.to_string(), value);
     let outcome = execute_compiled(&compile_program(&program), &mut state, &Host).await?;
@@ -395,12 +447,12 @@ async fn exec_with_global_state(
     }
 }
 
-async fn assert_projected_parity(name: &str, value: Value, source: &str) {
-    let (normal, _) = exec_with_global_state(name, value.clone(), source)
+async fn assert_projected_parity(name: &str, value: Value, source: &str, program: Program) {
+    let (normal, _) = exec_with_global_state(name, value.clone(), program.clone())
         .await
         .expect("normal global should run");
     let projected = projected_value_binding(name, value.clone());
-    let (projected_scalar, _) = exec_with_projected(source, &projected)
+    let (projected_scalar, _) = exec_with_projected(program.clone(), &projected)
         .await
         .expect("scalar projected binding should run");
     assert_eq!(
@@ -411,7 +463,7 @@ async fn assert_projected_parity(name: &str, value: Value, source: &str) {
 
     let custom_value = ProjectedFixture::new(value);
     let projected = projected_custom_binding(name, custom_value);
-    let (projected_custom, _) = exec_with_projected(source, &projected)
+    let (projected_custom, _) = exec_with_projected(program, &projected)
         .await
         .expect("custom projected binding should run");
     assert_eq!(
@@ -434,10 +486,9 @@ fn projected_bindings_reject_duplicate_checked_insertions() {
 }
 
 pub(super) async fn exec_with_projected(
-    source: &str,
+    program: Program,
     projected: &ProjectedBindings,
 ) -> Result<(Value, State), RuntimeError> {
-    let program = crate::parse(source).expect("program should parse");
     let mut state = State::new();
     let outcome = execute_compiled_with_projected_bindings(
         &compile_program(&program),
@@ -509,8 +560,22 @@ async fn projected_list_len_and_index_are_lazy() {
     let list = TestProjectedValue::new(vec![Value::String("first".into()), Value::Number(2.0)]);
     let projected = projected_list_bindings("history", Arc::clone(&list));
 
+    // finish { n: len(history), first: history[0], missing: history[9] }
     let (value, _) = exec_with_projected(
-        "finish { n: len(history), first: history[0], missing: history[9] }",
+        builders::program(vec![builders::finish(builders::record(vec![
+            (
+                "n",
+                builders::builtin("len", vec![builders::var("history")]),
+            ),
+            (
+                "first",
+                builders::index(builders::var("history"), builders::num(0.0)),
+            ),
+            (
+                "missing",
+                builders::index(builders::var("history"), builders::num(9.0)),
+            ),
+        ]))]),
         &projected,
     )
     .await
@@ -537,14 +602,30 @@ async fn projected_bindings_are_read_only_and_not_snapshotted() {
     let list = TestProjectedValue::new(vec![Value::String("entry".into())]);
     let projected = projected_list_bindings("history", Arc::clone(&list));
 
-    let err = exec_with_projected("history = []\nfinish history", &projected)
-        .await
-        .expect_err("projected root assignment should fail");
+    // history = []
+    // finish history
+    let err = exec_with_projected(
+        builders::program(vec![
+            builders::assign("history", builders::list(Vec::new())),
+            builders::finish(builders::var("history")),
+        ]),
+        &projected,
+    )
+    .await
+    .expect_err("projected root assignment should fail");
     assert!(err.to_string().contains("read-only projected binding"));
 
-    let (_, state) = exec_with_projected("alias = history\nfinish alias[0]", &projected)
-        .await
-        .expect("alias should materialize");
+    // alias = history
+    // finish alias[0]
+    let (_, state) = exec_with_projected(
+        builders::program(vec![
+            builders::assign("alias", builders::var("history")),
+            builders::finish(builders::index(builders::var("alias"), builders::num(0.0))),
+        ]),
+        &projected,
+    )
+    .await
+    .expect("alias should materialize");
     assert!(state.snapshot().globals().get("history").is_none());
     assert!(matches!(
         state.snapshot().globals().get("alias"),
@@ -567,8 +648,18 @@ async fn projected_children_can_be_lazy_inside_ordinary_records() {
         ProjectedValue::scalar("rules", Value::Record(Arc::new(record))),
     );
 
+    // finish { title: rules.title, first_body_item: rules.body[0] }
     let (value, _) = exec_with_projected(
-        "finish { title: rules.title, first_body_item: rules.body[0] }",
+        builders::program(vec![builders::finish(builders::record(vec![
+            ("title", builders::field(builders::var("rules"), "title")),
+            (
+                "first_body_item",
+                builders::index(
+                    builders::field(builders::var("rules"), "body"),
+                    builders::num(0.0),
+                ),
+            ),
+        ]))]),
         &projected,
     )
     .await
@@ -591,9 +682,17 @@ async fn print_projected_leaves_projection_to_host_and_finish_materializes() {
     let list = TestProjectedValue::new(vec![Value::String("entry".into())]);
     let projected = projected_list_bindings("history", Arc::clone(&list));
 
-    let (value, _) = exec_with_projected("print history\nfinish history", &projected)
-        .await
-        .expect("projected print and finish");
+    // print history
+    // finish history
+    let (value, _) = exec_with_projected(
+        builders::program(vec![
+            builders::print(builders::var("history")),
+            builders::finish(builders::var("history")),
+        ]),
+        &projected,
+    )
+    .await
+    .expect("projected print and finish");
     let _ = to_json(&value);
 
     assert_eq!(list.render_count.load(Ordering::SeqCst), 0);
@@ -682,10 +781,36 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
         Value::List(vec![Value::Record(Arc::new(match_record))].into()),
     );
 
+    // m = r.matches[0]
+    // head = slice(m.text, 10, 30)
+    // finish { title: m.title, head: head }
     let (value, state) = exec_with_global_state(
         "r",
         Value::Record(Arc::new(result_record)),
-        "m = r.matches[0]\nhead = slice(m.text, 10, 30)\nfinish { title: m.title, head: head }",
+        builders::program(vec![
+            builders::assign(
+                "m",
+                builders::index(
+                    builders::field(builders::var("r"), "matches"),
+                    builders::num(0.0),
+                ),
+            ),
+            builders::assign(
+                "head",
+                builders::builtin(
+                    "slice",
+                    vec![
+                        builders::field(builders::var("m"), "text"),
+                        builders::num(10.0),
+                        builders::num(30.0),
+                    ],
+                ),
+            ),
+            builders::finish(builders::record(vec![
+                ("title", builders::field(builders::var("m"), "title")),
+                ("head", builders::var("head")),
+            ])),
+        ]),
     )
     .await
     .expect("projected search result should run");
@@ -717,7 +842,11 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
     assert_eq!(text.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(text.materialize_count.load(Ordering::SeqCst), 0);
 
-    let program = crate::parse("finish to_string(m.text)").expect("program should parse");
+    // finish to_string(m.text)
+    let program = builders::program(vec![builders::finish(builders::builtin(
+        "to_string",
+        vec![builders::field(builders::var("m"), "text")],
+    ))]);
     let mut state = State::from_snapshot(snapshot);
     let outcome = execute_program(&program, &mut state, &Host)
         .await
@@ -743,39 +872,158 @@ async fn projected_values_match_normal_values_for_language_operations() {
             "start": 1,
             "end": 4
         })),
-        r#"
-        out = {
-          exact_smoke: slice(input.context, 2, 7),
-          field: input.record.a,
-          index: input.items[input.start],
-          len_context: len(input.context),
-          empty_items: empty(input.items),
-          keys_record: keys(input.record),
-          values_record: values(input.record),
-          contains_text: contains(input.context, "beta"),
-          contains_list: contains(input.items, "green"),
-          contains_record: contains(input.record, "a"),
-          find_text: find(input.context, "beta"),
-          grep_text: grep_text(input.context, "beta"),
-          starts: starts_with(trim(input.context), "alpha"),
-          ends: ends_with(trim(input.context), "gamma"),
-          split: split(trim(input.context), ","),
-          joined: join(input.items, "|"),
-          trimmed: trim(input.context),
-          list_slice: slice(input.items, 0, 2),
-          pushed: push(input.items, "yellow"),
-          as_int: to_int(input.n),
-          as_float: to_float(input.n),
-          parsed: json_parse(input.json),
-          plus: input.record.a + 1,
-          neg: -input.record.a,
-          cmp: input.record.a < input.record.b,
-          truthy: input.record.a ? "yes" : "no",
-          formatted: format("ctx={}", input.context),
-          text: to_string(input.record)
-        }
-        finish out
-        "#,
+        LANGUAGE_OPERATION_PARITY_SOURCE,
+        {
+            let input = |field: &str| builders::field(builders::var("input"), field);
+            let record_a = || builders::field(input("record"), "a");
+            let trimmed_context = || builders::builtin("trim", vec![input("context")]);
+            builders::program(vec![
+                builders::assign(
+                    "out",
+                    builders::record(vec![
+                        (
+                            "exact_smoke",
+                            builders::builtin(
+                                "slice",
+                                vec![input("context"), builders::num(2.0), builders::num(7.0)],
+                            ),
+                        ),
+                        ("field", record_a()),
+                        ("index", builders::index(input("items"), input("start"))),
+                        (
+                            "len_context",
+                            builders::builtin("len", vec![input("context")]),
+                        ),
+                        (
+                            "empty_items",
+                            builders::builtin("empty", vec![input("items")]),
+                        ),
+                        (
+                            "keys_record",
+                            builders::builtin("keys", vec![input("record")]),
+                        ),
+                        (
+                            "values_record",
+                            builders::builtin("values", vec![input("record")]),
+                        ),
+                        (
+                            "contains_text",
+                            builders::builtin(
+                                "contains",
+                                vec![input("context"), builders::string("beta")],
+                            ),
+                        ),
+                        (
+                            "contains_list",
+                            builders::builtin(
+                                "contains",
+                                vec![input("items"), builders::string("green")],
+                            ),
+                        ),
+                        (
+                            "contains_record",
+                            builders::builtin(
+                                "contains",
+                                vec![input("record"), builders::string("a")],
+                            ),
+                        ),
+                        (
+                            "find_text",
+                            builders::builtin(
+                                "find",
+                                vec![input("context"), builders::string("beta")],
+                            ),
+                        ),
+                        (
+                            "grep_text",
+                            builders::builtin(
+                                "grep_text",
+                                vec![input("context"), builders::string("beta")],
+                            ),
+                        ),
+                        (
+                            "starts",
+                            builders::builtin(
+                                "starts_with",
+                                vec![trimmed_context(), builders::string("alpha")],
+                            ),
+                        ),
+                        (
+                            "ends",
+                            builders::builtin(
+                                "ends_with",
+                                vec![trimmed_context(), builders::string("gamma")],
+                            ),
+                        ),
+                        (
+                            "split",
+                            builders::builtin(
+                                "split",
+                                vec![trimmed_context(), builders::string(",")],
+                            ),
+                        ),
+                        (
+                            "joined",
+                            builders::builtin("join", vec![input("items"), builders::string("|")]),
+                        ),
+                        ("trimmed", trimmed_context()),
+                        (
+                            "list_slice",
+                            builders::builtin(
+                                "slice",
+                                vec![input("items"), builders::num(0.0), builders::num(2.0)],
+                            ),
+                        ),
+                        (
+                            "pushed",
+                            builders::builtin(
+                                "push",
+                                vec![input("items"), builders::string("yellow")],
+                            ),
+                        ),
+                        ("as_int", builders::builtin("to_int", vec![input("n")])),
+                        ("as_float", builders::builtin("to_float", vec![input("n")])),
+                        (
+                            "parsed",
+                            builders::builtin("json_parse", vec![input("json")]),
+                        ),
+                        (
+                            "plus",
+                            builders::binary(record_a(), BinaryOp::Add, builders::num(1.0)),
+                        ),
+                        ("neg", builders::unary(UnaryOp::Negate, record_a())),
+                        (
+                            "cmp",
+                            builders::binary(
+                                record_a(),
+                                BinaryOp::Less,
+                                builders::field(input("record"), "b"),
+                            ),
+                        ),
+                        (
+                            "truthy",
+                            builders::if_else(
+                                record_a(),
+                                builders::string("yes"),
+                                builders::string("no"),
+                            ),
+                        ),
+                        (
+                            "formatted",
+                            builders::builtin(
+                                "format",
+                                vec![builders::string("ctx={}"), input("context")],
+                            ),
+                        ),
+                        (
+                            "text",
+                            builders::builtin("to_string", vec![input("record")]),
+                        ),
+                    ]),
+                ),
+                builders::finish(builders::var("out")),
+            ])
+        },
     )
     .await;
 }
@@ -789,28 +1037,57 @@ async fn projected_values_match_normal_values_for_ranges_validation_and_iteratio
             "end": 5,
             "item": { "name": "pkg", "version": "1.0" }
         })),
-        r#"
-        total = 0
-        for i in range(input.start, input.end) {
-          total = total + i
-        }
-        finish {
-          range_values: range(input.start, input.end),
-          total: total,
-          validated: validate(input.item, Type { name: str, version: str })
-        }
-        "#,
+        RANGE_PARITY_SOURCE,
+        {
+            let input = |field: &str| builders::field(builders::var("input"), field);
+            let range = || builders::builtin("range", vec![input("start"), input("end")]);
+            builders::program(vec![
+                builders::assign("total", builders::num(0.0)),
+                builders::for_in(
+                    "i",
+                    range(),
+                    builders::block(vec![builders::assign(
+                        "total",
+                        builders::binary(builders::var("total"), BinaryOp::Add, builders::var("i")),
+                    )]),
+                ),
+                builders::finish(builders::record(vec![
+                    ("range_values", range()),
+                    ("total", builders::var("total")),
+                    (
+                        "validated",
+                        builders::builtin(
+                            "validate",
+                            vec![
+                                input("item"),
+                                builders::type_literal(TypeExpr::Object(vec![
+                                    builders::type_field("name", TypeExpr::Str, false),
+                                    builders::type_field("version", TypeExpr::Str, false),
+                                ])),
+                            ],
+                        ),
+                    ),
+                ])),
+            ])
+        },
     )
     .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn projected_empty_rejects_scalar_like_normal_empty() {
-    let normal = exec_with_global_state("n", Value::Number(1.0), "finish empty(n)")
+    // finish empty(n)
+    let empty_n = || {
+        builders::program(vec![builders::finish(builders::builtin(
+            "empty",
+            vec![builders::var("n")],
+        ))])
+    };
+    let normal = exec_with_global_state("n", Value::Number(1.0), empty_n())
         .await
         .expect_err("normal scalar empty should fail");
     let projected = projected_value_binding("n", Value::Number(1.0));
-    let projected_err = exec_with_projected("finish empty(n)", &projected)
+    let projected_err = exec_with_projected(empty_n(), &projected)
         .await
         .expect_err("projected scalar empty should fail");
     assert_eq!(projected_err, normal);
@@ -1027,6 +1304,7 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
 
 async fn assert_override_uses_hook(
     source: &str,
+    finished: Expr,
     name: &'static str,
     value: Value,
     expected_hook: &'static str,
@@ -1040,9 +1318,12 @@ async fn assert_override_uses_hook(
             projected_value.clone() as Arc<dyn ProjectedHostDescriptor>,
         ),
     );
-    exec_with_projected(source, &projected)
-        .await
-        .expect("override projected operation should run");
+    exec_with_projected(
+        builders::program(vec![builders::finish(finished)]),
+        &projected,
+    )
+    .await
+    .expect("override projected operation should run");
     let calls = projected_value.calls();
     assert!(
         calls.contains(&expected_hook),
@@ -1058,110 +1339,170 @@ async fn assert_override_uses_hook(
 async fn projected_host_descriptors_can_override_all_lazy_receiver_operations() {
     let record = from_json(serde_json::json!({ "a": 1, "b": 2 }));
     let list = from_json(serde_json::json!(["a", "b", "c"]));
+    let p = || builders::var("p");
+    let text = |value: &str| Value::String(value.into());
 
-    assert_override_uses_hook("finish p.a", "p", record.clone(), "get_field").await;
-    assert_override_uses_hook("finish p[1]", "p", list.clone(), "get_index").await;
-    assert_override_uses_hook("finish len(p)", "p", list.clone(), "len").await;
-    assert_override_uses_hook("finish empty(p)", "p", list.clone(), "empty").await;
-    assert_override_uses_hook("finish keys(p)", "p", record.clone(), "keys").await;
-    assert_override_uses_hook("finish values(p)", "p", record.clone(), "values").await;
-    assert_override_uses_hook(r#"finish contains(p, "b")"#, "p", list.clone(), "contains").await;
-    assert_override_uses_hook(
-        r#"finish find(p, "ph")"#,
-        "p",
-        Value::String("alpha".into()),
-        "find",
-    )
-    .await;
-    assert_override_uses_hook(
-        r#"finish grep_text(p, "beta")"#,
-        "p",
-        Value::String("alpha\nbeta\n".into()),
-        "grep_text",
-    )
-    .await;
-    assert_override_uses_hook(
-        r#"finish starts_with(p, "al")"#,
-        "p",
-        Value::String("alpha".into()),
-        "starts_with",
-    )
-    .await;
-    assert_override_uses_hook(
-        r#"finish ends_with(p, "ha")"#,
-        "p",
-        Value::String("alpha".into()),
-        "ends_with",
-    )
-    .await;
-    assert_override_uses_hook(
-        r#"finish split(p, ",")"#,
-        "p",
-        Value::String("a,b".into()),
-        "split",
-    )
-    .await;
-    assert_override_uses_hook(r#"finish join(p, "|")"#, "p", list.clone(), "join").await;
-    assert_override_uses_hook(
-        "finish trim(p)",
-        "p",
-        Value::String("  alpha  ".into()),
-        "trim",
-    )
-    .await;
-    assert_override_uses_hook(
-        "finish slice(p, 1, 3)",
-        "p",
-        Value::String("alpha".into()),
-        "slice",
-    )
-    .await;
-    assert_override_uses_hook("finish push(p, \"d\")", "p", list, "push").await;
-    assert_override_uses_hook(
-        "finish to_int(p)",
-        "p",
-        Value::String("42".into()),
-        "to_number",
-    )
-    .await;
-    assert_override_uses_hook(
-        "finish to_float(p)",
-        "p",
-        Value::String("42.5".into()),
-        "to_number",
-    )
-    .await;
-    assert_override_uses_hook(
-        "finish json_parse(p)",
-        "p",
-        Value::String("{\"ok\":true}".into()),
-        "json_parse",
-    )
-    .await;
-    assert_override_uses_hook(
-        "finish slice(\"abcdef\", p, null)",
-        "p",
-        Value::Number(2.0),
-        "slice_bound",
-    )
-    .await;
-    assert_override_uses_hook("finish range(p, 4)", "p", Value::Number(1.0), "range_bound").await;
-    assert_override_uses_hook(
-        "finish range(0, p, 2)",
-        "p",
-        Value::Number(4.0),
-        "range_bound",
-    )
-    .await;
-    assert_override_uses_hook("finish p ? 1 : 2", "p", Value::Number(1.0), "truthy").await;
+    let cases: Vec<(&str, Expr, Value, &'static str)> = vec![
+        (
+            "finish p.a",
+            builders::field(p(), "a"),
+            record.clone(),
+            "get_field",
+        ),
+        (
+            "finish p[1]",
+            builders::index(p(), builders::num(1.0)),
+            list.clone(),
+            "get_index",
+        ),
+        (
+            "finish len(p)",
+            builders::builtin("len", vec![p()]),
+            list.clone(),
+            "len",
+        ),
+        (
+            "finish empty(p)",
+            builders::builtin("empty", vec![p()]),
+            list.clone(),
+            "empty",
+        ),
+        (
+            "finish keys(p)",
+            builders::builtin("keys", vec![p()]),
+            record.clone(),
+            "keys",
+        ),
+        (
+            "finish values(p)",
+            builders::builtin("values", vec![p()]),
+            record.clone(),
+            "values",
+        ),
+        (
+            r#"finish contains(p, "b")"#,
+            builders::builtin("contains", vec![p(), builders::string("b")]),
+            list.clone(),
+            "contains",
+        ),
+        (
+            r#"finish find(p, "ph")"#,
+            builders::builtin("find", vec![p(), builders::string("ph")]),
+            text("alpha"),
+            "find",
+        ),
+        (
+            r#"finish grep_text(p, "beta")"#,
+            builders::builtin("grep_text", vec![p(), builders::string("beta")]),
+            text("alpha\nbeta\n"),
+            "grep_text",
+        ),
+        (
+            r#"finish starts_with(p, "al")"#,
+            builders::builtin("starts_with", vec![p(), builders::string("al")]),
+            text("alpha"),
+            "starts_with",
+        ),
+        (
+            r#"finish ends_with(p, "ha")"#,
+            builders::builtin("ends_with", vec![p(), builders::string("ha")]),
+            text("alpha"),
+            "ends_with",
+        ),
+        (
+            r#"finish split(p, ",")"#,
+            builders::builtin("split", vec![p(), builders::string(",")]),
+            text("a,b"),
+            "split",
+        ),
+        (
+            r#"finish join(p, "|")"#,
+            builders::builtin("join", vec![p(), builders::string("|")]),
+            list.clone(),
+            "join",
+        ),
+        (
+            "finish trim(p)",
+            builders::builtin("trim", vec![p()]),
+            text("  alpha  "),
+            "trim",
+        ),
+        (
+            "finish slice(p, 1, 3)",
+            builders::builtin("slice", vec![p(), builders::num(1.0), builders::num(3.0)]),
+            text("alpha"),
+            "slice",
+        ),
+        (
+            r#"finish push(p, "d")"#,
+            builders::builtin("push", vec![p(), builders::string("d")]),
+            list,
+            "push",
+        ),
+        (
+            "finish to_int(p)",
+            builders::builtin("to_int", vec![p()]),
+            text("42"),
+            "to_number",
+        ),
+        (
+            "finish to_float(p)",
+            builders::builtin("to_float", vec![p()]),
+            text("42.5"),
+            "to_number",
+        ),
+        (
+            "finish json_parse(p)",
+            builders::builtin("json_parse", vec![p()]),
+            text(r#"{"ok":true}"#),
+            "json_parse",
+        ),
+        (
+            r#"finish slice("abcdef", p, null)"#,
+            builders::builtin(
+                "slice",
+                vec![builders::string("abcdef"), p(), builders::null()],
+            ),
+            Value::Number(2.0),
+            "slice_bound",
+        ),
+        (
+            "finish range(p, 4)",
+            builders::builtin("range", vec![p(), builders::num(4.0)]),
+            Value::Number(1.0),
+            "range_bound",
+        ),
+        (
+            "finish range(0, p, 2)",
+            builders::builtin("range", vec![builders::num(0.0), p(), builders::num(2.0)]),
+            Value::Number(4.0),
+            "range_bound",
+        ),
+        (
+            "finish p ? 1 : 2",
+            builders::if_else(p(), builders::num(1.0), builders::num(2.0)),
+            Value::Number(1.0),
+            "truthy",
+        ),
+    ];
+
+    for (source, finished, value, expected_hook) in cases {
+        assert_override_uses_hook(source, finished, "p", value, expected_hook).await;
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn image_values_expose_read_only_metadata_fields() {
+    // finish [img.id, img.label, img.size, img.width, img.height, img.missing]
     let value = exec_with_global(
         "img",
         test_image(),
-        "finish [img.id, img.label, img.size, img.width, img.height, img.missing]",
+        builders::program(vec![builders::finish(builders::list(
+            ["id", "label", "size", "width", "height", "missing"]
+                .into_iter()
+                .map(|field| builders::field(builders::var("img"), field))
+                .collect(),
+        ))]),
     )
     .await
     .expect("image fields should read");
@@ -1202,23 +1543,49 @@ async fn image_values_serialize_as_descriptors() {
         r#"{"height":480,"id":"img-1","mime":"image/png","label":"chart.png","size":1234,"type":"image","width":640}"#
     );
     assert_eq!(
-        exec_with_global("img", image.clone(), "finish img")
-            .await
-            .expect("finish image"),
+        // finish img
+        exec_with_global(
+            "img",
+            image.clone(),
+            builders::program(vec![builders::finish(builders::var("img"))]),
+        )
+        .await
+        .expect("finish image"),
         image
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn image_values_are_immutable_and_len_is_unsupported() {
-    let err = exec_with_global("img", test_image(), "img.label = \"other\"\nfinish img")
-        .await
-        .expect_err("image field assignment should fail");
+    // img.label = "other"
+    // finish img
+    let err = exec_with_global(
+        "img",
+        test_image(),
+        builders::program(vec![
+            builders::assign_path(
+                "img",
+                vec![builders::field_step("label")],
+                builders::string("other"),
+            ),
+            builders::finish(builders::var("img")),
+        ]),
+    )
+    .await
+    .expect_err("image field assignment should fail");
     assert_eq!(err, RuntimeError::ImmutableImageFields);
 
-    let err = exec_with_global("img", test_image(), "finish len(img)")
-        .await
-        .expect_err("len image should fail");
+    // finish len(img)
+    let err = exec_with_global(
+        "img",
+        test_image(),
+        builders::program(vec![builders::finish(builders::builtin(
+            "len",
+            vec![builders::var("img")],
+        ))]),
+    )
+    .await
+    .expect_err("len image should fail");
     assert_eq!(err, RuntimeError::LenUnsupported);
 }
 
@@ -1299,17 +1666,31 @@ async fn await_list_process_starts_and_joins_handles() {
         calls: AtomicUsize::new(0),
         batches: AtomicUsize::new(0),
     };
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        result = await [
-          start echo(value: "a"),
-          start echo(value: "b")
-        ]
-        finish [result[0]?, result[1]?]
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // result = await [start echo(value: "a"), start echo(value: "b")]
+    // finish [result[0]?, result[1]?]
+    let start_echo =
+        |value: &str| builders::start("echo", vec![("value", builders::string(value))]);
+    let unwrap_result = |index: f64| {
+        builders::unwrap(builders::index(
+            builders::var("result"),
+            builders::num(index),
+        ))
+    };
+    let program = builders::module(
+        vec![builders::process(
+            "echo",
+            vec![builders::param("value", TypeExpr::Str)],
+            builders::block(vec![builders::finish(builders::var("value"))]),
+        )],
+        vec![
+            builders::assign(
+                "result",
+                builders::await_expr(builders::list(vec![start_echo("a"), start_echo("b")])),
+            ),
+            builders::finish(builders::list(vec![unwrap_result(0.0), unwrap_result(1.0)])),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &host)
         .await
