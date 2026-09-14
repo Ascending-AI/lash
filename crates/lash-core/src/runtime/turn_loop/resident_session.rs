@@ -14,7 +14,7 @@ use crate::TurnId;
 
 /// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ResidentSessionState {
+pub enum ResidentSessionState {
     /// In-memory session and plugin state are valid and match durable expectations.
     Valid,
     /// Resident state was invalidated and requires durable reload before further execution.
@@ -152,7 +152,7 @@ pub(in crate::runtime) struct ResidentSessionReloadDecision<'a> {
 /// a set by [`Self::mark_adopted`]. `graph_head_stale` is shared with the
 /// session services this handle hands out, so a borrowed nested commit can
 /// mark the resident graph stale from another owner.
-pub(in crate::runtime) struct ResidentSessionContinuity {
+pub struct ResidentSessionContinuity {
     validity: ResidentSessionState,
     /// Set only after this handle itself has attempted a durable graph load.
     graph_loaded_from_store: bool,
@@ -181,7 +181,7 @@ impl ResidentSessionContinuity {
         }
     }
 
-    pub(in crate::runtime) fn validity(&self) -> &ResidentSessionState {
+    pub fn validity(&self) -> &ResidentSessionState {
         &self.validity
     }
 
@@ -291,24 +291,24 @@ impl ResidentSessionContinuity {
             .map(|(_, turn_id)| turn_id)
     }
 
-    #[cfg(test)]
-    pub(in crate::runtime) fn mark_graph_head_stale(&self) {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn mark_graph_head_stale(&self) {
         self.graph_head_stale.store(true, Ordering::Release);
     }
 
-    #[cfg(test)]
-    pub(in crate::runtime) fn graph_loaded_from_store(&self) -> bool {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn graph_loaded_from_store(&self) -> bool {
         self.graph_loaded_from_store
     }
 
-    #[cfg(test)]
-    pub(in crate::runtime) fn graph_head_is_stale(&self) -> bool {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn graph_head_is_stale(&self) -> bool {
         self.graph_head_stale.load(Ordering::Acquire)
     }
 }
 
 impl LashRuntime {
-    pub(crate) fn invalidate_resident_session_state(&mut self) {
+    pub fn invalidate_resident_session_state(&mut self) {
         self.resident_session.invalidate(&self.state.session_id);
         if let Some(session) = self.session.as_ref() {
             session.invalidate_runtime_caches();
@@ -351,9 +351,7 @@ impl LashRuntime {
         );
     }
 
-    pub(in crate::runtime) async fn reload_invalidated_resident_session_state(
-        &mut self,
-    ) -> Result<(), RuntimeError> {
+    pub async fn reload_invalidated_resident_session_state(&mut self) -> Result<(), RuntimeError> {
         self.reload_invalidated_resident_session_state_under_lease(None)
             .await
     }
@@ -565,7 +563,7 @@ impl LashRuntime {
         }
     }
 
-    pub(in crate::runtime) async fn reload_invalidated_resident_session_state_for_session(
+    pub async fn reload_invalidated_resident_session_state_for_session(
         &mut self,
     ) -> Result<(), SessionError> {
         self.reload_invalidated_resident_session_state()

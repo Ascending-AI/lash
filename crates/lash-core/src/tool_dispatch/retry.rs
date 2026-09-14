@@ -48,8 +48,8 @@ pub(super) async fn execute_leaf_tool_attempt<'run>(
 ///
 /// This compatibility entry point resolves authority before entering the
 /// shared implementation so tests exercise the production admission path.
-#[cfg(test)]
-pub(crate) async fn execute_once<'run>(
+#[cfg(any(test, feature = "testing"))]
+pub async fn execute_once<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &PreparedToolCall,
     tool_context: ToolContext<'run>,

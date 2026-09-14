@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use super::ToolDispatchContext;
 
-pub(crate) async fn execute_final_tool_intents(
+pub async fn execute_final_tool_intents(
     context: &ToolDispatchContext<'_>,
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,

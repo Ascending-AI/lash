@@ -8,7 +8,7 @@ impl LashRuntime {
         &self.state.session_id
     }
 
-    pub(super) fn stamp_live_plugin_state(&mut self) {
+    pub fn stamp_live_plugin_state(&mut self) {
         if let Some(session) = self.session.as_ref() {
             let snapshot = session.plugins().tool_registry().export_state();
             self.state.set_tool_state_snapshot(Some(snapshot));
@@ -32,7 +32,7 @@ impl LashRuntime {
             session.invalidate_runtime_caches();
         }
     }
-    pub(super) fn active_tool_catalog_shared(
+    pub fn active_tool_catalog_shared(
         &self,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         match self.resident_session.validity() {
@@ -71,7 +71,7 @@ impl LashRuntime {
         Ok(session.plugins().tool_registry().export_state())
     }
     /// The durable protocol turn options recorded on the session.
-    pub(crate) fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
+    pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
         self.state.effective_protocol_turn_options()
     }
 
@@ -294,7 +294,7 @@ impl LashRuntime {
         Ok(())
     }
 
-    pub(super) async fn refresh_session_graph_from_store(&mut self) -> Result<(), SessionError> {
+    pub async fn refresh_session_graph_from_store(&mut self) -> Result<(), SessionError> {
         let Some(store) = self
             .session
             .as_ref()
@@ -394,7 +394,7 @@ impl LashRuntime {
         self.unreported_usage_attempts = crate::runtime::outstanding_unreported_attempts(&entries);
     }
 
-    pub(super) fn runtime_session_services(
+    pub fn runtime_session_services(
         &self,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         match self.resident_session.validity() {
@@ -596,7 +596,7 @@ impl LashRuntime {
         Ok(result.opened)
     }
 
-    pub(super) fn session_policy(&self) -> SessionPolicy {
+    pub fn session_policy(&self) -> SessionPolicy {
         self.state.effective_policy().clone()
     }
 
@@ -756,7 +756,7 @@ impl LashRuntime {
         .await
     }
 
-    pub(super) async fn submit_apply_config_patch_with_idempotency_key(
+    pub async fn submit_apply_config_patch_with_idempotency_key(
         &mut self,
         patch: super::ApplyConfigPatch,
         idempotency_key: impl Into<String>,
@@ -974,7 +974,7 @@ impl LashRuntime {
         .await
     }
 
-    pub(super) async fn drain_next_session_command_with_cancellation(
+    pub async fn drain_next_session_command_with_cancellation(
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         cancellation: tokio_util::sync::CancellationToken,

@@ -271,7 +271,7 @@ impl RuntimeCheckpointComponents {
         }
     }
 
-    pub(crate) fn build_checkpoint(
+    pub fn build_checkpoint(
         &self,
         turn_state: crate::PersistedTurnState,
     ) -> Result<crate::store::HydratedSessionCheckpoint, crate::StoreError> {
@@ -846,7 +846,7 @@ impl RuntimeSessionState {
         super::usage::SessionUsageReport::from_entries(&self.token_ledger)
     }
 
-    pub(crate) fn read_model(
+    pub fn read_model(
         &self,
     ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
         self.session_graph
@@ -1593,7 +1593,7 @@ pub(crate) fn resolve_append_node_ids(
     }
 }
 
-pub(super) fn open_agent_frame_in_state_with_clock(
+pub fn open_agent_frame_in_state_with_clock(
     state: &mut RuntimeSessionState,
     request: crate::OpenAgentFrameRequest,
     clock: &dyn crate::Clock,

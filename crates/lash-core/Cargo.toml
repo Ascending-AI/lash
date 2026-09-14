@@ -26,7 +26,7 @@ otel-trace = ["lash-trace/otel"]
 perf-witness = []
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = []
+testing = ["dep:tracing-subscriber"]
 
 [lints]
 workspace = true
@@ -52,10 +52,11 @@ sha2 = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 hmac = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
 insta = "1"
 proptest = "1"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-tracing-subscriber = { workspace = true }

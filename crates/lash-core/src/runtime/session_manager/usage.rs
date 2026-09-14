@@ -10,7 +10,7 @@ pub struct PendingTokenLedgerEntry {
 }
 
 impl PendingTokenLedgerEntry {
-    pub(crate) fn unstaged(entry: TokenLedgerEntry) -> Self {
+    pub fn unstaged(entry: TokenLedgerEntry) -> Self {
         Self {
             entry,
             identity: None,

@@ -16,6 +16,9 @@ mod commit;
 mod execute;
 mod lease;
 mod post_commit;
+#[cfg(feature = "testing")]
+pub mod prepare;
+#[cfg(not(feature = "testing"))]
 mod prepare;
 mod queued_work;
 mod resident_session;
@@ -23,8 +26,8 @@ mod resident_session;
 pub(in crate::runtime) use commit::LogicalTurnErrorContext;
 use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
 pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
-#[cfg(test)]
-pub(in crate::runtime) use execute::TURN_CANCEL_WATCH_MAX_ATTEMPTS;
+#[cfg(any(test, feature = "testing"))]
+pub use execute::TURN_CANCEL_WATCH_MAX_ATTEMPTS;
 use execute::TurnDriverRemainder;
 #[cfg(test)]
 use execute::{
@@ -39,7 +42,7 @@ pub use queued_work::{
     SelectedQueuedWorkDrainRefusalCause,
 };
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
-pub(crate) use resident_session::ResidentSessionState;
+pub use resident_session::ResidentSessionState;
 
 /// The pair of sinks every turn phase writes to.
 ///

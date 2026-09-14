@@ -24,8 +24,8 @@ use super::{
 };
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct LlmStreamAccumulator {
-    pub(super) parts: Vec<LlmOutputPart>,
+pub struct LlmStreamAccumulator {
+    pub parts: Vec<LlmOutputPart>,
 }
 
 /// Reasoning parts already published as live activity during one LLM attempt.
@@ -251,7 +251,7 @@ impl LlmStreamSummary {
 }
 
 impl LlmStreamAccumulator {
-    pub(super) fn push_text(&mut self, piece: &str) {
+    pub fn push_text(&mut self, piece: &str) {
         if piece.is_empty() {
             return;
         }
@@ -264,7 +264,7 @@ impl LlmStreamAccumulator {
         }
     }
 
-    pub(super) fn push_text_part(&mut self, text: String, response_meta: Option<ResponseTextMeta>) {
+    pub fn push_text_part(&mut self, text: String, response_meta: Option<ResponseTextMeta>) {
         if text.is_empty() && response_meta.is_none() {
             return;
         }
@@ -322,7 +322,7 @@ impl LlmStreamAccumulator {
         }
     }
 
-    pub(super) fn push_tool_call(
+    pub fn push_tool_call(
         &mut self,
         call_id: String,
         tool_name: String,
@@ -342,7 +342,7 @@ impl LlmStreamAccumulator {
         });
     }
 
-    pub(super) fn push_reasoning(
+    pub fn push_reasoning(
         &mut self,
         text: String,
         item_id: Option<String>,
@@ -360,7 +360,7 @@ impl LlmStreamAccumulator {
         self.push_reasoning_with_replay(text, (!replay.is_empty()).then_some(replay));
     }
 
-    pub(super) fn push_reasoning_with_replay(
+    pub fn push_reasoning_with_replay(
         &mut self,
         text: String,
         replay: Option<ProviderReasoningReplay>,
@@ -420,7 +420,7 @@ impl LlmStreamAccumulator {
         })
     }
 
-    pub(super) fn apply_to_response(&self, response: &mut LlmResponse) {
+    pub fn apply_to_response(&self, response: &mut LlmResponse) {
         if self.is_empty() {
             return;
         }
@@ -657,7 +657,7 @@ fn reconcile_text_snapshot(existing: &mut String, snapshot: &str) {
     }
 }
 
-pub(super) struct TurnAssembler {
+pub struct TurnAssembler {
     pub(super) tool_calls: Vec<ToolCallRecord>,
     pub(super) had_code_execution: bool,
     pub(super) omitted: Option<crate::OmittedToolCalls>,
@@ -699,11 +699,11 @@ impl TurnAssembler {
         }
     }
 
-    pub(super) fn note_code_execution(&mut self) {
+    pub fn note_code_execution(&mut self) {
         self.had_code_execution = true;
     }
 
-    pub(super) fn push(&mut self, event: &SessionStreamEvent) {
+    pub fn push(&mut self, event: &SessionStreamEvent) {
         match event {
             SessionStreamEvent::ToolCall {
                 call_id,
@@ -801,7 +801,7 @@ impl TurnAssembler {
         self
     }
 
-    pub(super) fn finish(
+    pub fn finish(
         mut self,
         state: crate::SessionSnapshot,
         cancellation: Option<crate::TurnCancellationEvidence>,
@@ -1028,11 +1028,7 @@ pub(super) fn sanitize_assistant_output(text: String) -> String {
         .to_string()
 }
 
-pub(super) fn classify_output_state(
-    raw_text: &str,
-    safe_text: &str,
-    issues: &[TurnIssue],
-) -> OutputState {
+pub fn classify_output_state(raw_text: &str, safe_text: &str, issues: &[TurnIssue]) -> OutputState {
     if safe_text.is_empty() && raw_text.is_empty() {
         return OutputState::EmptyOutput;
     }

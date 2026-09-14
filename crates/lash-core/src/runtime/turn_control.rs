@@ -187,7 +187,7 @@ impl TurnCancelOriginHint {
     /// Record a process-local token and the origin to use if that token fires
     /// independently of a routed cancellation request.
     #[doc(hidden)]
-    pub(crate) fn configure_local_token(&self, origin: Option<String>) {
+    pub fn configure_local_token(&self, origin: Option<String>) {
         let mut state = self.state.lock_recover();
         state.configured_origin = Some(origin);
     }

@@ -347,7 +347,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         clippy::too_many_arguments,
         reason = "code execution bridge carries explicit per-turn runtime dependencies"
     )]
-    pub(crate) fn new(
+    pub fn new(
         session_id: SessionId,
         dispatch: Arc<ToolDispatchContext<'run>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -662,7 +662,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub(crate) fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
+    pub fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
         let mut pending = self.nested_effect_error.lock_recover();
         pending.get_or_insert(error);
     }

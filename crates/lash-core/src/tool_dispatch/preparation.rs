@@ -266,7 +266,7 @@ pub(crate) fn resolve_callable_manifest(
     resolve_callable_definition(context, tool_name).map(|entry| entry.manifest.clone())
 }
 
-pub(crate) fn resolve_callable_manifest_by_id(
+pub fn resolve_callable_manifest_by_id(
     context: &ToolDispatchContext<'_>,
     tool_id: &crate::ToolId,
 ) -> Option<ToolManifest> {

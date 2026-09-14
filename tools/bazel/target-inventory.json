@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
-  "cargo_target_count": 120,
-  "generated_label_count": 175,
+  "cargo_target_count": 125,
+  "generated_label_count": 180,
   "packages": [
     {
       "declared_features": [],
@@ -56,6 +56,7 @@
         "futures-util",
         "hmac",
         "insta",
+        "lash-internal-core",
         "lash-internal-http-transport",
         "lash-internal-sansio",
         "lash-internal-trace",
@@ -104,6 +105,36 @@
           "cargo": "panic_containment",
           "kind": "test",
           "label": "//crates/lash-core:panic_containment__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_effect",
+          "kind": "test",
+          "label": "//crates/lash-core:runtime_effect__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_lifecycle",
+          "kind": "test",
+          "label": "//crates/lash-core:runtime_lifecycle__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_observability",
+          "kind": "test",
+          "label": "//crates/lash-core:runtime_observability__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_scenarios",
+          "kind": "test",
+          "label": "//crates/lash-core:runtime_scenarios__test",
+          "tags": []
+        },
+        {
+          "cargo": "runtime_turns",
+          "kind": "test",
+          "label": "//crates/lash-core:runtime_turns__test",
           "tags": []
         },
         {

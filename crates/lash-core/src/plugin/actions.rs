@@ -70,12 +70,12 @@ impl PluginOperationKind {
 /// registration whose declared kind disagrees with its handler cannot be
 /// written down.
 #[derive(Clone, Debug)]
-pub(crate) struct PluginOperationSpec {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) session_param: SessionParam,
-    pub(crate) input_schema: serde_json::Value,
-    pub(crate) output_schema: serde_json::Value,
+pub struct PluginOperationSpec {
+    pub name: String,
+    pub description: String,
+    pub session_param: SessionParam,
+    pub input_schema: serde_json::Value,
+    pub output_schema: serde_json::Value,
 }
 
 /// A registered plugin operation as hosts see it.
@@ -297,10 +297,10 @@ pub struct PluginOperationReceipt<T> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ErasedPluginOperationOutcome {
-    pub(crate) output: serde_json::Value,
-    pub(crate) events: Vec<PluginRuntimeEvent>,
-    pub(crate) directives: Vec<PluginRuntimeDirective>,
+pub struct ErasedPluginOperationOutcome {
+    pub output: serde_json::Value,
+    pub events: Vec<PluginRuntimeEvent>,
+    pub directives: Vec<PluginRuntimeDirective>,
 }
 
 impl ErasedPluginOperationOutcome {

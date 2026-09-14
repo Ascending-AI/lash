@@ -273,11 +273,11 @@ async fn list_scope_process_handles(
 
 #[derive(Clone)]
 pub struct RuntimeHandle {
-    pub(in crate::runtime) runtime: Arc<Mutex<LashRuntime>>,
-    observation: Arc<ArcSwap<RuntimeObservation>>,
-    live_replay_store: Arc<dyn LiveReplayStore>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    process_engines: crate::ProcessEngineRegistry,
+    pub runtime: Arc<Mutex<LashRuntime>>,
+    pub observation: Arc<ArcSwap<RuntimeObservation>>,
+    pub live_replay_store: Arc<dyn LiveReplayStore>,
+    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub process_engines: crate::ProcessEngineRegistry,
 }
 
 impl RuntimeHandle {

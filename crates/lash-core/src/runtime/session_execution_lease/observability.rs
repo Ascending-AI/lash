@@ -74,7 +74,7 @@ fn trace_taken_over(
 /// distinguishes a holder-side rejection from a distinct Busy claimant that
 /// proceeded lane-less. A rejection after `lost` / `taken_over` is an ordinary
 /// handoff. Non-CAS store failures are left to their own error paths.
-pub(in crate::runtime) fn trace_commit_cas_rejected(
+pub fn trace_commit_cas_rejected(
     session_id: &SessionId,
     evidence: Option<&SessionExecutionLeaseCommitEvidence>,
     claimant: &crate::LeaseOwnerIdentity,

@@ -331,7 +331,7 @@ pub(super) fn record_product_commit_admission(
         event = "commit_admission.product_path",
         "product commit path entered after same-session admission"
     );
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     product_observations()
         .lock_recover()
         .entry(session_id.clone())
@@ -344,16 +344,16 @@ pub(super) fn record_product_commit_admission(
         });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ProductCommitAdmissionObservation {
-    pub(super) path: &'static str,
-    pub(super) work_identity: String,
-    pub(super) waited: Duration,
-    pub(super) queue_depth: usize,
+pub struct ProductCommitAdmissionObservation {
+    pub path: &'static str,
+    pub work_identity: String,
+    pub waited: Duration,
+    pub queue_depth: usize,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 fn product_observations()
 -> &'static Mutex<HashMap<SessionId, Vec<ProductCommitAdmissionObservation>>> {
     static OBSERVATIONS: OnceLock<
@@ -362,8 +362,8 @@ fn product_observations()
     OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(test)]
-pub(super) fn take_product_commit_admission_observations(
+#[cfg(any(test, feature = "testing"))]
+pub fn take_product_commit_admission_observations(
     session_id: &SessionId,
 ) -> Vec<ProductCommitAdmissionObservation> {
     product_observations()
@@ -372,8 +372,8 @@ pub(super) fn take_product_commit_admission_observations(
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-pub(super) fn process_commit_admission_queue_depth(session_id: &SessionId) -> usize {
+#[cfg(any(test, feature = "testing"))]
+pub fn process_commit_admission_queue_depth(session_id: &SessionId) -> usize {
     PROCESS_COMMIT_ADMISSION
         .get()
         .and_then(|coordinator| {

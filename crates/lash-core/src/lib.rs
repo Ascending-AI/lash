@@ -30,6 +30,9 @@ pub mod session;
 pub mod session_graph;
 pub(crate) mod session_graph_integrity;
 pub mod session_model;
+#[cfg(feature = "testing")]
+pub mod stable_hash;
+#[cfg(not(feature = "testing"))]
 mod stable_hash;
 mod stable_identity;
 pub mod store;
@@ -41,15 +44,21 @@ pub mod sync {
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod test_support;
-#[cfg(test)]
-mod test_watchdog;
+#[cfg(any(test, feature = "testing"))]
+pub mod test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;
 mod tool_intent;
+#[cfg(feature = "testing")]
+pub mod tool_provider;
+#[cfg(not(feature = "testing"))]
 mod tool_provider;
 pub mod tool_registry;
 mod tool_result;
+#[cfg(feature = "testing")]
+pub mod trace;
+#[cfg(not(feature = "testing"))]
 mod trace;
 pub mod triggers;
 

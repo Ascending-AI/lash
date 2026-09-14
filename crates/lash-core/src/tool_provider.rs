@@ -145,7 +145,7 @@ pub struct AttemptContext<'run> {
     /// The dispatch-bound direct-completion client. `pub(crate)` so the
     /// attempt-atomicity laws can reach the *raw* client and prove the binding
     /// travels with it rather than with the accessor.
-    pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
+    pub direct_completions: crate::DirectCompletionClient<'run>,
     /// The recorded attempt this leaf body runs inside. Carried so
     /// attempt-attributed capabilities classify their journal position exactly
     /// as the legacy [`ToolContext`] path does. Boxed because this context is
@@ -468,7 +468,7 @@ pub struct ToolContext<'run> {
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
+    pub runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
     pub(crate) async_process_id: Option<ProcessId>,
@@ -534,7 +534,7 @@ pub(crate) struct ToolProcessEventContext {
     clock: Arc<dyn crate::Clock>,
 }
 
-pub(crate) struct ToolContextBuilder<'run> {
+pub struct ToolContextBuilder<'run> {
     session_id: SessionId,
     agent_frame_id: crate::FrameNodeId,
     sessions: Arc<dyn SessionStateService>,
@@ -592,7 +592,7 @@ impl<'run> ToolContextBuilder<'run> {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn tool_call_id(mut self, tool_call_id: impl Into<Option<String>>) -> Self {
+    pub fn tool_call_id(mut self, tool_call_id: impl Into<Option<String>>) -> Self {
         self.tool_call_id = tool_call_id.into();
         self
     }
@@ -609,7 +609,7 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    pub(crate) fn cancellation_token(
+    pub fn cancellation_token(
         mut self,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Self {
@@ -641,7 +641,7 @@ impl<'run> ToolContextBuilder<'run> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn process_events(
+    pub fn process_events(
         mut self,
         process_id: impl Into<ProcessId>,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
@@ -666,20 +666,17 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    pub(crate) fn parent_invocation(mut self, metadata: Option<crate::RuntimeInvocation>) -> Self {
+    pub fn parent_invocation(mut self, metadata: Option<crate::RuntimeInvocation>) -> Self {
         self.parent_invocation = metadata;
         self
     }
 
-    pub(crate) fn child_execution_trace_hook(
-        mut self,
-        hook: Option<ToolChildExecutionTraceHook>,
-    ) -> Self {
+    pub fn child_execution_trace_hook(mut self, hook: Option<ToolChildExecutionTraceHook>) -> Self {
         self.child_execution_trace_hook = hook;
         self
     }
 
-    pub(crate) fn build(self) -> ToolContext<'run> {
+    pub fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
             agent_frame_id: self.agent_frame_id,
@@ -804,7 +801,7 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    pub(crate) fn from_dispatch(
+    pub fn from_dispatch(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder::from_dispatch(dispatch)

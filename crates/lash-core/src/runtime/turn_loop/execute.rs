@@ -245,7 +245,7 @@ pub(super) const TURN_CANCEL_START_GATE_ATTEMPTS: usize = 3;
 /// the whole exponential ladder through its one-second ceiling (2.575 seconds
 /// of injected sleep). Exhaustion fails closed through the same cancellation
 /// token that observed evidence uses, tearing down in-flight turn execution.
-pub(in crate::runtime) const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
+pub const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
 
 pub(super) async fn await_turn_cancellation_start_gate<F, C>(
     clock: &dyn Clock,

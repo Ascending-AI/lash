@@ -16,13 +16,13 @@ use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
 use lash_sansio::core_support::Blake3DomainHasher;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
     static COMPOSITION_SCHEMA_SERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(test)]
-pub(crate) fn composition_schema_serialization_count() -> usize {
+#[cfg(any(test, feature = "testing"))]
+pub fn composition_schema_serialization_count() -> usize {
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(std::cell::Cell::get)
 }
 
@@ -466,7 +466,7 @@ impl std::io::Write for CompositionHashWriter {
 }
 
 pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     let mut writer = CompositionHashWriter(Blake3DomainHasher::new("lash-composition-tool/v2"));
     serde_json::to_writer(&mut writer, tool)
@@ -500,7 +500,7 @@ pub(crate) fn trace_composition_snapshot(
     req: &LlmRequest,
     fingerprint: [u8; 32],
 ) -> CompositionTraceSnapshot {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     let rendered_system_prompt = req.instructions.as_deref().unwrap_or_default().to_owned();
     let tool_schemas = req.tools.iter().map(trace_tool_spec).collect::<Vec<_>>();

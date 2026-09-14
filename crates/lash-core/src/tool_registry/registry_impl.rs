@@ -83,7 +83,7 @@ impl ToolRegistry {
             .is_some_and(|entry| entry.registration_kind() == ToolRegistrationKind::Orchestrating)
     }
 
-    pub(crate) fn export_state(&self) -> ToolState {
+    pub fn export_state(&self) -> ToolState {
         let authority = self.inner.read_recover();
         ToolState::new(
             authority.state.generation,

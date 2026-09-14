@@ -3,11 +3,7 @@ use std::time::{Duration, Instant};
 
 const CHILD_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub(crate) fn assert_exact_test_completes(
-    test_name: &str,
-    child_env: &str,
-    watchdog_description: &str,
-) {
+pub fn assert_exact_test_completes(test_name: &str, child_env: &str, watchdog_description: &str) {
     let mut child = Command::new(std::env::current_exe().expect("current test binary"))
         .args(["--exact", test_name])
         .env(child_env, "1")

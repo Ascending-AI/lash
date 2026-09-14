@@ -19,7 +19,7 @@ use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancel
 use super::{TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation};
 
 mod handle;
-pub(crate) use handle::RuntimeEffectControllerHandle;
+pub use handle::RuntimeEffectControllerHandle;
 pub use handle::{BoundaryReason, SegmentProgress};
 
 // =============================================================================
@@ -432,7 +432,7 @@ impl<'run> ScopedEffectController<'run> {
         })
     }
 
-    pub(crate) fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
+    pub fn owned_controller(&self) -> Option<Arc<dyn RuntimeEffectController>> {
         match &self.controller {
             ScopedEffectControllerInner::Shared(controller) => Some(Arc::clone(controller)),
             ScopedEffectControllerInner::Borrowed(_) | ScopedEffectControllerInner::Owned(_) => {
@@ -667,7 +667,7 @@ pub trait QueuedLaneProbe: Send + Sync {
     async fn pause(&self, slice: std::time::Duration);
 }
 
-pub(crate) enum EffectControllerTaskRequest {
+pub enum EffectControllerTaskRequest {
     Execute {
         scope: ExecutionScope,
         envelope: Box<RuntimeEffectEnvelope>,
@@ -779,7 +779,7 @@ pub(super) struct RemoteLocalExecutionRequest {
 }
 
 #[derive(Clone)]
-pub(crate) struct EffectTaskController {
+pub struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     scope: ExecutionScope,
     supports_concurrent_effects: bool,
@@ -788,7 +788,7 @@ pub(crate) struct EffectTaskController {
 }
 
 impl EffectTaskController {
-    pub(crate) fn scoped(
+    pub fn scoped(
         controller: &dyn RuntimeEffectController,
         scope: ExecutionScope,
     ) -> Result<
@@ -1049,7 +1049,7 @@ impl RuntimeEffectController for EffectTaskController {
     }
 }
 
-pub(crate) async fn drive_effect_controller_task(
+pub async fn drive_effect_controller_task(
     controller: &dyn RuntimeEffectController,
     scope: ExecutionScope,
     envelope: RuntimeEffectEnvelope,

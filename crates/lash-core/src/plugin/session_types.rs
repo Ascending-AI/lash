@@ -165,7 +165,7 @@ impl SessionSnapshot {
 }
 
 impl SessionSnapshot {
-    pub(crate) fn read_model(
+    pub fn read_model(
         &self,
     ) -> Result<crate::session_graph::SessionReadModel, crate::SessionGraphScopeError> {
         self.session_graph

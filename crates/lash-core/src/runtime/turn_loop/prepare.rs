@@ -406,7 +406,7 @@ impl LashRuntime {
         .await
     }
 
-    async fn normalize_input_items(
+    pub async fn normalize_input_items(
         &self,
         items: &[InputItem],
     ) -> Result<Vec<NormalizedItem>, String> {

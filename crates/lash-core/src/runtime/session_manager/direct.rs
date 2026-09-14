@@ -105,7 +105,7 @@ impl<'run> DirectCompletionClient<'run> {
         }
     }
 
-    pub(crate) fn with_tool_attempt_parent_invocation(
+    pub fn with_tool_attempt_parent_invocation(
         mut self,
         parent_invocation: crate::RuntimeInvocation,
     ) -> Self {
