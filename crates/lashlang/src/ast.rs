@@ -109,7 +109,7 @@ fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
         match declaration {
             Declaration::Type(declaration) => check_process_type(&declaration.ty)?,
             Declaration::Process(process) => {
-                ProcessSignature::try_new(process.params.clone(), TypeExpr::Any)?;
+                ProcessSignature::validate_params(&process.params)?;
                 for param in &process.params {
                     check_process_type(&param.ty)?;
                 }
@@ -698,7 +698,7 @@ impl Expr {
     }
 }
 
-type SmallExprVec<'expr> = smallvec::SmallVec<[&'expr Expr; 3]>;
+type SmallExprVec<'expr> = smallvec::SmallVec<[&'expr Expr; 8]>;
 
 /// Iterator over the direct child expressions yielded by [`Expr::children`].
 pub struct ExprChildren<'expr> {
@@ -1011,23 +1011,38 @@ impl ProcessSignature {
         params: Vec<ProcessParam>,
         output: TypeExpr,
     ) -> Result<Self, ProcessSignatureError> {
-        let mut names = std::collections::BTreeSet::new();
-        for param in &params {
+        Self::validate_params(&params)?;
+        Ok(Self {
+            params,
+            output: Box::new(output),
+        })
+    }
+
+    /// Applies the same parameter rules as [`ProcessSignature::try_new`] without
+    /// building the signature.
+    ///
+    /// AST validation only wants the verdict, and cloning the parameter list to
+    /// get it is one of the costs publish-time verification pays per process
+    /// (FIG-3088). A parameter list is short, so the uniqueness scan is linear
+    /// and allocates nothing; it reports the same duplicate - the later of the
+    /// two - as the set-based scan did.
+    pub fn validate_params(params: &[ProcessParam]) -> Result<(), ProcessSignatureError> {
+        for (index, param) in params.iter().enumerate() {
             if !crate::identifier::is_process_parameter_name(param.name.as_str()) {
                 return Err(ProcessSignatureError::InvalidParameterName {
                     name: param.name.to_string(),
                 });
             }
-            if !names.insert(param.name.as_str()) {
+            if params[..index]
+                .iter()
+                .any(|earlier| earlier.name == param.name)
+            {
                 return Err(ProcessSignatureError::DuplicateParameter {
                     name: param.name.to_string(),
                 });
             }
         }
-        Ok(Self {
-            params,
-            output: Box::new(output),
-        })
+        Ok(())
     }
 
     /// Returns parameters in invocation order.
