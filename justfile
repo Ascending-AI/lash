@@ -352,6 +352,7 @@ release-version-test:
 release-automation-test:
   python3 "{{repo}}/scripts/test_release_version.py"
   python3 "{{repo}}/scripts/test_publish_workspace.py"
+  python3 "{{repo}}/scripts/test_package_workspace.py"
 
 # ── crates.io publishing ─────────────────────────────────────
 # Show the publishable workspace set. The in-tree version is the 0.0.0-dev
@@ -398,6 +399,13 @@ publish-dry-run:
   cargo publish --dry-run --locked -p lash-internal-sansio
   cargo publish --dry-run --locked -p lash-internal-lashlang
   @echo "OK."
+
+# The packaging proof the release runs before it publishes anything: package
+# every publishable crate in one cargo invocation (so workspace siblings resolve
+# against the crates just packaged, not against crates.io) and report the sha256
+# of each .crate. `--no-verify` skips the per-crate verify builds.
+package-workspace *args:
+  python3 "{{repo}}/scripts/package_workspace.py" {{args}}
 
 # Publish a single crate at the in-tree version. Idempotent: returns success if
 # the same version is already on crates.io. NOTE: the in-tree version is the
