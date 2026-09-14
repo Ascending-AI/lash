@@ -11,6 +11,30 @@ pub(super) struct CallFrame {
     pub(super) return_target: ReturnTarget,
 }
 
+/// Arguments for one call. A callback driver keeps its pending calls as
+/// argument tuples, so it lends the arguments of the call it is starting
+/// instead of re-materializing them into a fresh vector per element.
+pub(super) enum CallArguments<'a> {
+    Owned(Vec<Value>),
+    Borrowed(&'a [Value]),
+}
+
+impl CallArguments<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Owned(values) => values.len(),
+            Self::Borrowed(values) => values.len(),
+        }
+    }
+
+    fn into_owned(self) -> Vec<Value> {
+        match self {
+            Self::Owned(values) => values,
+            Self::Borrowed(values) => values.to_vec(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum ReturnTarget {
     Direct,
@@ -169,13 +193,41 @@ impl<H: ExecutionHost> Vm<'_, H> {
         closure: Value,
         args: Vec<Value>,
     ) -> Result<(), RuntimeError> {
-        self.begin_function_call(closure, args, ReturnTarget::Direct)
+        self.begin_function_call(closure, CallArguments::Owned(args), ReturnTarget::Direct)
+    }
+
+    /// Keeps a returning frame's slot vectors for the next call. Their
+    /// contents are dropped here: the scratch slot is not a root set, and a
+    /// finished frame's values must not outlive it.
+    fn recycle_slot_state(&mut self, mut slots: SlotState) {
+        slots.values.clear();
+        slots.projected.clear();
+        slots.extras = Record::new();
+        self.slot_scratch = Some(slots);
+    }
+
+    /// Slot vectors for a frame of `len` slots, reusing the scratch pair when
+    /// one is held. Both vectors are reset to the fresh-frame state, so a
+    /// reused pair is indistinguishable from a newly allocated one.
+    fn take_slot_state(&mut self, len: usize) -> SlotState {
+        let Some(mut slots) = self.slot_scratch.take() else {
+            return SlotState {
+                values: vec![None; len],
+                projected: vec![false; len],
+                extras: Record::new(),
+            };
+        };
+        slots.values.clear();
+        slots.values.resize(len, None);
+        slots.projected.clear();
+        slots.projected.resize(len, false);
+        slots
     }
 
     pub(super) fn begin_function_call(
         &mut self,
         closure: Value,
-        mut args: Vec<Value>,
+        mut args: CallArguments<'_>,
         return_target: ReturnTarget,
     ) -> Result<(), RuntimeError> {
         let limit = self.host.execution_bounds().max_frame_depth.get();
@@ -219,17 +271,23 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .parameter_count
                     .saturating_sub(usize::from(accepts_rest));
                 debug_assert!(required_count <= fixed_count);
-                if accepts_rest {
-                    let rest = if args.len() > fixed_count {
-                        args.split_off(fixed_count)
+                // An exact-arity call needs no adjustment, so the arguments
+                // stay where they are instead of being copied into a vector.
+                if accepts_rest || args.len() != function.parameter_count {
+                    let mut values = args.into_owned();
+                    if accepts_rest {
+                        let rest = if values.len() > fixed_count {
+                            values.split_off(fixed_count)
+                        } else {
+                            Vec::new()
+                        };
+                        values.resize(fixed_count, Value::Undefined);
+                        values.push(self.heap.allocate_list(rest)?);
                     } else {
-                        Vec::new()
-                    };
-                    args.resize(fixed_count, Value::Undefined);
-                    args.push(self.heap.allocate_list(rest)?);
-                } else {
-                    args.resize(function.parameter_count, Value::Undefined);
-                    args.truncate(function.parameter_count);
+                        values.resize(function.parameter_count, Value::Undefined);
+                        values.truncate(function.parameter_count);
+                    }
+                    args = CallArguments::Owned(values);
                 }
             }
         }
@@ -241,16 +299,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
             });
         }
 
-        let mut slots = SlotState {
-            values: vec![None; function.slot_names.len()],
-            projected: vec![false; function.slot_names.len()],
-            extras: Record::new(),
-        };
+        let mut slots = self.take_slot_state(function.slot_names.len());
         if let Some(slot) = function.self_slot {
             slots.values[slot] = Some(Value::Ref(id));
         }
-        for (slot, value) in function.parameter_slots.iter().copied().zip(args) {
-            slots.values[slot] = Some(value);
+        match args {
+            CallArguments::Owned(values) => {
+                for (slot, value) in function.parameter_slots.iter().copied().zip(values) {
+                    slots.values[slot] = Some(value);
+                }
+            }
+            CallArguments::Borrowed(values) => {
+                for (slot, value) in function.parameter_slots.iter().copied().zip(values) {
+                    slots.values[slot] = Some(value.clone());
+                }
+            }
         }
         for (slot, value) in function.capture_slots.iter().copied().zip(captures) {
             slots.values[slot] = Some(value);
@@ -275,7 +338,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let result = self.pop_stack()?;
         let frame = self.frames.pop().ok_or(RuntimeError::VmStackUnderflow)?;
         self.stack.truncate(frame.operand_stack_base);
-        self.slots = frame.slots;
+        let finished = std::mem::replace(&mut self.slots, frame.slots);
+        self.recycle_slot_state(finished);
         self.iter_stack = frame.iter_stack;
         self.extras_heapified = frame.extras_heapified;
         self.active_function = frame.function;
@@ -314,9 +378,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // Each builtin-initiated frame push has the same unit cost
                     // as an explicit `Call` opcode.
                     self.instructions_executed = self.instructions_executed.saturating_add(1);
+                    let arguments = callback_arguments(call)?;
                     self.begin_function_call(
                         function,
-                        callback_arguments(call)?,
+                        CallArguments::Borrowed(&arguments),
                         ReturnTarget::Callback(callback),
                     )?;
                 } else {
@@ -363,7 +428,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             allow_effects,
             live_url_search_params: false,
         };
-        self.begin_function_call(function, first, ReturnTarget::Callback(callback))
+        self.begin_function_call(
+            function,
+            CallArguments::Borrowed(&first),
+            ReturnTarget::Callback(callback),
+        )
     }
 
     pub(super) fn begin_url_search_params_for_each(
@@ -393,7 +462,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             allow_effects: true,
             live_url_search_params: true,
         };
-        self.begin_function_call(function, first, ReturnTarget::Callback(callback))
+        self.begin_function_call(
+            function,
+            CallArguments::Owned(first),
+            ReturnTarget::Callback(callback),
+        )
     }
 }
 
@@ -437,11 +510,11 @@ fn clear_pending_calls(frames: &mut [CallFrame], receiver: HeapId) {
     }
 }
 
-fn callback_arguments(call: Value) -> Result<Vec<Value>, RuntimeError> {
+fn callback_arguments(call: Value) -> Result<ListValue, RuntimeError> {
     let Value::Tuple(arguments) = call else {
         return Err(RuntimeError::ValidationFailed {
             reason: "invalid durable callback argument vector".to_string(),
         });
     };
-    Ok(arguments.into_vec())
+    Ok(arguments)
 }
