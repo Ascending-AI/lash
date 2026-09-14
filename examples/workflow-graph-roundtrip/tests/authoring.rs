@@ -287,12 +287,16 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
 
-    // FIG-3047: TypeScript has no `@label(title:)` form, so an authored title
-    // has nowhere to live in canonical source and the node reprojects with its
-    // derived title. The save still accepts the authored name and the document
-    // still round-trips; the title itself is lost until FIG-3047 gives the
-    // dialect a spelling for it.
-    assert!(!saved.document.source.contains("@label"));
+    // FIG-3047: an authored title is written back into the source as the
+    // `@label` doc comment on the statement it names, so it survives the save
+    // and comes back out of the reprojection rather than being recomputed.
+    assert!(
+        saved.document.source.contains(
+            "/** @label Hand back the result — What the operator sees when the run ends */"
+        ),
+        "saved source:\n{}",
+        saved.document.source
+    );
     let saved_terminal = saved
         .document
         .nodes
@@ -301,8 +305,9 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
         .expect("renamed terminal reprojected");
     assert_eq!(
         saved_terminal.data.name,
-        NodeName::Derived {
-            title: "return".to_string(),
+        NodeName::Authored {
+            title: "Hand back the result".to_string(),
+            description: Some("What the operator sees when the run ends".to_string()),
         }
     );
 
@@ -326,7 +331,11 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
         .expect("save derived terminal");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
-    assert!(!saved.document.source.contains("@label"));
+    assert!(
+        !saved.document.source.contains("@label"),
+        "saved source:\n{}",
+        saved.document.source
+    );
     assert_eq!(
         saved
             .document

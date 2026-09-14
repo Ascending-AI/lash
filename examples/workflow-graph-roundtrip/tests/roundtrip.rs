@@ -889,6 +889,30 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             assert_eq!(document.source.matches("llm.query").count(), 2);
         }
 
+        // A label is the serialization target for an editor rename, so the
+        // corpora that carry one prove the whole path: the doc comment
+        // projects as an authored name, and the fixpoint checks above already
+        // proved it is written back byte-identically.
+        let authored = document
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.data.name, NodeName::Authored { .. }))
+            .count();
+        if matches!(
+            entry.id.as_str(),
+            "onboarding" | "traffic-lights" | "branching-approval" | "counter-loop"
+        ) {
+            assert!(
+                authored > 0,
+                "{} should carry authored `@label` names",
+                entry.id
+            );
+            assert!(document.source.contains("/** @label "));
+        } else {
+            assert_eq!(authored, 0, "{} should carry only derived names", entry.id);
+            assert!(!document.source.contains("@label"));
+        }
+
         if entry.id == "counter-loop" {
             assert!(!document.nodes.iter().any(|node| node.node_type == "opaque"));
             assert!(
@@ -899,11 +923,11 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             );
             assert!(document.nodes.iter().any(|node| {
                 node.node_type == "container"
-                    && node.data.name.title() == "while"
+                    && node.data.subkind.as_deref() == Some("while")
                     && node.data.children.iter().any(|child| child.slot == "body")
             }));
             assert!(document.nodes.iter().any(|node| {
-                node.node_type == "container" && node.data.name.title().starts_with("for ")
+                node.node_type == "container" && node.data.subkind.as_deref() == Some("for")
             }));
             assert!(projected.nodes().any(|node| {
                 matches!(
@@ -1125,7 +1149,7 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
+        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
         .expect("counter-loop while node");
     assert_eq!(
         while_node.data.condition.as_deref(),
@@ -1178,7 +1202,7 @@ async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
+        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
         .expect("counter-loop while node");
     while_node.data.condition = Some("state.count < 1".to_string());
 
@@ -2118,7 +2142,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
+        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
         .expect("default workflow while container");
     let original_condition = while_node.data.condition.clone();
     while_node.data.condition = Some("count <".to_string());
@@ -2136,7 +2160,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
+        .find(|node| node.node_type == "container" && node.data.subkind.as_deref() == Some("while"))
         .expect("default workflow while container");
     while_node.data.condition = original_condition;
     while_node

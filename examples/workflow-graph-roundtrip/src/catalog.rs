@@ -23,10 +23,12 @@ pub(crate) struct BuiltInWorkflow {
 }
 
 // Every catalog corpus is TypeScript: it is the only cell language, and the
-// lens's canonical text is TypeScript (FIG-3033). The retired Lashlang corpora
-// carried `@label(title:, description:)` on each process; TypeScript has no
-// label form yet (FIG-3047), so those processes take their derived names and
-// no title mechanism is invented here to replace them.
+// lens's canonical text is TypeScript (FIG-3033). Authored names are spelled
+// as `@label` doc comments (FIG-3047), which is what an editor rename writes
+// back into source; the corpora that carry them are the fixture proving
+// render -> parse -> render is a fixed point over a labeled program. `blank`
+// and the tool-facing examples carry none, so the derived-name path stays
+// exercised too.
 
 const BLANK_WORKFLOW: &str = r#"const blank = defineProcess({
   name: "blank",
@@ -37,13 +39,16 @@ const BLANK_WORKFLOW: &str = r#"const blank = defineProcess({
 });
 "#;
 
-const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"const traffic_lights = defineProcess({
+const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"/** @label Traffic lights — Cycle a three-light signal twice */
+const traffic_lights = defineProcess({
   name: "traffic_lights",
   signals: {},
   run: async () => {
     await display.set_status({ key: "traffic", value: "running" });
+    /** @label Run two cycles */
     for (const cycle of [1, 2]) {
       await display.add_item({ list: "cycles", item: cycle });
+      /** @label Red — Stop the traffic */
       await display.set_light({ name: "red", state: "on" });
       await display.set_light({ name: "amber", state: "off" });
       await display.set_light({ name: "green", state: "off" });
@@ -62,13 +67,15 @@ const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"const traffic_lights = defineProcess({
 });
 "#;
 
-const BRANCHING_APPROVAL_WORKFLOW: &str = r#"const branching_approval = defineProcess({
+const BRANCHING_APPROVAL_WORKFLOW: &str = r#"/** @label Branching approval — Wait for a decision and take one of two paths */
+const branching_approval = defineProcess({
   name: "branching_approval",
   signals: { continue: null },
   run: async () => {
     await display.set_status({ key: "approval", value: "waiting" });
     await display.highlight({ target: "approval" });
     await display.show_message({ text: "Approval requested" });
+    /** @label Wait for the decision */
     const decision = await waitSignal("continue");
     if (decision.autoFired) {
       await display.set_status({ key: "approval", value: "approved" });
@@ -90,19 +97,22 @@ const BRANCHING_APPROVAL_WORKFLOW: &str = r#"const branching_approval = definePr
 });
 "#;
 
-const COUNTER_LOOP_WORKFLOW: &str = r#"const counter_loop = defineProcess({
+const COUNTER_LOOP_WORKFLOW: &str = r#"/** @label Counter loop — Count to three, then walk a fixed progress list */
+const counter_loop = defineProcess({
   name: "counter_loop",
   signals: {},
   run: async () => {
     await display.set_status({ key: "counter", value: "running" });
     await display.set_progress({ pct: 5 });
     const state = { count: 0 };
+    /** @label Count to three */
     while (state.count < 3) {
       await display.add_item({ list: "counts", item: state.count });
       await display.set_progress({ pct: state.count * 20 + 20 });
       state.count = state.count + 1;
       await sleep("250ms");
     }
+    /** @label Walk the progress list */
     for (const pct of [70, 85, 100]) {
       await display.set_progress({ pct: pct });
       await sleep("300ms");

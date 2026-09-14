@@ -223,6 +223,7 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         "Call the app lookup tool and finish its value.",
         vec![
             r#"<typescript>
+/** @label Lookup app state */
 const value = await tools.app_lookup({});
 finish(value);
 </typescript>"#,
@@ -265,6 +266,7 @@ const lookup = defineProcess({
   name: "lookup",
   signals: {},
   run: async () => {
+    /** @label Lookup app state in process */
     const value = await tools.app_lookup({});
     return value;
   }
@@ -316,6 +318,7 @@ const parent = defineProcess({
   name: "parent",
   signals: {},
   run: async () => {
+    /** @label Start nested child process */
     const inner = await start(child);
     return { parent: inner.child };
   }
@@ -349,6 +352,7 @@ const spawnChild = defineProcess({
   name: "spawn_child",
   signals: {},
   run: async () => {
+    /** @label Spawn subagent with web search */
     const result = await agents.spawn({
       capability: "default",
       task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
@@ -415,6 +419,7 @@ async fn agent_failed_child_preserves_failure_graph_execution()
         "lash_runtime agent failed child graph",
         vec![
             r#"<typescript>
+/** @label Spawn failing subagent */
 const result = await agents.spawn({
   capability: "default",
   task: "Fail with reason child boom.",
@@ -494,7 +499,9 @@ const child = defineProcess({
     return value;
   }
 });
+/** @label Start left process */
 const left = start(child, { value: "left" });
+/** @label Start right process */
 const right = start(child, { value: "right" });
 const leftValue = await left;
 const rightValue = await right;

@@ -17,7 +17,8 @@ use lashlang::{
     TypeExpr, TypeField, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
     WorkflowEdgeKind, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowSubgraph, WorkflowTypeDiagnostic, node_id_for_execution_site,
+    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSubgraph, WorkflowTypeDiagnostic,
+    node_id_for_execution_site,
 };
 
 fn canonical(source: &str) -> String {
@@ -1050,4 +1051,172 @@ finish(handle);
             .iter()
             .any(|edge| matches!(edge.kind, WorkflowEdgeKind::Sequence))
     );
+}
+
+const LABELED: &str = r#"/** @label Lookup — Read the app's current state */
+const value = await tools.app_lookup({});
+/** @label Traffic lights */
+const lights = defineProcess({
+  name: "lights",
+  signals: {},
+  run: async () => {
+    /** @label Go — Turn the green light on */
+    await display.set_light({ name: "green", state: "on" });
+    return 0;
+  },
+});
+"#;
+
+/// A label is authored as a doc comment, and the whole point of the spelling
+/// is that it survives the round trip a rename depends on: the projection
+/// reads it, the renderer writes it back, and a reparse finds the same label
+/// on the same node.
+#[test]
+fn label_doc_comments_name_nodes_through_every_lens_law() {
+    assert_lens_laws(LABELED);
+    let graph = workflow_graph_from_source(&canonical(LABELED)).expect("labeled source projects");
+    let node = graph
+        .main
+        .nodes
+        .iter()
+        .find(|node| node.name_source == WorkflowNodeNameSource::Label)
+        .expect("a labeled node in the module body");
+    assert_eq!(node.name.as_str(), "Lookup");
+    assert_eq!(
+        node.description.as_ref().map(|text| text.as_str()),
+        Some("Read the app's current state")
+    );
+
+    let WorkflowDeclaration::Process(process) = graph
+        .declarations
+        .iter()
+        .find(|declaration| matches!(declaration, WorkflowDeclaration::Process(_)))
+        .expect("the declared process")
+    else {
+        unreachable!("filtered to processes")
+    };
+    assert_eq!(process.display_name.as_str(), "Traffic lights");
+    assert_eq!(process.name_source, WorkflowNodeNameSource::Label);
+    assert_eq!(
+        process
+            .body
+            .nodes
+            .iter()
+            .filter(|node| node.name_source == WorkflowNodeNameSource::Label)
+            .map(|node| node.name.to_string())
+            .collect::<Vec<_>>(),
+        vec!["Go".to_string()],
+    );
+}
+
+/// The label is a name, not an instruction: it must not change what the
+/// program compiles to.
+#[test]
+fn a_label_comment_changes_no_lowered_program() {
+    let labeled = parse(LABELED).expect("labeled source parses");
+    let bare = parse(
+        &LABELED
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("/**"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("unlabeled source parses");
+    // Source spans move, because the comment occupies bytes and the label
+    // node occupies an AST path. What the program *does* — its declarations
+    // and its body — does not.
+    for part in ["declarations", "main"] {
+        assert_eq!(
+            strip_labels(
+                serde_json::to_value(&labeled).expect("labeled program serializes")[part].clone()
+            ),
+            strip_labels(
+                serde_json::to_value(&bare).expect("bare program serializes")[part].clone()
+            ),
+            "the label is the only difference a label comment makes to `{part}`",
+        );
+    }
+}
+
+/// Drops every label the AST carries — the `LabelAnnotated` wrapper and a
+/// process declaration's own title — so two programs can be compared on what
+/// they *do*.
+fn strip_labels(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(mut object) => {
+            if let Some(annotated) = object.remove("LabelAnnotated") {
+                let mut annotated = match annotated {
+                    serde_json::Value::Object(annotated) => annotated,
+                    other => return strip_labels(other),
+                };
+                return strip_labels(annotated.remove("expr").expect("annotated expression"));
+            }
+            object.remove("label");
+            serde_json::Value::Object(
+                object
+                    .into_iter()
+                    .map(|(key, value)| (key, strip_labels(value)))
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(strip_labels).collect())
+        }
+        other => other,
+    }
+}
+
+/// Two names for one node is the author contradicting themselves, and no rule
+/// for picking between them would be the one they meant.
+#[test]
+fn a_second_label_on_one_statement_is_refused() {
+    let error = parse(
+        "/** @label First */\n/** @label Second */\nconst value = await tools.app_lookup({});\n",
+    )
+    .expect_err("two labels on one statement");
+    assert_eq!(error.code.as_str(), "TS_DUPLICATE_NODE_LABEL");
+}
+
+/// Everything that is not exactly the one-line form is ordinary trivia.
+#[test]
+fn comments_that_are_not_the_label_form_stay_trivia() {
+    for source in [
+        "// @label Line comment\nconst value = 1;\n",
+        "/* @label Not a doc comment */\nconst value = 1;\n",
+        "/**\n * @label Multi line\n */\nconst value = 1;\n",
+        "/** Notes @label Not first */\nconst value = 1;\n",
+        "/** @label */\nconst value = 1;\n",
+    ] {
+        let graph = workflow_graph_from_source(source).expect("a commented module projects");
+        assert!(
+            graph
+                .main
+                .nodes
+                .iter()
+                .all(|node| node.name_source == WorkflowNodeNameSource::Derived),
+            "source named a node:\n{source}"
+        );
+        let rendered = workflow_graph_to_source(&graph).expect("graph renders");
+        assert!(!rendered.contains("@label"), "rendered source:\n{rendered}");
+    }
+}
+
+/// A title the renderer cannot write back is refused rather than mangled: a
+/// rename that silently became a different name is worse than a typed error.
+#[test]
+fn a_label_with_no_spelling_is_refused_by_the_renderer() {
+    let mut graph = workflow_graph_from_source(&canonical(LABELED)).expect("labeled source");
+    let node = graph
+        .main
+        .nodes
+        .iter_mut()
+        .find(|node| node.name_source == WorkflowNodeNameSource::Label)
+        .expect("a labeled node");
+    node.name = "Close */ me".into();
+    assert!(matches!(
+        workflow_graph_to_source(&graph),
+        Err(GraphRenderError::CanonicalSource(
+            TypeScriptSourceError::UnrepresentableLabel { .. }
+        ))
+    ));
 }

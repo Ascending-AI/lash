@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessDecl,
+    ProcessParam, ProcessSignalDecl, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{
@@ -11,6 +11,7 @@ use crate::adapter::{
     Function, FunctionBody, LogicalOp, MemberProperty, ObjectProperty, OptionalOperation, Pattern,
     PropertyKey, Stmt, UnaryOp, VarKind,
 };
+use crate::node_label::NodeLabel;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use spans::SpanNote;
 
@@ -177,7 +178,7 @@ impl Lowerer {
 
         let local_function_internals = statements
             .iter()
-            .filter_map(|statement| match statement {
+            .filter_map(|statement| match statement.unlabeled() {
                 Stmt::Function { name, .. } => {
                     Some(self.binding(name).map(|binding| binding.internal.clone()))
                 }
@@ -203,7 +204,7 @@ impl Lowerer {
         let previous_capture_mode = self.allow_uninitialized_declaration_capture;
         self.allow_uninitialized_declaration_capture = true;
         for statement in statements {
-            if let Stmt::Function { name, function } = statement {
+            if let Stmt::Function { name, function } = statement.unlabeled() {
                 let binding = self.binding(name)?.clone();
                 if function.is_async {
                     self.set_role(name, BindingRole::AsyncHelper)?;
@@ -262,7 +263,7 @@ impl Lowerer {
         let mut output = hoisted_vars;
         for statement in statements {
             flush_ready(&mut pending, &mut available, &mut output);
-            match statement {
+            match statement.unlabeled() {
                 Stmt::Function { .. } => {}
                 Stmt::Var { declarations, .. } => {
                     output.extend(self.lower_stmt(statement)?);
@@ -296,7 +297,7 @@ impl Lowerer {
 
     fn predeclare(&mut self, statements: &[Stmt], root: bool) -> Result<(), Diagnostic> {
         for statement in statements {
-            match statement {
+            match statement.unlabeled() {
                 Stmt::Var { kind, declarations } => {
                     if *kind == VarKind::Var {
                         continue;
@@ -329,9 +330,55 @@ impl Lowerer {
         Ok(())
     }
 
+    /// Attaches a statement's `@label` to what the statement lowered to.
+    ///
+    /// A process binding is the one statement whose label does not belong on
+    /// the lowered expression: `const p = defineProcess(..)` lowers to a
+    /// declaration plus the binding that names it, and the graph reads a
+    /// process's title off the declaration. Everything else carries the label
+    /// on its own expression, which is the node the graph shows.
+    fn apply_label(&mut self, label: &NodeLabel, mut lowered: Vec<LashExpr>) -> Vec<LashExpr> {
+        let metadata = LabelMetadata {
+            title: label.title.as_str().into(),
+            description: label.description.as_deref().map(Into::into),
+        };
+        let Some(first) = lowered.first_mut() else {
+            // A statement with nothing to run has no node to name.
+            return lowered;
+        };
+        if let LashExpr::Assign { expr, .. } = first
+            && let LashExpr::ProcessRef { process } = expr.as_ref()
+        {
+            let process = process.clone();
+            if let Some(declaration) =
+                self.declarations
+                    .iter_mut()
+                    .find_map(|declaration| match declaration {
+                        Declaration::Process(candidate) if candidate.name == process => {
+                            Some(candidate)
+                        }
+                        _ => None,
+                    })
+            {
+                declaration.label = Some(metadata);
+                return lowered;
+            }
+        }
+        let expression = std::mem::replace(first, LashExpr::Undefined);
+        *first = LashExpr::LabelAnnotated {
+            label: metadata,
+            expr: Box::new(expression),
+        };
+        lowered
+    }
+
     fn lower_stmt(&mut self, stmt: &Stmt) -> Result<Vec<LashExpr>, Diagnostic> {
         Ok(match stmt {
             Stmt::Empty => Vec::new(),
+            Stmt::Labeled { label, stmt } => {
+                let lowered = self.lower_stmt(stmt)?;
+                self.apply_label(label, lowered)
+            }
             Stmt::Expr(expr) => vec![self.lower_expr(expr)?],
             Stmt::Block(statements) => {
                 vec![LashExpr::Block(self.lower_statements(statements, false)?)]
