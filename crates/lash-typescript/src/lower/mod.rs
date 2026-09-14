@@ -12,7 +12,8 @@ use crate::adapter::{
     Function, FunctionBody, LogicalOp, MemberProperty, ObjectProperty, OptionalOperation, Pattern,
     PropertyKey, Stmt, UnaryOp, VarKind,
 };
-use crate::{Diagnostic, DiagnosticCode};
+use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use spans::SpanNote;
 
 mod stdlib;
 use stdlib::*;
@@ -27,6 +28,7 @@ mod constructs;
 mod graph;
 mod json_replacer;
 mod regex;
+mod spans;
 mod triggers;
 use binding::*;
 use constructs::*;
@@ -137,12 +139,19 @@ pub(crate) fn lower_with_context(
         })
         .collect::<Vec<_>>();
     root_global_initializers.extend(expressions);
+    let main = LashExpr::Block(root_global_initializers);
+    let expression_source_spans = spans::source_spans(&main, &lowerer.span_notes);
     Ok(LashProgram {
         declarations: lowerer.declarations,
-        main: LashExpr::Block(root_global_initializers),
-        declaration_spans: Vec::new(),
+        main,
+        declaration_spans: lowerer.declaration_spans,
+        // Left empty deliberately: this table is the linker's per-root-statement
+        // fallback, and lowering only knows a statement's position when one of
+        // its expressions carries a source span. A placeholder here would put a
+        // caret on line 1 of a statement whose position is unknown, which is
+        // worse than the message-only rendering the fallback already gives.
         expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        expression_source_spans,
     })
 }
 
@@ -192,6 +201,14 @@ struct Lowerer {
     continue_epilogues: Vec<Option<LashExpr>>,
     process_depth: usize,
     declarations: Vec<Declaration>,
+    declaration_spans: Vec<lashlang::Span>,
+    /// One note per lowered TypeScript expression that carries a source span,
+    /// in lowering (post-)order. Resolved against the finished program by
+    /// `spans::source_spans`.
+    span_notes: Vec<SpanNote>,
+    /// The span of the TypeScript expression currently being lowered, which is
+    /// what a declaration emitted mid-lowering is positioned by.
+    current_span: Option<SourceSpan>,
     intrinsic_global_slots: BTreeSet<String>,
     module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
@@ -613,6 +630,7 @@ impl Lowerer {
                         && let Expr::Member {
                             object,
                             property: MemberProperty::Field(method),
+                            ..
                         } = callee.as_ref()
                     {
                         let kind = if matches!(object.as_ref(), Expr::Ident(owner) if owner == "Map")
@@ -1085,6 +1103,18 @@ impl Lowerer {
     }
 
     fn lower_expr(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
+        let Some(source) = source_span(expr) else {
+            return self.lower_expr_inner(expr);
+        };
+        let enclosing = self.current_span.replace(source);
+        let lowered = self.lower_expr_inner(expr);
+        self.current_span = enclosing;
+        let lowered = lowered?;
+        self.span_notes.push(SpanNote::new(source, &lowered));
+        Ok(lowered)
+    }
+
+    fn lower_expr_inner(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
         Ok(match expr {
             Expr::Undefined => LashExpr::Undefined,
             Expr::Null => LashExpr::Null,
@@ -1140,7 +1170,9 @@ impl Lowerer {
             Expr::Array(items) => self.lower_array_literal(items)?,
             Expr::Object(entries) => self.lower_object_literal(entries)?,
             Expr::Assign { target, op, value } => self.lower_assignment(target, *op, value)?,
-            Expr::Member { object, property } => self.lower_member(object, property)?,
+            Expr::Member {
+                object, property, ..
+            } => self.lower_member(object, property)?,
             Expr::Unary { op, value } => match op {
                 UnaryOp::Void => {
                     LashExpr::Block(vec![self.lower_expr(value)?, LashExpr::Undefined])
@@ -1188,12 +1220,12 @@ impl Lowerer {
                 value
             }
             Expr::Function(function) => self.lower_function(function, None)?,
-            Expr::Call { callee, args } => self.lower_call(callee, args)?,
+            Expr::Call { callee, args, .. } => self.lower_call(callee, args)?,
             Expr::New { constructor, args } => self.lower_constructor(constructor, args)?,
             Expr::OptionalChain { base, operations } => {
                 self.lower_optional_chain(base, operations)?
             }
-            Expr::Await(inner) => self.lower_await(inner)?,
+            Expr::Await { value, .. } => self.lower_await(value)?,
             Expr::Update {
                 target,
                 delta,
@@ -1346,6 +1378,14 @@ impl Lowerer {
             .map(|name| LashExpr::Variable(name.clone()))
             .collect();
         let failure_name = format!("{GENERATED_BINDING_PREFIX}process_error");
+        self.declaration_spans.push(
+            self.current_span
+                .map(|source| lashlang::Span {
+                    start: source.start,
+                    end: source.end,
+                })
+                .unwrap_or(lashlang::Span { start: 0, end: 0 }),
+        );
         self.declarations.push(Declaration::Process(ProcessDecl {
             name: process_name.as_str().into(),
             params,
@@ -1439,7 +1479,9 @@ impl Lowerer {
     fn member_path(&mut self, expr: &Expr) -> Result<(String, Vec<AssignPathStep>), Diagnostic> {
         match expr {
             Expr::Ident(name) => Ok((self.resolve(name)?, Vec::new())),
-            Expr::Member { object, property } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 let (root, mut steps) = self.member_path(object)?;
                 steps.push(match property {
                     MemberProperty::Field(field) => AssignPathStep::Field(field.as_str().into()),
@@ -1635,5 +1677,20 @@ fn map_binary(op: BinaryOp) -> JavaScriptBinaryOp {
         | BinaryOp::ShiftRightUnsigned
         | BinaryOp::In
         | BinaryOp::InstanceOf => unreachable!("operator has a dedicated lowering"),
+    }
+}
+
+/// The source position a lowered TypeScript expression is reported at.
+///
+/// Only the forms a diagnostic points at carry one: a call, a member access
+/// and an await. Everything else inherits the nearest enclosing span the
+/// linker is already carrying, which is what the lashlang parser's tables did
+/// for a sub-expression it recorded no span for.
+fn source_span(expr: &Expr) -> Option<SourceSpan> {
+    match expr {
+        Expr::Call { span, .. } | Expr::Member { span, .. } | Expr::Await { span, .. } => {
+            Some(*span)
+        }
+        _ => None,
     }
 }

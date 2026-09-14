@@ -415,10 +415,11 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
                     "deletes through `{binding}`, the iterable this loop is walking"
                 ));
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, .. } => {
                 if let Expr::Member {
                     object,
                     property: MemberProperty::Field(method),
+                    ..
                 } = callee.as_ref()
                     && expression_root_binding(object) == Some(binding)
                 {

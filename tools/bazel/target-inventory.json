@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
-  "cargo_target_count": 127,
-  "generated_label_count": 182,
+  "cargo_target_count": 128,
+  "generated_label_count": 183,
   "packages": [
     {
       "declared_features": [],
@@ -1729,6 +1729,12 @@
           "cargo": "append_cost",
           "kind": "test",
           "label": "//crates/lashlang:append_cost__test",
+          "tags": []
+        },
+        {
+          "cargo": "diagnostic_locations",
+          "kind": "test",
+          "label": "//crates/lashlang:diagnostic_locations__test",
           "tags": []
         },
         {

@@ -243,6 +243,7 @@ impl Lowerer {
             Expr::Member {
                 object,
                 property: MemberProperty::Field(method),
+                ..
             } => CalleeFamily::Member { object, method },
             Expr::Ident(name)
                 if self

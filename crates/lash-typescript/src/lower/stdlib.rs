@@ -7,6 +7,7 @@ pub(super) fn module_path(expr: &Expr) -> Option<Vec<String>> {
         Expr::Member {
             object,
             property: MemberProperty::Field(field),
+            ..
         } => {
             let mut path = module_path(object)?;
             path.push(field.clone());

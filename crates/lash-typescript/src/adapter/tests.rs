@@ -77,6 +77,7 @@ fn child_expression_accessors_reach_every_expression_and_statement_field() {
         Expr::Member {
             object: Box::new(marker("Member.object")),
             property: MemberProperty::Index(Box::new(marker("Member.property"))),
+            span: SourceSpan { start: 0, end: 0 },
         },
         Expr::Unary {
             op: UnaryOp::Not,
@@ -115,6 +116,7 @@ fn child_expression_accessors_reach_every_expression_and_statement_field() {
                 CallArg::Value(marker("Call.args.value")),
                 CallArg::Spread(marker("Call.args.spread")),
             ],
+            span: SourceSpan { start: 0, end: 0 },
         },
         Expr::New {
             constructor: "Set".into(),
@@ -141,7 +143,10 @@ fn child_expression_accessors_reach_every_expression_and_statement_field() {
                 },
             ],
         },
-        Expr::Await(Box::new(marker("Await.value"))),
+        Expr::Await {
+            value: Box::new(marker("Await.value")),
+            span: SourceSpan { start: 0, end: 0 },
+        },
         Expr::Update {
             target: AssignTarget::Member {
                 object: Box::new(marker("Update.target.object")),
