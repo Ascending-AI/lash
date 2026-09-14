@@ -856,10 +856,7 @@ async fn run_user_turn(
     Ok(())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
-)]
+#[expect(clippy::expect_used, reason = "`image/png` is a valid MediaType")]
 pub(crate) async fn workbench_turn_input(
     state: &AppState,
     request: &WorkbenchTurnWorkflowRequest,
