@@ -12,6 +12,7 @@ command = ["cargo", "check", "--workspace", "--all-targets", "--locked"]
 features = [
   "agent-workbench/default",
   "lash-internal-core/default",
+  "lash-internal-core-store/default",
   "lash-internal-core-ids/default",
   "lash-internal-core-llm/default",
   "lash-internal-llm-tools/default",
@@ -55,6 +56,8 @@ features = [
   "lash-internal-core-ids/otel-trace:off",
   "lash-internal-core-ids/testing:on",
   "lash-internal-core-ids/testing:off",
+  "lash-internal-core-store/otel-trace:on",
+  "lash-internal-core-store/otel-trace:off",
   "lash-internal-core-llm/otel-trace:on",
   "lash-internal-core-llm/otel-trace:off",
   "lash-internal-core-llm/testing:on",
@@ -81,6 +84,13 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-core-llm", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-llm", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-llm", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-core-ids/otel-trace", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-core-llm/otel-trace", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-trace/otel", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
@@ -99,12 +109,20 @@ features = [
   "lash-internal-core-ids/perf-witness:off",
   "lash-internal-core-llm/perf-witness:on",
   "lash-internal-core-llm/perf-witness:off",
+  "lash-internal-core-store/perf-witness:on",
+  "lash-internal-core-store/perf-witness:off",
+  "lash-internal-core-store/testing:on",
+  "lash-internal-core-store/testing:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-llm", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-llm", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "testing", "--locked"],
@@ -267,6 +285,24 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-provider-openai", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "test", "-p", "lash-internal-provider-openai", "--features", "testing", "--locked", "conformance"],
 ]
+
+# `lash-internal-core-store/otel-trace` gates only metric assertions in the
+# crate's own tests, so each forwarded edge needs a local-OFF/dependency-ON
+# witness.
+[[proxy_witness]]
+feature = "lash-internal-core-store/otel-trace"
+dependency = "lash-core-ids/otel-trace"
+command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-core-ids/otel-trace", "--locked"]
+
+[[proxy_witness]]
+feature = "lash-internal-core-store/otel-trace"
+dependency = "lash-core-llm/otel-trace"
+command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-core-llm/otel-trace", "--locked"]
+
+[[proxy_witness]]
+feature = "lash-internal-core-store/otel-trace"
+dependency = "lash-trace/otel"
+command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-trace/otel", "--locked"]
 
 [[proxy_witness]]
 feature = "lash-internal-plugin-process-controls/lashlang"
