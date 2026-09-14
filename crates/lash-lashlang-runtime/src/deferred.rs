@@ -162,7 +162,7 @@ pub enum DeferredResolutionError {
     #[error("journaled deferred resolution outcome is invalid: {0}")]
     InvalidJournaledOutcome(#[source] serde_json::Error),
     #[error("invalid Lashlang host tool surface: {0}")]
-    Ambient(#[source] ToolBindingError),
+    Ambient(#[source] Box<ToolBindingError>),
     #[error("failed to restore recorded grant for `{path}`: {source}")]
     Install {
         path: String,
@@ -173,7 +173,7 @@ pub enum DeferredResolutionError {
     Fold {
         path: String,
         #[source]
-        source: ToolBindingError,
+        source: Box<ToolBindingError>,
     },
 }
 
@@ -377,7 +377,7 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     if referenced.is_empty() {
         return surface
             .host_environment(catalog)
-            .map_err(DeferredResolutionError::Ambient);
+            .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)));
     }
     let referenced_for_ambient = referenced.clone();
     let recorded_paths = record
@@ -407,7 +407,7 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     let masked_paths = outcomes.keys().cloned().collect::<BTreeSet<_>>();
     let mut host_environment = surface
         .host_environment_masking(catalog, &masked_paths)
-        .map_err(DeferredResolutionError::Ambient)?;
+        .map_err(|source| DeferredResolutionError::Ambient(Box::new(source)))?;
     apply_deferred_outcomes(&mut host_environment, &outcomes, resolver, ctx)?;
     record.resolutions = outcomes;
 
@@ -494,11 +494,10 @@ where
                 && error.summary.is_none()
                 && error.cause.is_none() =>
         {
-            return Err(DeferredResolutionError::Ambient(
-                ToolBindingError::JournaledAmbient {
-                    message: error.message,
-                },
-            ));
+            let message = error.message;
+            return Err(DeferredResolutionError::Ambient(Box::new(
+                ToolBindingError::JournaledAmbient { message },
+            )));
         }
         Err(error) => return Err(DeferredResolutionError::Journal(error)),
     };
@@ -531,7 +530,7 @@ fn apply_deferred_outcomes(
         };
         fold_grant(host_environment, grant).map_err(|source| DeferredResolutionError::Fold {
             path: path.clone(),
-            source,
+            source: Box::new(source),
         })?;
     }
     for (path, resolution) in outcomes {
@@ -1494,16 +1493,18 @@ mod tests {
         .await
         .expect_err("masking web.fetch must not hide the unrelated surface collision");
 
+        let DeferredResolutionError::Ambient(ambient) = &error else {
+            panic!("expected an ambient surface failure, got {error}");
+        };
         assert!(matches!(
-            error,
-            DeferredResolutionError::Ambient(ToolBindingError::ConflictingBinding {
+            ambient.as_ref(),
+            ToolBindingError::ConflictingBinding {
                 source:
                     lashlang::LashlangHostCatalogError::ConflictingResourceOperation {
                         resource_type,
                         operation,
                     },
-            }) if resource_type == "SharedFetch" && operation == "fetch"
-        ));
+            } if resource_type == "SharedFetch" && operation == "fetch"));
         assert_eq!(harness.calls.load(Ordering::SeqCst), 1);
     }
 
