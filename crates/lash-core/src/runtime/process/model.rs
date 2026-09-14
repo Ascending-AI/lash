@@ -245,34 +245,11 @@ pub struct AbandonRequest {
     pub reason: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ProcessExecutionEnvRef(String);
 
-impl ProcessExecutionEnvRef {
-    /// Constructs a `ProcessExecutionEnvRef` for store and durable-substrate implementors suspending or resuming durable process execution.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
 
-    /// Exposes the opaque stable reference for continuation-store implementors; its contents carry no ordering or backend-independent structure.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 
-    /// Verify that this reference addresses exactly one valid encoded
-    /// process-execution environment.
-    pub fn matches_store_bytes(&self, bytes: &[u8]) -> bool {
-        ProcessExecutionEnvSpec::from_store_bytes(bytes).is_ok()
-            && process_execution_env_ref_for_bytes(bytes) == *self
-    }
-}
 
-impl fmt::Display for ProcessExecutionEnvRef {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
+
 
 /// Exact authority retaining immutable module or process-environment bytes.
 ///
@@ -342,12 +319,7 @@ impl ArtifactOwner {
 
 
 
-fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
-    ProcessExecutionEnvRef::new(format!(
-        "process-env:v6:blake3:{}",
-        crate::stable_hash::blake3_hex("lash-process-env/v6", bytes)
-    ))
-}
+
 
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
@@ -1033,55 +1005,6 @@ impl ProcessRegistration {
 
 
 
-/// Generates a durable lifecycle vocabulary and its complete variant list from
-/// one declaration.
-///
-/// The generated encoder match is exhaustive, so a new variant requires its
-/// persisted spelling here and thereby necessarily extends `ALL`. Backends fold
-/// `ALL` into SQL predicates
-/// (`crate::store_backend_support::live_process_status_predicate_sql` and
-/// friends), so a hand-maintained list would be exactly the drift those
-/// predicates exist to prevent.
-macro_rules! lifecycle_vocabulary {
-    ($type:ident, $encoder:ident, by_ref { $($variant:ident => $wire:literal),+ $(,)? }) => {
-        impl $type {
-            /// Every variant, in declaration order.
-            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            /// Returns the stable spelling persisted by stores.
-            pub fn $encoder(&self) -> &'static str {
-                match self {
-                    $(Self::$variant => $wire),+
-                }
-            }
-        }
-    };
-    ($type:ident, $encoder:ident, by_value { $($variant:ident => $wire:literal),+ $(,)? }) => {
-        impl $type {
-            /// Every variant, in declaration order.
-            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            /// Returns the stable spelling persisted by stores.
-            pub fn $encoder(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $wire),+
-                }
-            }
-        }
-    };
-}
-
-pub(crate) use lifecycle_vocabulary;
-
-lifecycle_vocabulary!(ProcessStatus, label, by_ref {
-    Running => "running",
-    Waiting => "waiting",
-    Completed => "completed",
-    Failed => "failed",
-    Cancelled => "cancelled",
-    Abandoned => "abandoned",
-    CallerDeparted => "caller_departed",
-});
 
 /// Whether a durable write landed on this call, or coalesced onto a fact the
 /// store already held under the same durable key.
@@ -1178,59 +1101,7 @@ impl ProcessRegistrationOutcome {
     }
 }
 
-/// Durable process lifecycle fold. Observer membership and wake subscription
-/// are queryable edge state, audited by events but deliberately not projected
-/// into this record.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessRecord {
-    pub id: ProcessId,
-    pub incarnation: ProcessIncarnation,
-    /// Sequence of the newest event folded into this record. Registration
-    /// starts at zero; every event append advances the value in the same
-    /// transaction that persists the event and projected record.
-    pub last_event_sequence: u64,
-    pub registration_fingerprint: String,
-    pub input: Arc<ProcessInput>,
-    /// Declared recovery contract. Required with no serde default: pre-column
-    /// durable rows cannot deserialize and are handled by each store's schema
-    /// version bump (reject-and-recreate), never by an API/serde default.
-    pub disposition: RecoveryContract,
-    pub lifecycle: ProcessLifecyclePolicy,
-    /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u32>,
-    pub identity: ProcessIdentity,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
-    pub provenance: ProcessProvenance,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_ref: Option<ProcessExecutionEnvRef>,
-    #[serde(default)]
-    pub created_at_ms: u64,
-    #[serde(default)]
-    pub updated_at_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_ref: Option<ProcessExternalRef>,
-    /// Durable, lease-fenced execution-started fact (ADR 0019). `None` until a
-    /// runner records it immediately before executing. Boxed so these
-    /// usually-absent facts do not enlarge the pervasive `ProcessRecord` that
-    /// flows through the runtime; serde treats `Option<Box<T>>` identically to
-    /// `Option<T>`, so the persisted JSON is unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_started: Option<Box<ProcessStarted>>,
-    /// Pending Abandon Request the sweep reconciles once the lease lapses.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abandon_request: Option<Box<AbandonRequest>>,
-    /// The first accepted cancellation request, retained across retries.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cancel_request: Option<Box<CancelRequest>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait: Option<WaitState>,
-    #[serde(default)]
-    pub status: ProcessStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub outcome: Option<ProcessOutcome>,
-}
+
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitState {
@@ -1258,85 +1129,7 @@ impl WaitState {
     }
 }
 
-impl ProcessRecord {
-    /// Builds a `ProcessRecord` from registration data for store and durable-substrate implementors
-    /// while persisting and coordinating durable process execution.
-    pub fn from_registration(
-        registration: ProcessRegistration,
-        incarnation: ProcessIncarnation,
-    ) -> Self {
-        Self::from_registration_with_clock(registration, incarnation, &crate::SystemClock)
-    }
 
-    /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    ///
-    /// Panics when the registration is invalid, so callers that accept
-    /// host-supplied registrations validate them with
-    /// `prepare_process_registration` first.
-    #[expect(clippy::expect_used, reason = "callers validate first")]
-    pub fn from_registration_with_clock(
-        registration: ProcessRegistration,
-        incarnation: ProcessIncarnation,
-        clock: &dyn crate::Clock,
-    ) -> Self {
-        let registration = prepare_process_registration(registration)
-            .expect("process registration should be valid before record construction");
-        let registration_fingerprint =
-            super::validation::process_registration_fingerprint(&registration, &[]);
-        Self::from_prepared_registration(
-            registration,
-            registration_fingerprint,
-            incarnation,
-            clock.timestamp_ms(),
-        )
-    }
-
-    /// Builds a `ProcessRecord` from prepared registration data for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn from_prepared_registration(
-        registration: ProcessRegistration,
-        registration_fingerprint: String,
-        incarnation: ProcessIncarnation,
-        now_ms: u64,
-    ) -> Self {
-        Self {
-            id: registration.id,
-            incarnation,
-            last_event_sequence: 0,
-            registration_fingerprint,
-            input: registration.input,
-            disposition: registration.disposition,
-            lifecycle: registration.lifecycle,
-            max_attempts: registration.max_attempts,
-            identity: registration.identity,
-            event_types: registration.event_types,
-            provenance: registration.provenance,
-            env_ref: registration.env_ref,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-            external_ref: None,
-            first_started: None,
-            abandon_request: None,
-            cancel_request: None,
-            wait: None,
-            status: ProcessStatus::Running,
-            outcome: None,
-        }
-    }
-
-    /// Lets process-store implementors gate retention on the folded durable status rather than the
-    /// presence of an incidental event.
-    pub fn is_terminal(&self) -> bool {
-        self.status.is_terminal()
-    }
-
-    /// Exposes originator id to store and durable-substrate implementors while persisting and
-    /// coordinating durable process execution.
-    pub fn originator_id(&self) -> String {
-        self.provenance.originator.id()
-    }
-}
 
 /// The kind and label a host declares for a start whose input core owns
 /// outright — a session turn, a tool call, an external placeholder.
@@ -1786,4 +1579,140 @@ pub enum ProcessChange {
     Deleted { tombstone: ProcessTombstone },
 }
 
+/// Durable process lifecycle fold. Observer membership and wake subscription
+/// are queryable edge state, audited by events but deliberately not projected
+/// into this record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessRecord {
+    pub id: ProcessId,
+    pub incarnation: ProcessIncarnation,
+    /// Sequence of the newest event folded into this record. Registration
+    /// starts at zero; every event append advances the value in the same
+    /// transaction that persists the event and projected record.
+    pub last_event_sequence: u64,
+    pub registration_fingerprint: String,
+    pub input: Arc<ProcessInput>,
+    /// Declared recovery contract. Required with no serde default: pre-column
+    /// durable rows cannot deserialize and are handled by each store's schema
+    /// version bump (reject-and-recreate), never by an API/serde default.
+    pub disposition: RecoveryContract,
+    pub lifecycle: ProcessLifecyclePolicy,
+    /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    pub identity: ProcessIdentity,
+    #[serde(default)]
+    pub event_types: Vec<ProcessEventType>,
+    pub provenance: ProcessProvenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_ref: Option<ProcessExecutionEnvRef>,
+    #[serde(default)]
+    pub created_at_ms: u64,
+    #[serde(default)]
+    pub updated_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_ref: Option<ProcessExternalRef>,
+    /// Durable, lease-fenced execution-started fact (ADR 0019). `None` until a
+    /// runner records it immediately before executing. Boxed so these
+    /// usually-absent facts do not enlarge the pervasive `ProcessRecord` that
+    /// flows through the runtime; serde treats `Option<Box<T>>` identically to
+    /// `Option<T>`, so the persisted JSON is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_started: Option<Box<ProcessStarted>>,
+    /// Pending Abandon Request the sweep reconciles once the lease lapses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abandon_request: Option<Box<AbandonRequest>>,
+    /// The first accepted cancellation request, retained across retries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel_request: Option<Box<CancelRequest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<WaitState>,
+    #[serde(default)]
+    pub status: ProcessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<ProcessOutcome>,
+}
+impl ProcessRecord {
+    /// Builds a `ProcessRecord` from registration data for store and durable-substrate implementors
+    /// while persisting and coordinating durable process execution.
+    pub fn from_registration(
+        registration: ProcessRegistration,
+        incarnation: ProcessIncarnation,
+    ) -> Self {
+        Self::from_registration_with_clock(registration, incarnation, &crate::SystemClock)
+    }
 
+    /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn from_registration_with_clock(
+        registration: ProcessRegistration,
+        incarnation: ProcessIncarnation,
+        clock: &dyn crate::Clock,
+    ) -> Self {
+        let registration = prepare_process_registration(registration)
+            .expect("process registration should be valid before record construction");
+        let registration_fingerprint =
+            super::validation::process_registration_fingerprint(&registration, &[]);
+        Self::from_prepared_registration(
+            registration,
+            registration_fingerprint,
+            incarnation,
+            clock.timestamp_ms(),
+        )
+    }
+
+    /// Builds a `ProcessRecord` from prepared registration data for store and durable-substrate
+    /// implementors while persisting and coordinating durable process execution.
+    pub fn from_prepared_registration(
+        registration: ProcessRegistration,
+        registration_fingerprint: String,
+        incarnation: ProcessIncarnation,
+        now_ms: u64,
+    ) -> Self {
+        Self {
+            id: registration.id,
+            incarnation,
+            last_event_sequence: 0,
+            registration_fingerprint,
+            input: registration.input,
+            disposition: registration.disposition,
+            lifecycle: registration.lifecycle,
+            max_attempts: registration.max_attempts,
+            identity: registration.identity,
+            event_types: registration.event_types,
+            provenance: registration.provenance,
+            env_ref: registration.env_ref,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+            external_ref: None,
+            first_started: None,
+            abandon_request: None,
+            cancel_request: None,
+            wait: None,
+            status: ProcessStatus::Running,
+            outcome: None,
+        }
+    }
+
+    /// Lets process-store implementors gate retention on the folded durable status rather than the
+    /// presence of an incidental event.
+    pub fn is_terminal(&self) -> bool {
+        self.status.is_terminal()
+    }
+
+    /// Exposes originator id to store and durable-substrate implementors while persisting and
+    /// coordinating durable process execution.
+    pub fn originator_id(&self) -> String {
+        self.provenance.originator.id()
+    }
+}
+
+impl lash_core_store::process_identity::ProcessRecordIdentity for ProcessRecord {
+    fn process_id(&self) -> &ProcessId {
+        &self.id
+    }
+
+    fn process_incarnation(&self) -> ProcessIncarnation {
+        self.incarnation
+    }
+}

@@ -13,7 +13,7 @@
 //! wire until it is named here -- so a field this file does not mention is a
 //! runtime-only field by construction.
 
-use super::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
+use crate::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
 use crate::SessionId;
 
 impl serde::Serialize for SessionPolicy {

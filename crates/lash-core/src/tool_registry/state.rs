@@ -30,21 +30,15 @@ impl ToolSourceHandle {
     }
 }
 
-fn is_member_default() -> bool {
-    true
-}
-
-fn is_default_member(member: &bool) -> bool {
-    *member
-}
 
 
 
 
 
-fn is_leaf_registration(kind: &ToolRegistrationKind) -> bool {
-    *kind == ToolRegistrationKind::Leaf
-}
+
+
+
+
 
 
 

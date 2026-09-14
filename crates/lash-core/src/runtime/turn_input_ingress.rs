@@ -15,41 +15,6 @@ use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 
 
 
-/// Generates a turn-input wire vocabulary and its complete variant list from one declaration.
-///
-/// The generated encoder and decoder matches are exhaustive, so adding a variant requires its
-/// persisted spelling here and necessarily extends `ALL`.
-macro_rules! turn_input_wire {
-    ($type:ident, $visibility:vis, $encoder:ident, $decoder:ident {
-        $($variant:ident => $wire:literal),+ $(,)?
-    }) => {
-        impl $type {
-            #[allow(dead_code)]
-            pub(crate) const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            /// Returns the stable wire spelling persisted by turn-input stores.
-            $visibility fn $encoder(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $wire),+
-                }
-            }
-
-            /// Parses a stable wire spelling persisted by turn-input stores.
-            #[allow(dead_code)]
-            $visibility fn $decoder(value: &str) -> Option<Self> {
-                match value {
-                    $($wire => Some(Self::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-    };
-}
-
-turn_input_wire!(TurnInputCheckpointBoundary, pub(crate), as_wire_str, from_wire_str {
-    AfterWork => "after_work",
-    BeforeCompletion => "before_completion",
-});
 
 /// Generates the checkpoint enumeration a claim can name, from one variant list.
 ///
@@ -78,13 +43,6 @@ turn_input_claim_checkpoints!(AfterWork, BeforeCompletion);
 
 
 
-turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
-    PendingActive => "pending_active",
-    DeferredNextTurn => "deferred_next_turn",
-    Accepted => "accepted",
-    Cancelled => "cancelled",
-    Completed => "completed",
-});
 
 
 
@@ -128,67 +86,9 @@ turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
 
 
 
-/// Turn-input rows a turn accepted itself and drives without a claim.
-///
-/// The unclaimed half of a turn's drive: the rows exist durably before the
-/// turn executes, exactly as a claimed row does, but no session-execution lease
-/// fences them. Their settlement is decided by the head CAS alone
-/// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct UnclaimedTurnInputs {
-    pub session_id: SessionId,
-    pub inputs: Vec<PendingTurnInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub applications: Vec<TurnInputApplication>,
-}
 
-impl UnclaimedTurnInputs {
-    /// Exposes settlement to store and durable-substrate implementors driving
-    /// rows they accepted themselves.
-    pub fn completion(&self) -> TurnInputCompletion {
-        TurnInputCompletion {
-            session_id: self.session_id.clone(),
-            claim: None,
-            data: TurnInputCompletionData {
-                input_ids: self
-                    .inputs
-                    .iter()
-                    .map(|input| input.input_id.clone())
-                    .collect(),
-                applications: self.applications.clone(),
-            },
-        }
-    }
 
-    /// Records the initial application evidence for rows driven without a
-    /// claim, matching [`TurnInputClaim::record_initial_turn_application`].
-    pub fn record_initial_turn_application(
-        &mut self,
-        turn_id: &crate::TurnId,
-        committed_message_id: &str,
-    ) -> Result<(), crate::RuntimeError> {
-        if !self.applications.is_empty() {
-            if !self.applications.iter().all(|application| {
-                application.turn_id == *turn_id
-                    && application.committed_message_id == committed_message_id
-                    && application.checkpoint.is_none()
-            }) {
-                return Err(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
-                    format!(
-                        "cannot apply retained turn-input redrive set for session `{}` as the \
-                         initial group of turn `{turn_id}`: its durable applications belong to \
-                         another turn or checkpoint",
-                        self.session_id
-                    ),
-                ));
-            }
-            return Ok(());
-        }
-        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
-        Ok(())
-    }
-}
+
 
 /// The turn-input rows one turn is driving, with the authority it will settle
 /// them under.
@@ -243,12 +143,7 @@ impl TurnInputDrive {
         }
     }
 
-    pub(crate) fn materialize_turn_input(&self) -> TurnInput {
-        match self {
-            Self::Claimed(claim) => claim.materialize_turn_input(),
-            Self::Unclaimed(unclaimed) => materialize_turn_input(&unclaimed.inputs),
-        }
-    }
+
 
     pub(crate) fn record_initial_turn_application(
         &mut self,
@@ -267,50 +162,6 @@ impl TurnInputDrive {
     }
 }
 
-fn initial_turn_applications(
-    inputs: &[PendingTurnInput],
-    turn_id: &crate::TurnId,
-    committed_message_id: &str,
-) -> Vec<TurnInputApplication> {
-    inputs
-        .iter()
-        .filter(|input| {
-            input.input.items.iter().any(|item| match item {
-                crate::InputItem::Text { text } => !text.is_empty(),
-                crate::InputItem::Attachment { .. } => true,
-            })
-        })
-        .map(|input| TurnInputApplication {
-            input_id: input.input_id.clone(),
-            source_key: input.source_key.clone(),
-            turn_id: turn_id.clone(),
-            committed_message_id: committed_message_id.to_string(),
-            checkpoint: None,
-        })
-        .collect()
-}
-
-fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
-    let mut input_items = Vec::new();
-    let mut protocol_turn_options = None;
-    let mut trace_turn_id = None;
-    for pending in inputs {
-        input_items.extend(pending.input.items.clone());
-        if protocol_turn_options.is_none() {
-            protocol_turn_options = pending.input.protocol_turn_options.clone();
-        }
-        if trace_turn_id.is_none() {
-            trace_turn_id = pending.input.trace_turn_id.clone();
-        }
-    }
-    TurnInput {
-        items: input_items,
-        protocol_turn_options,
-        trace_turn_id,
-        protocol_extension: None,
-        turn_context: crate::TurnContext::default(),
-    }
-}
 
 
 
@@ -318,91 +169,16 @@ fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
 
 
 
-#[derive(Clone, Debug, Default)]
-pub struct QueuedCheckpointTurnInput {
-    pub messages: Vec<crate::Message>,
-    pub turn_causes: Vec<TurnCause>,
-}
 
-pub(crate) fn source_key_display_id(source: &str) -> String {
-    source
-        .strip_prefix("host:")
-        .or_else(|| source.strip_prefix("injection:"))
-        .unwrap_or(source)
-        .to_string()
-}
 
-pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<PluginMessage> {
-    let mut text = Vec::new();
-    let mut attachments = Vec::new();
-    for item in &input.items {
-        match item {
-            crate::InputItem::Text { text: item_text } if !item_text.is_empty() => {
-                text.push(item_text.clone());
-            }
-            crate::InputItem::Text { .. } => {}
-            crate::InputItem::Attachment { source } => attachments.push(source.clone()),
-        }
-    }
-    if text.is_empty() && attachments.is_empty() {
-        return None;
-    }
-    Some(PluginMessage {
-        id: None,
-        role: crate::MessageRole::User,
-        content: text.join("\n"),
-        origin: None,
-        parts: Vec::new(),
-        attachments,
-    })
-}
 
-async fn committed_message_from_pending_input(
-    pending: &PendingTurnInput,
-    turn_id: &crate::TurnId,
-    attachment_store: &crate::SessionAttachmentStore,
-    attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
-) -> Result<Option<crate::Message>, String> {
-    let normalized = super::io::normalize_input_items(
-        &pending.input.items,
-        attachment_store,
-        attachment_source_policy,
-    )
-    .await?;
-    let message_id = ingress_message_id(&pending.input_id);
-    let mut parts = Vec::new();
-    for item in normalized {
-        match item {
-            super::NormalizedItem::Text(text) if !text.is_empty() => {
-                let part_id = format!("{message_id}.p{}", parts.len());
-                parts.push(crate::Part::text(part_id, text, None));
-            }
-            super::NormalizedItem::Text(_) => {}
-            super::NormalizedItem::Attachment(source) => {
-                let part_id = format!("{message_id}.p{}", parts.len());
-                parts.push(crate::Part::attachment_part(
-                    part_id,
-                    String::new(),
-                    Some(crate::session_model::message::PartAttachment { source }),
-                ));
-            }
-        }
-    }
-    if parts.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(crate::Message {
-        id: message_id,
-        role: crate::MessageRole::User,
-        // Same typed provenance the turn's opening input carries: the absorbing
-        // turn plus the durable input this message came from (FIG-972).
-        origin: Some(crate::MessageOrigin::TurnInput {
-            turn_id: turn_id.clone(),
-            input_id: Some(pending.input_id.clone()),
-        }),
-        parts: crate::shared_parts(parts),
-    }))
-}
+
+
+
+
+
+
+
 
 impl crate::TurnInput {
     /// The part of this input a durable acceptance row can carry.
@@ -432,9 +208,7 @@ impl crate::TurnInput {
     }
 }
 
-pub fn ingress_message_id(input_id: &str) -> String {
-    format!("m_ingress_{input_id}")
-}
+
 
 #[cfg(test)]
 mod tests {

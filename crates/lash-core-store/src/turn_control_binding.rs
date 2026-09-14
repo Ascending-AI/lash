@@ -1,5 +1,6 @@
 //! Scope binding identity for durable turn-cancellation authority.
 
+use crate::{RuntimeError};
 const PHYSICAL_SCOPE_BINDING_SEPARATOR: &str = "#lash-physical-scope:";
 /// Bind a durable cancellation authority to the non-session physical scope
 /// that owns its journal. Turn/session scopes are already tied to their
@@ -47,4 +48,15 @@ pub(crate) fn admitted_turn_cancel_scope(
     } else {
         controller_scope.clone()
     }
+}
+
+/// The reopenable turn-cancellation authority a store may provide.
+///
+/// The authority owns an `AwaitEventResolver`, which is effect-executor
+/// machinery and stays in `lash-core`, so the store names this seam and
+/// transports the value without inspecting it. `lash-core`'s
+/// `TurnCancellationAuthority` is the sole implementor.
+pub trait StoreTurnCancellationAuthority: std::any::Any + Send + Sync {
+    /// Stable identity of the durable authority that minted the accepted keys.
+    fn binding_id(&self) -> &str;
 }

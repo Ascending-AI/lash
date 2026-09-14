@@ -167,35 +167,10 @@ impl WakeDeliveryConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WakeDeliveryState {
-    Pending,
-    Enqueuing,
-    Enqueued,
-    Discarded,
-}
 
-super::model::lifecycle_vocabulary!(WakeDeliveryState, as_str, by_value {
-    Pending => "pending",
-    Enqueuing => "enqueuing",
-    Enqueued => "enqueued",
-    Discarded => "discarded",
-});
 
-impl WakeDeliveryState {
-    /// Whether the delivery still owes the target a wake.
-    ///
-    /// The Rust twin of the `state IN (...)` predicate prune and preflight
-    /// queries carry. Exhaustive on purpose: a new state must declare whether
-    /// it is still owed before any query can compile.
-    pub fn is_undelivered(self) -> bool {
-        match self {
-            Self::Pending | Self::Enqueuing => true,
-            Self::Enqueued | Self::Discarded => false,
-        }
-    }
-}
+
+
 
 /// Durable terminal outcome for an undeliverable wake.
 ///

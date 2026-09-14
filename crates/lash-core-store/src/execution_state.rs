@@ -1,8 +1,8 @@
 //! Durable protocol-owned execution state carried in a session checkpoint.
+use serde::de::DeserializeOwned;
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::BTreeMap;
 
 /// Complete protocol-owned execution-state component update for one checkpoint.
 ///

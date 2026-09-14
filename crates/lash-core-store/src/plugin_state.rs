@@ -1,8 +1,8 @@
 //! Durable plugin-namespace state carried in a session checkpoint.
+use serde_json::Value;
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::BTreeMap;
 
 /// Complete plugin-state checkpoint body, including non-resident namespaces.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

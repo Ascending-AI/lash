@@ -1,8 +1,7 @@
 //! Durable and host-reconciled session policy.
 
+use crate::{ChargeSafetyPolicy, ModelSpec, NoProgressBudget, SessionId, TurnBudget};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {
@@ -78,14 +77,14 @@ impl SessionPolicy {
     /// host's id; an open that names nothing inherits the recorded pin; an
     /// open naming the recorded provider keeps it; an open naming a
     /// *different* provider is refused with
-    /// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
-    /// rather than having its request silently discarded and the conflict
-    /// deferred to the first turn.
+    /// [`ProviderPinMismatch`] (widened to `SessionError::ProviderMismatch` by
+    /// `lash-core`) rather than having its request silently discarded and the
+    /// conflict deferred to the first turn.
     pub fn settle_provider_pin(
         session_id: &SessionId,
         recorded: &str,
         requested: &str,
-    ) -> Result<String, crate::SessionError> {
+    ) -> Result<String, ProviderPinMismatch> {
         let recorded = recorded.trim();
         let requested = requested.trim();
         if recorded.is_empty() {
@@ -94,7 +93,7 @@ impl SessionPolicy {
         if requested.is_empty() || requested == recorded {
             return Ok(recorded.to_string());
         }
-        Err(crate::SessionError::ProviderMismatch {
+        Err(ProviderPinMismatch {
             expected: recorded.to_string(),
             actual: requested.to_string(),
             session_id: session_id.clone(),
@@ -117,5 +116,166 @@ impl SessionPolicy {
     /// materializing, executing, or persisting a session turn.
     pub fn context_window_tokens(&self) -> usize {
         self.model.context_window_tokens()
+    }
+}
+
+/// Durable session-policy mutation carried by
+/// [`crate::SessionCommand::ApplyConfigPatch`].
+///
+/// Every field is applied at the session-command drain. The command commit is
+/// therefore the publication boundary: resident policy is never changed by a
+/// setter before the durable head accepts the same values.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ApplyConfigPatch {
+    /// Exact session-config wire generation. The patch and the head row share
+    /// one schema because they carry the same durable policy facts.
+    pub schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::ModelSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<crate::PromptLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<crate::GenerationOverlay>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_budget: Option<crate::TurnBudget>,
+    /// Session-owned tool authority. This durable fact lives beside the
+    /// protocol turn options on runtime state and replaces the whole access
+    /// value when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_access: Option<crate::SessionToolAccess>,
+    /// Protocol-owned turn options. Unlike the other fields this durable fact
+    /// lives on the runtime session state rather than inside
+    /// [`crate::SessionPolicy`], but it settles through the same commanded
+    /// path: the drain commit publishes it to the session head (v6) and to
+    /// resident state in one step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+}
+impl Default for ApplyConfigPatch {
+    fn default() -> Self {
+        Self {
+            schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            provider_id: None,
+            model: None,
+            prompt: None,
+            generation: None,
+            turn_budget: None,
+            tool_access: None,
+            protocol_turn_options: None,
+        }
+    }
+}
+impl ApplyConfigPatch {
+    pub(super) fn between(previous: &crate::SessionPolicy, next: &crate::SessionPolicy) -> Self {
+        Self {
+            provider_id: (previous.provider_id != next.provider_id)
+                .then(|| next.provider_id.clone()),
+            model: (previous.model != next.model).then(|| next.model.clone()),
+            prompt: (previous.prompt != next.prompt).then(|| next.prompt.clone()),
+            generation: (previous.generation != next.generation)
+                .then(|| crate::GenerationOverlay::Replace(next.generation.clone())),
+            turn_budget: (previous.turn_budget != next.turn_budget).then_some(next.turn_budget),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn validate(&self) -> Result<(), crate::RuntimeError> {
+        if self.schema_version != crate::store::SESSION_HEAD_META_SCHEMA_VERSION {
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCommandClaim,
+                format!(
+                    "unsupported config patch schema version {}; expected {}",
+                    self.schema_version,
+                    crate::store::SESSION_HEAD_META_SCHEMA_VERSION
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn apply_to(&self, policy: &mut crate::SessionPolicy) {
+        if let Some(provider_id) = self.provider_id.as_ref() {
+            policy.provider_id = provider_id.clone();
+        }
+        if let Some(model) = self.model.as_ref() {
+            policy.replace_model_retaining_attachment_acceptance(model.clone());
+        }
+        if let Some(prompt) = self.prompt.as_ref() {
+            policy.prompt = prompt.clone();
+        }
+        if let Some(generation) = self.generation.as_ref() {
+            policy.generation = generation.resolve(&policy.generation);
+        }
+        if let Some(turn_budget) = self.turn_budget {
+            policy.turn_budget = turn_budget;
+        }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.provider_id.is_none()
+            && self.model.is_none()
+            && self.prompt.is_none()
+            && self.generation.is_none()
+            && self.turn_budget.is_none()
+            && self.tool_access.is_none()
+            && self.protocol_turn_options.is_none()
+    }
+
+    /// Publish every settled field to resident session state.
+    ///
+    /// Policy-homed fields land through [`Self::apply_to`]; the protocol turn
+    /// options land on their runtime-state home. Both publications happen only
+    /// after the durable head accepted the same values.
+    pub(super) fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
+        self.apply_to(&mut state.policy);
+        if let Some(access) = self.tool_access.as_ref() {
+            state.authority.tool_access = access.clone();
+        }
+        if let Some(options) = self.protocol_turn_options.as_ref() {
+            state.protocol_turn_options = options.clone();
+        }
+    }
+}
+
+/// A recorded provider pin that does not match the live request.
+///
+/// `lash-core` widens this into `SessionError::ProviderMismatch`; the pin rule
+/// itself is durable policy, so it settles here.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "provider mismatch for session `{session_id}`: persisted provider `{expected}` does not match live provider `{actual}`"
+)]
+pub struct ProviderPinMismatch {
+    pub expected: String,
+    pub actual: String,
+    pub session_id: crate::SessionId,
+}
+
+/// How a [`SessionSpec`] layers generation intent over the policy it resolves
+/// against.
+///
+/// [`crate::GenerationOptions`] is a set of independently optional controls, not
+/// one value, so the default overlay is per-field: a child that caps output
+/// tokens keeps the temperature and seed its parent pinned. Discarding
+/// inherited intent stays available, but it has to be asked for.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", content = "generation", rename_all = "snake_case")]
+pub enum GenerationOverlay {
+    /// Layer the set options over the inherited ones. Options this overlay
+    /// leaves unset keep the value they inherit.
+    Merge(crate::GenerationOptions),
+    /// Use exactly these options, discarding every inherited one. A default
+    /// [`crate::GenerationOptions`] therefore clears the inherited intent.
+    Replace(crate::GenerationOptions),
+}
+impl GenerationOverlay {
+    /// Resolve this overlay against the options it inherits.
+    pub fn resolve(&self, inherited: &crate::GenerationOptions) -> crate::GenerationOptions {
+        match self {
+            Self::Merge(generation) => generation.merged_over(inherited),
+            Self::Replace(generation) => generation.clone(),
+        }
     }
 }

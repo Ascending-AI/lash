@@ -20,138 +20,17 @@ use crate::{
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
 #[cfg(test)]
-use super::identity_types::process_transfer_set_preimage;
+use lash_core_store::effect_identity::process_transfer_set_preimage;
 use super::identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
     process_transfer_set_identity,
 };
 
-pub(super) const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 
-/// Canonical lineage for a runtime-side invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeInvocation {
-    pub attribution: RuntimeAttribution,
-    pub subject: RuntimeSubject,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub caused_by: Option<CausalRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay: Option<RuntimeReplay>,
-}
 
-impl RuntimeInvocation {
-    /// Constructs the general causal-fact projection of an effect invocation.
-    pub fn effect(
-        address: EffectAddress,
-        attribution: RuntimeAttribution,
-        effect_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            attribution,
-            subject: RuntimeSubject::Effect {
-                address,
-                effect_id: effect_id.into(),
-                replay_attribution: None,
-            },
-            caused_by: None,
-            replay: None,
-        }
-    }
 
-    /// Sets the caused by carried by a `RuntimeInvocation` for store, effect-host, and protocol
-    /// implementors while materializing, executing, or persisting a session turn.
-    pub fn with_caused_by(mut self, caused_by: Option<CausalRef>) -> Self {
-        self.caused_by = caused_by;
-        self
-    }
 
-    /// Exposes the effect ID to effect-host implementors only for effect subjects, returning `None`
-    /// for process, trigger, and session-node subjects.
-    pub fn effect_id(&self) -> Option<&str> {
-        match &self.subject {
-            RuntimeSubject::Effect { effect_id, .. } => Some(effect_id),
-            _ => None,
-        }
-    }
 
-    /// Exposes the admitted address only for effect subjects.
-    pub fn effect_address(&self) -> Option<&EffectAddress> {
-        match &self.subject {
-            RuntimeSubject::Effect { address, .. } => Some(address),
-            _ => None,
-        }
-    }
-
-    /// Exposes replay key to store, effect-host, and protocol implementors while materializing,
-    /// executing, or persisting a session turn. Returns `None` when no replay key is present.
-    pub fn replay_key(&self) -> Option<&str> {
-        self.effect_address()
-            .map(|address| address.replay_key.as_str())
-            .or_else(|| self.replay.as_ref().map(|replay| replay.key.as_str()))
-    }
-
-    pub fn replay_attribution(&self) -> Option<&RuntimeReplayAttribution> {
-        match &self.subject {
-            RuntimeSubject::Effect {
-                replay_attribution, ..
-            } => replay_attribution.as_ref(),
-            _ => self
-                .replay
-                .as_ref()
-                .and_then(|replay| replay.attribution.as_ref()),
-        }
-    }
-
-    #[must_use]
-    pub fn with_replay_attribution(mut self, attribution: RuntimeReplayAttribution) -> Self {
-        match &mut self.subject {
-            RuntimeSubject::Effect {
-                replay_attribution, ..
-            } => *replay_attribution = Some(attribution),
-            _ => panic!("runtime replay attribution can only be attached to an effect subject"),
-        }
-        self
-    }
-
-    /// Projects stable causal identity for protocol and effect-host implementors; each invocation
-    /// subject maps to its corresponding causal-reference variant.
-    pub fn causal_ref(&self) -> Option<CausalRef> {
-        match &self.subject {
-            RuntimeSubject::Effect { address, .. } => Some(CausalRef::Effect {
-                address: address.clone(),
-            }),
-            RuntimeSubject::Process { process_id } => Some(CausalRef::Process {
-                process_id: process_id.clone(),
-            }),
-            RuntimeSubject::ProcessEvent {
-                process_id,
-                sequence,
-                ..
-            } => Some(CausalRef::ProcessEvent {
-                process_id: process_id.clone(),
-                sequence: *sequence,
-            }),
-            RuntimeSubject::TriggerOccurrence {
-                occurrence_id,
-                subscription_id,
-                subscription_incarnation,
-                subscription_revision,
-            } => Some(CausalRef::TriggerOccurrence {
-                occurrence_id: occurrence_id.clone(),
-                subscription_id: subscription_id.clone(),
-                subscription_incarnation: subscription_incarnation.clone(),
-                subscription_revision: *subscription_revision,
-            }),
-            RuntimeSubject::SessionNode {
-                session_id,
-                node_id,
-            } => Some(CausalRef::SessionNode {
-                session_id: session_id.clone(),
-                node_id: node_id.clone(),
-            }),
-        }
-    }
-}
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -319,11 +198,7 @@ impl<'de> Deserialize<'de> for RuntimeEffectInvocation {
     }
 }
 
-impl From<RuntimeEffectInvocation> for RuntimeInvocation {
-    fn from(invocation: RuntimeEffectInvocation) -> Self {
-        invocation.into_runtime_invocation()
-    }
-}
+
 
 /// Fully serializable envelope emitted at Lash's nondeterministic boundary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1722,5 +1597,11 @@ mod settlement_order_journal_tests {
             panic!("decoded the wrong outcome kind");
         };
         assert_eq!(settlement_order, vec![2, 0, 1]);
+    }
+}
+
+impl From<RuntimeEffectInvocation> for crate::RuntimeInvocation {
+    fn from(invocation: RuntimeEffectInvocation) -> Self {
+        invocation.into_runtime_invocation()
     }
 }

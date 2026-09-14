@@ -131,6 +131,16 @@ pub enum SessionError {
     Protocol(String),
 }
 
+impl From<lash_core_store::session_policy::ProviderPinMismatch> for SessionError {
+    fn from(value: lash_core_store::session_policy::ProviderPinMismatch) -> Self {
+        Self::ProviderMismatch {
+            expected: value.expected,
+            actual: value.actual,
+            session_id: value.session_id,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecRequest {
     pub language: String,

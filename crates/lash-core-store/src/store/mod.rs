@@ -26,7 +26,7 @@ mod preflight;
 pub mod queued_work;
 mod realization;
 mod retention;
-mod runtime_commit;
+pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
 pub(crate) mod session_execution_lease;
@@ -34,7 +34,7 @@ mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 mod usage;
-mod work_claim;
+pub mod work_claim;
 
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use attachment_manifest::{
@@ -1086,7 +1086,9 @@ pub trait TurnInputStore: Send + Sync {
     /// Reopenable authority for the reserved cancellation promises, when this
     /// store provides one. Native execution delegates only turn-control waits
     /// here; durable/custom effect hosts keep their declared owner.
-    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>> {
         None
     }
 

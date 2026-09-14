@@ -4,8 +4,14 @@
 //! payloads, and the checkpoint boundary rule stores filter on. The ingress
 //! driver that normalizes and applies them stays in `lash-core`.
 
+use std::any::Any;
+use std::fmt;
+use crate::{
+    CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCancelOriginHint,
+    TurnCause, TurnId,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Mint a newly created pending turn-input ID from explicit deterministic facts.
@@ -86,6 +92,9 @@ impl TurnInputIngress {
         }
     }
 }
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnInputCheckpointBoundary {
     #[default]
@@ -524,3 +533,582 @@ impl crate::WorkClaim<TurnInputClaimData> {
         materialize_turn_input(&self.inputs)
     }
 }
+
+pub(crate) fn source_key_display_id(source: &str) -> String {
+    source
+        .strip_prefix("host:")
+        .or_else(|| source.strip_prefix("injection:"))
+        .unwrap_or(source)
+        .to_string()
+}
+
+/// Turn-input rows a turn accepted itself and drives without a claim.
+///
+/// The unclaimed half of a turn's drive: the rows exist durably before the
+/// turn executes, exactly as a claimed row does, but no session-execution lease
+/// fences them. Their settlement is decided by the head CAS alone
+/// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct UnclaimedTurnInputs {
+    pub session_id: SessionId,
+    pub inputs: Vec<PendingTurnInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applications: Vec<TurnInputApplication>,
+}
+impl UnclaimedTurnInputs {
+    /// Exposes settlement to store and durable-substrate implementors driving
+    /// rows they accepted themselves.
+    pub fn completion(&self) -> TurnInputCompletion {
+        TurnInputCompletion {
+            session_id: self.session_id.clone(),
+            claim: None,
+            data: TurnInputCompletionData {
+                input_ids: self
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.clone())
+                    .collect(),
+                applications: self.applications.clone(),
+            },
+        }
+    }
+
+    /// Records the initial application evidence for rows driven without a
+    /// claim, matching [`TurnInputClaim::record_initial_turn_application`].
+    pub fn record_initial_turn_application(
+        &mut self,
+        turn_id: &crate::TurnId,
+        committed_message_id: &str,
+    ) -> Result<(), crate::RuntimeError> {
+        if !self.applications.is_empty() {
+            if !self.applications.iter().all(|application| {
+                application.turn_id == *turn_id
+                    && application.committed_message_id == committed_message_id
+                    && application.checkpoint.is_none()
+            }) {
+                return Err(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
+                    format!(
+                        "cannot apply retained turn-input redrive set for session `{}` as the \
+                         initial group of turn `{turn_id}`: its durable applications belong to \
+                         another turn or checkpoint",
+                        self.session_id
+                    ),
+                ));
+            }
+            return Ok(());
+        }
+        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
+        Ok(())
+    }
+}
+fn initial_turn_applications(
+    inputs: &[PendingTurnInput],
+    turn_id: &crate::TurnId,
+    committed_message_id: &str,
+) -> Vec<TurnInputApplication> {
+    inputs
+        .iter()
+        .filter(|input| {
+            input.input.items.iter().any(|item| match item {
+                crate::InputItem::Text { text } => !text.is_empty(),
+                crate::InputItem::Attachment { .. } => true,
+            })
+        })
+        .map(|input| TurnInputApplication {
+            input_id: input.input_id.clone(),
+            source_key: input.source_key.clone(),
+            turn_id: turn_id.clone(),
+            committed_message_id: committed_message_id.to_string(),
+            checkpoint: None,
+        })
+        .collect()
+}
+fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
+    let mut input_items = Vec::new();
+    let mut protocol_turn_options = None;
+    let mut trace_turn_id = None;
+    for pending in inputs {
+        input_items.extend(pending.input.items.clone());
+        if protocol_turn_options.is_none() {
+            protocol_turn_options = pending.input.protocol_turn_options.clone();
+        }
+        if trace_turn_id.is_none() {
+            trace_turn_id = pending.input.trace_turn_id.clone();
+        }
+    }
+    TurnInput {
+        items: input_items,
+        protocol_turn_options,
+        trace_turn_id,
+        protocol_extension: None,
+        turn_context: crate::TurnContext::default(),
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct QueuedCheckpointTurnInput {
+    pub messages: Vec<crate::Message>,
+    pub turn_causes: Vec<TurnCause>,
+}
+pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<PluginMessage> {
+    let mut text = Vec::new();
+    let mut attachments = Vec::new();
+    for item in &input.items {
+        match item {
+            crate::InputItem::Text { text: item_text } if !item_text.is_empty() => {
+                text.push(item_text.clone());
+            }
+            crate::InputItem::Text { .. } => {}
+            crate::InputItem::Attachment { source } => attachments.push(source.clone()),
+        }
+    }
+    if text.is_empty() && attachments.is_empty() {
+        return None;
+    }
+    Some(PluginMessage {
+        id: None,
+        role: crate::MessageRole::User,
+        content: text.join("\n"),
+        origin: None,
+        parts: Vec::new(),
+        attachments,
+    })
+}
+async fn committed_message_from_pending_input(
+    pending: &PendingTurnInput,
+    turn_id: &crate::TurnId,
+    attachment_store: &crate::SessionAttachmentStore,
+    attachment_source_policy: &dyn crate::AttachmentSourcePolicy,
+) -> Result<Option<crate::Message>, String> {
+    let normalized = crate::input_normalization::normalize_input_items(
+        &pending.input.items,
+        attachment_store,
+        attachment_source_policy,
+    )
+    .await?;
+    let message_id = ingress_message_id(&pending.input_id);
+    let mut parts = Vec::new();
+    for item in normalized {
+        match item {
+            crate::NormalizedItem::Text(text) if !text.is_empty() => {
+                let part_id = format!("{message_id}.p{}", parts.len());
+                parts.push(crate::Part::text(part_id, text, None));
+            }
+            crate::NormalizedItem::Text(_) => {}
+            crate::NormalizedItem::Attachment(source) => {
+                let part_id = format!("{message_id}.p{}", parts.len());
+                parts.push(crate::Part::attachment_part(
+                    part_id,
+                    String::new(),
+                    Some(crate::session_model::message::PartAttachment { source }),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(crate::Message {
+        id: message_id,
+        role: crate::MessageRole::User,
+        // Same typed provenance the turn's opening input carries: the absorbing
+        // turn plus the durable input this message came from (FIG-972).
+        origin: Some(crate::MessageOrigin::TurnInput {
+            turn_id: turn_id.clone(),
+            input_id: Some(pending.input_id.clone()),
+        }),
+        parts: crate::shared_parts(parts),
+    }))
+}
+pub fn ingress_message_id(input_id: &str) -> String {
+    format!("m_ingress_{input_id}")
+}
+
+/// Host-provided per-turn input.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InputItem {
+    Text { text: String },
+    Attachment { source: crate::AttachmentSource },
+}
+impl InputItem {
+    /// Constructs a text turn item for protocol implementors while preserving its position among
+    /// mixed text and attachment input.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+
+    /// Constructs an attachment item for protocol implementors while preserving the source variant
+    /// until runtime attachment resolution.
+    pub fn attachment(source: crate::AttachmentSource) -> Self {
+        Self::Attachment { source }
+    }
+}
+/// Host-provided per-turn input.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TurnInput {
+    pub items: Vec<InputItem>,
+    /// Per-turn override for protocol-owned turn options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+    /// Internal protocol transport carrier for the facade builder's turn ID.
+    ///
+    /// All non-advanced facade paths overwrite this field. Set
+    /// `TurnBuilder::turn_id` to control turn identity. Only low-level protocol
+    /// transport should read this field directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_turn_id: Option<TurnId>,
+    #[serde(skip)]
+    pub protocol_extension: Option<ProtocolTurnExtensionHandle>,
+    #[serde(skip)]
+    pub turn_context: TurnContext,
+}
+impl TurnInput {
+    /// Constructs an input with no items for protocol and process-engine implementors that will add
+    /// content or extensions before execution.
+    pub fn empty() -> Self {
+        Self::items(std::iter::empty())
+    }
+
+    /// Constructs a one-item text input for protocol and process-engine implementors without adding
+    /// protocol extensions or metadata.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::items([InputItem::text(text)])
+    }
+
+    /// Collects mixed input items in caller order for protocol implementors materializing a turn.
+    pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
+        Self {
+            items: items.into_iter().collect(),
+            protocol_turn_options: None,
+            trace_turn_id: None,
+            protocol_extension: None,
+            turn_context: TurnContext::default(),
+        }
+    }
+
+    /// Appends an attachment after existing turn items for protocol implementors, preserving
+    /// mixed-input source order.
+    pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
+        self.items.push(InputItem::attachment(source));
+        self
+    }
+
+    /// Sets the protocol turn options carried by a `TurnInput` for protocol and process-engine
+    /// implementors while materializing protocol-specific session and turn state.
+    pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
+        self.protocol_turn_options = Some(options);
+        self
+    }
+}
+/// Per-turn, in-process side channel of typed plugin inputs.
+///
+/// This is an `Any`-keyed map of live Rust values handed to plugins for a
+/// single turn. It is deliberately **not** serializable: the values never
+/// survive a process boundary, so durable effect-host runs explicitly reject a
+/// turn that carries any live inputs with
+/// [`RuntimeErrorCode::DurableEffectLivePluginInput`]. Durable callers must
+/// instead encode replayable data in `protocol_turn_options` or persisted
+/// plugin state.
+#[derive(Clone, Default)]
+pub struct LiveTurnInputs {
+    inputs: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,
+}
+impl LiveTurnInputs {
+    fn insert<T>(&mut self, plugin_id: &'static str, input: T)
+    where
+        T: Send + Sync + 'static,
+    {
+        self.inputs.insert(plugin_id, Arc::new(input));
+    }
+
+    fn get<T>(&self, plugin_id: &'static str) -> Option<&T>
+    where
+        T: 'static,
+    {
+        self.inputs
+            .get(plugin_id)
+            .and_then(|input| input.downcast_ref::<T>())
+    }
+
+    fn contains(&self, plugin_id: &'static str) -> bool {
+        self.inputs.contains_key(plugin_id)
+    }
+
+    pub fn plugin_ids(&self) -> Vec<&'static str> {
+        self.inputs.keys().copied().collect()
+    }
+
+    /// Returns an error when live per-turn inputs would make a durable effect
+    /// host replay depend on process-local values.
+    pub fn durable_effect_rejection(&self) -> Result<(), RuntimeError> {
+        if self.inputs.is_empty() {
+            return Ok(());
+        }
+        Err(RuntimeError::new(
+            RuntimeErrorCode::DurableEffectLivePluginInput,
+            "durable effect hosts do not support live TurnContext plugin inputs; encode replayable data in protocol_turn_options or persisted plugin state",
+        ))
+    }
+}
+#[derive(Clone)]
+pub struct TurnContext {
+    plugin_inputs: LiveTurnInputs,
+    provider: Option<crate::ProviderHandle>,
+    prompt: crate::PromptLayer,
+    local_cancel_origin: TurnCancelOriginHint,
+    claim_checkpoint_queued_work: bool,
+    enforce_selected_queued_work_cost_bound: bool,
+}
+impl Default for TurnContext {
+    fn default() -> Self {
+        Self {
+            plugin_inputs: LiveTurnInputs::default(),
+            provider: None,
+            prompt: crate::PromptLayer::default(),
+            local_cancel_origin: TurnCancelOriginHint::default(),
+            claim_checkpoint_queued_work: true,
+            enforce_selected_queued_work_cost_bound: false,
+        }
+    }
+}
+impl TurnContext {
+    /// Constructs a `TurnContext` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Updates plugin input state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
+    pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
+    where
+        T: Send + Sync + 'static,
+    {
+        self.plugin_inputs.insert(plugin_id, input);
+    }
+
+    /// Updates provider state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
+    pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
+        self.provider = Some(provider);
+    }
+
+    /// Exposes provider to protocol and process-engine implementors while preparing or executing
+    /// plugin and tool work. Returns `None` when no provider is present.
+    pub fn provider(&self) -> Option<&crate::ProviderHandle> {
+        self.provider.as_ref()
+    }
+
+    pub fn set_local_cancel_origin_hint(&mut self, hint: TurnCancelOriginHint) {
+        self.local_cancel_origin = hint;
+    }
+
+    pub(crate) fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
+        self.local_cancel_origin.clone()
+    }
+
+    pub(crate) fn mark_selected_queued_work_drain(&mut self) {
+        self.claim_checkpoint_queued_work = false;
+        self.enforce_selected_queued_work_cost_bound = true;
+    }
+
+    pub(crate) fn enforces_selected_queued_work_cost_bound(&self) -> bool {
+        self.enforce_selected_queued_work_cost_bound
+    }
+
+    pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
+        if self.claim_checkpoint_queued_work {
+            default_limit
+        } else {
+            0
+        }
+    }
+
+    /// Exposes plugin input to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work. Returns `None` when no plugin input is present.
+    pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
+    where
+        T: 'static,
+    {
+        self.plugin_inputs.get(plugin_id)
+    }
+
+    /// Lets protocol implementors detect type-erased live plugin inputs that cannot cross a durable
+    /// serialization boundary.
+    pub fn has_live_plugin_inputs(&self) -> bool {
+        !self.plugin_inputs.inputs.is_empty()
+    }
+
+    /// Lists only type-erased live plugin inputs for protocol implementors that must reject
+    /// non-persistable turn extensions before a durable boundary.
+    pub fn live_plugin_input_ids(&self) -> Vec<&'static str> {
+        self.plugin_inputs.plugin_ids()
+    }
+
+    /// Live plugin inputs for this turn. The durable boundary inspects this to
+    /// reject turns carrying non-serializable live state.
+    pub fn live_plugin_inputs(&self) -> &LiveTurnInputs {
+        &self.plugin_inputs
+    }
+
+    /// Updates prompt layer state for protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
+    pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
+        self.prompt = prompt;
+    }
+
+    /// Exposes prompt layer to protocol and process-engine implementors while preparing or
+    /// executing plugin and tool work.
+    pub fn prompt_layer(&self) -> &crate::PromptLayer {
+        &self.prompt
+    }
+}
+    impl facade_ops::TurnContextFacadeOps for TurnContext {
+        fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
+            self.plugin_inputs.contains(plugin_id)
+        }
+
+        fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
+            self.prompt.template = Some(template);
+        }
+
+        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
+            self.prompt.add_contribution(contribution);
+        }
+
+        fn replace_prompt_slot(
+            &mut self,
+            slot: crate::PromptSlot,
+            contributions: impl IntoIterator<Item = crate::PromptContribution>,
+        ) {
+            self.prompt.replace_slot(slot, contributions);
+        }
+
+        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
+            self.prompt.clear_slot(slot);
+        }
+    }
+impl fmt::Debug for TurnContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TurnContext")
+            .field("plugin_inputs", &self.plugin_inputs.plugin_ids())
+            .field("has_provider", &self.provider.is_some())
+            .field("has_prompt_layer", &(!self.prompt.is_empty()))
+            .finish()
+    }
+}
+#[derive(Clone)]
+pub struct ProtocolTurnExtensionHandle(Arc<dyn ProtocolTurnExtension>);
+impl ProtocolTurnExtensionHandle {
+    /// Type-erases and shares a turn extension for protocol implementors while retaining its
+    /// downcast and prompt-contribution behavior.
+    pub fn new(extension: impl ProtocolTurnExtension + 'static) -> Self {
+        Self(Arc::new(extension))
+    }
+
+    /// Exposes the erased extension for protocol implementors that must downcast back to their
+    /// concrete turn-extension type.
+    pub fn as_any(&self) -> &dyn Any {
+        self.0.as_any()
+    }
+
+    /// Exposes prompt contributions to protocol and process-engine implementors while materializing
+    /// or restoring protocol session state.
+    pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
+        self.0.prompt_contributions()
+    }
+}
+impl fmt::Debug for ProtocolTurnExtensionHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ProtocolTurnExtensionHandle(..)")
+    }
+}
+pub trait ProtocolTurnExtension: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+
+    fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
+        Vec::new()
+    }
+}
+
+/// Stable identifier for a semantic turn activity.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct TurnActivityId(pub Arc<str>);
+impl TurnActivityId {
+    /// Constructs a `TurnActivityId` for store, effect-host, and protocol implementors while
+    /// materializing, executing, or persisting a session turn.
+    pub fn new(id: impl Into<Arc<str>>) -> Self {
+        Self(id.into())
+    }
+}
+
+pub mod facade_ops {
+    
+
+    /// Facade-internal operations for [`TurnContext`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait TurnContextFacadeOps {
+        fn has_plugin_input(&self, plugin_id: &'static str) -> bool;
+
+        fn set_prompt_template(&mut self, template: crate::PromptTemplate);
+
+        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
+
+        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
+        fn replace_prompt_slot(
+            &mut self,
+            slot: crate::PromptSlot,
+            contributions: impl IntoIterator<Item = crate::PromptContribution>,
+        );
+
+        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot);
+    }
+}
+
+/// Generates a turn-input wire vocabulary and its complete variant list from one declaration.
+///
+/// The generated encoder and decoder matches are exhaustive, so adding a variant requires its
+/// persisted spelling here and necessarily extends `ALL`.
+macro_rules! turn_input_wire {
+    ($type:ident, $visibility:vis, $encoder:ident, $decoder:ident {
+        $($variant:ident => $wire:literal),+ $(,)?
+    }) => {
+        impl $type {
+            #[allow(dead_code)]
+            pub(crate) const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// Returns the stable wire spelling persisted by turn-input stores.
+            $visibility fn $encoder(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire),+
+                }
+            }
+
+            /// Parses a stable wire spelling persisted by turn-input stores.
+            #[allow(dead_code)]
+            $visibility fn $decoder(value: &str) -> Option<Self> {
+                match value {
+                    $($wire => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+turn_input_wire!(TurnInputCheckpointBoundary, pub(crate), as_wire_str, from_wire_str {
+    AfterWork => "after_work",
+    BeforeCompletion => "before_completion",
+});
+
+turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
+    PendingActive => "pending_active",
+    DeferredNextTurn => "deferred_next_turn",
+    Accepted => "accepted",
+    Cancelled => "cancelled",
+    Completed => "completed",
+});

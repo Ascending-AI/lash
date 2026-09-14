@@ -15,104 +15,13 @@ use super::PluginError;
 
 
 
-#[derive(Debug)]
-struct SessionReadState {
-    meta: SessionReadMeta,
-    graph: SessionReadGraph,
-    read_model: crate::session_graph::SessionReadModel,
-    chronological_projection: OnceLock<Arc<crate::ChronologicalProjection>>,
-    turn_failure_settlements: Arc<Vec<crate::TurnFailureSettlement>>,
-}
 
-#[derive(Clone, Debug)]
-struct SessionReadMeta {
-    session_id: SessionId,
-    durable_relation: Option<crate::SessionRelation>,
-    policy: SessionPolicy,
-    turn_index: usize,
-    token_usage: crate::TokenUsage,
-    last_prompt_usage: Option<crate::runtime::PromptUsage>,
-    protocol_turn_options: crate::ProtocolTurnOptions,
-}
 
-impl SessionReadMeta {
-    fn from_snapshot_ref(snapshot: &SessionSnapshot) -> Self {
-        Self {
-            session_id: snapshot.session_id.clone(),
-            durable_relation: None,
-            policy: snapshot.policy.clone(),
-            turn_index: snapshot.turn_index,
-            token_usage: snapshot.token_usage.clone(),
-            last_prompt_usage: snapshot.last_prompt_usage.clone(),
-            protocol_turn_options: snapshot.protocol_turn_options.clone(),
-        }
-    }
 
-    fn from_persisted_ref(state: &RuntimeSessionState) -> Self {
-        Self {
-            session_id: state.session_id.clone(),
-            durable_relation: None,
-            policy: state.policy.clone(),
-            turn_index: state.turn_index,
-            token_usage: state.token_usage.clone(),
-            last_prompt_usage: state.last_prompt_usage.clone(),
-            protocol_turn_options: state.protocol_turn_options.clone(),
-        }
-    }
 
-    fn with_policy(mut self, policy: SessionPolicy) -> Self {
-        self.policy = policy;
-        self
-    }
 
-    fn with_durable_relation(mut self, relation: crate::SessionRelation) -> Self {
-        self.durable_relation = Some(relation);
-        self
-    }
 
-    fn with_turn_index(mut self, turn_index: usize) -> Self {
-        self.turn_index = turn_index;
-        self
-    }
 
-    fn with_protocol_turn_options(
-        mut self,
-        protocol_turn_options: crate::ProtocolTurnOptions,
-    ) -> Self {
-        self.protocol_turn_options = protocol_turn_options;
-        self
-    }
-
-    fn to_snapshot(&self, session_graph: crate::SessionGraph) -> SessionSnapshot {
-        SessionSnapshot {
-            session_id: self.session_id.clone(),
-            policy: self.policy.clone(),
-            agent_frames: Vec::new(),
-            current_frame_node_id: None,
-            session_graph,
-            turn_index: self.turn_index,
-            token_usage: self.token_usage.clone(),
-            last_prompt_usage: self.last_prompt_usage.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
-            tool_state_ref: None,
-            tool_state_generation: None,
-            plugin_state_ref: None,
-            plugin_state_generations: Default::default(),
-            execution_state_ref: None,
-            token_ledger: Vec::new(),
-            checkpoint_ref: None,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum SessionReadGraph {
-    Owned(crate::SessionGraph),
-    Derived {
-        cache: OnceLock<crate::SessionGraph>,
-        base_graph: Arc<crate::SessionGraph>,
-    },
-}
 
 
 

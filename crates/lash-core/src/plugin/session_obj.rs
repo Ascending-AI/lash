@@ -1000,3 +1000,25 @@ impl PluginSession {
         .await
     }
 }
+
+impl lash_core_store::session_state::SessionPluginStateSource for PluginSession {
+    fn tool_state_generation(&self) -> u64 {
+        self.tool_registry().generation()
+    }
+
+    fn export_tool_state(&self) -> crate::ToolState {
+        self.tool_registry().export_state()
+    }
+
+    fn plugin_state_generations(&self) -> BTreeMap<String, u64> {
+        self.state_generations()
+    }
+
+    fn export_plugin_state(&self) -> PluginState {
+        self.export_state()
+    }
+
+    fn capture_plugin_state(&self) -> PluginState {
+        self.capture_state()
+    }
+}

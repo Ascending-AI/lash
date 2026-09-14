@@ -1,8 +1,15 @@
 //! Input normalization and message-delta utilities used by the runtime.
 //!
-//! Extracted from `runtime/mod.rs`. These helpers are crate-internal.
+//! These helpers resolve turn input against the attachment store, so they live
+//! beside the durable attachment layer they call.
 
-use super::{InputItem, NormalizedItem};
+#[derive(Clone, Debug)]
+pub enum NormalizedItem {
+    Text(String),
+    Attachment(crate::AttachmentSource),
+}
+
+use crate::InputItem;
 
 pub async fn normalize_input_items(
     items: &[InputItem],

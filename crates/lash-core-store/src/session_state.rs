@@ -12,7 +12,6 @@ use crate::session_model::{Message, SessionPolicy, TokenUsage, plugin_message_to
 use crate::{PersistedTurnState, SessionSnapshot};
 
 use super::usage::TokenLedgerEntry;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 enum CheckpointComponentCompleteness {
@@ -1128,27 +1127,26 @@ impl RuntimeSessionState {
 
     /// Refreshes exported plugin state while respecting the session handle's
     /// namespace permissions. Plugin-facing handles expose no namespaces.
-    pub fn refresh_plugin_states(&mut self, plugins: &crate::PluginSession) {
-        self.refresh_plugin_states_with(plugins, crate::PluginSession::export_state);
+    pub fn refresh_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
+        self.refresh_plugin_states_with(plugins, |source| source.export_plugin_state());
     }
 
-    pub(crate) fn capture_plugin_states(&mut self, plugins: &crate::PluginSession) {
-        self.refresh_plugin_states_with(plugins, crate::PluginSession::capture_state);
+    pub(crate) fn capture_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
+        self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state());
     }
 
     fn refresh_plugin_states_with(
         &mut self,
-        plugins: &crate::PluginSession,
-        capture: fn(&crate::PluginSession) -> crate::PluginState,
+        plugins: &dyn SessionPluginStateSource,
+        capture: fn(&dyn SessionPluginStateSource) -> crate::PluginState,
     ) {
-        let tool_registry = plugins.tool_registry();
-        let generation = tool_registry.generation();
+        let generation = plugins.tool_state_generation();
         if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
-            let snapshot = tool_registry.export_state();
+            let snapshot = plugins.export_tool_state();
             self.set_tool_state_snapshot(Some(snapshot));
         }
 
-        let generations = plugins.state_generations();
+        let generations = plugins.plugin_state_generations();
         let captured = self.checkpoint_components.plugin_generations();
         if !generations.is_empty()
             && (self.plugin_state_ref().is_none() || captured != Some(&generations))
@@ -1587,48 +1585,6 @@ pub(crate) fn receipt_append_node_ids(
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn commit_in_lane_context(
-    held_session_execution_lease: Option<&super::session_execution_lease::BorrowedLaneAuthority>,
-    store: std::sync::Arc<dyn crate::RuntimePersistence>,
-    commit: crate::RuntimeCommit,
-    runtime_lease_owner: &crate::LeaseOwnerIdentity,
-    runtime_lease_executor_id: &str,
-    lease_timings: crate::store::LeaseTimings,
-    clock: std::sync::Arc<dyn crate::Clock>,
-    resident_graph_head_stale: &AtomicBool,
-) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
-    // Dual-context sites run either under the parent turn's held lane or as
-    // lane-less host services. Select authority from the explicit context,
-    // never from scheduling or elapsed time.
-    if let Some(lease) = held_session_execution_lease {
-        let result = super::session_execution_lease::commit_runtime_state_with_borrowed_lease(
-            lease,
-            store,
-            commit,
-            runtime_lease_owner,
-        )
-        .await;
-        if result.is_ok() {
-            // The guard remains current, but this service committed from a
-            // snapshot outside the owning runtime. Force a deliberate head
-            // reload before its next physical turn; planner CAS is not the
-            // graph-freshness discovery mechanism.
-            resident_graph_head_stale.store(true, Ordering::Release);
-        }
-        result
-    } else {
-        super::session_execution_lease::commit_runtime_state_with_fresh_session_execution_lease(
-            store,
-            commit,
-            runtime_lease_owner,
-            runtime_lease_executor_id,
-            lease_timings,
-            clock,
-        )
-        .await
-    }
-}
 
 pub(crate) fn resolve_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
@@ -1752,4 +1708,25 @@ fn plugin_generations(state: &crate::PluginState) -> std::collections::BTreeMap<
         .iter()
         .map(|(id, namespace)| (id.clone(), namespace.generation))
         .collect()
+}
+
+/// The plugin-side facts durable session state refreshes itself from.
+///
+/// `lash-core`'s `PluginSession` is the sole implementor; the trait exists so
+/// the durable state struct does not need the plugin host to describe itself.
+pub trait SessionPluginStateSource {
+    /// Current tool-registry generation.
+    fn tool_state_generation(&self) -> u64;
+
+    /// Snapshot of the tool registry at the current generation.
+    fn export_tool_state(&self) -> crate::ToolState;
+
+    /// Per-plugin state generations, keyed by plugin id.
+    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64>;
+
+    /// Namespace-filtered export, as a plugin-facing handle sees it.
+    fn export_plugin_state(&self) -> crate::PluginState;
+
+    /// Unfiltered capture, as the runtime commits it.
+    fn capture_plugin_state(&self) -> crate::PluginState;
 }

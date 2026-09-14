@@ -1,6 +1,5 @@
 use crate::SessionId;
 pub mod context;
-mod session_policy_serde;
 pub use lash_sansio::session_model::message;
 pub use lash_sansio::session_model::prompt;
 
@@ -59,45 +58,7 @@ pub(crate) async fn send_event(tx: &mpsc::Sender<SessionStreamEvent>, event: Ses
     }
 }
 
-pub(crate) fn plugin_message_to_message(
-    plugin_message: &PluginMessage,
-    fallback_id: &str,
-) -> Message {
-    let message_id = plugin_message
-        .id
-        .as_deref()
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| fallback_id.to_string());
-    let mut parts = if plugin_message.parts.is_empty() && !plugin_message.content.is_empty() {
-        vec![Part::text(
-            format!("{message_id}.p0"),
-            plugin_message.content.clone(),
-            None,
-        )]
-    } else {
-        plugin_message.parts.clone()
-    };
-    parts.extend(plugin_message.attachments.iter().cloned().map(|source| {
-        Part::attachment_part(
-            String::new(),
-            String::new(),
-            Some(message::PartAttachment { source }),
-        )
-    }));
-    reassign_part_ids(&message_id, &mut parts);
-    Message {
-        id: message_id,
-        role: plugin_message.role,
-        parts: Arc::new(parts),
-        origin: plugin_message.origin.clone().or_else(|| {
-            Some(crate::MessageOrigin::Plugin {
-                plugin_id: "plugin".to_string(),
-                transient: false,
-            })
-        }),
-    }
-}
+pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
 
 
 
@@ -144,33 +105,9 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
     }
 }
 
-/// How a [`SessionSpec`] layers generation intent over the policy it resolves
-/// against.
-///
-/// [`crate::GenerationOptions`] is a set of independently optional controls, not
-/// one value, so the default overlay is per-field: a child that caps output
-/// tokens keeps the temperature and seed its parent pinned. Discarding
-/// inherited intent stays available, but it has to be asked for.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "mode", content = "generation", rename_all = "snake_case")]
-pub enum GenerationOverlay {
-    /// Layer the set options over the inherited ones. Options this overlay
-    /// leaves unset keep the value they inherit.
-    Merge(crate::GenerationOptions),
-    /// Use exactly these options, discarding every inherited one. A default
-    /// [`crate::GenerationOptions`] therefore clears the inherited intent.
-    Replace(crate::GenerationOptions),
-}
 
-impl GenerationOverlay {
-    /// Resolve this overlay against the options it inherits.
-    pub fn resolve(&self, inherited: &crate::GenerationOptions) -> crate::GenerationOptions {
-        match self {
-            Self::Merge(generation) => generation.merged_over(inherited),
-            Self::Replace(generation) => generation.clone(),
-        }
-    }
-}
+
+
 
 /// Reusable session configuration overlay.
 ///

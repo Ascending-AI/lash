@@ -762,7 +762,7 @@ pub fn select_exact_turn_work_claim_prefix(
     now_epoch_ms: u64,
 ) -> Result<TurnWorkClaimPrefix, StoreError> {
     let policy = QueuedWorkClaimPolicy {
-        drain_policy: crate::runtime::exact_selection_drain_policy(),
+        drain_policy: crate::queued_drain_policy::exact_selection_drain_policy(),
         max_rows: policy.max_rows.max(candidates.len()),
         ..policy.clone()
     };

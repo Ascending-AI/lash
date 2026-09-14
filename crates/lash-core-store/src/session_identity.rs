@@ -4,10 +4,25 @@
 //! written in terms of. The plugin-facing session handle, its create request
 //! and the lifecycle services stay in `lash-core`.
 
+use crate::facade_support::SessionGraphFacadeOps;
+use crate::{PluginOptions, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::BTreeSet;
 
+/// Why a session still owes one process-observer edge.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionObserverIntentAttribution {
     HostRequested,
@@ -148,11 +163,23 @@ impl AgentFrameReason {
         &self.0
     }
 }
+pub mod facade_ops {
+    use super::*;
+
+    /// Facade-internal operations for [`AgentFrameReason`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait AgentFrameReasonFacadeOps {
+        fn continue_as() -> Self;
+    }
+
     impl AgentFrameReasonFacadeOps for AgentFrameReason {
         fn continue_as() -> Self {
             Self::new(Self::CONTINUE_AS)
         }
     }
+}
 impl Default for AgentFrameReason {
     fn default() -> Self {
         Self::initial()
@@ -182,14 +209,19 @@ pub struct AgentFrameAssignment {
     pub usage_source: Option<String>,
 }
 impl AgentFrameAssignment {
-    pub(crate) fn from_session_request(
-        request: &SessionCreateRequest,
+    /// Builds the assignment from a create request's durable fields.
+    ///
+    /// `SessionCreateRequest` itself is plugin-host surface and stays in
+    /// `lash-core`, so the two durable facts are passed explicitly.
+    pub fn from_session_request_facts(
+        plugin_options: PluginOptions,
+        usage_source: Option<String>,
         policy: SessionPolicy,
     ) -> Self {
         Self {
             policy,
-            plugin_options: request.plugin_options.clone(),
-            usage_source: request.usage_source.clone(),
+            plugin_options,
+            usage_source,
         }
     }
 
@@ -675,30 +707,18 @@ pub enum SessionStartPoint {
     ExistingSession { session_id: SessionId },
     Snapshot { snapshot: Box<SessionSnapshot> },
 }
+
 #[derive(Clone)]
-pub struct SessionContextOverlay {
-    pub include_base_tools: bool,
-    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
-    pub prompt_contributions: Vec<PromptContribution>,
+pub struct SessionStoreCreateRequest {
+    pub session_id: SessionId,
+    pub relation: SessionRelation,
+    pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
+    pub policy: SessionPolicy,
 }
-impl Default for SessionContextOverlay {
-    fn default() -> Self {
-        Self {
-            include_base_tools: true,
-            tool_providers: Vec::new(),
-            prompt_contributions: Vec::new(),
-        }
-    }
-}
-impl std::fmt::Debug for SessionContextOverlay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SessionContextOverlay")
-            .field("include_base_tools", &self.include_base_tools)
-            .field("tool_provider_count", &self.tool_providers.len())
-            .field(
-                "prompt_contribution_count",
-                &self.prompt_contributions.len(),
-            )
-            .finish()
+impl SessionStoreCreateRequest {
+    /// Exposes the parent session ID to session-store factories for child and fork relations,
+    /// returning `None` for a root session.
+    pub fn parent_session_id(&self) -> Option<&str> {
+        self.relation.parent_session_id()
     }
 }

@@ -504,7 +504,7 @@ pub fn apply_process_event_projection(
         record.outcome = Some(terminal.outcome.clone());
         apply_process_status_projection(
             record,
-            ProcessStatus::from_terminal(terminal),
+            terminal.into_status(),
             event.occurred_at,
         );
     } else {

@@ -4,9 +4,8 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
+use crate::{PluginMessage, ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -659,5 +658,170 @@ impl TryFrom<QueuedWorkDraftWire> for QueuedWorkBatchDraft {
             available_at_ms: wire.available_at_ms,
             payloads: wire.payloads,
         })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct QueuedCheckpointWork {
+    pub messages: Vec<PluginMessage>,
+    pub transient_messages: Vec<PluginMessage>,
+    pub turn_causes: Vec<TurnCause>,
+}
+/// One command or a nonempty sequence of turn work, in the existing item order.
+#[derive(Clone, Debug)]
+pub enum QueuedWorkBatchPayloads {
+    /// Exactly one session command.
+    SessionCommand(SessionCommandPayload),
+    /// A nonempty sequence whose item order is preserved.
+    TurnWork {
+        /// The required first item.
+        first: TurnWorkPayload,
+        /// Remaining items in delivery order.
+        rest: Vec<TurnWorkPayload>,
+    },
+}
+impl From<TurnWorkPayload> for QueuedWorkBatchPayloads {
+    fn from(first: TurnWorkPayload) -> Self {
+        Self::TurnWork {
+            first,
+            rest: Vec::new(),
+        }
+    }
+}
+impl QueuedWorkBatchPayloads {
+    /// Return the ingress family encoded by this value.
+    pub fn kind(&self) -> QueuedWorkKind {
+        match self {
+            Self::SessionCommand(_) => QueuedWorkKind::Control,
+            Self::TurnWork { .. } => QueuedWorkKind::Turn,
+        }
+    }
+
+    /// Visit the durable items in delivery order.
+    pub fn iter(&self) -> impl Iterator<Item = &QueuedWorkPayload> {
+        let (first, rest): (&QueuedWorkPayload, &[TurnWorkPayload]) = match self {
+            Self::SessionCommand(command) => (&command.0, &[]),
+            Self::TurnWork { first, rest } => (&first.0, rest),
+        };
+        std::iter::once(first).chain(rest.iter().map(|payload| &payload.0))
+    }
+}
+impl IntoIterator for QueuedWorkBatchPayloads {
+    type Item = QueuedWorkPayload;
+    type IntoIter = std::vec::IntoIter<QueuedWorkPayload>;
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::SessionCommand(command) => vec![command.0],
+            Self::TurnWork { first, rest } => std::iter::once(first.0)
+                .chain(rest.into_iter().map(|payload| payload.0))
+                .collect(),
+        }
+        .into_iter()
+    }
+}
+impl serde::Serialize for QueuedWorkBatchPayloads {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+impl<'de> serde::Deserialize<'de> for QueuedWorkBatchPayloads {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let payloads = <Vec<QueuedWorkPayload> as serde::Deserialize>::deserialize(deserializer)?;
+        let kind = match payloads.first() {
+            Some(QueuedWorkPayload::SessionCommand { .. }) => QueuedWorkKind::Control,
+            Some(_) => QueuedWorkKind::Turn,
+            None => {
+                return Err(serde::de::Error::custom(
+                    "queued work requires at least one payload",
+                ));
+            }
+        };
+        validate_payload_family(kind, payloads.iter()).map_err(serde::de::Error::custom)?;
+        let mut payloads = payloads.into_iter();
+        let first = payloads
+            .next()
+            .ok_or_else(|| serde::de::Error::custom("queued work requires at least one payload"))?;
+        Ok(match first {
+            first @ QueuedWorkPayload::SessionCommand { .. } => {
+                Self::SessionCommand(SessionCommandPayload(first))
+            }
+            first => Self::TurnWork {
+                first: TurnWorkPayload(first),
+                rest: payloads.map(TurnWorkPayload).collect(),
+            },
+        })
+    }
+}
+#[derive(serde::Deserialize)]
+struct QueuedWorkDraftWire {
+    session_id: SessionId,
+    source_key: Option<String>,
+    process_wake_source: Option<ProcessWakeSource>,
+    delivery_policy: DeliveryPolicy,
+    kind: QueuedWorkKind,
+    authority: QueuedWorkAuthority,
+    merge_key: Option<String>,
+    available_at_ms: u64,
+    payloads: QueuedWorkBatchPayloads,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueuedTurnWork {
+    pub input: TurnInput,
+    pub messages: Vec<PluginMessage>,
+    pub turn_causes: Vec<TurnCause>,
+}
+pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
+    format!("process:{process_id}:event:{sequence}:wake")
+}
+/// A turn-work item; session commands cannot be constructed through this type.
+#[derive(Clone, Debug)]
+pub struct TurnWorkPayload(QueuedWorkPayload);
+impl TurnWorkPayload {
+    /// Wrap one durable process wake as turn work.
+    pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
+        Self(QueuedWorkPayload::process_wake(wake))
+    }
+
+    /// Construct an internal agent-frame task item.
+    pub fn agent_frame_task(
+        frame_id: crate::FrameNodeId,
+        task: impl Into<String>,
+        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+    ) -> Self {
+        Self(QueuedWorkPayload::agent_frame_task(
+            frame_id,
+            task,
+            protocol_turn_options,
+        ))
+    }
+}
+/// Exactly one session command, validated by construction.
+#[derive(Clone, Debug)]
+pub struct SessionCommandPayload(QueuedWorkPayload);
+
+fn validate_payload_family<'a>(
+    kind: QueuedWorkKind,
+    mut payloads: impl Iterator<Item = &'a QueuedWorkPayload>,
+) -> Result<(), String> {
+    let first = payloads
+        .next()
+        .ok_or_else(|| "queued work requires at least one payload".to_string())?;
+    match kind {
+        QueuedWorkKind::Control
+            if matches!(first, QueuedWorkPayload::SessionCommand { .. })
+                && payloads.next().is_none() =>
+        {
+            Ok(())
+        }
+        QueuedWorkKind::Turn
+            if !matches!(first, QueuedWorkPayload::SessionCommand { .. })
+                && payloads.all(|payload| {
+                    !matches!(payload, QueuedWorkPayload::SessionCommand { .. })
+                }) =>
+        {
+            Ok(())
+        }
+        _ => Err("queued-work kind contradicts its payload family".into()),
     }
 }

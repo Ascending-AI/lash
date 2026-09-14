@@ -5,9 +5,8 @@
 //! live beside it. The session-facing mapping into `SessionError` stays in
 //! `lash-core`.
 
+use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 /// Stable runtime error code.
 ///
@@ -308,7 +307,7 @@ pub enum RuntimeErrorCode {
     #[non_exhaustive]
     ForeignCode(String),
 }
-pub(crate) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
+pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
         crate::store::StoreError::Contended => RuntimeError::new(
             RuntimeErrorCode::StoreCommitContended,
@@ -1091,4 +1090,134 @@ impl std::error::Error for RuntimeError {}
 pub struct RuntimeEffectReplayMismatchReport {
     pub divergent_path_count: usize,
     pub first_divergent_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
+#[error("{code}: {message}")]
+pub struct RuntimeEffectControllerError {
+    pub code: RuntimeErrorCode,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<crate::RuntimeEffectReplayMismatchReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<crate::RuntimeErrorCause>,
+}
+
+impl RuntimeEffectControllerError {
+    /// Constructs a first-party `RuntimeEffectControllerError` from a classified code.
+    pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            summary: None,
+            cause: None,
+        }
+    }
+
+    /// Constructs an error minted by a foreign effect-host extension.
+    ///
+    /// Hosts must namespace these codes and must not mint a built-in
+    /// [`RuntimeErrorCode`] spelling. First-party producers use [`Self::new`],
+    /// whose typed argument makes an unclassified string a compile error.
+    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
+    }
+
+    /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
+    /// while executing or replaying a runtime effect.
+    pub fn with_summary(
+        mut self,
+        summary: crate::RuntimeEffectReplayMismatchReport,
+    ) -> Self {
+        self.summary = Some(summary);
+        self
+    }
+
+    pub fn wrong_outcome(
+        expected: RuntimeEffectKind,
+        actual: RuntimeEffectKind,
+    ) -> Self {
+        Self::new(
+            RuntimeErrorCode::RuntimeEffectWrongOutcome,
+            format!(
+                "expected {} outcome, got {}",
+                expected.as_str(),
+                actual.as_str()
+            ),
+        )
+    }
+
+    pub fn into_runtime_error(self) -> RuntimeError {
+        let Self {
+            code,
+            message,
+            summary,
+            cause,
+        } = self;
+        let mut runtime = RuntimeError::new(code, message);
+        runtime.summary = summary;
+        match cause {
+            Some(cause) => runtime.with_cause(cause),
+            None => runtime,
+        }
+    }
+}
+
+impl From<RuntimeError> for RuntimeEffectControllerError {
+    fn from(err: RuntimeError) -> Self {
+        Self {
+            code: err.code,
+            message: err.message,
+            summary: err.summary,
+            cause: err.cause,
+        }
+    }
+}
+
+impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
+    fn from(error: lash_sansio::EffectIdentityError) -> Self {
+        RuntimeError::from(error).into()
+    }
+}
+
+impl From<crate::StoreError> for RuntimeEffectControllerError {
+    fn from(err: crate::StoreError) -> Self {
+        let cause = match &err {
+            crate::StoreError::SessionDeleted { session_id } => {
+                Some(crate::RuntimeErrorCause::SessionDeleted {
+                    session_id: session_id.clone(),
+                })
+            }
+            _ => None,
+        };
+        let code = match &err {
+            crate::StoreError::StoredDataCorrupt { .. }
+            | crate::StoreError::MonotonicCounterOverflow { .. } => {
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt
+            }
+            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
+            crate::StoreError::HeadRevisionConflict { .. } => {
+                crate::RuntimeErrorCode::StoreCommitSuperseded
+            }
+            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+            }
+            crate::StoreError::CommitByteBudgetExceeded { .. } => {
+                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
+            }
+            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
+                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+            }
+            crate::StoreError::RecordEncodingFailed { .. } => {
+                crate::RuntimeErrorCode::RecordEncodingFailed
+            }
+            _ => crate::RuntimeErrorCode::RuntimeStore,
+        };
+        Self {
+            code,
+            message: err.to_string(),
+            summary: None,
+            cause,
+        }
+    }
 }

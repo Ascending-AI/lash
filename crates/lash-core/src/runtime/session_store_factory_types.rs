@@ -1,21 +1,9 @@
 use crate::{NodeId, SessionId};
 use crate::{SessionPolicy, SessionRelation};
 
-#[derive(Clone)]
-pub struct SessionStoreCreateRequest {
-    pub session_id: SessionId,
-    pub relation: SessionRelation,
-    pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
-    pub policy: SessionPolicy,
-}
 
-impl SessionStoreCreateRequest {
-    /// Exposes the parent session ID to session-store factories for child and fork relations,
-    /// returning `None` for a root session.
-    pub fn parent_session_id(&self) -> Option<&str> {
-        self.relation.parent_session_id()
-    }
-}
+
+
 
 /// A durable turn boundary whose continuation checkpoint is currently retained.
 ///
