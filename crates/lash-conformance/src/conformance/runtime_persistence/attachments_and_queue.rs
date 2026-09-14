@@ -11,11 +11,13 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
         crate::conformance::helpers::record_completed_attachment_write(
             &store,
             attachment_intent(id.as_str()),
-        );
+        )
+        .await;
     }
 
     let mut uncommitted = store
         .list_uncommitted(200)
+        .await
         .expect("list uncommitted attachment intents");
     uncommitted.sort_by(|left, right| left.attachment_id.cmp(&right.attachment_id));
     assert_eq!(uncommitted.len(), 3);
@@ -25,6 +27,7 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
             &SessionId::from("root"),
             std::slice::from_ref(&committed_out_of_band),
         )
+        .await
         .expect("commit attachment ref out of band");
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -41,6 +44,7 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
 
     let still_uncommitted = store
         .list_uncommitted(200)
+        .await
         .expect("list remaining uncommitted attachments");
     assert_eq!(still_uncommitted.len(), 1);
     assert_eq!(still_uncommitted[0].attachment_id, orphan);
@@ -48,10 +52,12 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
 
     store
         .forget(&SessionId::from("root"), &orphan)
+        .await
         .expect("forget orphan attachment");
     assert!(
         store
             .list_uncommitted(200)
+            .await
             .expect("list after forget")
             .is_empty()
     );
@@ -71,16 +77,21 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
                 intent_at_epoch_ms: 100,
                 owner: None,
             },
-        );
+        )
+        .await;
     }
     store
         .commit_refs(
             &SessionId::from("committed-owner"),
             std::slice::from_ref(&attachment),
         )
+        .await
         .expect("commit first owner");
 
-    let uncommitted = store.list_uncommitted(200).expect("list owner orphan");
+    let uncommitted = store
+        .list_uncommitted(200)
+        .await
+        .expect("list owner orphan");
     assert!(
         uncommitted.iter().any(|entry| {
             entry.session_id == "orphan-owner" && entry.attachment_id == attachment
@@ -92,6 +103,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
 
     store
         .forget(&SessionId::from("orphan-owner"), &attachment)
+        .await
         .expect("forget only orphan owner");
     crate::conformance::helpers::record_completed_attachment_write(
         &store,
@@ -102,10 +114,11 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
             intent_at_epoch_ms: 150,
             owner: None,
         },
-    );
+    )
+    .await;
     assert!(
         !store
-            .list_uncommitted(200)
+            .list_uncommitted(200).await
             .expect("committed ownership remains stamped")
             .iter()
             .any(|entry| entry.session_id == "committed-owner"

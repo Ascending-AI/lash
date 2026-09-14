@@ -783,7 +783,8 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
             intent_at_epoch_ms: 1,
             owner: None,
         },
-    );
+    )
+    .await;
     commit.committed_attachment_ids = vec![attachment_id];
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "root",

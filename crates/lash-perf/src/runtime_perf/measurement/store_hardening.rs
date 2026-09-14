@@ -467,15 +467,19 @@ async fn measure_store_hardening_backend_turn(
             id: format!("hardening-turn-{turn_index}"),
         }),
     };
-    let (_, phase) = measure_runtime_perf_phase(names.attachment_intent, || {
-        let lash_core::AttachmentWriteFence::Granted(permit) =
-            store.begin_attachment_write(attachment_intent.clone())?
+    let (_, phase) = measure_runtime_perf_async_phase(names.attachment_intent, async {
+        let lash_core::AttachmentWriteFence::Granted(permit) = store
+            .begin_attachment_write(attachment_intent.clone())
+            .await?
         else {
             anyhow::bail!("hardening attachment write was fenced off");
         };
-        store.complete_attachment_write(&attachment_intent, permit)?;
+        store
+            .complete_attachment_write(&attachment_intent, permit)
+            .await?;
         Ok(())
-    })?;
+    })
+    .await?;
     phases.insert(phase.0, phase.1);
 
     state = load_store_hardening_state(store, session_id).await?;

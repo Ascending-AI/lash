@@ -151,14 +151,66 @@ impl InMemorySessionStore {
             .cloned()
             .collect()
     }
+    /// The cutoff-aware live-ref predicate, evaluated synchronously.
+    ///
+    /// The factory's condemn and root-check paths hold the factory-wide write
+    /// transaction while they ask this question — that shared lock is what makes
+    /// the root predicate and the condemnation insert one conditional mutation
+    /// against a concurrent `begin_attachment_write`. The answer is pure
+    /// in-memory state, so exposing it without an await keeps the guard off an
+    /// await point instead of forcing the caller to drop it mid-predicate.
+    pub(crate) fn evaluate_live_ref_for_id(
+        &self,
+        attachment_id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, crate::store::StoreError> {
+        let deleted = self.deleted_session_ids.lock_recover().clone();
+        let committed_turns = self
+            .runtime_turn_commits
+            .lock_recover()
+            .iter()
+            .map(|((session_id, turn_id), record)| {
+                (session_id.clone(), turn_id.clone(), record.committed_at_ms)
+            })
+            .collect::<Vec<_>>();
+        Ok(self
+            .attachment_manifest
+            .lock_recover()
+            .values()
+            .filter(|entry| &entry.attachment_id == attachment_id)
+            .any(|entry| {
+                if entry.committed_at_epoch_ms.is_some()
+                    || entry.intent_at_epoch_ms > intent_grace_cutoff_epoch_ms
+                {
+                    return true;
+                }
+                if deleted.contains(&entry.session_id) {
+                    return false;
+                }
+                match &entry.owner {
+                    None => false,
+                    Some(crate::AttachmentOwner::Turn { id: owner_id }) => !committed_turns
+                        .iter()
+                        .any(|(session_id, turn_id, committed_at_ms)| {
+                            session_id == entry.session_id
+                                && turn_id != owner_id
+                                && *committed_at_ms > entry.intent_at_epoch_ms
+                        }),
+                    // The in-memory store has no durable process registry, so it
+                    // cannot prove process death and must retain the root.
+                    Some(crate::AttachmentOwner::Process { .. }) => true,
+                }
+            }))
+    }
 }
 
+#[async_trait::async_trait]
 impl crate::AttachmentManifest for InMemorySessionStore {
     /// The writer half of the GC fence. The factory-global condemnation state
     /// and the manifest row are mutated under the store's one transaction lock —
     /// the same boundary the sweeper's condemn CAS takes — so claim-and-record
     /// is atomic against it.
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: crate::AttachmentIntent,
     ) -> Result<crate::AttachmentWriteFence, crate::store::StoreError> {
@@ -198,7 +250,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         ))
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &crate::AttachmentIntent,
         permit: crate::AttachmentWritePermit,
@@ -234,7 +286,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         Ok(())
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &crate::AttachmentIntent,
         permit: crate::AttachmentWritePermit,
@@ -281,7 +333,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         Ok(())
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
@@ -292,7 +344,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         self.commit_attachment_refs_in_memory(session_id, attachment_ids, committed_at_epoch_ms)
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::store::StoreError> {
@@ -315,7 +367,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         Ok(entries)
     }
 
-    fn forget_aged_uncommitted_intents(
+    async fn forget_aged_uncommitted_intents(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), crate::store::StoreError> {
@@ -352,7 +404,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         Ok(())
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
@@ -373,51 +425,15 @@ impl crate::AttachmentManifest for InMemorySessionStore {
         Ok(())
     }
 
-    fn has_live_ref_for_id(
+    async fn has_live_ref_for_id(
         &self,
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::store::StoreError> {
-        let deleted = self.deleted_session_ids.lock_recover().clone();
-        let committed_turns = self
-            .runtime_turn_commits
-            .lock_recover()
-            .iter()
-            .map(|((session_id, turn_id), record)| {
-                (session_id.clone(), turn_id.clone(), record.committed_at_ms)
-            })
-            .collect::<Vec<_>>();
-        Ok(self
-            .attachment_manifest
-            .lock_recover()
-            .values()
-            .filter(|entry| &entry.attachment_id == attachment_id)
-            .any(|entry| {
-                if entry.committed_at_epoch_ms.is_some()
-                    || entry.intent_at_epoch_ms > intent_grace_cutoff_epoch_ms
-                {
-                    return true;
-                }
-                if deleted.contains(&entry.session_id) {
-                    return false;
-                }
-                match &entry.owner {
-                    None => false,
-                    Some(crate::AttachmentOwner::Turn { id: owner_id }) => !committed_turns
-                        .iter()
-                        .any(|(session_id, turn_id, committed_at_ms)| {
-                            session_id == entry.session_id
-                                && turn_id != owner_id
-                                && *committed_at_ms > entry.intent_at_epoch_ms
-                        }),
-                    // The in-memory store has no durable process registry, so it
-                    // cannot prove process death and must retain the root.
-                    Some(crate::AttachmentOwner::Process { .. }) => true,
-                }
-            }))
+        self.evaluate_live_ref_for_id(attachment_id, intent_grace_cutoff_epoch_ms)
     }
 
-    fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, crate::store::StoreError> {
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, crate::store::StoreError> {
         let mut refs = self
             .attachment_manifest
             .lock_recover()
@@ -448,15 +464,17 @@ mod attachment_reconciliation_tests {
 
     /// One completed write: acquire the fence, then stamp upload evidence —
     /// the only way a manifest row is created.
-    fn put(store: &InMemorySessionStore, intent: crate::AttachmentIntent) {
+    async fn put(store: &InMemorySessionStore, intent: crate::AttachmentIntent) {
         let fence = store
             .begin_attachment_write(intent.clone())
+            .await
             .expect("begin attachment write");
         let crate::AttachmentWriteFence::Granted(permit) = fence else {
             panic!("expected a granted write fence");
         };
         store
             .complete_attachment_write(&intent, permit)
+            .await
             .expect("complete attachment write");
     }
 
@@ -465,25 +483,27 @@ mod attachment_reconciliation_tests {
     // age check and the removal happen under one lock, so the refreshed timestamp
     // is what the conditional delete sees. Without a refresh the aged intent is
     // reconciled away.
-    #[test]
-    fn reconciliation_spares_refreshed_intent_and_collects_stale() {
+    #[tokio::test]
+    async fn reconciliation_spares_refreshed_intent_and_collects_stale() {
         let store = InMemorySessionStore::new();
         let cutoff = 200;
 
         // Refreshed case: recorded old, then re-recorded (refreshed) young.
-        put(&store, intent_at("s", "kept", 100));
-        put(&store, intent_at("s", "kept", 300));
+        put(&store, intent_at("s", "kept", 100)).await;
+        put(&store, intent_at("s", "kept", 300)).await;
 
         // Stale case: recorded old and never refreshed.
-        put(&store, intent_at("s", "collected", 100));
+        put(&store, intent_at("s", "collected", 100)).await;
 
         store
             .forget_aged_uncommitted_intents(cutoff)
+            .await
             .expect("reconcile");
 
         assert!(
             store
                 .list_all_refs()
+                .await
                 .map(|refs| refs
                     .contains(&crate::AttachmentId::parse("kept").expect("valid attachment id")))
                 .unwrap(),
@@ -492,6 +512,7 @@ mod attachment_reconciliation_tests {
         assert!(
             !store
                 .list_all_refs()
+                .await
                 .map(|refs| refs.contains(
                     &crate::AttachmentId::parse("collected").expect("valid attachment id")
                 ))
@@ -502,29 +523,31 @@ mod attachment_reconciliation_tests {
 
     // A committed ref is never reconciled, even if its intent timestamp predates
     // the cutoff; and `has_live_ref_for_id` reflects committed vs aged-orphan.
-    #[test]
-    fn has_live_ref_distinguishes_committed_from_aged_orphan() {
+    #[tokio::test]
+    async fn has_live_ref_distinguishes_committed_from_aged_orphan() {
         let store = InMemorySessionStore::new();
         let cutoff = 200;
         let committed = crate::AttachmentId::parse("committed").expect("valid attachment id");
         let orphan = crate::AttachmentId::parse("orphan").expect("valid attachment id");
 
-        put(&store, intent_at("s", "committed", 100));
+        put(&store, intent_at("s", "committed", 100)).await;
         store
             .commit_refs(&SessionId::from("s"), std::slice::from_ref(&committed))
+            .await
             .unwrap();
-        put(&store, intent_at("s", "orphan", 100));
+        put(&store, intent_at("s", "orphan", 100)).await;
 
-        assert!(store.has_live_ref_for_id(&committed, cutoff).unwrap());
+        assert!(store.has_live_ref_for_id(&committed, cutoff).await.unwrap());
         assert!(
-            !store.has_live_ref_for_id(&orphan, cutoff).unwrap(),
+            !store.has_live_ref_for_id(&orphan, cutoff).await.unwrap(),
             "an aged uncommitted intent is not a live root"
         );
 
-        store.forget_aged_uncommitted_intents(cutoff).unwrap();
+        store.forget_aged_uncommitted_intents(cutoff).await.unwrap();
         assert!(
             store
                 .list_all_refs()
+                .await
                 .map(|refs| refs.contains(&committed))
                 .unwrap(),
             "a committed ref survives reconciliation regardless of its intent age"
@@ -532,6 +555,7 @@ mod attachment_reconciliation_tests {
         assert!(
             !store
                 .list_all_refs()
+                .await
                 .map(|refs| refs.contains(&orphan))
                 .unwrap()
         );

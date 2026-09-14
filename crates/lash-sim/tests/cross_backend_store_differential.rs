@@ -1207,7 +1207,8 @@ impl BackendRunner {
                 attachment_seeding::seed_differential_attachment_rows(
                     self.store().as_ref(),
                     &self.session_id,
-                )?;
+                )
+                .await?;
                 Ok(None)
             }
             StoreOperation::PinLeaf => {

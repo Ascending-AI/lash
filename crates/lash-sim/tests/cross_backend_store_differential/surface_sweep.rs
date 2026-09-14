@@ -557,22 +557,25 @@ impl BackendRunner {
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);
-                let outcome = store
-                    .begin_attachment_write(intent.clone())
-                    .and_then(|fence| match fence {
-                        lash_core::AttachmentWriteFence::Granted(permit) => store
-                            .abort_attachment_write(&intent, permit)
-                            .map(|()| "aborted"),
-                        _ => Ok("not_granted"),
-                    })?;
+                let outcome = match store.begin_attachment_write(intent.clone()).await? {
+                    lash_core::AttachmentWriteFence::Granted(permit) => {
+                        store.abort_attachment_write(&intent, permit).await?;
+                        "aborted"
+                    }
+                    _ => "not_granted",
+                };
                 format!("outcome={outcome}")
             }
-            SurfaceMethod::CommitUnknownAttachmentRefs => store
-                .commit_refs(&session_id, &[unknown_attachment_id()])
-                .map(|()| "committed".to_string())?,
-            SurfaceMethod::ForgetUnknownAttachment => store
-                .forget(&session_id, &unknown_attachment_id())
-                .map(|()| "forgotten".to_string())?,
+            SurfaceMethod::CommitUnknownAttachmentRefs => {
+                store
+                    .commit_refs(&session_id, &[unknown_attachment_id()])
+                    .await?;
+                "committed".to_string()
+            }
+            SurfaceMethod::ForgetUnknownAttachment => {
+                store.forget(&session_id, &unknown_attachment_id()).await?;
+                "forgotten".to_string()
+            }
             SurfaceMethod::Vacuum => {
                 let report = store
                     .vacuum()

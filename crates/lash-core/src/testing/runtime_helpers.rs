@@ -258,8 +258,9 @@ impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
             crate::AttachmentManifest::forget_aged_uncommitted_intents(
                 &*store,
                 intent_grace_cutoff_epoch_ms,
-            )?;
-            refs.extend(crate::AttachmentManifest::list_all_refs(&*store)?);
+            )
+            .await?;
+            refs.extend(crate::AttachmentManifest::list_all_refs(&*store).await?);
         }
         Ok(refs)
     }
@@ -274,7 +275,9 @@ impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
                 &*store,
                 id,
                 intent_grace_cutoff_epoch_ms,
-            )? {
+            )
+            .await?
+            {
                 return Ok(true);
             }
         }

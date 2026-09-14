@@ -185,7 +185,11 @@ async fn assert_policy_denial_left_no_attachment_state(
         "the final hook output must pass through attachment policy"
     );
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "authorization rejection must leave no write-ahead manifest intent"
     );
     assert!(
@@ -234,7 +238,11 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         authorized: Arc::clone(&authorized),
     });
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "precondition: the manifest starts empty"
     );
     assert!(
@@ -258,7 +266,11 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         "precondition: policy reaches and denies the second source"
     );
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "authorization rejection must leave no write-ahead manifest intent"
     );
     assert!(
@@ -284,7 +296,13 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
     let authorized = deny_probe_attachment(&mut context);
-    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(backend.list().await.unwrap().is_empty());
 
     let outcome = dispatch_tool_call(
@@ -315,7 +333,13 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
     let authorized = deny_probe_attachment(&mut context);
-    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(backend.list().await.unwrap().is_empty());
 
     let outcome = dispatch_tool_call(
@@ -348,7 +372,13 @@ async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_re
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let authorized = deny_probe_attachment(&mut context);
-    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(backend.list().await.unwrap().is_empty());
     let call = prepared(&definition, "after-hook-orchestrating-call");
     let tool_context = tool_context_for_prepared(&context, &call);
@@ -377,7 +407,13 @@ async fn after_tool_attachment_replacement_is_normalized_before_internal_recordi
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
     let authorized = deny_probe_attachment(&mut context);
-    assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+    assert!(
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(backend.list().await.unwrap().is_empty());
     let call = prepared(&definition, "after-hook-internal-call");
     let tool_context = tool_context_for_prepared(&context, &call);
@@ -399,7 +435,11 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
     let authorized = deny_probe_attachment(&mut context);
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "precondition: the deferred completion manifest starts empty"
     );
     assert!(
@@ -464,7 +504,11 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
             crate::ProcessIncarnation::from_registration_sequence(1),
         ));
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "precondition: the process manifest starts empty"
     );
     let call = prepared(&definition, "orchestrating-attachment-call");
@@ -473,7 +517,7 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     let outcome = execute_orchestrating_tool(&context, call, tool_context).await;
 
     assert_single_stored_attachment(&outcome.record.output);
-    let entries = persistence.list_uncommitted(u64::MAX).unwrap();
+    let entries = persistence.list_uncommitted(u64::MAX).await.unwrap();
     assert_eq!(
         entries.len(),
         1,
@@ -501,7 +545,11 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
             crate::ProcessIncarnation::from_registration_sequence(1),
         ));
     assert!(
-        persistence.list_uncommitted(u64::MAX).unwrap().is_empty(),
+        persistence
+            .list_uncommitted(u64::MAX)
+            .await
+            .unwrap()
+            .is_empty(),
         "precondition: the process manifest starts empty"
     );
     let call = prepared(&definition, "internal-attachment-call");
@@ -510,7 +558,7 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     let outcome = execute_internal_process_tool(&context, call, tool_context).await;
 
     assert_single_stored_attachment(&outcome.record.output);
-    let entries = persistence.list_uncommitted(u64::MAX).unwrap();
+    let entries = persistence.list_uncommitted(u64::MAX).await.unwrap();
     assert_eq!(
         entries.len(),
         1,

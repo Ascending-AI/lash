@@ -176,6 +176,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     assert!(
         store_b
             .list_uncommitted(u64::MAX)
+            .await
             .expect("list committed owner rows")
             .into_iter()
             .all(|entry| entry.attachment_id != plain_id && entry.attachment_id != typed_id),
@@ -620,7 +621,8 @@ pub async fn attachment_owner_degraded_proof(factory: Arc<dyn crate::SessionStor
                 incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
             }),
         },
-    );
+    )
+    .await;
     for empty in [false, true] {
         if empty {
             backend

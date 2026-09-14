@@ -445,6 +445,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
         .runtime
         .begin_attachment_write(attachment_intent.clone())
+        .await
         .expect("begin fixture attachment write")
     else {
         panic!("the fixture digest must grant its writer");
@@ -452,6 +453,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .runtime
         .complete_attachment_write(&attachment_intent, attachment_permit)
+        .await
         .expect("stamp fixture attachment upload");
 
     let mut loaded = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
@@ -983,6 +985,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     assert!(
         AttachmentManifest::list_all_refs(handles.runtime.as_ref())
+            .await
             .expect("read fixture attachment manifest")
             .contains(&AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id")),
         "durable fixture semantic drift: committed attachment disappeared"

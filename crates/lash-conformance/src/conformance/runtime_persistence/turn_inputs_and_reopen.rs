@@ -1535,25 +1535,31 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
         intent_at_epoch_ms: at,
         owner: None,
     };
-    crate::conformance::helpers::record_completed_attachment_write(&store, intent(&intent_id, 100));
+    crate::conformance::helpers::record_completed_attachment_write(&store, intent(&intent_id, 100))
+        .await;
     crate::conformance::helpers::record_completed_attachment_write(
         &store,
         intent(&committed_id, 100),
-    );
+    )
+    .await;
     store
         .commit_refs(
             &SessionId::from("root"),
             std::slice::from_ref(&committed_id),
         )
+        .await
         .expect("commit attachment ref");
 
     // Root set: every live ref, intent or committed.
-    let refs = store.list_all_refs().expect("list all refs");
+    let refs = store.list_all_refs().await.expect("list all refs");
     assert!(refs.contains(&intent_id), "intents feed the GC root set");
     assert!(refs.contains(&committed_id), "commits feed the GC root set");
 
     // Uncommitted listing still distinguishes intents from commits.
-    let uncommitted = store.list_uncommitted(1_000_000).expect("list uncommitted");
+    let uncommitted = store
+        .list_uncommitted(1_000_000)
+        .await
+        .expect("list uncommitted");
     assert!(
         uncommitted
             .iter()
@@ -1570,10 +1576,12 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
     // Forget drops the ref from the root set.
     store
         .forget(&SessionId::from("root"), &intent_id)
+        .await
         .expect("forget intent ref");
     assert!(
         !store
             .list_all_refs()
+            .await
             .map(|refs| refs.contains(&intent_id))
             .expect("ref dropped"),
         "a forgotten ref is no longer held"
@@ -1581,6 +1589,7 @@ pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
     assert!(
         !store
             .list_all_refs()
+            .await
             .expect("list after forget")
             .contains(&intent_id),
         "a forgotten ref leaves the root set"
@@ -1730,7 +1739,8 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
             intent_at_epoch_ms: 100,
             owner: None,
         },
-    );
+    )
+    .await;
 
     let reopened_meta = factory
         .reopen
@@ -1781,6 +1791,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     let reopened_intents = factory
         .reopen
         .list_uncommitted(200)
+        .await
         .expect("list reopened attachment intents");
     assert!(
         reopened_intents

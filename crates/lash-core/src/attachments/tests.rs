@@ -6,8 +6,9 @@ struct RecordingManifest {
     entries: Mutex<HashMap<(SessionId, AttachmentId), crate::AttachmentManifestEntry>>,
 }
 
+#[async_trait::async_trait]
 impl AttachmentManifest for RecordingManifest {
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<crate::AttachmentWriteFence, crate::StoreError> {
@@ -29,7 +30,7 @@ impl AttachmentManifest for RecordingManifest {
         ))
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         _permit: crate::AttachmentWritePermit,
@@ -41,7 +42,7 @@ impl AttachmentManifest for RecordingManifest {
         Ok(())
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         _permit: crate::AttachmentWritePermit,
@@ -51,7 +52,7 @@ impl AttachmentManifest for RecordingManifest {
         Ok(())
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[AttachmentId],
@@ -68,7 +69,7 @@ impl AttachmentManifest for RecordingManifest {
         Ok(())
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
@@ -84,7 +85,7 @@ impl AttachmentManifest for RecordingManifest {
             .collect())
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &AttachmentId,
@@ -96,7 +97,7 @@ impl AttachmentManifest for RecordingManifest {
         Ok(())
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
         Ok(self
             .entries
             .lock_recover()
@@ -146,10 +147,15 @@ impl AttachmentRootSet for RecordingRootSet {
         for manifest in &self.manifests {
             // This test root set contains only ownerless host puts, whose
             // documented fallback remains age-only reconciliation.
-            for aged in manifest.list_uncommitted(intent_grace_cutoff_epoch_ms)? {
-                manifest.forget(&aged.session_id, &aged.attachment_id)?;
+            for aged in manifest
+                .list_uncommitted(intent_grace_cutoff_epoch_ms)
+                .await?
+            {
+                manifest
+                    .forget(&aged.session_id, &aged.attachment_id)
+                    .await?;
             }
-            refs.extend(manifest.list_all_refs()?);
+            refs.extend(manifest.list_all_refs().await?);
         }
         Ok(refs)
     }
@@ -160,7 +166,10 @@ impl AttachmentRootSet for RecordingRootSet {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::StoreError> {
         for manifest in &self.manifests {
-            if manifest.has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)? {
+            if manifest
+                .has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)
+                .await?
+            {
                 return Ok(true);
             }
         }
@@ -180,13 +189,14 @@ async fn recording_targeted_probe_does_not_reconcile_aged_intent() {
             intent_at_epoch_ms: 1,
             owner: None,
         })
+        .await
         .expect("record intent");
     let roots = RecordingRootSet {
         manifests: vec![Arc::clone(&manifest)],
     };
 
     assert!(roots.has_live_attachment_ref(&id, 1).await.unwrap());
-    assert_eq!(manifest.list_all_refs().unwrap(), vec![id]);
+    assert_eq!(manifest.list_all_refs().await.unwrap(), vec![id]);
 }
 
 fn meta() -> AttachmentCreateMeta {
@@ -224,6 +234,7 @@ async fn committed_factory_attachment() -> (
         .expect("put factory attachment");
     store
         .commit_refs(&request.session_id, std::slice::from_ref(&reference.id))
+        .await
         .expect("commit factory attachment ref");
     (factory, backend, reference.id)
 }
@@ -640,6 +651,7 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
             &SessionId::from("healthy-sweep"),
             std::slice::from_ref(&live.id),
         )
+        .await
         .expect("commit live ref");
     let orphan = backend
         .put(vec![4, 2, 5, 0], meta())
@@ -752,12 +764,14 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
             &SessionId::from("session-a"),
             std::slice::from_ref(&ref_a.id),
         )
+        .await
         .expect("commit a");
     manifest_b
         .commit_refs(
             &SessionId::from("session-b"),
             std::slice::from_ref(&ref_b.id),
         )
+        .await
         .expect("commit b");
     assert_eq!(backend.list().await.expect("list").len(), 1);
 
@@ -875,7 +889,7 @@ async fn gc_collects_aged_uncommitted_intent_orphan() {
         Err(AttachmentStoreError::NotFound(_))
     ));
     // The intent row was reconciled away too, so it is no longer a root.
-    assert!(manifest.list_all_refs().expect("refs").is_empty());
+    assert!(manifest.list_all_refs().await.expect("refs").is_empty());
 }
 
 // Fix C: the GC delete-time re-check. A blob looks unreferenced and stale in
@@ -1276,57 +1290,58 @@ struct SignalingManifest {
     attempts: tokio::sync::mpsc::UnboundedSender<AttachmentWriteFence>,
 }
 
+#[async_trait::async_trait]
 impl AttachmentManifest for SignalingManifest {
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, crate::StoreError> {
-        let fence = self.inner.begin_attachment_write(intent)?;
+        let fence = self.inner.begin_attachment_write(intent).await?;
         let _ = self.attempts.send(fence);
         Ok(fence)
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.complete_attachment_write(intent, permit)
+        self.inner.complete_attachment_write(intent, permit).await
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: crate::AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        self.inner.abort_attachment_write(intent, permit)
+        self.inner.abort_attachment_write(intent, permit).await
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        self.inner.commit_refs(session_id, attachment_ids)
+        self.inner.commit_refs(session_id, attachment_ids).await
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        self.inner.list_uncommitted(older_than_epoch_ms)
+        self.inner.list_uncommitted(older_than_epoch_ms).await
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        self.inner.forget(session_id, attachment_id)
+        self.inner.forget(session_id, attachment_id).await
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
-        self.inner.list_all_refs()
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+        self.inner.list_all_refs().await
     }
 }
 
@@ -1382,6 +1397,7 @@ async fn same_content_put_inside_the_delete_window_survives() {
     );
     assert!(
         crate::AttachmentManifest::list_all_refs(&*fixture.store)
+            .await
             .map(|refs| refs.contains(&id))
             .expect("manifest probe"),
         "the surviving bytes are rooted by the writer's intent"
@@ -1637,8 +1653,8 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
     );
 }
 
-#[test]
-fn persistence_manifest_adapter_forwards_root_tracking() {
+#[tokio::test]
+async fn persistence_manifest_adapter_forwards_root_tracking() {
     let runtime: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
     let adapter = PersistenceManifestAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
@@ -1651,21 +1667,24 @@ fn persistence_manifest_adapter_forwards_root_tracking() {
     };
     let crate::AttachmentWriteFence::Granted(permit) = adapter
         .begin_attachment_write(intent.clone())
+        .await
         .expect("begin attachment write")
     else {
         panic!("expected a granted write fence");
     };
     adapter
         .complete_attachment_write(&intent, permit)
+        .await
         .expect("complete attachment write");
     assert!(
         adapter
             .list_all_refs()
+            .await
             .map(|refs| refs.contains(&attachment_id))
             .expect("holds ref")
     );
     assert_eq!(
-        adapter.list_all_refs().expect("list all refs"),
+        adapter.list_all_refs().await.expect("list all refs"),
         vec![attachment_id]
     );
 }
@@ -1960,4 +1979,131 @@ fn backend_failure_class_drives_retry_and_operator_verdicts() {
     };
     assert!(reclamation.is_retryable());
     assert!(!reclamation.is_operator_actionable());
+}
+
+/// A manifest whose durable work takes real time, standing in for a Postgres or
+/// SQLite round trip.
+struct SlowManifest {
+    inner: NoopAttachmentManifest,
+    delay: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl AttachmentManifest for SlowManifest {
+    async fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<AttachmentWriteFence, crate::StoreError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.begin_attachment_write(intent).await
+    }
+
+    async fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.complete_attachment_write(intent, permit).await
+    }
+
+    async fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.abort_attachment_write(intent, permit).await
+    }
+
+    async fn commit_refs(
+        &self,
+        session_id: &SessionId,
+        attachment_ids: &[AttachmentId],
+    ) -> Result<(), crate::StoreError> {
+        self.inner.commit_refs(session_id, attachment_ids).await
+    }
+
+    async fn list_uncommitted(
+        &self,
+        older_than_epoch_ms: u64,
+    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
+        self.inner.list_uncommitted(older_than_epoch_ms).await
+    }
+
+    async fn forget(
+        &self,
+        session_id: &SessionId,
+        attachment_id: &AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        self.inner.forget(session_id, attachment_id).await
+    }
+
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+        self.inner.list_all_refs().await
+    }
+}
+
+/// FIG-3076 (succeeding FIG-3073's bridge regression): a manifest write must
+/// not stop the caller's runtime.
+///
+/// The worker that wedged in the Restate workers E2E had one attachment write
+/// in flight and nothing else could run — not the session-lease renewal, not
+/// the h2 accept loop, not an unrelated `/health` listener on its own port.
+/// This reproduces that shape at the async boundary the manifest now exposes:
+/// a single-worker multi-thread runtime, one heartbeat task, and a manifest
+/// whose durable half takes 300ms. With the write awaited rather than bridged
+/// onto the worker thread, the heartbeat keeps ticking throughout; any
+/// re-introduced `block_on`/`spawn_blocking`/throwaway-runtime bridge on the
+/// sole worker leaves it at zero.
+#[test]
+fn a_manifest_write_leaves_the_caller_runtime_running() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("build single-worker runtime");
+
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let heartbeat = Arc::clone(&ticks);
+    let observed = Arc::clone(&ticks);
+
+    let (reference, before, after) = runtime.block_on(async move {
+        crate::task::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                heartbeat.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        // Let the heartbeat reach its first await point before the write starts.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let before = observed.load(Ordering::SeqCst);
+        // The write has to run on a worker thread, which is where every real
+        // manifest call runs. Driving it from the `block_on` thread instead
+        // would leave the worker free and prove nothing.
+        let worker = crate::task::spawn(async move {
+            let session = SessionAttachmentStore::new(
+                Arc::new(InMemoryAttachmentStore::new()),
+                Arc::new(SlowManifest {
+                    inner: NoopAttachmentManifest,
+                    delay: std::time::Duration::from_millis(300),
+                }),
+                "runtime-liveness",
+            );
+            let reference = session
+                .put(vec![4, 2], meta())
+                .await
+                .expect("the attachment write completes");
+            (reference, observed.load(Ordering::SeqCst))
+        });
+        let (reference, after) = worker.await.expect("attachment write task");
+        (reference, before, after)
+    });
+
+    assert_eq!(reference.id, content_id(&[4, 2]));
+    assert!(
+        after > before + 1,
+        "the caller's runtime stopped while a manifest write was in flight: \
+         heartbeat went {before} -> {after} across a 300ms write"
+    );
 }

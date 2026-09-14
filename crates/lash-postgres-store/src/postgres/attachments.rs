@@ -247,16 +247,17 @@ pub(crate) async fn recover_abandoned_attachment_write(
     tx.commit().await.map_err(store_sqlx_error)
 }
 
+#[async_trait::async_trait]
 impl AttachmentManifest for PostgresSessionStore {
     /// The writer half of the GC fence: the condemnation read, the claim, and
     /// the intent upsert are one transaction, so a sweeper's condemn CAS either
     /// runs before all of it or fails against the intent it wrote.
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
         let pool = self.pool.clone();
-        block_on_detached(async move {
+        {
             let write_id = lash_core::AttachmentWriteToken::new();
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
@@ -360,10 +361,10 @@ impl AttachmentManifest for PostgresSessionStore {
             Ok(lash_core::AttachmentWriteFence::Granted(
                 lash_core::AttachmentWritePermit::new(write_id),
             ))
-        })
+        }
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
@@ -374,7 +375,7 @@ impl AttachmentManifest for PostgresSessionStore {
         let session_id = intent.session_id.clone();
         let write_id = permit.write_id().as_hex();
         let written_at_ms = clamp_epoch_ms(self.clock.timestamp_ms());
-        block_on_detached(async move {
+        {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
             // Id-matched: only the row this attempt still owns is stamped, and
@@ -407,10 +408,10 @@ impl AttachmentManifest for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)
-        })
+        }
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
@@ -419,7 +420,7 @@ impl AttachmentManifest for PostgresSessionStore {
         let attachment_id = intent.attachment_id.to_string();
         let session_id = intent.session_id.clone();
         let write_id = permit.write_id().as_hex();
-        block_on_detached(async move {
+        {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             lock_attachment_fence_tx(&mut tx, &attachment_id).await?;
             // Only this attempt's own unstamped, uncommitted row. A superseded
@@ -465,10 +466,10 @@ impl AttachmentManifest for PostgresSessionStore {
                 .map_err(store_sqlx_error)?;
             }
             tx.commit().await.map_err(store_sqlx_error)
-        })
+        }
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[AttachmentId],
@@ -477,21 +478,21 @@ impl AttachmentManifest for PostgresSessionStore {
         let now = self.clock.timestamp_ms();
         let session_id = SessionId::from(session_id.to_string());
         let attachment_ids = attachment_ids.to_vec();
-        block_on_detached(async move {
+        {
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &session_id).await?;
             commit_attachment_refs_tx(&mut tx, &session_id, &attachment_ids, now).await?;
             tx.commit().await.map_err(store_sqlx_error)
-        })
+        }
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
         let pool = self.pool.clone();
         let older_than = clamp_epoch_ms(older_than_epoch_ms);
-        block_on_detached(async move {
+        {
             let rows = sqlx::query(
                 "SELECT attachment_id, session_id, canonical_uri, intent_at_ms, committed_at_ms,
                         owner_kind, owner_id, owner_incarnation, written_at_ms
@@ -543,10 +544,10 @@ impl AttachmentManifest for PostgresSessionStore {
                     })
                 })
                 .collect()
-        })
+        }
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &AttachmentId,
@@ -554,7 +555,7 @@ impl AttachmentManifest for PostgresSessionStore {
         let pool = self.pool.clone();
         let session_id = SessionId::from(session_id.to_string());
         let attachment_id = attachment_id.to_string();
-        block_on_detached(async move {
+        {
             sqlx::query(
                 "DELETE FROM lash_attachment_manifest
                  WHERE session_id = $1 AND attachment_id = $2 AND (
@@ -570,12 +571,12 @@ impl AttachmentManifest for PostgresSessionStore {
             .await
             .map(|_| ())
             .map_err(store_sqlx_error)
-        })
+        }
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
         let pool = self.pool.clone();
-        block_on_detached(async move {
+        {
             let rows = sqlx::query("SELECT DISTINCT attachment_id FROM lash_attachment_manifest")
                 .fetch_all(&pool)
                 .await
@@ -585,6 +586,6 @@ impl AttachmentManifest for PostgresSessionStore {
                     attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0))
                 })
                 .collect()
-        })
+        }
     }
 }

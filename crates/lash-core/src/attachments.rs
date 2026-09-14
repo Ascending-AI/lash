@@ -1425,18 +1425,19 @@ impl SessionAttachmentStore {
         // is taken back from a sweep that condemned it. If this fails the bytes
         // never land.
         let mut attempts: u32 = 0;
-        let permit = loop {
+        let reference = loop {
             attempts += 1;
             let fence = self
                 .manifest
                 .begin_attachment_write(intent.clone())
+                .await
                 .map_err(|err| {
                     AttachmentStoreError::ManifestRecordFailed(format!(
                         "failed to record attachment intent for `{attachment_id}`: {err}"
                     ))
                 })?;
-            match fence {
-                AttachmentWriteFence::Granted(permit) => break permit,
+            let permit = match fence {
+                AttachmentWriteFence::Granted(permit) => permit,
                 // A sweep armed this digest's delete before we recorded an
                 // intent. Writing bytes into an in-flight delete would lose
                 // them, so back off and re-acquire: the sweep releases the
@@ -1451,40 +1452,70 @@ impl SessionAttachmentStore {
                         });
                     }
                     reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    continue;
                 }
-            }
-        };
-        let reference = match self.backend.put(bytes, meta).await {
-            Ok(reference) => reference,
-            Err(backend_error) => {
-                if let Err(rollback_error) = self.manifest.abort_attachment_write(&intent, permit) {
+            };
+            // Cloned per attempt because a retry has to re-put: a sweep that
+            // condemned the digest in the window below deletes both this row and
+            // the bytes, so the recovering attempt is a full re-put, not a bare
+            // re-stamp.
+            let reference = match self.backend.put(bytes.clone(), meta.clone()).await {
+                Ok(reference) => reference,
+                Err(backend_error) => {
+                    if let Err(rollback_error) =
+                        self.manifest.abort_attachment_write(&intent, permit).await
+                    {
+                        return Err(AttachmentStoreError::ManifestRecordFailed(format!(
+                            "backend put for `{attachment_id}` failed ({backend_error}); \
+                             condemnation rollback also failed: {rollback_error}"
+                        )));
+                    }
+                    return Err(backend_error);
+                }
+            };
+            if reference.id != attachment_id {
+                let backend_error = AttachmentStoreError::Contract(format!(
+                    "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
+                    reference.id
+                ));
+                if let Err(rollback_error) =
+                    self.manifest.abort_attachment_write(&intent, permit).await
+                {
                     return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                        "backend put for `{attachment_id}` failed ({backend_error}); \
-                         condemnation rollback also failed: {rollback_error}"
+                        "{backend_error}; condemnation rollback also failed: {rollback_error}"
                     )));
                 }
                 return Err(backend_error);
             }
-        };
-        if reference.id != attachment_id {
-            let backend_error = AttachmentStoreError::Contract(format!(
-                "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
-                reference.id
-            ));
-            if let Err(rollback_error) = self.manifest.abort_attachment_write(&intent, permit) {
-                return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                    "{backend_error}; condemnation rollback also failed: {rollback_error}"
-                )));
+            match self
+                .manifest
+                .complete_attachment_write(&intent, permit)
+                .await
+            {
+                Ok(()) => break reference,
+                // The manifest has no TTL and no elapsed-time authority, so an
+                // unstamped intent that is already past the sweep's grace cutoff
+                // reads as an abandoned attempt: a sweep that condemns this
+                // digest between the grant and the stamp deletes the row this
+                // permit names, and the stamp then certifies nothing. That is
+                // the documented recovery point for the writer, not a failure —
+                // re-acquire the fence (which claims the condemnation and stops
+                // the delete from arming) and re-put. The bytes are only ever
+                // written behind a granted permit, so nothing lands inside an
+                // armed delete.
+                Err(StoreError::StaleWritePermit { .. })
+                    if attempts < RECLAMATION_FENCE_ATTEMPTS =>
+                {
+                    reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    continue;
+                }
+                Err(err) => {
+                    return Err(AttachmentStoreError::ManifestRecordFailed(format!(
+                        "failed to complete attachment write for `{attachment_id}` after the backend put succeeded: {err}"
+                    )));
+                }
             }
-            return Err(backend_error);
-        }
-        self.manifest
-            .complete_attachment_write(&intent, permit)
-            .map_err(|err| {
-                AttachmentStoreError::ManifestRecordFailed(format!(
-                    "failed to complete attachment write for `{attachment_id}` after the backend put succeeded: {err}"
-                ))
-            })?;
+        };
         if let Some(owner) = &owner {
             owner
                 .recorded_intent_ids
@@ -1503,11 +1534,14 @@ impl SessionAttachmentStore {
     pub async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         // Drop this session's manifest ref. Backend bytes stay put; they are
         // reclaimed by GC once no session references them.
-        self.manifest.forget(&self.session_id, id).map_err(|err| {
-            AttachmentStoreError::ManifestRecordFailed(format!(
-                "failed to forget attachment ref for `{id}`: {err}"
-            ))
-        })?;
+        self.manifest
+            .forget(&self.session_id, id)
+            .await
+            .map_err(|err| {
+                AttachmentStoreError::ManifestRecordFailed(format!(
+                    "failed to forget attachment ref for `{id}`: {err}"
+                ))
+            })?;
         Ok(())
     }
 }
@@ -1517,8 +1551,9 @@ impl SessionAttachmentStore {
 /// backend is the sole source of truth for these runtimes.
 pub struct NoopAttachmentManifest;
 
+#[async_trait::async_trait]
 impl AttachmentManifest for NoopAttachmentManifest {
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         _intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError> {
@@ -1527,7 +1562,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
         )))
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         _intent: &AttachmentIntent,
         _permit: AttachmentWritePermit,
@@ -1535,7 +1570,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
         Ok(())
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         _intent: &AttachmentIntent,
         _permit: AttachmentWritePermit,
@@ -1543,7 +1578,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
         Ok(())
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         _session_id: &SessionId,
         _attachment_ids: &[AttachmentId],
@@ -1551,14 +1586,14 @@ impl AttachmentManifest for NoopAttachmentManifest {
         Ok(())
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         _older_than_epoch_ms: u64,
     ) -> Result<Vec<crate::AttachmentManifestEntry>, StoreError> {
         Ok(Vec::new())
     }
 
-    fn forget(
+    async fn forget(
         &self,
         _session_id: &SessionId,
         _attachment_id: &AttachmentId,
@@ -1566,7 +1601,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
         Ok(())
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
         Ok(Vec::new())
     }
 }
@@ -1585,55 +1620,56 @@ fn now_epoch_ms() -> u64 {
 /// between the two; this thin forwarder is the bridge.
 pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimePersistence>);
 
+#[async_trait::async_trait]
 impl AttachmentManifest for PersistenceManifestAdapter {
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, crate::StoreError> {
-        AttachmentManifest::begin_attachment_write(&*self.0, intent)
+        AttachmentManifest::begin_attachment_write(&*self.0, intent).await
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::complete_attachment_write(&*self.0, intent, permit)
+        AttachmentManifest::complete_attachment_write(&*self.0, intent, permit).await
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::abort_attachment_write(&*self.0, intent, permit)
+        AttachmentManifest::abort_attachment_write(&*self.0, intent, permit).await
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[AttachmentId],
     ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::commit_refs(&*self.0, session_id, attachment_ids)
+        AttachmentManifest::commit_refs(&*self.0, session_id, attachment_ids).await
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
-        AttachmentManifest::list_uncommitted(&*self.0, older_than_epoch_ms)
+        AttachmentManifest::list_uncommitted(&*self.0, older_than_epoch_ms).await
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
-        AttachmentManifest::forget(&*self.0, session_id, attachment_id)
+        AttachmentManifest::forget(&*self.0, session_id, attachment_id).await
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
-        AttachmentManifest::list_all_refs(&*self.0)
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, crate::StoreError> {
+        AttachmentManifest::list_all_refs(&*self.0).await
     }
 }
 

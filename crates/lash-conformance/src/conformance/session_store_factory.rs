@@ -807,7 +807,8 @@ pub async fn process_prune_deletes_owned_session_stores(
                     incarnation: process.incarnation,
                 }),
             },
-        );
+        )
+        .await;
         requests.push(request);
     }
 
@@ -1045,6 +1046,7 @@ pub async fn attachment_reference_lifecycle_with_store(
         .expect("put a attachment");
     a_manifest
         .commit_refs(&a_request.session_id, std::slice::from_ref(&a_ref.id))
+        .await
         .expect("commit a's attachment ref");
 
     // FIG-653: the reference layer owns liveness, not read authorization.
@@ -1080,6 +1082,7 @@ pub async fn attachment_reference_lifecycle_with_store(
         .expect("b resolves the blob it now references");
     b_manifest
         .commit_refs(&b_request.session_id, std::slice::from_ref(&b_ref.id))
+        .await
         .expect("commit b's attachment ref");
 
     // Sweep: A's and B's committed refs both count as live roots, so the shared
@@ -1279,7 +1282,8 @@ async fn session_store_factory_rejects_writes_after_delete(
                 intent_at_epoch_ms: 1,
                 owner: None,
             },
-        ),
+        )
+        .await,
         &request.session_id,
         "attachment intent",
     );
@@ -2260,6 +2264,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
                 owner: None,
             },
         )
+        .await
         .expect("write after a completed sweep"),
         crate::AttachmentWriteFence::Granted(_)
     ));
@@ -2268,7 +2273,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
 /// Attachment cutoff parameter conformance across large cutoff values (e.g. `u64::MAX`, `(i64::MAX as u64) + 1`).
 ///
 /// Verifies that:
-/// 1. `list_uncommitted(cutoff)` lists uncommitted intents when `cutoff >= intent_at_epoch_ms`.
+/// 1. `list_uncommitted(cutoff).await` lists uncommitted intents when `cutoff >= intent_at_epoch_ms`.
 /// 2. `has_live_attachment_ref(id, cutoff)` reports `false` for uncommitted aged intents with dead/no owners, and `true` for committed refs.
 /// 3. `condemn_attachment(id, cutoff)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
 /// 4. `live_attachment_refs(cutoff)` forgets uncommitted aged intents and retains committed refs.
@@ -2302,6 +2307,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 owner: None,
             },
         )
+        .await
         .expect("record aged_uncommitted intent"),
         crate::AttachmentWriteFence::Granted(_)
     ));
@@ -2315,13 +2321,15 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
             intent_at_epoch_ms: 1_000,
             owner: None,
         },
-    );
+    )
+    .await;
     // Commit the ref for committed_id.
     crate::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
         std::slice::from_ref(&committed_id),
     )
+    .await
     .expect("commit ref");
 
     assert!(matches!(
@@ -2335,6 +2343,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
                 owner: None,
             },
         )
+        .await
         .expect("record cond_target intent"),
         crate::AttachmentWriteFence::Granted(_)
     ));
@@ -2343,6 +2352,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
     for large_cutoff in [u64::MAX, (i64::MAX as u64) + 1] {
         // 1. list_uncommitted must find all uncommitted intents whose intent_at_epoch_ms <= large_cutoff
         let uncommitted = crate::AttachmentManifest::list_uncommitted(&*store, large_cutoff)
+            .await
             .expect("list_uncommitted with large cutoff");
         let uncommitted_ids = uncommitted
             .iter()

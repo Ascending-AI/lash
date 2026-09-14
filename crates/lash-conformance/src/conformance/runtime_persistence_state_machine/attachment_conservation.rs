@@ -216,6 +216,7 @@ async fn commit_with_attachment_refs(
     if turn_owned
         && store
             .list_uncommitted(RECONCILE_SQL_SAFE_MAX)
+            .await
             .map_err(|error| error.to_string())?
             .iter()
             .any(|entry| entry.attachment_id == attachment.id)

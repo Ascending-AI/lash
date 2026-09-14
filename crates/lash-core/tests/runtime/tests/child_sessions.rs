@@ -484,6 +484,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         .expect("child store");
     assert!(
         lash_core::AttachmentManifest::list_all_refs(&*child_store)
+            .await
             .map(|refs| refs.contains(&id))
             .expect("child manifest lookup"),
         "child session must hold the ref it wrote"

@@ -673,12 +673,14 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     };
     let lash_core::AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("begin process-owned write")
     else {
         panic!("a free digest must grant its writer");
     };
     store
         .complete_attachment_write(&intent, permit)
+        .await
         .expect("stamp process-owned upload");
 
     let refs = factory

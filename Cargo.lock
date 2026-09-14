@@ -2541,7 +2541,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "flate2",
- "futures-executor",
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-lashlang",

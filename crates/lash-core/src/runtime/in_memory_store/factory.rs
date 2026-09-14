@@ -827,7 +827,8 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             crate::AttachmentManifest::forget_aged_uncommitted_intents(
                 &*store,
                 intent_grace_cutoff_epoch_ms,
-            )?;
+            )
+            .await?;
         }
         let _transaction = self.write_transaction.lock_recover();
         self.reclaim_deleted_attachment_roots();
@@ -903,11 +904,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             return Ok(crate::AttachmentCondemnation::RootPresent);
         }
         for store in stores {
-            if crate::AttachmentManifest::has_live_ref_for_id(
-                &*store,
-                id,
-                intent_grace_cutoff_epoch_ms,
-            )? {
+            // Synchronous by design: this predicate is asked while the
+            // factory-wide write transaction is held, which is what makes it
+            // one conditional mutation against a concurrent writer.
+            if store.evaluate_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)? {
                 return Ok(crate::AttachmentCondemnation::RootPresent);
             }
         }
@@ -1049,11 +1049,10 @@ impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
             return Ok(true);
         }
         for store in stores {
-            if crate::AttachmentManifest::has_live_ref_for_id(
-                &*store,
-                id,
-                intent_grace_cutoff_epoch_ms,
-            )? {
+            // Synchronous by design: this predicate is asked while the
+            // factory-wide write transaction is held, which is what makes it
+            // one conditional mutation against a concurrent writer.
+            if store.evaluate_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)? {
                 return Ok(true);
             }
         }

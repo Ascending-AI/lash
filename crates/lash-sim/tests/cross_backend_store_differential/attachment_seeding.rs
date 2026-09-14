@@ -19,7 +19,7 @@ use super::ConformancePersistence;
 /// backends persist and return the incarnation rather than the turn shape that
 /// leaves the column NULL. The fixture wires no process registry, so the row
 /// stays an immortal root everywhere.
-pub(crate) fn seed_differential_attachment_rows(
+pub(crate) async fn seed_differential_attachment_rows(
     store: &dyn ConformancePersistence,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
@@ -34,11 +34,13 @@ pub(crate) fn seed_differential_attachment_rows(
         owner: Some(AttachmentOwner::Turn { id: operation }),
     };
     let AttachmentWriteFence::Granted(turn_permit) =
-        store.begin_attachment_write(turn_owned.clone())?
+        store.begin_attachment_write(turn_owned.clone()).await?
     else {
         panic!("the differential digest must grant its writer");
     };
-    store.complete_attachment_write(&turn_owned, turn_permit)?;
+    store
+        .complete_attachment_write(&turn_owned, turn_permit)
+        .await?;
 
     let process_owned = AttachmentIntent {
         attachment_id: super::differential_process_attachment_id(),
@@ -52,7 +54,8 @@ pub(crate) fn seed_differential_attachment_rows(
             ),
         }),
     };
-    let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(process_owned)? else {
+    let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(process_owned).await?
+    else {
         panic!("the process-owned digest must grant its writer");
     };
     Ok(())
