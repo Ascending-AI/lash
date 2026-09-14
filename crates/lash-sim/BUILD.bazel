@@ -30,12 +30,13 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     extra_compile_data = [],
+    extra_data = [
+        "//:confidence_gate_corpus",
+    ],
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
-    tags = [
-        "cargo-heavy-suite",
-        "manual",
-    ],
+    tags = [],
+    timeout = "long",
     version = "0.0.0-dev",
 )
 

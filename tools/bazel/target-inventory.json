@@ -6,6 +6,25 @@
   "packages": [
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "chrono",
+        "futures-util",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-sansio",
+        "pretty_assertions",
+        "proptest",
+        "rmp-serde",
+        "serde",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "uuid"
+      ],
       "manifest": "crates/lash-conformance/Cargo.toml",
       "package": "lash-internal-conformance",
       "resolved_features": [],
@@ -30,6 +49,32 @@
         "perf-witness",
         "testing"
       ],
+      "dependencies": [
+        "arc-swap",
+        "async-trait",
+        "chrono",
+        "futures-util",
+        "hmac",
+        "insta",
+        "lash-internal-http-transport",
+        "lash-internal-sansio",
+        "lash-internal-trace",
+        "proptest",
+        "rmp-serde",
+        "schemars",
+        "serde",
+        "serde-content",
+        "serde_bytes",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber",
+        "uuid"
+      ],
       "manifest": "crates/lash-core/Cargo.toml",
       "package": "lash-internal-core",
       "resolved_features": [
@@ -45,23 +90,17 @@
         },
         {
           "cargo": "lash_core",
-          "cargo_only": "shares a unit-test binary with the fault-matrix tests, which execute scripts/confidence-gate.sh against a fake Cargo on PATH, and with turn_cancel_modes::native_takeover_settles_unresolved_cancel_authorization_before_fresh_work, which needs nextest's process-per-test isolation: it passes alone and fails with StoreCommitContended inside a single libtest process",
           "kind": "unit-test",
           "label": "//crates/lash-core:lash-core__unit_test",
           "tags": [
-            "cargo-nested-suite",
-            "manual"
+            "no-remote-exec"
           ]
         },
         {
           "cargo": "integration_boundary",
-          "cargo_only": "invokes Cargo metadata against the workspace",
           "kind": "test",
           "label": "//crates/lash-core:integration_boundary__test",
-          "tags": [
-            "cargo-nested-suite",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "panic_containment",
@@ -85,6 +124,15 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "bytes",
+        "httpdate",
+        "lash-internal-sansio",
+        "reqwest",
+        "thiserror",
+        "tokio"
+      ],
       "manifest": "crates/lash-http-transport/Cargo.toml",
       "package": "lash-internal-http-transport",
       "resolved_features": [],
@@ -105,6 +153,22 @@
     {
       "declared_features": [
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "chrono",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-remote-protocol",
+        "lash-internal-sansio",
+        "lash-internal-trace",
+        "serde",
+        "serde_json",
+        "thiserror",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "uuid"
       ],
       "manifest": "crates/lash-lashlang-runtime/Cargo.toml",
       "package": "lash-internal-lashlang-runtime",
@@ -130,6 +194,16 @@
         "default",
         "lashlang"
       ],
+      "dependencies": [
+        "async-trait",
+        "jsonschema",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-sansio",
+        "lash-internal-tool-support",
+        "serde_json",
+        "tokio"
+      ],
       "manifest": "crates/lash-llm-tools/Cargo.toml",
       "package": "lash-internal-llm-tools",
       "resolved_features": [
@@ -154,6 +228,17 @@
       "declared_features": [
         "proptest-support",
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "bytes",
+        "lash-internal-core",
+        "lash-internal-http-transport",
+        "lash-internal-llm-transport",
+        "lash-internal-sansio",
+        "proptest",
+        "serde_json",
+        "tokio"
       ],
       "manifest": "crates/lash-llm-transport/Cargo.toml",
       "package": "lash-internal-llm-transport",
@@ -185,6 +270,35 @@
       "declared_features": [
         "default",
         "dhat-heap"
+      ],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "chrono",
+        "clap",
+        "dhat",
+        "futures-util",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-llm-tools",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-plugin-rolling-history",
+        "lash-internal-plugin-tool-output-budget",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-provider-openai",
+        "lash-internal-rlm-types",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-runtime",
+        "serde",
+        "serde_json",
+        "stats_alloc",
+        "tempfile",
+        "tokio",
+        "tokio-util",
+        "uuid"
       ],
       "manifest": "crates/lash-perf/Cargo.toml",
       "package": "lash-perf",
@@ -222,6 +336,28 @@
         "default",
         "lashlang"
       ],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "blake3",
+        "fastrand",
+        "futures-util",
+        "http",
+        "jsonschema",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-sansio",
+        "lash-internal-tool-support",
+        "rmcp",
+        "serde",
+        "serde_json",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber"
+      ],
       "manifest": "crates/lash-plugin-mcp/Cargo.toml",
       "package": "lash-internal-plugin-mcp",
       "resolved_features": [
@@ -247,6 +383,14 @@
         "default",
         "lashlang"
       ],
+      "dependencies": [
+        "async-trait",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-tool-support",
+        "serde_json",
+        "tokio"
+      ],
       "manifest": "crates/lash-plugin-process-controls/Cargo.toml",
       "package": "lash-internal-plugin-process-controls",
       "resolved_features": [
@@ -269,6 +413,14 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "lash-internal-core",
+        "lash-internal-sansio",
+        "serde",
+        "serde_json",
+        "tokio"
+      ],
       "manifest": "crates/lash-plugin-rolling-history/Cargo.toml",
       "package": "lash-internal-plugin-rolling-history",
       "resolved_features": [],
@@ -288,6 +440,13 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "lash-internal-core",
+        "lash-internal-protocol-standard",
+        "lash-internal-sansio",
+        "serde",
+        "serde_json"
+      ],
       "manifest": "crates/lash-plugin-tool-output-budget/Cargo.toml",
       "package": "lash-internal-plugin-tool-output-budget",
       "resolved_features": [],
@@ -311,6 +470,34 @@
         "lashlang",
         "perf-witness",
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "fastrand",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-standard",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-runtime",
+        "rmp-serde",
+        "rusqlite",
+        "schemars",
+        "serde",
+        "serde_json",
+        "sha2",
+        "sqlx",
+        "tempfile",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber",
+        "uuid"
       ],
       "manifest": "crates/lash-postgres-store/Cargo.toml",
       "package": "lash-internal-postgres-store",
@@ -423,6 +610,28 @@
         "default",
         "testing"
       ],
+      "dependencies": [
+        "async-trait",
+        "insta",
+        "jsonschema",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-rlm-types",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-trace",
+        "lash-internal-typescript",
+        "rmp-serde",
+        "serde",
+        "serde_bytes",
+        "serde_json",
+        "syn",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "uuid"
+      ],
       "manifest": "crates/lash-protocol-rlm/Cargo.toml",
       "package": "lash-internal-protocol-rlm",
       "resolved_features": [
@@ -458,6 +667,18 @@
       "declared_features": [
         "default",
         "lashlang"
+      ],
+      "dependencies": [
+        "async-trait",
+        "insta",
+        "lash-internal-core",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-tool-support",
+        "serde_json",
+        "tokio",
+        "tokio-util"
       ],
       "manifest": "crates/lash-protocol-standard/Cargo.toml",
       "package": "lash-internal-protocol-standard",
@@ -502,6 +723,19 @@
         "default",
         "testing"
       ],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "lash-internal-core",
+        "lash-internal-llm-transport",
+        "lash-internal-provider-anthropic",
+        "lash-internal-sansio",
+        "proptest",
+        "reqwest",
+        "serde_json",
+        "tokio",
+        "uuid"
+      ],
       "manifest": "crates/lash-provider-anthropic/Cargo.toml",
       "package": "lash-internal-provider-anthropic",
       "resolved_features": [
@@ -536,6 +770,20 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "chrono",
+        "form_urlencoded",
+        "lash-internal-core",
+        "lash-internal-sansio",
+        "reqwest",
+        "serde_json",
+        "sha2",
+        "thiserror",
+        "tokio",
+        "uuid"
+      ],
       "manifest": "crates/lash-provider-auth/Cargo.toml",
       "package": "lash-internal-provider-auth",
       "resolved_features": [],
@@ -557,6 +805,22 @@
       "declared_features": [
         "default",
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "lash-internal-core",
+        "lash-internal-llm-transport",
+        "lash-internal-provider-auth",
+        "lash-internal-provider-google",
+        "lash-internal-sansio",
+        "lash-runtime",
+        "proptest",
+        "reqwest",
+        "serde",
+        "serde_json",
+        "tokio",
+        "uuid"
       ],
       "manifest": "crates/lash-provider-google/Cargo.toml",
       "package": "lash-internal-provider-google",
@@ -595,6 +859,29 @@
         "default",
         "testing"
       ],
+      "dependencies": [
+        "async-trait",
+        "base64",
+        "bytes",
+        "futures-util",
+        "lash-internal-core",
+        "lash-internal-llm-transport",
+        "lash-internal-protocol-rlm",
+        "lash-internal-provider-auth",
+        "lash-internal-provider-openai",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-tool-support",
+        "lash-runtime",
+        "reqwest",
+        "serde",
+        "serde_json",
+        "tempfile",
+        "tokio",
+        "tokio-tungstenite",
+        "tracing",
+        "uuid"
+      ],
       "manifest": "crates/lash-provider-openai/Cargo.toml",
       "package": "lash-internal-provider-openai",
       "resolved_features": [
@@ -629,6 +916,10 @@
         "prohibit-unsafe",
         "std",
         "utf16"
+      ],
+      "dependencies": [
+        "hashbrown",
+        "memchr"
       ],
       "manifest": "crates/lash-regress/Cargo.toml",
       "package": "lash-regress",
@@ -678,6 +969,16 @@
         "core-conversions",
         "default"
       ],
+      "dependencies": [
+        "base64",
+        "lash-internal-core",
+        "lash-internal-sansio",
+        "schemars",
+        "serde",
+        "serde_json",
+        "thiserror",
+        "tokio"
+      ],
       "manifest": "crates/lash-remote-protocol/Cargo.toml",
       "package": "lash-internal-remote-protocol",
       "resolved_features": [
@@ -700,6 +1001,41 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "bytes",
+        "chrono",
+        "http",
+        "http-body",
+        "http-body-util",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-http-transport",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-llm-tools",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-protocol-standard",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-internal-trace",
+        "lash-internal-typescript",
+        "lash-runtime",
+        "reqwest",
+        "restate-sdk",
+        "rusqlite",
+        "serde",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tokio-util",
+        "tracing"
+      ],
       "manifest": "crates/lash-restate/Cargo.toml",
       "package": "lash-internal-restate",
       "resolved_features": [],
@@ -719,6 +1055,11 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "lash-internal-sansio",
+        "serde",
+        "serde_json"
+      ],
       "manifest": "crates/lash-rlm-types/Cargo.toml",
       "package": "lash-internal-rlm-types",
       "resolved_features": [],
@@ -739,6 +1080,16 @@
     {
       "declared_features": [
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "futures-util",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-sansio",
+        "object_store",
+        "tokio",
+        "url"
       ],
       "manifest": "crates/lash-s3-store/Cargo.toml",
       "package": "lash-internal-s3-store",
@@ -768,6 +1119,14 @@
         "default",
         "schema-validation"
       ],
+      "dependencies": [
+        "blake3",
+        "jsonschema",
+        "proptest",
+        "schemars",
+        "serde",
+        "serde_json"
+      ],
       "manifest": "crates/lash-sansio/Cargo.toml",
       "package": "lash-internal-sansio",
       "resolved_features": [
@@ -790,6 +1149,38 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "bytes",
+        "chrono",
+        "fastrand",
+        "insta",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-llm-transport",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-protocol-standard",
+        "lash-internal-provider-anthropic",
+        "lash-internal-provider-auth",
+        "lash-internal-provider-google",
+        "lash-internal-provider-openai",
+        "lash-internal-rlm-types",
+        "lash-internal-s3-store",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-runtime",
+        "rmp-serde",
+        "rusqlite",
+        "serde",
+        "serde_json",
+        "sha2",
+        "sqlx",
+        "tempfile",
+        "tokio"
+      ],
       "manifest": "crates/lash-sim/Cargo.toml",
       "package": "lash-sim",
       "resolved_features": [],
@@ -801,13 +1192,9 @@
         },
         {
           "cargo": "lash_sim",
-          "cargo_only": "shares a unit-test binary with the specially scheduled heavy simulation tests, a repository-root docs/gate walk from CARGO_MANIFEST_DIR, and a search-mode case whose determinism depends on the Cargo runner's scheduling",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
-          "tags": [
-            "cargo-heavy-suite",
-            "manual"
-          ]
+          "tags": []
         },
         {
           "cargo": "lash-sim",
@@ -880,6 +1267,28 @@
         "perf-witness",
         "testing"
       ],
+      "dependencies": [
+        "async-trait",
+        "flate2",
+        "futures-executor",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "rmp-serde",
+        "rusqlite",
+        "serde",
+        "serde_bytes",
+        "serde_json",
+        "tempfile",
+        "tokio",
+        "tokio-rusqlite",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber",
+        "uuid"
+      ],
       "manifest": "crates/lash-sqlite-store/Cargo.toml",
       "package": "lash-internal-sqlite-store",
       "resolved_features": [
@@ -934,6 +1343,20 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "async-trait",
+        "jsonschema",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-protocol-rlm",
+        "lash-internal-rlm-types",
+        "lash-internal-sansio",
+        "lash-internal-tool-support",
+        "serde",
+        "serde_json",
+        "tokio",
+        "tokio-util"
+      ],
       "manifest": "crates/lash-subagents/Cargo.toml",
       "package": "lash-internal-subagents",
       "resolved_features": [],
@@ -955,6 +1378,14 @@
       "declared_features": [
         "default",
         "lashlang"
+      ],
+      "dependencies": [
+        "async-trait",
+        "lash-internal-core",
+        "lash-internal-lashlang-runtime",
+        "serde",
+        "serde_json",
+        "serde_path_to_error"
       ],
       "manifest": "crates/lash-tool-support/Cargo.toml",
       "package": "lash-internal-tool-support",
@@ -980,6 +1411,17 @@
       "declared_features": [
         "default",
         "otel"
+      ],
+      "dependencies": [
+        "chrono",
+        "lash-internal-sansio",
+        "opentelemetry",
+        "opentelemetry_sdk",
+        "serde",
+        "serde_json",
+        "sha2",
+        "thiserror",
+        "uuid"
       ],
       "manifest": "crates/lash-trace/Cargo.toml",
       "package": "lash-internal-trace",
@@ -1010,6 +1452,20 @@
       "declared_features": [
         "testing"
       ],
+      "dependencies": [
+        "futures",
+        "lash-internal-lashlang",
+        "lash-internal-sansio",
+        "lash-internal-typescript",
+        "ryu-js",
+        "serde",
+        "serde_json",
+        "serde_yaml",
+        "swc_common",
+        "swc_ecma_ast",
+        "swc_ecma_parser",
+        "tokio"
+      ],
       "manifest": "crates/lash-typescript/Cargo.toml",
       "package": "lash-internal-typescript",
       "resolved_features": [
@@ -1029,12 +1485,10 @@
         },
         {
           "cargo": "integration",
-          "cargo_only": "uses Cargo-relative Test262 and WPT asset trees",
           "kind": "test",
           "label": "//crates/lash-typescript:integration__test",
           "tags": [
-            "cargo-path-assets",
-            "manual"
+            "no-remote-exec"
           ]
         }
       ]
@@ -1045,6 +1499,44 @@
         "otel-trace",
         "rlm",
         "testing"
+      ],
+      "dependencies": [
+        "async-trait",
+        "futures-util",
+        "insta",
+        "lash-internal-conformance",
+        "lash-internal-core",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-llm-tools",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-plugin-rolling-history",
+        "lash-internal-plugin-tool-output-budget",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-protocol-standard",
+        "lash-internal-provider-anthropic",
+        "lash-internal-remote-protocol",
+        "lash-internal-rlm-types",
+        "lash-internal-sansio",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-internal-tool-support",
+        "lash-internal-trace",
+        "rmp-serde",
+        "rusqlite",
+        "serde",
+        "serde_bytes",
+        "serde_json",
+        "sqlx",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber",
+        "trybuild",
+        "uuid"
       ],
       "manifest": "crates/lash/Cargo.toml",
       "package": "lash-runtime",
@@ -1129,6 +1621,30 @@
       "declared_features": [
         "testing"
       ],
+      "dependencies": [
+        "async-trait",
+        "compact_str",
+        "criterion",
+        "futures",
+        "futures-executor",
+        "insta",
+        "lash-internal-core",
+        "lash-internal-sansio",
+        "lash-regress",
+        "num-bigint",
+        "num-traits",
+        "proptest",
+        "rmp-serde",
+        "rustc-hash",
+        "ryu-js",
+        "serde",
+        "serde_json",
+        "sha2",
+        "smallvec",
+        "thiserror",
+        "tokio",
+        "url"
+      ],
       "manifest": "crates/lashlang/Cargo.toml",
       "package": "lash-internal-lashlang",
       "resolved_features": [
@@ -1202,6 +1718,30 @@
       "declared_features": [
         "restate"
       ],
+      "dependencies": [
+        "async-trait",
+        "axum",
+        "bytes",
+        "chrono",
+        "dotenvy",
+        "futures-util",
+        "lash-internal-protocol-rlm",
+        "lash-internal-provider-openai",
+        "lash-internal-remote-protocol",
+        "lash-internal-restate",
+        "lash-internal-rlm-types",
+        "lash-internal-sqlite-store",
+        "lash-runtime",
+        "reqwest",
+        "restate-sdk",
+        "rusqlite",
+        "serde",
+        "serde_json",
+        "tempfile",
+        "tokio",
+        "tokio-stream",
+        "uuid"
+      ],
       "manifest": "examples/agent-service/Cargo.toml",
       "package": "agent-service",
       "resolved_features": [],
@@ -1231,6 +1771,52 @@
         "default",
         "provider-wire-fixtures"
       ],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "axum",
+        "base64",
+        "bytes",
+        "chrono",
+        "chrono-tz",
+        "croner",
+        "dotenvy",
+        "futures-util",
+        "http",
+        "http-body-util",
+        "lash-internal-http-transport",
+        "lash-internal-lashlang",
+        "lash-internal-lashlang-runtime",
+        "lash-internal-llm-tools",
+        "lash-internal-plugin-mcp",
+        "lash-internal-plugin-process-controls",
+        "lash-internal-plugin-rolling-history",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-provider-openai",
+        "lash-internal-remote-protocol",
+        "lash-internal-restate",
+        "lash-internal-rlm-types",
+        "lash-internal-sqlite-store",
+        "lash-internal-subagents",
+        "lash-internal-typescript",
+        "lash-runtime",
+        "lash-sim",
+        "percent-encoding",
+        "reqwest",
+        "restate-sdk",
+        "rusqlite",
+        "serde",
+        "serde_json",
+        "sha2",
+        "sqlx",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tokio-stream",
+        "tracing-subscriber",
+        "uuid"
+      ],
       "manifest": "examples/agent-workbench/Cargo.toml",
       "package": "agent-workbench",
       "resolved_features": [
@@ -1259,6 +1845,29 @@
       "declared_features": [
         "e2e",
         "live-e2e"
+      ],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "axum",
+        "base64",
+        "bytes",
+        "dotenvy",
+        "futures-util",
+        "lash-internal-plugin-mcp",
+        "lash-internal-provider-openai",
+        "lash-internal-sqlite-store",
+        "lash-runtime",
+        "reqwest",
+        "rmcp",
+        "rusqlite",
+        "schemars",
+        "serde",
+        "serde_json",
+        "tempfile",
+        "tokio",
+        "tokio-stream",
+        "uuid"
       ],
       "manifest": "examples/slack-clone/Cargo.toml",
       "package": "slack-clone",
@@ -1346,6 +1955,22 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "axum",
+        "clap",
+        "dotenvy",
+        "futures-util",
+        "lash-internal-provider-openai",
+        "lash-runtime",
+        "reqwest",
+        "serde",
+        "serde_json",
+        "tokio",
+        "tracing",
+        "tracing-subscriber"
+      ],
       "manifest": "examples/toolbench/Cargo.toml",
       "package": "toolbench",
       "resolved_features": [],
@@ -1366,6 +1991,19 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "anyhow",
+        "axum",
+        "compact_str",
+        "lash-internal-lashlang",
+        "lash-runtime",
+        "reqwest",
+        "serde",
+        "serde_json",
+        "tokio",
+        "tokio-stream",
+        "uuid"
+      ],
       "manifest": "examples/workflow-graph-roundtrip/Cargo.toml",
       "package": "workflow-graph-roundtrip",
       "resolved_features": [],
@@ -1427,6 +2065,32 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "axum",
+        "chrono",
+        "lash-internal-core",
+        "lash-internal-llm-tools",
+        "lash-internal-postgres-store",
+        "lash-internal-protocol-rlm",
+        "lash-internal-provider-openai",
+        "lash-internal-restate",
+        "lash-internal-s3-store",
+        "lash-internal-sqlite-store",
+        "lash-runtime",
+        "reqwest",
+        "restate-sdk",
+        "serde",
+        "serde_json",
+        "sqlx",
+        "tempfile",
+        "tokio",
+        "tokio-util",
+        "tracing",
+        "tracing-subscriber",
+        "uuid"
+      ],
       "manifest": "runbooks/restate-postgres-workers/Cargo.toml",
       "package": "lash-restate-postgres-workers-e2e",
       "resolved_features": [],
@@ -1554,6 +2218,18 @@
     },
     {
       "declared_features": [],
+      "dependencies": [
+        "anyhow",
+        "async-trait",
+        "clap",
+        "lash-internal-provider-openai",
+        "lash-internal-sqlite-store",
+        "lash-runtime",
+        "serde",
+        "serde_json",
+        "tempfile",
+        "tokio"
+      ],
       "manifest": "runbooks/rlm-smoke/Cargo.toml",
       "package": "rlm-smoke-host",
       "resolved_features": [],

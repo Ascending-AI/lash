@@ -55,6 +55,35 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# scripts/confidence-gate.sh and the helpers it sources. The lash-core
+# fault-matrix routing probes execute the gate against a recording `cargo`, so
+# the script is a runtime input of that test, not a compile input.
+filegroup(
+    name = "confidence_gate_scripts",
+    srcs = [
+        "scripts/ci/confidence-stage.sh",
+        "scripts/confidence-gate.sh",
+        "scripts/worktree-gate-env.sh",
+    ],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
+# The repository-root documents whose Postgres effect-history wording lash-sim
+# asserts is consistent with the gate. `confidence-gate.sh` and the ADR are
+# also how that test recognises the repository root.
+filegroup(
+    name = "confidence_gate_corpus",
+    srcs = [
+        "CONTEXT.md",
+        "docs/adr/0008-confidence-gate.md",
+        "docs/adr/0009-deterministic-simulation-harness.md",
+        "scripts/confidence-gate.sh",
+    ],
+    testonly = True,
+    visibility = ["//visibility:public"],
+)
+
 filegroup(
     name = "workspace_test_scripts",
     srcs = ["scripts/slack-clone-live-model-ui.py"],

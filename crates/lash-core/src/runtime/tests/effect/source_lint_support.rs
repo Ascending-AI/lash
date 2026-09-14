@@ -17,14 +17,16 @@ fn rust_sources_in(dir: PathBuf) -> Vec<PathBuf> {
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(&dir).expect("read module directory") {
             let entry = entry.expect("read module directory entry");
-            let file_type = entry.file_type().expect("read module entry type");
             let path = entry.path();
+            // Resolve through symlinks rather than refusing them: a locally
+            // executed Bazel test reads its sources from a runfiles tree built
+            // out of symlinks, and a walk that stopped at one would silently
+            // lint nothing. `metadata` follows the link, so every module the
+            // directory names is inspected in either checkout shape.
+            let file_type = std::fs::metadata(&path)
+                .expect("read module entry metadata")
+                .file_type();
 
-            assert!(
-                !file_type.is_symlink(),
-                "module source traversal does not follow symlink {}",
-                path.display()
-            );
             if file_type.is_dir() {
                 pending.push(path);
             } else if file_type.is_file()

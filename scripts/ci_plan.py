@@ -419,14 +419,19 @@ def evaluate_conclusion(
                 )
             continue
         if job == "workspace-tests":
-            required = (
-                plan_outputs.get("rust") == "true"
-                or plan_outputs.get("workbench") == "true"
+            # On a trusted event the Bazel partition owns every deterministic
+            # Rust binary, so the Cargo job runs only for the workbench
+            # binary. An untrusted event has no Bazel partition and keeps the
+            # full Cargo workspace run.
+            required = plan_outputs.get("workbench") == "true" or (
+                not bazel_is_trusted and plan_outputs.get("rust") == "true"
             )
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
-                    f"{job} ended with {result!r}, expected {wanted}"
+                    f"{job} ended with {result!r} for a"
+                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" expected {wanted}"
                 )
             continue
         if job == "unicode-tests":

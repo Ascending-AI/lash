@@ -392,6 +392,8 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
 
 WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core:integration_boundary__test",
+    "//crates/lash-core:lash-core__unit_test",
     "//crates/lash-core:panic_containment__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
@@ -429,6 +431,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
+    "//crates/lash-sim:lash-sim__unit_test",
     "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:process_lifecycle_vocabulary__test",
     "//crates/lash-sim:retention_classification__test",
@@ -443,6 +446,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:lash-trace__unit_test",
     "//crates/lash-trace:schema__test",
+    "//crates/lash-typescript:integration__test",
     "//crates/lash-typescript:lash-typescript__unit_test",
     "//crates/lash:embed_plugins__test",
     "//crates/lash:integrator_facade__test",
@@ -487,8 +491,6 @@ WORKSPACE_DEFERRED_TEST_TARGETS = [
 ]
 
 WORKSPACE_CARGO_TEST_TARGETS = [
-    "//crates/lash-core:integration_boundary__test",
-    "//crates/lash-core:lash-core__unit_test",
     "//crates/lash-postgres-store:conformance__test",
     "//crates/lash-postgres-store:durable_read_fixture__test",
     "//crates/lash-postgres-store:integration__test",
@@ -500,8 +502,6 @@ WORKSPACE_CARGO_TEST_TARGETS = [
     "//crates/lash-s3-store:lash-s3-store__unit_test",
     "//crates/lash-sim:cross_backend_active_turn_divergence__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
-    "//crates/lash-sim:lash-sim__unit_test",
-    "//crates/lash-typescript:integration__test",
     "//crates/lash:ui__test",
     "//examples/agent-workbench:agent-workbench__unit_test",
     "//examples/workflow-graph-roundtrip:authoring__test",
