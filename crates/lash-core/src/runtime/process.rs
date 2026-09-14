@@ -37,7 +37,7 @@ pub use engine::{
     AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
     ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
-    ProcessRunOutcome, SegmentHandover,
+    ProcessRunOutcome, SegmentHandover, settle_started_process_engine_artifacts,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -64,8 +64,9 @@ pub use model::{
     ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
     RecoveryContract, SessionId, SessionScope, SessionScopeId, StoreRealization, WaitKind,
-    WaitState, artifact_owner_is_permanently_retired, ensure_process_lease_schema_version,
-    load_process_execution_env, process_runtime_session_ids, publish_process_execution_env,
+    WaitState, artifact_owner_is_permanently_retired, artifact_staging_owner_edge_is_missing,
+    ensure_process_lease_schema_version, load_process_execution_env, process_runtime_session_ids,
+    publish_process_execution_env, settle_started_process_execution_env,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,

@@ -634,6 +634,77 @@ pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool
     )
 }
 
+/// Message fragment every artifact store reports when a transfer finds neither
+/// the staging owner's edge nor the destination owner's edge.
+pub const ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE: &str =
+    "is not retained by the staging owner";
+
+/// Reports whether `error` is an artifact store refusing a transfer because the
+/// staging owner no longer retains the artifact, as opposed to any other store
+/// failure.
+///
+/// The staging owner of a process start is stable per process id, so every
+/// concurrent attempt at the same start shares it. One attempt's completed
+/// transfer, or its failure cleanup, retires that owner and severs the edge
+/// another in-flight attempt staged; when the two attempts registered different
+/// process incarnations the destination edge is absent too. The store's refusal
+/// is correct — the caller that still holds the staged bytes is the one that can
+/// settle the destination edge (FIG-3090).
+pub fn artifact_staging_owner_edge_is_missing(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Session(message)
+            if message.contains(ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE)
+    )
+}
+
+/// Settle one staged process execution environment onto the owner of the process
+/// a start has just registered.
+///
+/// `staged` records whether this attempt's own publication landed. A staged
+/// attempt transfers, which is the only path that also reclaims the staging
+/// edge atomically. Two recoveries keep a concurrent attempt from losing the
+/// environment the registered process now needs:
+///
+/// * `staged == false` — the staging owner was already fenced before this
+///   attempt published, so there is no edge to move and the destination edge is
+///   written directly.
+/// * the transfer refuses because the staging edge is gone — a concurrent
+///   attempt at the same start retired the shared staging owner between this
+///   attempt's publication and its transfer. The bytes in hand are the exact
+///   content-addressed environment, so the destination edge is written the same
+///   way. The store's refusal stays intact; only this caller, which staged those
+///   bytes, may complete the start.
+pub async fn settle_started_process_execution_env(
+    env_store: &dyn ProcessExecutionEnvStore,
+    staging_owner: &ArtifactOwner,
+    process_owner: &ArtifactOwner,
+    env_ref: &ProcessExecutionEnvRef,
+    bytes: &[u8],
+    staged: bool,
+) -> Result<(), crate::PluginError> {
+    if !staged {
+        return env_store
+            .publish_process_execution_env(process_owner, env_ref, bytes)
+            .await;
+    }
+    match env_store
+        .transfer_process_execution_env(staging_owner, process_owner, env_ref)
+        .await
+    {
+        Ok(()) => {}
+        Err(error) if artifact_staging_owner_edge_is_missing(&error) => {
+            env_store
+                .publish_process_execution_env(process_owner, env_ref, bytes)
+                .await?;
+        }
+        Err(error) => return Err(error),
+    }
+    env_store
+        .retire_process_execution_env_owner(staging_owner)
+        .await
+}
+
 pub async fn publish_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
     owner: &ArtifactOwner,

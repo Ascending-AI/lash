@@ -241,30 +241,25 @@ where
             if let (Some(store), Some((env_ref, bytes, staged))) =
                 (process_env_store.as_ref(), env_artifacts.as_ref())
             {
-                if *staged {
-                    store
-                        .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
-                        .await?;
-                    store
-                        .retire_process_execution_env_owner(&staging_owner)
-                        .await?;
-                } else {
-                    store
-                        .publish_process_execution_env(&process_owner, env_ref, bytes)
-                        .await?;
-                }
+                lash_core::runtime::settle_started_process_execution_env(
+                    store.as_ref(),
+                    &staging_owner,
+                    &process_owner,
+                    env_ref,
+                    bytes,
+                    *staged,
+                )
+                .await?;
             }
             if let Some((engine, payload, staged)) = engine_artifacts {
-                if staged {
-                    engine
-                        .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
-                        .await?;
-                    engine.retire_artifact_owner(&staging_owner).await?;
-                } else {
-                    engine
-                        .protect_start_artifacts(&process_owner, &payload)
-                        .await?;
-                }
+                lash_core::runtime::settle_started_process_engine_artifacts(
+                    engine.as_ref(),
+                    &staging_owner,
+                    &process_owner,
+                    &payload,
+                    staged,
+                )
+                .await?;
             }
             Ok((
                 ProcessEffectOutcome::Start {

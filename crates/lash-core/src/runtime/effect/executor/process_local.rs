@@ -147,30 +147,25 @@ impl ProcessLocalExecution {
                 if let (Some(env_store), Some((env_ref, bytes, staged))) =
                     (process_env_store.as_ref(), env_artifacts.as_ref())
                 {
-                    if *staged {
-                        env_store
-                            .transfer_process_execution_env(&staging_owner, &process_owner, env_ref)
-                            .await?;
-                        env_store
-                            .retire_process_execution_env_owner(&staging_owner)
-                            .await?;
-                    } else {
-                        env_store
-                            .publish_process_execution_env(&process_owner, env_ref, bytes)
-                            .await?;
-                    }
+                    crate::settle_started_process_execution_env(
+                        env_store.as_ref(),
+                        &staging_owner,
+                        &process_owner,
+                        env_ref,
+                        bytes,
+                        *staged,
+                    )
+                    .await?;
                 }
                 if let Some((engine, payload, staged)) = engine_artifacts {
-                    if staged {
-                        engine
-                            .transfer_start_artifacts(&staging_owner, &process_owner, &payload)
-                            .await?;
-                        engine.retire_artifact_owner(&staging_owner).await?;
-                    } else {
-                        engine
-                            .protect_start_artifacts(&process_owner, &payload)
-                            .await?;
-                    }
+                    crate::settle_started_process_engine_artifacts(
+                        engine.as_ref(),
+                        &staging_owner,
+                        &process_owner,
+                        &payload,
+                        staged,
+                    )
+                    .await?;
                 }
                 // The poke is advisory. Registration already committed the
                 // durable row, and the row is the work queue: the native
@@ -560,6 +555,176 @@ mod tests {
                 .expect("read reclaimed environment"),
             None,
             "the process owner must be the only surviving edge after transfer"
+        );
+    }
+
+    /// A `ProcessExecutionEnvStore` that retires one staging owner at the exact
+    /// moment a start settles its staged environment.
+    ///
+    /// The injected call is the one a concurrent attempt at the same start makes
+    /// on its own: `process-start:<id>` is stable per process id, so a second
+    /// attempt — a trigger delivery reconciled by the worker while the emitting
+    /// turn is still starting it, or an attempt whose registration failed —
+    /// retires the shared staging owner. The interleaving point is the reachable
+    /// one: after this attempt's publication landed, before its transfer.
+    struct RetireStagingOwnerBeforeFirstTransfer {
+        inner: Arc<crate::InMemoryProcessExecutionEnvStore>,
+        staging_owner: crate::ArtifactOwner,
+        interleavings: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ProcessExecutionEnvStore for RetireStagingOwnerBeforeFirstTransfer {
+        async fn publish_process_execution_env(
+            &self,
+            owner: &crate::ArtifactOwner,
+            env_ref: &crate::ProcessExecutionEnvRef,
+            bytes: &[u8],
+        ) -> Result<(), crate::PluginError> {
+            self.inner
+                .publish_process_execution_env(owner, env_ref, bytes)
+                .await
+        }
+
+        async fn transfer_process_execution_env(
+            &self,
+            from: &crate::ArtifactOwner,
+            to: &crate::ArtifactOwner,
+            env_ref: &crate::ProcessExecutionEnvRef,
+        ) -> Result<(), crate::PluginError> {
+            if self.interleavings.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.inner
+                    .retire_process_execution_env_owner(&self.staging_owner)
+                    .await?;
+            }
+            self.inner
+                .transfer_process_execution_env(from, to, env_ref)
+                .await
+        }
+
+        async fn release_process_execution_env(
+            &self,
+            owner: &crate::ArtifactOwner,
+            env_ref: &crate::ProcessExecutionEnvRef,
+        ) -> Result<(), crate::PluginError> {
+            self.inner
+                .release_process_execution_env(owner, env_ref)
+                .await
+        }
+
+        async fn retire_process_execution_env_owner(
+            &self,
+            owner: &crate::ArtifactOwner,
+        ) -> Result<(), crate::PluginError> {
+            self.inner.retire_process_execution_env_owner(owner).await
+        }
+
+        async fn get_process_execution_env(
+            &self,
+            env_ref: &crate::ProcessExecutionEnvRef,
+        ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+            self.inner.get_process_execution_env(env_ref).await
+        }
+    }
+
+    /// FIG-3090: a start whose staging edge is severed mid-flight still leaves
+    /// the registered process owning its environment.
+    ///
+    /// This is the trigger-delivery shape: the registration names an environment
+    /// a subscription already published, the start re-publishes it under the
+    /// stable staging owner, and a concurrent attempt at the same start retires
+    /// that owner before this attempt transfers. The store is right to refuse a
+    /// transfer whose source edge is gone; this attempt still holds the exact
+    /// content-addressed bytes, so it settles the destination edge itself
+    /// instead of failing the delivery.
+    #[tokio::test]
+    async fn a_start_settles_its_environment_after_a_concurrent_attempt_retires_the_staging_owner()
+    {
+        let process_id = ProcessId::from("raced-staging-owner-start");
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let env_ref = env_spec.stable_ref().expect("stable environment reference");
+        let bytes = env_spec.to_store_bytes().expect("encode environment");
+        let inner = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        // The subscription's own edge, exactly as a registered trigger holds it.
+        let subscription_owner = crate::ArtifactOwner::host("trigger-subscription");
+        inner
+            .publish_process_execution_env(&subscription_owner, &env_ref, &bytes)
+            .await
+            .expect("publish the subscription environment");
+        let env_store = Arc::new(RetireStagingOwnerBeforeFirstTransfer {
+            inner: Arc::clone(&inner),
+            staging_owner: crate::ArtifactOwner::process_start(&process_id),
+            interleavings: AtomicUsize::new(0),
+        });
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("runtime"),
+                    "raced-staging-owner-start",
+                )
+                .expect("valid process-start test address"),
+                crate::RuntimeAttribution::none(),
+                "raced-staging-owner-start",
+            ),
+            crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
+                registration: tool_registration(process_id.as_str(), "delivery")
+                    .with_execution_env_ref(Some(env_ref.clone())),
+                observers: Vec::new(),
+                env_spec: None,
+                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+            }),
+        );
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+            Arc::new(crate::NativeProcessWork::for_registry(
+                Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+            )),
+        )
+        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
+
+        NativeRuntimeEffectController::default()
+            .execute_effect(envelope, executor)
+            .await
+            .expect("a severed staging edge must not fail the start");
+
+        assert_eq!(
+            env_store.interleavings.load(Ordering::SeqCst),
+            1,
+            "the start must still attempt the transfer first"
+        );
+        let record = registry
+            .get_process(&process_id)
+            .await
+            .expect("read registered process")
+            .expect("registered process remains live");
+        let process_owner = crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
+        inner
+            .release_process_execution_env(&subscription_owner, &env_ref)
+            .await
+            .expect("release the subscription edge");
+        assert_eq!(
+            inner
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read the retained environment"),
+            Some(bytes.clone()),
+            "the registered process must own its environment after the race"
+        );
+        inner
+            .release_process_execution_env(&process_owner, &env_ref)
+            .await
+            .expect("release the process edge");
+        assert_eq!(
+            inner
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read the reclaimed environment"),
+            None,
+            "the process owner must be the only surviving edge"
         );
     }
 
