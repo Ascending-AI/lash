@@ -42,6 +42,7 @@ pub(super) fn single_pattern_name(pattern: &Pattern) -> Option<&str> {
 pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
     fn visit(statement: &Stmt, names: &mut Vec<String>) {
         match statement {
+            Stmt::Labeled { stmt, .. } => visit(stmt, names),
             Stmt::Enum { name, .. } => names.push(name.clone()),
             Stmt::Var {
                 kind: VarKind::Var,

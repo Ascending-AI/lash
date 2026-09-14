@@ -55,7 +55,11 @@ The lens laws are:
    graph (PutGet).
 
 Authored formatting and comments are outside these laws because this is not a
-lossless CST. `@label` is semantic graph metadata and does survive. Rendering a
+lossless CST. `@label` is semantic graph metadata and does survive. Its
+TypeScript spelling is a one-line JSDoc comment on the statement it names —
+`/** @label Title — Description */`, the em-dash separating the two — so it is
+the one comment the lens reads and writes; every other comment is trivia and is
+dropped by canonicalization. Rendering a
 structurally invalid graph returns a typed error; Lash refuses to emit source
 that it cannot prove parses rather than presenting a plausible but false view.
 

@@ -31,6 +31,7 @@ pub(super) fn assigned_identifiers_in_statements(statements: &[Stmt]) -> BTreeSe
 
 fn collect_statement_assignments(statement: &Stmt, assigned: &mut BTreeSet<String>) {
     match statement {
+        Stmt::Labeled { stmt, .. } => collect_statement_assignments(stmt, assigned),
         Stmt::Empty | Stmt::Break | Stmt::Continue | Stmt::Function { .. } => {}
         Stmt::Expr(expression) | Stmt::Throw(expression) => {
             collect_expression_assignments(expression, assigned);

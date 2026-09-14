@@ -2,8 +2,9 @@
 use super::super::*;
 #[cfg(feature = "rlm")]
 use super::contracts::{
-    GraphContract, assert_all_processes_terminal, assert_failed_code_block_present,
-    assert_graph_lineage_connected, assert_no_false_finishted_success,
+    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_failed_code_block_present,
+    assert_graph_lineage_connected, assert_labeled_resource_operation,
+    assert_no_duplicate_label_step, assert_no_false_finishted_success,
     assert_no_forbidden_error_text, assert_subagent_bridge_exec_graphs,
 };
 #[cfg(feature = "rlm")]
@@ -218,11 +219,13 @@ fn agent_scenario_foreground_labeled_tool_call() -> Result<()> {
         )
         .response(typescript_block(
             r#"
+/** @label Lookup app state */
 const value = await tools.app_lookup({});
 finish(value);"#,
         ))
         .expected_final_value(serde_json::json!({ "ok": true }))
-        .tool_provider(Arc::new(AppTools));
+        .tool_provider(Arc::new(AppTools))
+        .labeled_resource("Lookup app state");
 
         let run = run_agent_turn_scenario(case).await?;
         assert_eq!(run.prompt_captures.len(), 1);
@@ -245,6 +248,7 @@ const lookup = defineProcess({
   name: "lookup",
   signals: {},
   run: async () => {
+    /** @label Lookup app state in process */
     const value = await tools.app_lookup({});
     return value;
   }
@@ -263,6 +267,7 @@ finish(result);"#,
             .expected_final_value(serde_json::json!({ "ok": true }))
             .tool_provider(Arc::new(AppTools))
             .completed_process("lookup")
+            .labeled_resource("Lookup app state in process")
             .min_completed_process_graphs(1),
         )
         .await?;
@@ -384,6 +389,7 @@ const spawnChild = defineProcess({
   name: "spawn_child",
   signals: {},
   run: async () => {
+    /** @label Spawn subagent with web search */
     const result = await agents.spawn({
       capability: "default",
       task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
@@ -402,6 +408,7 @@ finish(result);"#,
             .expected_final_value(serde_json::json!({ "len": 2 }))
             .install_subagents()
             .completed_process("spawn_child")
+            .labeled_resource("Spawn subagent with web search")
             .min_completed_child_session_exec_graphs(1)
             .min_completed_process_graphs(1),
         )
@@ -467,6 +474,7 @@ const parent = defineProcess({
   name: "parent",
   signals: {},
   run: async () => {
+    /** @label Start nested child process */
     const inner = await start(child);
     return { parent: inner.child };
   }
@@ -482,6 +490,7 @@ finish(result);"#,
             .observer_visible_process("lashlang", "parent")
             .observer_visible_process("lashlang", "child")
             .observer_visible_process("lashlang", "grandchild")
+            .labeled_node("Start nested child process")
             .min_completed_process_graphs(3),
         )
         .await?;
@@ -530,6 +539,7 @@ fn agent_scenario_failed_child_preserves_failure_graph() -> Result<()> {
             .responses([
                 typescript_block(
                     r#"
+/** @label Spawn failing subagent */
 const result = await agents.spawn({
   capability: "default",
   task: "Fail with reason child boom.",
@@ -611,6 +621,12 @@ finish(result);"#,
         assert_no_false_finishted_success(&run);
         assert_all_processes_terminal(&run.final_process_list);
         let contract = GraphContract::from_graphs(&run.graph_snapshots);
+        assert_labeled_resource_operation(
+            &contract,
+            "Spawn failing subagent",
+            NodeStatusFact::Failed,
+        );
+        assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
         assert_graph_lineage_connected(&contract, &run.final_process_list);
         assert_subagent_bridge_exec_graphs(
             &run,
@@ -639,7 +655,9 @@ const child = defineProcess({
     return value;
   }
 });
+/** @label Start left process */
 const left = start(child, { value: "left" });
+/** @label Start right process */
 const right = start(child, { value: "right" });
 const leftValue = await left;
 const rightValue = await right;
@@ -647,6 +665,8 @@ finish({ joined: [leftValue, rightValue] });"#,
             ))
             .expected_final_value(serde_json::json!({ "joined": ["left", "right"] }))
             .completed_process("child")
+            .labeled_node("Start left process")
+            .labeled_node("Start right process")
             .min_completed_process_graphs(2),
         )
         .await?;

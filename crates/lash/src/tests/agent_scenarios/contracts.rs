@@ -36,9 +36,8 @@ struct NodeFact {
     has_error: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NodeStatusFact {
+pub(super) enum NodeStatusFact {
     Unobserved,
     Running,
     Completed,
@@ -131,6 +130,10 @@ impl GraphContract {
             graphs: facts,
             child_links: links,
         }
+    }
+
+    fn nodes(&self) -> impl Iterator<Item = &NodeFact> {
+        self.graphs.iter().flat_map(|graph| graph.nodes.iter())
     }
 
     fn graph_keys(&self) -> BTreeSet<&str> {
@@ -317,12 +320,66 @@ pub(super) fn assert_graph_lineage_connected(
     }
 }
 
-// The label assertions that lived here retired with the lashlang surface
-// (ADR 0096). They required `node.label_title == Some(title)`, and the only
-// way a graph node ever carried a title was the surface's `@label(title: ..)`
-// decorator. TypeScript has no label form — the lowerer builds no label node —
-// so there is nothing left for them to read. The scenarios they guarded still
-// assert the operation itself: its status, its lineage and its terminal fold.
+// A graph node carries a title only when the program named it, which in
+// TypeScript is the `@label` doc comment on the statement (FIG-3047). These
+// assertions read that title back off the executed graph, so they prove the
+// whole path — doc comment, lowering, compilation, execution-site correlation
+// — and not just that the lens can project one.
+
+pub(super) fn assert_labeled_resource_operation(
+    contract: &GraphContract,
+    title: &str,
+    expected_status: NodeStatusFact,
+) {
+    let node = contract
+        .nodes()
+        .find(|node| {
+            node.kind == "resource_operation"
+                && node.label_title.as_deref() == Some(title)
+                && node.status == expected_status
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing labeled resource operation `{title}` with status {expected_status:?}: {contract:#?}"
+            );
+        });
+    assert_eq!(
+        node.status, expected_status,
+        "labeled resource operation `{title}` had wrong status: {node:#?}"
+    );
+    if expected_status == NodeStatusFact::Failed {
+        assert!(
+            node.has_error,
+            "failed labeled resource operation should retain node error: {node:#?}"
+        );
+    }
+}
+
+pub(super) fn assert_labeled_node(
+    contract: &GraphContract,
+    title: &str,
+    expected_status: NodeStatusFact,
+) {
+    let node = contract
+        .nodes()
+        .find(|node| node.label_title.as_deref() == Some(title) && node.status == expected_status)
+        .unwrap_or_else(|| {
+            panic!("missing labeled node `{title}` with status {expected_status:?}: {contract:#?}")
+        });
+    assert_eq!(
+        node.status, expected_status,
+        "labeled node `{title}` had wrong status: {node:#?}"
+    );
+}
+
+pub(super) fn assert_no_duplicate_label_step(contract: &GraphContract, title: &str) {
+    assert!(
+        !contract
+            .nodes()
+            .any(|node| node.kind == "step" && node.label == title),
+        "label `{title}` produced a duplicate standalone step: {contract:#?}"
+    );
+}
 
 pub(super) fn assert_completed_process_graph(contract: &GraphContract, entry_name: &str) {
     assert!(

@@ -167,6 +167,13 @@ tags the name: a `label` name carries `data.title` and an optional
 A missing or unrecognized `nameSource` is a decode error, never a `derived`
 name — a title sent without its tag would otherwise be dropped on save.
 
+An authored name is written back into the canonical source as a one-line JSDoc
+comment on the statement it names, `/** @label Title — Description */`, with an
+em-dash before the optional description. That is the only comment the lens
+reads or writes. A title that could not be read back the same way — one holding
+`*/`, a newline, or the separator itself — is refused with `canonical_source`
+rather than silently rewritten.
+
 `data.fields` contains JSON-editable literal arguments. In the default graph
 that includes strings such as `text`, `key`, `value`, `name`, `state`, `list`,
 `item`, and `target`; numeric `pct`; sleep `duration`; and wait `signal`.

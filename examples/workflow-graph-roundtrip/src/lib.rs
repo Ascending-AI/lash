@@ -45,14 +45,16 @@ pub use runtime::RunTiming;
 /// Default deterministic workflow served as version 1.
 ///
 /// TypeScript is the only cell language, so this corpus is TypeScript and the
-/// lens's canonical text is TypeScript (FIG-3033). The retired Lashlang corpus
-/// carried `@label(title:, description:)` on the process and on two steps;
-/// TypeScript has no label form yet (FIG-3047), so those two nodes now take
-/// their derived names. No title mechanism is invented here to replace them.
-pub const DEFAULT_WORKFLOW: &str = r#"const onboarding = defineProcess({
+/// lens's canonical text is TypeScript (FIG-3033). Its authored names are
+/// spelled as `@label` doc comments (FIG-3047) — the form an editor rename
+/// writes back — so the corpus exercises both the authored and the derived
+/// naming paths.
+pub const DEFAULT_WORKFLOW: &str = r#"/** @label Onboarding — Welcome a new operator and wait for their approval */
+const onboarding = defineProcess({
   name: "onboarding",
   signals: { continue: null },
   run: async () => {
+    /** @label Start the run */
     await display.set_status({ key: "phase", value: "starting" });
     await sleep("400ms");
     await display.show_message({ text: "Welcome to the workflow graph" });
@@ -63,10 +65,12 @@ pub const DEFAULT_WORKFLOW: &str = r#"const onboarding = defineProcess({
     } else {
       await display.show_message({ text: "Alternate path" });
     }
+    /** @label Wait for approval — Hold until the operator signals continue */
     const approval = await waitSignal("continue");
     await display.highlight({ target: "checklist" });
     await display.add_item({ list: "steps", item: "Approved" });
     let count = 0;
+    /** @label Replay the checklist */
     while (count < 2) {
       await display.add_item({ list: "steps", item: "Loop item" });
       count = count + 1;

@@ -6,6 +6,7 @@
 mod adapter;
 mod diagnostics;
 mod lower;
+mod node_label;
 mod regex;
 mod signatures;
 pub mod workflow_graph;

@@ -33,6 +33,7 @@ use lashlang::{
 use thiserror::Error;
 
 use crate::GENERATED_BINDING_PREFIX;
+use crate::node_label::render_label_comment;
 
 /// Error returned when canonical IR has no TypeScript spelling.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -48,6 +49,8 @@ pub enum TypeScriptSourceError {
     UnsupportedNumber { value: String },
     #[error("cannot render host descriptor constructor `{type_name}` without a constructor path")]
     UnknownHostDescriptorConstructor { type_name: String },
+    #[error("label `{title}` has no TypeScript spelling")]
+    UnrepresentableLabel { title: String },
 }
 
 type Printed = Result<String, TypeScriptSourceError>;
@@ -181,13 +184,18 @@ impl Printer {
             .iter()
             .map(|param| self.identifier("process parameter", param.name.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut out = format!(
+        let mut out = String::new();
+        if let Some(label) = &process.label {
+            out.push_str(&label_comment(label)?);
+            out.push('\n');
+        }
+        out.push_str(&format!(
             "const {} = defineProcess({{\n  name: {},\n  signals: {},\n  run: async ({}) => ",
             self.identifier("process binding", binding)?,
             string_literal(process.name.as_str()),
             self.signals(&process.signals)?,
             params.join(", "),
-        );
+        ));
         let mut run_bound = process
             .params
             .iter()
@@ -272,11 +280,18 @@ impl Printer {
             // The lowerer's unit completion value. It is not something a user
             // wrote, and `undefined;` is not a statement worth showing.
             Expr::Undefined => Ok(String::new()),
-            Expr::LabelAnnotated { expr, .. } => {
-                // `@label(title:)` has no TypeScript form (FIG-3047): the label
-                // travels on the graph node, and the closest TypeScript is the
-                // annotated statement itself.
-                self.statement(expr, level, bound)
+            Expr::LabelAnnotated { label, expr } => {
+                // The label is a one-line doc comment on the statement it
+                // names, which is exactly what a parse reads back into this
+                // node (FIG-3047).
+                let statement = self.statement(expr, level, bound)?;
+                if statement.is_empty() {
+                    // Nothing was printed, so there is no statement for the
+                    // comment to attach to; a dangling comment would re-parse
+                    // onto whatever came next.
+                    return Ok(statement);
+                }
+                Ok(format!("{prefix}{}\n{statement}", label_comment(label)?))
             }
             expression if let Some((target, value)) = assignment_sugar(expression) => Ok(format!(
                 "{prefix}{} = {};\n",
@@ -1116,6 +1131,18 @@ fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'a [Expr]> {
         return None;
     };
     (found.as_str() == selector).then_some(rest)
+}
+
+/// The doc comment a label is spelled as, or the refusal when its text has no
+/// spelling that would read back as the same label.
+fn label_comment(label: &lashlang::LabelMetadata) -> Printed {
+    render_label_comment(
+        label.title.as_str(),
+        label.description.as_ref().map(|text| text.as_str()),
+    )
+    .ok_or_else(|| TypeScriptSourceError::UnrepresentableLabel {
+        title: label.title.to_string(),
+    })
 }
 
 fn indent(level: usize) -> String {

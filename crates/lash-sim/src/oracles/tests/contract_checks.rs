@@ -636,20 +636,17 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         &mut started_process_graph_lost,
         "agent.started_process_tool_call_graph",
         |execution| {
-            // The graph title this used to corrupt retired with the lashlang
-            // surface (ADR 0096). The completed process entry is the evidence
-            // the contract still reads, so that is what the mutation breaks.
             execution
-                .pointer_mut("/result/process_facts/completed_entries/0")
-                .expect("started process completed entry")
-                .clone_from(&json!("wrong process"));
+                .pointer_mut("/result/graph_facts/completed_labeled_resources/0")
+                .expect("started process labeled resource")
+                .clone_from(&json!("wrong label"));
         },
     );
     let err = scenario_contract_generated_facts_for_semantic(
         "agent.started_process_tool_call_graph",
         &started_process_graph_lost,
     )
-    .expect_err("Agent started process fact must require completed process evidence");
+    .expect_err("Agent started process fact must require labeled process graph evidence");
     assert!(
         err.contains("fixed-source replay validation"),
         "unexpected Agent started-process replay failure: {err}"

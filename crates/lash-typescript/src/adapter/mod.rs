@@ -1,10 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
+use swc_common::comments::{CommentKind, Comments, SingleThreadedComments};
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 
+use crate::node_label::{NodeLabel, is_label_comment, parse_label_comment};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod enums;
@@ -37,6 +39,14 @@ pub(crate) struct Program {
 #[derive(Clone, Debug)]
 pub(crate) enum Stmt {
     Empty,
+    /// A statement carrying the label its leading `@label` doc comment named.
+    ///
+    /// The wrapper is inert: it names the statement below it and changes
+    /// nothing about how that statement runs.
+    Labeled {
+        label: NodeLabel,
+        stmt: Box<Stmt>,
+    },
     Expr(Expr),
     Block(Vec<Stmt>),
     Var {
@@ -95,6 +105,20 @@ pub(crate) enum Stmt {
         catch: Option<Catch>,
         finally: Option<Vec<Stmt>>,
     },
+}
+
+impl Stmt {
+    /// The statement itself, with any `@label` wrapper peeled off.
+    ///
+    /// The label names a node; it never changes what the statement *is*, so
+    /// every pass that asks what kind of statement this is — hoisting,
+    /// pre-declaration, loop analysis — asks through here.
+    pub(crate) fn unlabeled(&self) -> &Self {
+        match self {
+            Self::Labeled { stmt, .. } => stmt.unlabeled(),
+            other => other,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -497,6 +521,10 @@ fn parse_on_proportional_stack(source: &str) -> Result<Program, Diagnostic> {
 
 fn parse_source(source: &str) -> Result<Program, Diagnostic> {
     let end = u32::try_from(source.len()).unwrap_or(u32::MAX);
+    // Comments are trivia to the language and carry no semantics, but one
+    // shape of doc comment names a graph node (see `crate::node_label`), so
+    // the lexer has to keep them for the adapter to read back.
+    let comments = SingleThreadedComments::default();
     let lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
             tsx: true,
@@ -505,7 +533,7 @@ fn parse_source(source: &str) -> Result<Program, Diagnostic> {
         }),
         Default::default(),
         StringInput::new(source, BytePos(0), BytePos(end)),
-        None,
+        Some(&comments),
     );
     let mut parser = Parser::new_from(lexer);
     let module = parser
@@ -514,13 +542,17 @@ fn parse_source(source: &str) -> Result<Program, Diagnostic> {
     if let Some(error) = parser.take_errors().into_iter().next() {
         return Err(parser_diagnostic(error, source));
     }
-    Adapter::default()
-        .convert_module_items(&module.body)
-        .map(|statements| Program { statements })
+    Adapter {
+        comments: comments.clone(),
+        ..Adapter::default()
+    }
+    .convert_module_items(&module.body)
+    .map(|statements| Program { statements })
 }
 
 #[derive(Default)]
 struct Adapter {
+    comments: SingleThreadedComments,
     nesting_depth: Cell<usize>,
     enum_constants: RefCell<Vec<BTreeMap<String, BTreeMap<String, ConstEnumValue>>>>,
     inline_enums: RefCell<Vec<BTreeSet<String>>>,
@@ -585,6 +617,44 @@ impl Adapter {
     }
 
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
+        let label = self.statement_label(stmt.span().lo)?;
+        let converted = self.convert_unlabeled_stmt(stmt)?;
+        Ok(match label {
+            Some(label) => Stmt::Labeled {
+                label,
+                stmt: Box::new(converted),
+            },
+            None => converted,
+        })
+    }
+
+    /// The label named by the statement's own leading doc comments.
+    ///
+    /// Every other comment is trivia. Two labels on one statement is the one
+    /// refusal: the author wrote two names for one node and no rule for
+    /// picking between them would be the one they meant.
+    fn statement_label(&self, start: BytePos) -> Result<Option<NodeLabel>, Diagnostic> {
+        let Some(comments) = self.comments.get_leading(start) else {
+            return Ok(None);
+        };
+        let mut labels = comments
+            .iter()
+            .filter(|comment| comment.kind == CommentKind::Block)
+            .filter(|comment| is_label_comment(&comment.text));
+        let Some(first) = labels.next() else {
+            return Ok(None);
+        };
+        if let Some(second) = labels.next() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::DuplicateNodeLabel,
+                "this statement already carries an `@label` doc comment",
+                Some(source_span(second.span)),
+            ));
+        }
+        Ok(parse_label_comment(&first.text))
+    }
+
+    fn convert_unlabeled_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         if !matches!(
             stmt,
             swc::Stmt::If(_)

@@ -51,6 +51,7 @@ pub enum DiagnosticCode {
     ReservedIdentifier,
     MutualRecursionUnsupported,
     DuplicateBinding,
+    DuplicateNodeLabel,
     TemporalDeadZone,
     UnknownBinding,
     AssignConst,
@@ -133,6 +134,7 @@ impl DiagnosticCode {
         Self::ReservedIdentifier,
         Self::MutualRecursionUnsupported,
         Self::DuplicateBinding,
+        Self::DuplicateNodeLabel,
         Self::TemporalDeadZone,
         Self::UnknownBinding,
         Self::AssignConst,
@@ -396,6 +398,7 @@ impl DiagnosticCode {
             | Self::ParseResourcesUnavailable
             | Self::MissingInitializer
             | Self::DuplicateBinding
+            | Self::DuplicateNodeLabel
             | Self::TemporalDeadZone
             | Self::UnknownBinding
             | Self::AssignConst
@@ -457,6 +460,7 @@ impl DiagnosticCode {
             Self::ReservedIdentifier => "TS_RESERVED_IDENTIFIER",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
+            Self::DuplicateNodeLabel => "TS_DUPLICATE_NODE_LABEL",
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::AssignConst => "TS_ASSIGN_CONST",
@@ -807,6 +811,7 @@ mod tests {
                 "adapter/rejections.rs",
                 include_str!("adapter/rejections.rs"),
             ),
+            ("node_label.rs", include_str!("node_label.rs")),
             ("regex.rs", include_str!("regex.rs")),
             ("signatures.rs", include_str!("signatures.rs")),
             ("diagnostics.rs", include_str!("diagnostics.rs")),

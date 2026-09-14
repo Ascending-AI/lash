@@ -61,12 +61,13 @@ fn parse_program(source: &str) -> Program {
 /// A resource operation inside a process correlates to its workflow node.
 ///
 /// Was `labeled_process_resource_operation_site_correlates_to_workflow_node`,
-/// which put an `@label(title: …)` on the operation and asserted the graph
-/// node carried that title. `@label` has no TypeScript form (FIG-3047), so the
-/// witness is re-stated on the site path — which is the correlation the test
-/// was really about: the site the VM emits for the operation inside the
-/// process's `run` body names the node the projector minted for it, at the
-/// path the lowerer's wrapper puts that body at (FIG-3057).
+/// which put a label on the operation and asserted the graph node carried that
+/// title. The witness is stated on the site path instead — which is the
+/// correlation the test was really about: the site the VM emits for the
+/// operation inside the process's `run` body names the node the projector
+/// minted for it, at the path the lowerer's wrapper puts that body at
+/// (FIG-3057). The title itself is asserted over a real run by the agent
+/// scenarios.
 #[test]
 fn process_resource_operation_site_correlates_to_workflow_node() {
     let source = r#"const searchTest = defineProcess({
@@ -116,9 +117,9 @@ finish(1);
 
 /// Over a real run, every observed site is on the branch actually taken.
 ///
-/// Was the same test with `@label(title: …)` naming each step; the projector's
-/// own node names stand in for the titles (FIG-3047), and the ordering — and
-/// the absence of the skipped branch — is what the assertion turns on.
+/// Was the same test with a label naming each step; the projector's own node
+/// names stand in for the titles, and the ordering — and the absence of the
+/// skipped branch — is what the assertion turns on.
 #[tokio::test(flavor = "current_thread")]
 async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path() {
     #[derive(Default)]
@@ -260,12 +261,12 @@ finish(selected);
 /// A nested assignment stays a plain step on both sides.
 ///
 /// Was `execution_site_nested_assignment_label_remains_a_generic_step_on_both_sides`,
-/// where an `@label` on the outer assignment produced a `step` descriptor and
-/// the point was that it was not promoted to the inner effect's descriptor.
-/// `@label` has no TypeScript form (FIG-3047), so the witness is re-stated as
-/// the same non-promotion without a label: the nested assignment contributes no
-/// descriptor of its own, and the effect nested inside it keeps its own
-/// descriptor at its own path, identically on both sides.
+/// where a label on the outer assignment produced a `step` descriptor and the
+/// point was that it was not promoted to the inner effect's descriptor. The
+/// witness is stated as the same non-promotion without a label: the nested
+/// assignment contributes no descriptor of its own, and the effect nested
+/// inside it keeps its own descriptor at its own path, identically on both
+/// sides.
 #[test]
 fn execution_site_nested_assignment_emits_no_descriptor_of_its_own() {
     let source = r#"let inner = null;
@@ -314,10 +315,11 @@ finish(identity(1));
 
 /// The compiler and the projector emit the same descriptor vocabulary.
 ///
-/// The fixture reaches every descriptor TypeScript can spell. Three the
-/// Lashlang version also covered have no TypeScript form and are therefore not
-/// asserted here: `step` (an `@label` title, FIG-3047), `process_event`/`yield`
-/// and `sleep`/`sleep until`, none of which the front end lowers to.
+/// The fixture reaches every descriptor TypeScript can spell, `step` — an
+/// `@label` doc-comment title on a statement that bears no descriptor of its
+/// own — included (FIG-3047). Two the Lashlang version also covered have no
+/// TypeScript form and are therefore not asserted here: `process_event`/`yield`
+/// and `sleep`/`sleep until`, neither of which the front end lowers to.
 #[test]
 fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
     let source = r#"const worker = defineProcess({
@@ -329,6 +331,7 @@ fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
     return payload;
   }
 });
+/** @label Plain value */
 const plain = 1;
 const result = await tools.echo({ value: plain });
 const run = start(worker, {});
@@ -366,6 +369,7 @@ finish(result);
         ("resource_operation".to_string(), "echo".to_string()),
         ("signal".to_string(), "signal_run".to_string()),
         ("sleep".to_string(), "sleep for".to_string()),
+        ("step".to_string(), "Plain value".to_string()),
         ("terminal".to_string(), "result".to_string()),
         ("wait".to_string(), "wait_signal".to_string()),
     ];

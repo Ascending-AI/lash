@@ -1,8 +1,10 @@
 use super::super::*;
 use super::contracts::{
-    GraphContract, assert_all_processes_terminal, assert_completed_process_graph,
+    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_completed_process_graph,
+    assert_labeled_node, assert_labeled_resource_operation,
     assert_min_completed_child_session_exec_graphs, assert_min_completed_process_graphs,
-    assert_session_turn_child_graph, assert_successful_agent_scenario,
+    assert_no_duplicate_label_step, assert_session_turn_child_graph,
+    assert_successful_agent_scenario,
 };
 use lash_core::llm::types::LlmUsage;
 use lash_sansio::ProcessId;
@@ -13,6 +15,8 @@ use std::collections::VecDeque;
 #[derive(Default)]
 pub(super) struct AgentScenarioExpectations {
     pub(super) completed_process_entries: Vec<&'static str>,
+    pub(super) labeled_resource_titles: Vec<&'static str>,
+    pub(super) labeled_node_titles: Vec<&'static str>,
     pub(super) min_completed_child_session_exec_graphs: usize,
     pub(super) min_completed_process_graphs: usize,
     pub(super) observer_visible_processes: Vec<(&'static str, &'static str)>,
@@ -122,6 +126,20 @@ impl AgentScenario {
         self.expected_contracts
             .completed_process_entries
             .push(entry_name);
+        self
+    }
+
+    /// The program named this resource operation with an `@label` doc comment,
+    /// so the executed graph must carry that title on the operation's own node
+    /// rather than on a step beside it.
+    pub(super) fn labeled_resource(mut self, title: &'static str) -> Self {
+        self.expected_contracts.labeled_resource_titles.push(title);
+        self
+    }
+
+    /// The same, for a labeled node that is not a resource operation.
+    pub(super) fn labeled_node(mut self, title: &'static str) -> Self {
+        self.expected_contracts.labeled_node_titles.push(title);
         self
     }
 
@@ -468,6 +486,14 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     let contract = GraphContract::from_graphs(&run.graph_snapshots);
     for entry_name in case.expected_contracts.completed_process_entries {
         assert_completed_process_graph(&contract, entry_name);
+    }
+    for title in case.expected_contracts.labeled_resource_titles {
+        assert_labeled_resource_operation(&contract, title, NodeStatusFact::Completed);
+        assert_no_duplicate_label_step(&contract, title);
+    }
+    for title in case.expected_contracts.labeled_node_titles {
+        assert_labeled_node(&contract, title, NodeStatusFact::Completed);
+        assert_no_duplicate_label_step(&contract, title);
     }
     assert_min_completed_process_graphs(
         &contract,
