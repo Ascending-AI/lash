@@ -293,6 +293,11 @@ pub(crate) async fn complete(
         let bytes = serialize_body(&body)
             .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
         let fingerprint = request_fingerprint(&bytes);
+        #[expect(
+            clippy::expect_used,
+            reason = "`bytes` is what `serialize_body` just produced with serde_json, \
+                      whose output is UTF-8 by construction"
+        )]
         let diagnostic = body_excerpt(std::str::from_utf8(&bytes).expect("JSON is UTF-8"));
         emit_provider_request_trace(
             req.provider_trace.as_ref(),

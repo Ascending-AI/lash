@@ -15,7 +15,6 @@
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 
 use lash_core::DurableSurface;
 use serde::ser::SerializeStruct;
@@ -402,13 +401,11 @@ impl PreflightReport {
             ));
         }
         message.push_str(&reasons.join("; "));
-        write!(
-            message,
+        message.push_str(&format!(
             ". Drain {} affected item(s) on the previous build, or recreate the store; \
              there is no migration decoder at these boundaries.",
             self.drain.len()
-        )
-        .expect("a String write cannot fail");
+        ));
         Some(message)
     }
 }

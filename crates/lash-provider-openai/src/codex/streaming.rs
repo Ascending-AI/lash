@@ -68,12 +68,22 @@ impl<'a> CodexWebsocketAttemptGuard<'a> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the guard is constructed with a lease and only `Drop` takes it back \
+                  out, so every accessor on a live guard sees `Some`"
+    )]
     fn lease(&self) -> &CodexWebsocketLease {
         self.lease
             .as_ref()
             .expect("WebSocket attempt guard owns its lease")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the guard is constructed with a lease and only `Drop` takes it back \
+                  out, so every accessor on a live guard sees `Some`"
+    )]
     fn lease_mut(&mut self) -> &mut CodexWebsocketLease {
         self.lease
             .as_mut()

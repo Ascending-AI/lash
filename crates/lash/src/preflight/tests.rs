@@ -6,6 +6,15 @@
 //! payload from a *future* build — the build that writes it is the one running
 //! the test — and the version boundary that matters most is exactly that one.
 
+// Clippy's `allow-expect-in-tests` recognizes a bare `#[cfg(test)]` module;
+// this one is gated `#[cfg(all(test, feature = "rlm"))]` and so is not
+// recognized, even though every item in it is test code.
+#![expect(
+    clippy::expect_used,
+    reason = "test module gated on `cfg(all(test, feature = \"rlm\"))`, which clippy's \
+              in-test exemption does not recognize"
+)]
+
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;

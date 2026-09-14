@@ -79,10 +79,10 @@ pub fn validate_responses_attachments(
                         ),
                     );
                 }
-                if matches!(source, AttachmentSource::Stored { .. })
+                if let AttachmentSource::Stored { attachment_ref } = source
                     && req.attachment_bytes(source).is_none()
                 {
-                    let mime = source.media_type().expect("stored source MIME");
+                    let mime = &attachment_ref.media_type;
                     return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
                 .with_kind(ProviderFailureKind::Validation).with_code("stored_attachment_not_resolved"));
                 }
@@ -99,6 +99,9 @@ pub fn validate_responses_attachments(
     Ok(())
 }
 
+/// `validate_responses_attachments` runs over the same request first and
+/// refuses every source without a media type or resolved bytes.
+#[expect(clippy::expect_used, reason = "the validator refused these")]
 pub fn input_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
     if let AttachmentSource::ProviderFile { id, .. } = source {
         return json!({"type": "input_file", "file_id": id});
@@ -296,9 +299,9 @@ fn flush_pending_content(
     if is_user
         && let Some(prev) = input.last_mut()
         && prev.get("role").and_then(|v| v.as_str()) == Some("user")
-        && prev.get("content").is_some_and(|v| v.is_array())
+        && let Some(existing) = prev.get_mut("content").and_then(Value::as_array_mut)
     {
-        prev["content"].as_array_mut().unwrap().extend(content);
+        existing.extend(content);
     } else {
         let mut item = json!({"role": role});
         item["content"] = Value::Array(content);
@@ -339,22 +342,15 @@ fn fold_tool_result_images(input: &mut Vec<Value>) {
         .and_then(|c| c.as_array())
         .cloned()
         .unwrap_or_default();
-    let prev = input.last_mut().expect("function_call_output present");
-    if !prev["output"].is_array() {
-        let existing_text = prev["output"]
-            .as_str()
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        let mut parts: Vec<Value> = Vec::new();
-        if !existing_text.is_empty() {
-            parts.push(json!({
-                "type": "input_text",
-                "text": existing_text,
-            }));
-        }
-        prev["output"] = Value::Array(parts);
-    }
-    prev["output"].as_array_mut().unwrap().extend(image_parts);
+    let Some(prev) = input.last_mut() else { return };
+    // An array keeps its parts, a non-empty string becomes the text part it stood for.
+    let mut output = match prev["output"].take() {
+        Value::Array(parts) => parts,
+        Value::String(t) if !t.is_empty() => vec![json!({"type": "input_text", "text": t})],
+        _ => Vec::new(),
+    };
+    output.extend(image_parts);
+    prev["output"] = Value::Array(output);
 }
 
 fn reasoning_replay_item(text: &str, replay: Option<&ProviderReasoningReplay>) -> Option<Value> {
@@ -1295,23 +1291,42 @@ impl ResponsesStreamState {
         }
     }
 
+    /// Allocate or find a slot of a kind that is keyed by output index, and
+    /// resolve the part index it owns. `allocate_or_find_part_slot` declines
+    /// only when a slot needs a provider key it was not given, which the
+    /// message and reasoning kinds never do.
+    #[expect(clippy::expect_used, reason = "no provider key needed")]
+    fn keyless_part_slot(
+        &mut self,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+        kind: ResponsesPartKind,
+        current: Option<usize>,
+        allocation: ResponsesPartSlotAllocation,
+    ) -> (usize, usize) {
+        let owner = self
+            .allocate_or_find_part_slot(output_index, item_id, kind, current, allocation)
+            .expect("slots of this kind are allocated without a provider key");
+        let index = self
+            .part_slot_index(owner, kind)
+            .expect("the slot owns its part");
+        (owner, index)
+    }
+
     pub fn ensure_text_part_index(
         &mut self,
         output_index: Option<usize>,
         item_id: Option<&str>,
     ) -> usize {
-        let owner = self
-            .allocate_or_find_part_slot(
-                output_index,
-                item_id,
-                ResponsesPartKind::Message,
-                self.current_text_slot,
-                ResponsesPartSlotAllocation::ReuseCurrent,
-            )
-            .expect("message slots can be allocated without a provider key");
+        let (owner, index) = self.keyless_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Message,
+            self.current_text_slot,
+            ResponsesPartSlotAllocation::ReuseCurrent,
+        );
         self.current_text_slot = Some(owner);
-        self.part_slot_index(owner, ResponsesPartKind::Message)
-            .expect("message slot owns a text part")
+        index
     }
 
     fn message_part_index(
@@ -1320,18 +1335,13 @@ impl ResponsesStreamState {
         item_id: Option<&str>,
         response_meta: Option<ResponseTextMeta>,
     ) -> (usize, usize) {
-        let owner = self
-            .allocate_or_find_part_slot(
-                output_index,
-                item_id,
-                ResponsesPartKind::Message,
-                self.current_text_slot,
-                ResponsesPartSlotAllocation::Resolve,
-            )
-            .expect("message slots can be allocated without a provider key");
-        let index = self
-            .part_slot_index(owner, ResponsesPartKind::Message)
-            .expect("message slot owns a text part");
+        let (owner, index) = self.keyless_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Message,
+            self.current_text_slot,
+            ResponsesPartSlotAllocation::Resolve,
+        );
 
         if let Some(response_meta) = response_meta
             && let Some(LlmOutputPart::Text {
@@ -1399,19 +1409,14 @@ impl ResponsesStreamState {
         if delta.is_empty() {
             return;
         }
-        let owner = self
-            .allocate_or_find_part_slot(
-                output_index,
-                item_id,
-                ResponsesPartKind::Reasoning,
-                self.current_reasoning_slot,
-                ResponsesPartSlotAllocation::Resolve,
-            )
-            .expect("reasoning slots can be allocated without a provider key");
+        let (owner, index) = self.keyless_part_slot(
+            output_index,
+            item_id,
+            ResponsesPartKind::Reasoning,
+            self.current_reasoning_slot,
+            ResponsesPartSlotAllocation::Resolve,
+        );
         self.current_reasoning_slot = Some(owner);
-        let index = self
-            .part_slot_index(owner, ResponsesPartKind::Reasoning)
-            .expect("reasoning slot owns a reasoning part");
         if let Some(LlmOutputPart::Reasoning { text, .. }) = self.parts.get_mut(index) {
             text.push_str(delta);
         }

@@ -79,6 +79,11 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
     /// Returns the turn or panics with `message` when the successful drain was
     /// fully satisfied without one.
     #[track_caller]
+    #[expect(
+        clippy::expect_used,
+        reason = "this is the panicking accessor itself: callers opt into the panic by \
+                  choosing `expect` over `turn()`, exactly as with `Option::expect`"
+    )]
     pub fn expect(self, message: &str) -> T {
         self.turn.expect(message)
     }
