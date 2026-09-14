@@ -12,6 +12,24 @@ async fn await_process_terminal(
     }
 }
 
+/// The durable-wait resolution a process terminal delivers to every wait armed
+/// on it.
+///
+/// A terminal is a *fact*, never an error of the wait: a failed or cancelled
+/// process resolves its waiters successfully with that terminal as the value,
+/// exactly as the inline await path returns it. Only an unobservable terminal
+/// is an error resolution.
+pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> Resolution {
+    match serde_json::to_value(&output) {
+        Ok(value) => Resolution::Ok(value),
+        Err(error) => Resolution::Err(crate::runtime::ExternalCompletionError {
+            code: "process_terminal_encode".to_string(),
+            message: error.to_string(),
+            raw: None,
+        }),
+    }
+}
+
 impl ProcessLocalExecution {
     pub async fn execute(
         self,
@@ -267,6 +285,54 @@ impl ProcessLocalExecution {
                     ProcessEffectOutcome::Await {
                         output: Box::new(output),
                     },
+                    crate::StoreRealization::Realized,
+                ))
+            }
+            ProcessCommand::AttachTerminal { process_ref, key } => {
+                // The in-process boundary has no separate invocation to hand
+                // the wait to, so it arms a task: await the terminal, then
+                // resolve the key through the same resolver the parked turn
+                // awaits on. The task is deliberately fire-and-forget — the
+                // arming command must return so the turn can park — and it is
+                // deliberately not the durability story. Durability is the
+                // journaled arming itself: a crash loses the task, the turn is
+                // re-driven, the arming replays, and a new task is armed
+                // against a wait that is still open. Resolution is idempotent,
+                // so an arming that races a terminal it already missed resolves
+                // immediately and a duplicate resolve reports
+                // `AlreadyResolved`.
+                let effect_controller = effect_controller.clone().ok_or_else(|| {
+                    RuntimeEffectControllerError::foreign(
+                        "process_attach_resolver_unavailable",
+                        "arming a process terminal needs the effect controller that owns the wait",
+                    )
+                })?;
+                let process_work = Arc::clone(&process_work);
+                tokio::spawn(async move {
+                    let resolution =
+                        match await_process_terminal(process_work.as_ref(), &process_ref).await {
+                            Ok(output) => process_terminal_resolution(output),
+                            Err(error) => {
+                                Resolution::Err(crate::runtime::ExternalCompletionError {
+                                    code: "process_terminal_unobservable".to_string(),
+                                    message: error.to_string(),
+                                    raw: None,
+                                })
+                            }
+                        };
+                    if let Err(error) = effect_controller
+                        .resolve_await_event(&key, resolution)
+                        .await
+                    {
+                        tracing::warn!(
+                            process_id = %process_ref.process_id,
+                            key_id = %key.key_id,
+                            "armed process terminal could not resolve its durable wait: {error}"
+                        );
+                    }
+                });
+                Ok((
+                    ProcessEffectOutcome::AttachTerminal,
                     crate::StoreRealization::Realized,
                 ))
             }

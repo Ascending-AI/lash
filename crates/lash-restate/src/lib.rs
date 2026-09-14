@@ -89,6 +89,7 @@ mod effect_group;
 mod effect_host;
 mod ingress;
 mod process;
+mod process_attach;
 mod session_administration;
 mod turn;
 

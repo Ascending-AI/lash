@@ -881,7 +881,8 @@ fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_registry::{ToolRegistry, ToolState};
 pub use tool_result::{
-    CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolOutcome,
+    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
+    ToolOutcome,
 };
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,

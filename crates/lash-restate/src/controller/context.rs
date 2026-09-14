@@ -83,6 +83,7 @@ use crate::process::{
     LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
     RestateProcessWorkflowInput,
 };
+use crate::process_attach::{LashProcessAttachClient, RestateProcessAttachRequest};
 
 /// Fuse a Restate context future across both of its terminal poll shapes.
 ///
@@ -673,6 +674,19 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
+    /// Hand one process terminal wait to the attach workflow and return without
+    /// waiting for it.
+    ///
+    /// One-way by construction: the calling handler must go on to park on the
+    /// wait's own promise, so the terminal read has to happen in another
+    /// invocation's journal, not in this one's.
+    fn attach_process_terminal<'run>(
+        &'run self,
+        request: RestateProcessAttachRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run;
+
     fn update_session_waits<'run>(
         &'run self,
         session_id: SessionId,
@@ -1198,6 +1212,25 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Json(resolution) = request.call().await?;
                         Ok(resolution)
+                    })
+                }
+
+                fn attach_process_terminal<'run>(
+                    &'run self,
+                    request: RestateProcessAttachRequest,
+                ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let send = self
+                        .workflow_client::<LashProcessAttachClient>(
+                            crate::process_attach::process_attach_workflow_key(&request.key),
+                        )
+                        .run(Json(request))
+                        .send();
+                    Box::pin(async move {
+                        send.await?;
+                        Ok(())
                     })
                 }
 

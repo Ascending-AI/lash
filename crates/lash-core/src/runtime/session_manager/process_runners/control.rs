@@ -71,6 +71,20 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
+    async fn attach_process_terminal(
+        &self,
+        process_ref: crate::ProcessRef,
+        key: crate::AwaitEventKey,
+    ) -> Result<(), crate::PluginError> {
+        match self
+            .run(crate::ProcessCommand::AttachTerminal { process_ref, key })
+            .await?
+        {
+            crate::ProcessEffectOutcome::AttachTerminal => Ok(()),
+            _ => Err(wrong_process_outcome("attach-terminal")),
+        }
+    }
+
     async fn list(
         &self,
         session_scope: crate::SessionScope,
@@ -543,6 +557,20 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.command_runner(current, &scope)?
             .await_process_ref(process_ref)
+            .await
+    }
+
+    /// Arm the terminal of `process_ref` as the resolver of `key`, through the
+    /// journaled process seam, and return without waiting for it.
+    pub(in crate::runtime::session_manager) async fn attach_process_terminal(
+        &self,
+        current: &CurrentSessionCapability,
+        process_ref: crate::ProcessRef,
+        key: crate::AwaitEventKey,
+        scope: crate::ProcessOpScope<'_>,
+    ) -> Result<(), crate::PluginError> {
+        self.command_runner(current, &scope)?
+            .attach_process_terminal(process_ref, key)
             .await
     }
 

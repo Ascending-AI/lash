@@ -3,6 +3,7 @@ mod context;
 mod directives;
 mod execution;
 mod intent_executor;
+mod pending_resolver;
 mod preparation;
 mod retry;
 mod scheduling;
@@ -10,6 +11,7 @@ mod scheduling;
 mod tests;
 
 pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
+pub(crate) use pending_resolver::arm_pending_resolver;
 
 pub(crate) use attempt_coordinator::{
     BatchIntentDrainGate, IntentDrainGuard, ToolAttemptEffectIdentity, coordinate_tool_invocation,
