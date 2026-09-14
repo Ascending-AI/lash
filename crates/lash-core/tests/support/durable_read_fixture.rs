@@ -853,13 +853,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             .graph
             .nodes
             .iter()
-            .map(|node| node.node_id.clone())
+            .map(|node| node.node_id.to_string())
             .collect(),
         current_append_retry,
         legacy_commit_retry,
         record_config_retry,
-        queue_batch_id: queued.batch_id,
-        pending_input_id: pending.input_id,
+        queue_batch_id: queued.batch_id.to_string(),
+        pending_input_id: pending.input_id.to_string(),
         process_env_ref,
         await_event_key,
         revoked_await_event_key,

@@ -551,13 +551,13 @@ lash_conformance::append_head_switch_tests!({
     (
         _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id: String| async move {
+        move |leaf_node_id: lash_core::NodeId| async move {
             sqlx::query(
                 "UPDATE lash_sessions
                  SET leaf_node_id = $1, head_revision = head_revision + 1
                  WHERE session_id = 'root'",
             )
-            .bind(leaf_node_id)
+            .bind(leaf_node_id.into_inner())
             .execute(&pool)
             .await
             .expect("switch Postgres active branch");
@@ -575,9 +575,9 @@ lash_conformance::append_tombstone_tests!({
     (
         _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |node_id: String| async move {
+        move |node_id: lash_core::NodeId| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
-                .bind(node_id)
+                .bind(node_id.into_inner())
                 .execute(&pool)
                 .await
                 .expect("tombstone Postgres old leaf");

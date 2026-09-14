@@ -327,7 +327,7 @@ impl GeneratedRuntimeWorld {
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         self.queued_inputs
-            .insert(event.boundary_id.clone(), acceptance.input_id.clone());
+            .insert(event.boundary_id.clone(), acceptance.input_id.to_string());
         let input_state = acceptance.ingress.initial_state();
         Ok(json!({
             "session": event.actor_alias,
@@ -430,7 +430,7 @@ impl GeneratedRuntimeWorld {
                 while !expected_claims.is_empty() {
                     let pending = runtime_session.session.pending_turn_inputs().await
                         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-                    if pending.iter().all(|input| !expected_claims.contains(&input.input_id)) {
+                    if pending.iter().all(|input| !expected_claims.contains(input.input_id.as_str())) {
                         break;
                     }
                     tokio::task::yield_now().await;
@@ -725,7 +725,7 @@ impl GeneratedRuntimeWorld {
         })?;
         let outcome = runtime_session
             .session
-            .cancel_pending_turn_input(&input_id)
+            .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let (cancelled, cancel_outcome) = match &outcome {

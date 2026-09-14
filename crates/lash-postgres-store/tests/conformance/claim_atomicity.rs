@@ -81,7 +81,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .expect("enqueue queued work");
 
     sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = $1")
-        .bind(&batch.batch_id)
+        .bind(batch.batch_id.as_str())
         .execute(storage.pool())
         .await
         .expect("inject negative fence");
@@ -99,7 +99,7 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
 
     sqlx::query("UPDATE lash_queued_work_batches SET claim_fencing_token = $1 WHERE batch_id = $2")
         .bind(i64::MAX)
-        .bind(&batch.batch_id)
+        .bind(batch.batch_id.as_str())
         .execute(storage.pool())
         .await
         .expect("seed exhausted fence");

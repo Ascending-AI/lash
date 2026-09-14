@@ -190,7 +190,7 @@ impl From<lash_core::CellFailure> for RemoteCellFailure {
 impl From<&lash_core::TurnInputApplication> for RemoteTurnInputApplication {
     fn from(value: &lash_core::TurnInputApplication) -> Self {
         Self {
-            input_id: value.input_id.clone(),
+            input_id: value.input_id.to_string(),
             source_key: value.source_key.clone(),
             turn_id: value.turn_id.clone(),
             committed_message_id: value.committed_message_id.clone(),

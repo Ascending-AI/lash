@@ -1,5 +1,6 @@
 use crate::ProcessId;
 use crate::SessionId;
+use crate::{BatchId, InputId, NodeId};
 /// The returned renewal field that made a resident lease unsafe to replace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -81,7 +82,7 @@ pub enum StoreError {
         "queued-work row `{batch_id}` at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
     )]
     QueuedWorkRowExceedsContextWindow {
-        batch_id: String,
+        batch_id: BatchId,
         batch_enqueue_seq: u64,
         rendered_tokens: usize,
         max_context_tokens: usize,
@@ -325,37 +326,41 @@ pub enum StoreError {
     /// enforce this after receipt lookup so an already-committed retry wins,
     /// while runtimes translate a fresh rejection to `StaleBranch`.
     #[error("append requires inactive ancestor `{required_node_id}`")]
-    AppendAncestorNotActive { required_node_id: String },
+    AppendAncestorNotActive { required_node_id: NodeId },
     #[error("runtime commit node `{node_id}` does not match derived node id `{expected_node_id}`")]
     NodeIdDerivationMismatch {
-        node_id: String,
-        expected_node_id: String,
+        node_id: NodeId,
+        expected_node_id: NodeId,
     },
     #[error("runtime commit node id `{node_id}` already exists in durable session history")]
-    NodeIdCollision { node_id: String },
+    NodeIdCollision { node_id: NodeId },
     #[error("runtime commit node id must not be empty")]
-    InvalidGraphNodeId { node_id: String },
+    InvalidGraphNodeId { node_id: NodeId },
     #[error("runtime commit generation {generation} already exists for session `{session_id}`")]
     GraphGenerationCollision {
         session_id: SessionId,
         generation: u64,
     },
-    #[error("runtime commit leaf {leaf_node_id:?} does not resolve to a live graph node")]
-    InvalidGraphLeaf { leaf_node_id: Option<String> },
+    #[error("runtime commit leaf {:?} does not resolve to a live graph node", .leaf_node_id.as_deref())]
+    InvalidGraphLeaf { leaf_node_id: Option<NodeId> },
     #[error("node `{node_id}` has no retained continuation anchor")]
-    ForkPointNotRetained { node_id: String },
+    ForkPointNotRetained { node_id: NodeId },
     #[error("fork target session `{session_id}` already exists")]
     ForkSessionAlreadyExists { session_id: SessionId },
-    #[error("runtime commit node `{node_id}` has invalid parent {actual:?}; expected {expected:?}")]
+    #[error(
+        "runtime commit node `{node_id}` has invalid parent {:?}; expected {:?}",
+        .actual.as_deref(),
+        .expected.as_deref()
+    )]
     InvalidGraphParent {
-        node_id: String,
-        expected: Option<String>,
-        actual: Option<String>,
+        node_id: NodeId,
+        expected: Option<NodeId>,
+        actual: Option<NodeId>,
     },
     #[error(
         "session leaf `{leaf_node_id}` has no FrameOpen ancestor; every root graph must begin with a frame"
     )]
-    MissingFrameOpenAncestor { leaf_node_id: String },
+    MissingFrameOpenAncestor { leaf_node_id: NodeId },
     /// A commit's claimed current frame disagrees with its graph-derived frame.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
@@ -410,7 +415,7 @@ pub enum StoreError {
     )]
     UnclaimedTurnInputSettlementSuperseded {
         session_id: SessionId,
-        input_id: String,
+        input_id: InputId,
         observed_state: Option<Box<str>>,
         superseding_claim_id: Option<Box<str>>,
     },
@@ -465,7 +470,7 @@ pub enum StoreError {
     PendingTurnInputSourceKeyConflict {
         session_id: SessionId,
         source_key: String,
-        existing_input_id: String,
+        existing_input_id: InputId,
     },
     #[error(
         "process wake `{process_id}` sequence {sequence} for session `{session_id}` has no live receiver row and is at or below the receiver allocation floor {allocation_floor}; the sender store may have been restored or rewound"

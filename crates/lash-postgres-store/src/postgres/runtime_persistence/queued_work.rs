@@ -255,7 +255,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[lash_core::BatchId],
         policy: QueuedWorkClaimPolicy,
     ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
@@ -276,13 +276,17 @@ impl QueuedWorkStore for PostgresSessionStore {
             .iter()
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
+        let sql_batch_ids = batch_ids
+            .iter()
+            .map(|id| id.as_str().to_string())
+            .collect::<Vec<_>>();
         let present_ids = sqlx::query_scalar::<_, String>(
             "SELECT batch_id
              FROM lash_queued_work_batches
              WHERE session_id = $1 AND batch_id = ANY($2)",
         )
         .bind(session_id.as_str())
-        .bind(batch_ids)
+        .bind(&sql_batch_ids)
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -312,7 +316,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .bind(session_id.as_str())
         .bind(now as i64)
         .bind(sql_session_lease_generation(generation)?)
-        .bind(batch_ids)
+        .bind(&sql_batch_ids)
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -360,7 +364,12 @@ impl QueuedWorkStore for PostgresSessionStore {
         }
         let validation_batch_claims = validation_rows
             .iter()
-            .map(|row| (row.batch_id.clone(), row.claim_id.clone()))
+            .map(|row| {
+                (
+                    lash_core::BatchId::from(row.batch_id.clone()),
+                    row.claim_id.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         let interrupted_positions =
             lash_core::store::queued_work::select_interrupted_exact_claim_indices(
@@ -368,7 +377,12 @@ impl QueuedWorkStore for PostgresSessionStore {
                 batch_ids,
             )
             .map_err(|required_batch_ids| {
-                StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }
+                StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                    required_batch_ids: required_batch_ids
+                        .into_iter()
+                        .map(lash_core::BatchId::into_inner)
+                        .collect(),
+                }
             })?;
         let (selected, mut selected_batches) =
             if let Some(interrupted_positions) = interrupted_positions {
@@ -421,7 +435,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .collect::<Result<Vec<_>, _>>()?;
                 let Some(first_position) = span_rows
                     .iter()
-                    .position(|row| requested_ids.contains(&row.batch_id))
+                    .position(|row| requested_ids.contains(row.batch_id.as_str()))
                 else {
                     tx.rollback().await.map_err(store_sqlx_error)?;
                     return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
@@ -431,7 +445,7 @@ impl QueuedWorkStore for PostgresSessionStore {
                 };
                 let selected = span_rows[first_position..]
                     .iter()
-                    .take_while(|row| requested_ids.contains(&row.batch_id))
+                    .take_while(|row| requested_ids.contains(row.batch_id.as_str()))
                     .cloned()
                     .collect::<Vec<_>>();
                 let selected_batches = selected

@@ -55,7 +55,7 @@ impl SessionCommitStore for Store {
                     let graph = Self::load_active_path_session_graph_from_conn(
                         &tx,
                         &session_id,
-                        meta.leaf_node_id.clone(),
+                        meta.leaf_node_id.clone().map(lash_core::NodeId::into_inner),
                     )?;
                     let checkpoint = match meta.checkpoint_ref.as_ref() {
                         Some(blob_ref) => {
@@ -491,14 +491,14 @@ impl SessionCommitStore for Store {
                             .map_err(sqlite_error)?
                             .map(|(generation, frame_node_id)| {
                                 Ok(lash_core::store::ParentNodeFacts {
-                                    node_id: leaf_node_id.to_string(),
+                                    node_id: leaf_node_id.to_string().into(),
                                     generation: u64::try_from(generation).map_err(|_| {
                                         stored_data_corrupt(
                                             "SessionGraph node",
                                             format!("negative generation {generation}"),
                                         )
                                     })?,
-                                    frame_node_id,
+                                    frame_node_id: frame_node_id.into(),
                                 })
                             })
                             .transpose()
@@ -540,7 +540,7 @@ impl SessionCommitStore for Store {
                         let occupied = tx
                                 .query_row(
                                     "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
-                                    params![node.node_id],
+                                    params![node.node_id.as_str()],
                                     |_| Ok(()),
                                 )
                                 .optional()
@@ -556,7 +556,7 @@ impl SessionCommitStore for Store {
                                 "SELECT 1 FROM graph_nodes
                                  WHERE node_id = ?1 AND tombstoned = 0
                                  LIMIT 1",
-                                params![leaf_node_id],
+                                params![leaf_node_id.as_str()],
                                 |_| Ok(()),
                             )
                             .optional()
@@ -657,7 +657,7 @@ impl SessionCommitStore for Store {
                                     Some(claim) => StoreError::TurnInputClaimSuperseded {
                                         session_id: completed.session_id.clone(),
                                         claim_id: claim.claim_id.clone(),
-                                        row_id: Some(input_id.clone().into_boxed_str()),
+                                        row_id: Some(input_id.as_str().to_string().into_boxed_str()),
                                         superseding_claim_id: observed
                                             .as_ref()
                                             .and_then(|(claim_id, _, _, _)| claim_id.clone())
@@ -744,7 +744,7 @@ impl SessionCommitStore for Store {
                             params![
                                 commit.session_id.as_str(),
                                 node.node_id.as_str(),
-                                node.parent_node_id,
+                                node.parent_node_id.as_deref(),
                                 i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
                                     "node generation does not fit SQLite INTEGER".to_string()
                                 ))?,
@@ -770,7 +770,7 @@ impl SessionCommitStore for Store {
                             meta.session_id.as_str(),
                             encode_json(&meta.payload())?,
                             sql_head_revision,
-                            meta.leaf_node_id,
+                            meta.leaf_node_id.as_deref(),
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
                         ],
                     )
@@ -809,7 +809,7 @@ impl SessionCommitStore for Store {
                                    )",
                                 params![
                                     completed.session_id.as_str(),
-                                    batch_id,
+                                    batch_id.as_str(),
                                     completed.claim_id,
                                     completed.lease_token
                                 ],
@@ -823,7 +823,7 @@ impl SessionCommitStore for Store {
                                    AND claim_token = ?4",
                                 params![
                                     completed.session_id.as_str(),
-                                    batch_id,
+                                    batch_id.as_str(),
                                     completed.claim_id,
                                     completed.lease_token
                                 ],
@@ -849,7 +849,7 @@ impl SessionCommitStore for Store {
                                     ),
                                     params![
                                         completed.session_id.as_str(),
-                                        input_id,
+                                        input_id.as_str(),
                                         lash_core::TurnInputState::Completed.as_str(),
                                         claim.claim_id,
                                         claim.lease_token,
@@ -868,7 +868,7 @@ impl SessionCommitStore for Store {
                                     ),
                                     params![
                                         completed.session_id.as_str(),
-                                        input_id,
+                                        input_id.as_str(),
                                         lash_core::TurnInputState::Completed.as_str(),
                                     ],
                                 ),
@@ -879,7 +879,7 @@ impl SessionCommitStore for Store {
                                     Some(claim) => StoreError::TurnInputClaimSuperseded {
                                         session_id: completed.session_id.clone(),
                                         claim_id: claim.claim_id.clone(),
-                                        row_id: Some(input_id.clone().into_boxed_str()),
+                                        row_id: Some(input_id.as_str().to_string().into_boxed_str()),
                                         superseding_claim_id: None,
                                         superseding_session_lease_generation: None,
                                     },
@@ -982,7 +982,7 @@ impl SessionCommitStore for Store {
                                 }
                             ])
                             .map_err(sqlite_error)?;
-                            let affected = lash_core::TurnCancelAffectedInput { input_id, payload, disposition };
+                            let affected = lash_core::TurnCancelAffectedInput { input_id: input_id.into(), payload, disposition };
                             if cancellation.is_some() {
                                 append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
                                 turn_cancel_input_outcome.affected_inputs.push(affected);

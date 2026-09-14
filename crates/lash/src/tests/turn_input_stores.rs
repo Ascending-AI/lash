@@ -76,7 +76,8 @@ impl lash_core::TurnInputStore for SnapshotStore {
         let stored = lash_core::PendingTurnInput {
             input_id: input
                 .input_id
-                .unwrap_or_else(|| format!("snapshot-ti-{}", *seq)),
+                .unwrap_or_else(|| format!("snapshot-ti-{}", *seq))
+                .into(),
             session_id: input.session_id,
             enqueue_seq: *seq,
             source_key: input.source_key,

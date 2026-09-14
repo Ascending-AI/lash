@@ -106,7 +106,7 @@ pub(crate) async fn admit_turn_input(
     let accepted_state = acceptance.ingress.initial_state();
     let receipt = TurnInputReceipt {
         accepted: true,
-        input_id: acceptance.input_id.clone(),
+        input_id: acceptance.input_id.to_string(),
         ingress: acceptance.ingress.clone(),
         state: accepted_state,
         text,

@@ -1008,7 +1008,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
     let after_build_memory = process_memory_sample();
-    let session_id = SessionId::from(runtime.session().session_id());
+    let session_id = runtime.session().session_id();
     let store = runtime.persistence();
     let store_metrics = runtime.store_metrics();
     // The scenario drives the retained persistence handle directly. Close the

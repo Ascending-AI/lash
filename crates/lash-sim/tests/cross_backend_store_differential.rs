@@ -331,10 +331,10 @@ impl NodeSpec {
     fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
-            node_id: scoped_node_id(session_id, self.node_id),
+            node_id: scoped_node_id(session_id, self.node_id).into(),
             parent_node_id: self
                 .parent_node_id
-                .map(|node_id| scoped_node_id(session_id, node_id)),
+                .map(|node_id| scoped_node_id(session_id, node_id).into()),
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: if is_frame_alias(self.node_id) {
                 SessionNodePayload::FrameOpen {
@@ -676,7 +676,7 @@ fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
             .collect(),
         leaf_node_id: spec
             .leaf_node_id
-            .map(|node_id| scoped_node_id(session_id, node_id)),
+            .map(|node_id| scoped_node_id(session_id, node_id).into()),
     }
 }
 
@@ -1178,7 +1178,7 @@ impl BackendRunner {
                 match result {
                     Ok(result) => {
                         self.current_frame_node_id = next_frame_node_id;
-                        self.current_leaf_node_id = next_leaf_node_id;
+                        self.current_leaf_node_id = next_leaf_node_id.map(|id| id.to_string());
                         if matches!(*checkpoint, CheckpointSpec::Bodies) {
                             self.checkpoint_component_refs = Some(CheckpointComponentRefs {
                                 components: result.manifest.components.clone(),
@@ -1229,10 +1229,10 @@ impl BackendRunner {
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:fork", self.session_id)),
-                        node_id: node_id.clone(),
+                        node_id: node_id.clone().into(),
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: node_id,
+                            source_node_id: node_id.into(),
                             observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -1712,7 +1712,7 @@ impl BackendRunner {
         let freshness_head = match self.store().load_session_head_meta().await {
             Ok(Some(head)) => FreshnessHeadObservation::Present {
                 head_revision: head.head_revision,
-                leaf_node_id: head.leaf_node_id,
+                leaf_node_id: head.leaf_node_id.map(|id| id.to_string()),
                 checkpoint_ref: head.checkpoint_ref,
             },
             Ok(None) => FreshnessHeadObservation::Missing,

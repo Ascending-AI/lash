@@ -305,7 +305,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-all-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-all-literal"),
-                    source_node_id: "layout-source-node-all-literal".to_string(),
+                    source_node_id: "layout-source-node-all-literal".to_string().into(),
                     observer_inheritance: ObserverInheritance::All,
                 },
             },
@@ -324,7 +324,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-none-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-none-literal"),
-                    source_node_id: "layout-source-node-none-literal".to_string(),
+                    source_node_id: "layout-source-node-none-literal".to_string().into(),
                     observer_inheritance: ObserverInheritance::None,
                 },
             },
@@ -347,7 +347,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-only-empty-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-only-empty-literal"),
-                    source_node_id: "layout-source-node-only-empty-literal".to_string(),
+                    source_node_id: "layout-source-node-only-empty-literal".to_string().into(),
                     observer_inheritance: ObserverInheritance::Only(vec![]),
                 },
             },
@@ -372,7 +372,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 session_id: SessionId::from("layout-fork-only-processes-literal"),
                 relation: SessionRelation::Fork {
                     source_session_id: SessionId::from("layout-source-only-literal"),
-                    source_node_id: "layout-source-node-only-literal".to_string(),
+                    source_node_id: "layout-source-node-only-literal".to_string().into(),
                     observer_inheritance: ObserverInheritance::Only(vec![
                         ProcessId::from("layout-inherit-a-literal"),
                         ProcessId::from("layout-inherit-b-literal"),

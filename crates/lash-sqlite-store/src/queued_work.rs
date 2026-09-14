@@ -66,7 +66,7 @@ pub(crate) fn queued_work_batch_from_conn(
         });
     }
     let batch = QueuedWorkBatch {
-        batch_id: row.batch_id,
+        batch_id: row.batch_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
@@ -129,7 +129,7 @@ pub(crate) fn queued_work_batches_from_conn(
         .map(|row| {
             let items = items_by_batch.remove(&row.batch_id).unwrap_or_default();
             let batch = QueuedWorkBatch {
-                batch_id: row.batch_id,
+                batch_id: row.batch_id.into(),
                 session_id: row.session_id,
                 enqueue_seq: row.enqueue_seq,
                 source_key: row.source_key,
@@ -399,7 +399,7 @@ pub(crate) fn ensure_queued_work_completion_conn(
             return Err(StoreError::QueuedWorkClaimSuperseded {
                 session_id: completed.session_id.clone(),
                 claim_id: completed.claim_id.clone(),
-                row_id: Some(batch_id.clone().into_boxed_str()),
+                row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
                 superseding_claim_id: authority
                     .as_ref()
                     .and_then(|(claim_id, _, _)| claim_id.clone())

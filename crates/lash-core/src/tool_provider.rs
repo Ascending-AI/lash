@@ -1222,14 +1222,14 @@ pub struct PreparedToolBatchCall {
 /// pending completion consumption are projected back through this order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedToolBatch {
-    pub batch_id: String,
+    pub batch_id: crate::BatchId,
     pub calls: Vec<PreparedToolBatchCall>,
 }
 
 impl PreparedToolBatch {
     /// Freezes source-order prepared calls for protocol and process-engine implementors; execution
     /// may be concurrent, but launch and completion projection retain this order.
-    pub fn new(batch_id: impl Into<String>, calls: Vec<PreparedToolCall>) -> Self {
+    pub fn new(batch_id: impl Into<crate::BatchId>, calls: Vec<PreparedToolCall>) -> Self {
         let batch_id = batch_id.into();
         let calls = calls
             .into_iter()
@@ -1244,7 +1244,7 @@ impl PreparedToolBatch {
     }
 
     pub(crate) fn new_with_grants(
-        batch_id: impl Into<String>,
+        batch_id: impl Into<crate::BatchId>,
         calls: Vec<(PreparedToolCall, Option<ToolExecutionGrant>)>,
     ) -> Self {
         let batch_id = batch_id.into();

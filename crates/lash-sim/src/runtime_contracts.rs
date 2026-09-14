@@ -295,24 +295,26 @@ pub fn runtime_graph_invariant_facts(
     graph: &lash_core::SessionGraph,
 ) -> RuntimeGraphInvariantFacts {
     let mut seen = BTreeSet::new();
-    let mut duplicate_node_ids = BTreeSet::new();
+    let mut duplicate_node_ids = BTreeSet::<String>::new();
     let mut parent_by_node = BTreeMap::<String, Option<String>>::new();
     for node in &graph.nodes {
         if !seen.insert(node.node_id.clone()) {
-            duplicate_node_ids.insert(node.node_id.clone());
+            duplicate_node_ids.insert(node.node_id.to_string());
         }
         parent_by_node
-            .entry(node.node_id.clone())
-            .or_insert_with(|| node.parent_node_id.clone());
+            .entry(node.node_id.to_string())
+            .or_insert_with(|| node.parent_node_id.as_ref().map(ToString::to_string));
     }
     let missing_parent_links = graph
         .nodes
         .iter()
         .filter_map(|node| {
             let parent_node_id = node.parent_node_id.as_ref()?;
-            (!parent_by_node.contains_key(parent_node_id)).then(|| RuntimeGraphMissingParent {
-                node_id: node.node_id.clone(),
-                parent_node_id: parent_node_id.clone(),
+            (!parent_by_node.contains_key(parent_node_id.as_str())).then(|| {
+                RuntimeGraphMissingParent {
+                    node_id: node.node_id.to_string(),
+                    parent_node_id: parent_node_id.to_string(),
+                }
             })
         })
         .collect::<Vec<_>>();
@@ -339,7 +341,7 @@ pub fn runtime_graph_invariant_facts(
     let leaf_exists = graph
         .leaf_node_id
         .as_ref()
-        .is_none_or(|leaf| parent_by_node.contains_key(leaf));
+        .is_none_or(|leaf| parent_by_node.contains_key(leaf.as_str()));
     let duplicate_node_ids = duplicate_node_ids.into_iter().collect::<Vec<_>>();
     let cycle_node_ids = cycle_node_ids.into_iter().collect::<Vec<_>>();
     let passed = duplicate_node_ids.is_empty()
@@ -352,7 +354,7 @@ pub fn runtime_graph_invariant_facts(
         duplicate_node_ids,
         missing_parent_links,
         cycle_node_ids,
-        leaf_node_id: graph.leaf_node_id.clone(),
+        leaf_node_id: graph.leaf_node_id.as_ref().map(ToString::to_string),
         leaf_exists,
         passed,
     }
@@ -387,7 +389,8 @@ pub fn runtime_agent_frame_invariant_facts(
             &snapshot.session_graph,
             snapshot.session_graph.leaf_node_id.as_deref(),
         );
-    let current_frame_active = snapshot.current_frame_node_id.as_deref() == canonical_frame_node_id;
+    let current_frame_active =
+        snapshot.current_frame_node_id.as_deref() == canonical_frame_node_id.map(|id| id.as_str());
     let nodes_without_agent_frame = snapshot
         .session_graph
         .nodes
@@ -398,7 +401,7 @@ pub fn runtime_agent_frame_invariant_facts(
                 .nearest_frame_node_id(Some(&node.node_id))
                 .is_none()
         })
-        .map(|node| node.node_id.clone())
+        .map(|node| node.node_id.to_string())
         .collect::<Vec<_>>();
     let node_agent_frame_ids_without_record = snapshot
         .session_graph
@@ -410,7 +413,7 @@ pub fn runtime_agent_frame_invariant_facts(
                 .nearest_frame_node_id(Some(&node.node_id))
         })
         .filter(|frame_id| !frame_ids.contains(*frame_id))
-        .map(ToOwned::to_owned)
+        .map(ToString::to_string)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -663,7 +666,7 @@ mod tests {
         .expect("test nodes");
         let missing_parent = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             missing_parent_nodes,
-            Some("child".to_string()),
+            Some("child".to_string().into()),
         );
         let facts = runtime_graph_invariant_facts(&missing_parent);
         assert!(!facts.passed);
@@ -690,7 +693,7 @@ mod tests {
         .expect("test nodes");
         let cycle = lash_core::SessionGraph::from_unchecked_nodes_for_testing(
             cycle_nodes,
-            Some("b".to_string()),
+            Some("b".to_string().into()),
         );
         let facts = runtime_graph_invariant_facts(&cycle);
         assert!(!facts.passed);

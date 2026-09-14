@@ -1464,7 +1464,7 @@ fn remote_activity_preserves_model_attempt_reset_targets() {
 #[test]
 fn remote_activity_exposes_typed_turn_input_application_without_display_text() {
     let application = lash_core::TurnInputApplication {
-        input_id: "input-1".to_string(),
+        input_id: lash_core::InputId::from("input-1"),
         source_key: Some("host:source-1".to_string()),
         turn_id: lash_core::TurnId::from("turn-1"),
         committed_message_id: "message-1".to_string(),

@@ -2063,7 +2063,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
     let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: node_id.to_string(),
+            node_id: node_id.to_string().into(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -2075,7 +2075,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
                 protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
-        leaf_node_id: Some(node_id.to_string()),
+        leaf_node_id: Some(node_id.to_string().into()),
     };
     let (first, node_id_mapping) =
         RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
@@ -2083,7 +2083,10 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
             .expect("stamp guarded commit");
     assert_eq!(
         node_id_mapping,
-        vec![(node_id.to_string(), node_id.to_string())],
+        vec![(
+            lash_core::NodeId::new(node_id.as_str()),
+            lash_core::NodeId::new(node_id.as_str()),
+        )],
         "operation stamping must return the append-id mapping"
     );
     commit_runtime_state_for_test(&store, first.clone(), "realization-guard")
@@ -2093,7 +2096,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
     let first_hash = first.turn_commit_hash().expect("first store-computed hash");
     let mut divergent_replay = first;
     let crate::GraphAppend { nodes, .. } = &mut divergent_replay.graph;
-    nodes[0].parent_node_id = Some("proposal-only-parent".to_string());
+    nodes[0].parent_node_id = Some("proposal-only-parent".into());
     let divergent_hash = divergent_replay
         .turn_commit_hash()
         .expect("mutated store-computed hash");
@@ -2128,7 +2131,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
     let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: "rogue-node-id".to_string(),
+            node_id: "rogue-node-id".into(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
@@ -2136,7 +2139,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
             },
         }],
-        leaf_node_id: Some("rogue-node-id".to_string()),
+        leaf_node_id: Some("rogue-node-id".into()),
     };
     let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
     commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
@@ -2167,7 +2170,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
         crate::FrameKey::from_caller_material("collision-frame").expect("non-empty frame material");
     let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let original = crate::SessionNodeRecord {
-        node_id: colliding_id.to_string(),
+        node_id: colliding_id.to_string().into(),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::FrameOpen {
@@ -2179,9 +2182,11 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
             protocol_turn_options: ProtocolTurnOptions::default(),
         },
     };
-    state.session_graph =
-        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.to_string()))
-            .expect("collision fixture seed graph is valid");
+    state.session_graph = crate::SessionGraph::from_nodes(
+        vec![original.clone()],
+        Some(colliding_id.to_string().into()),
+    )
+    .expect("collision fixture seed graph is valid");
     let initial = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
         .await
@@ -2202,7 +2207,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
         &state,
         crate::GraphAppend {
             nodes: vec![replacement],
-            leaf_node_id: Some(colliding_id.to_string()),
+            leaf_node_id: Some(colliding_id.to_string().into()),
         },
         &[],
     );
@@ -2239,7 +2244,7 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersi
                 sample_session_node(&SessionId::from("root"), "duplicate", None),
                 sample_session_node(&SessionId::from("root"), "duplicate", None),
             ],
-            leaf_node_id: Some(duplicate_node_id.to_string()),
+            leaf_node_id: Some(duplicate_node_id.to_string().into()),
         },
         &[],
     );
@@ -2276,7 +2281,7 @@ pub async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>
                 "valid-node",
                 None,
             )],
-            leaf_node_id: Some("missing-leaf".to_string()),
+            leaf_node_id: Some("missing-leaf".into()),
         },
         &[],
     );

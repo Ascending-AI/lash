@@ -1339,7 +1339,7 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
         .expect("enqueue manual queued failure batch");
 
     run_queued_work_batch(
-        AxumPath(batch.batch_id.clone()),
+        AxumPath(batch.batch_id.to_string()),
         State(state.clone()),
         Query(SessionQuery::default()),
     )
@@ -1350,7 +1350,7 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
     let Json(retried) = run_queued_work_batch(
-        AxumPath(batch.batch_id),
+        AxumPath(batch.batch_id.to_string()),
         State(state.clone()),
         Query(SessionQuery::default()),
     )

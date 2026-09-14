@@ -497,7 +497,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
                 "storeless-stale-ancestor",
                 serde_json::json!({"value": 1}),
             )],
-            requires_ancestor_node_id: Some("not-on-active-path".to_string()),
+            requires_ancestor_node_id: Some("not-on-active-path".into()),
         }),
     )
     .await

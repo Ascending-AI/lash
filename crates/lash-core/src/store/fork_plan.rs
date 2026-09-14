@@ -1,6 +1,6 @@
 //! Backend-neutral lineage derivation for zero-copy forks.
 
-use crate::SessionId;
+use crate::{NodeId, SessionId};
 use std::collections::BTreeMap;
 
 use super::StoreError;
@@ -8,8 +8,8 @@ use super::StoreError;
 /// Immutable edge and ownership facts for one node on a retained fork path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkNodeFacts {
-    pub node_id: String,
-    pub parent_node_id: Option<String>,
+    pub node_id: NodeId,
+    pub parent_node_id: Option<NodeId>,
     pub owning_session_id: SessionId,
     pub generation: u64,
 }
@@ -18,7 +18,7 @@ pub struct ForkNodeFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkLineageAncestor {
     pub ancestor_session_id: SessionId,
-    pub fork_node_id: String,
+    pub fork_node_id: NodeId,
     pub fork_generation: u64,
 }
 
@@ -106,8 +106,8 @@ mod tests {
 
     fn node(owner: &str, generation: u64, parent: Option<&str>) -> ForkNodeFacts {
         ForkNodeFacts {
-            node_id: format!("{owner}-{generation}"),
-            parent_node_id: parent.map(str::to_string),
+            node_id: format!("{owner}-{generation}").into(),
+            parent_node_id: parent.map(crate::NodeId::from),
             owning_session_id: SessionId::from(owner.to_string()),
             generation,
         }
@@ -133,17 +133,17 @@ mod tests {
             &[
                 ForkLineageAncestor {
                     ancestor_session_id: SessionId::from("a"),
-                    fork_node_id: "a-1".to_string(),
+                    fork_node_id: "a-1".into(),
                     fork_generation: 1,
                 },
                 ForkLineageAncestor {
                     ancestor_session_id: SessionId::from("b"),
-                    fork_node_id: "b-3".to_string(),
+                    fork_node_id: "b-3".into(),
                     fork_generation: 3,
                 },
                 ForkLineageAncestor {
                     ancestor_session_id: SessionId::from("c"),
-                    fork_node_id: "c-4".to_string(),
+                    fork_node_id: "c-4".into(),
                     fork_generation: 4,
                 },
             ]

@@ -190,7 +190,7 @@ impl SessionSnapshot {
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
             .map(|frame_node_id| {
-                FrameNodeId::new(frame_node_id)
+                FrameNodeId::new(frame_node_id.as_str())
                     .expect("a graph node identity selected as a frame is non-empty")
             });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
@@ -205,7 +205,7 @@ impl SessionSnapshot {
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
             .map(|frame_node_id| {
-                FrameNodeId::new(frame_node_id)
+                FrameNodeId::new(frame_node_id.as_str())
                     .expect("a graph node identity selected as a frame is non-empty")
             });
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
@@ -537,7 +537,7 @@ pub struct OpenAgentFrameResult {
     pub frame_node_id: String,
     pub opened: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub initial_node_ids: Vec<String>,
+    pub initial_node_ids: Vec<crate::NodeId>,
 }
 
 #[derive(Clone)]
@@ -590,7 +590,7 @@ pub enum SessionRelation {
         source_session_id: SessionId,
         /// Host-declared source node, persisted alongside
         /// [`Self::Fork::source_session_id`] and equally unvalidated.
-        source_node_id: String,
+        source_node_id: crate::NodeId,
         #[serde(default)]
         observer_inheritance: crate::ObserverInheritance,
     },
@@ -632,7 +632,7 @@ impl SessionLineage {
                 ..
             } => Self::Fork {
                 source_session_id: source_session_id.clone(),
-                source_node_id: source_node_id.clone(),
+                source_node_id: source_node_id.to_string(),
             },
         }
     }

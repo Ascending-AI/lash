@@ -105,7 +105,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         );
 
         let Json(run) = run_queued_work_batch(
-            AxumPath(second.batch_id.clone()),
+            AxumPath(second.batch_id.to_string()),
             State(state.clone()),
             Query(SessionQuery::default()),
         )
@@ -131,7 +131,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         );
 
         let Json(cancelled) = cancel_queued_work_batch(
-            AxumPath(first.batch_id.clone()),
+            AxumPath(first.batch_id.to_string()),
             State(state.clone()),
             Query(SessionQuery::default()),
         )
@@ -428,7 +428,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-targeted-later"),
             session_id: session_id.clone(),
             reason: "test_targeted_later".to_string(),
-            batch_ids: vec![later.batch_id.clone()],
+            batch_ids: vec![later.batch_id.to_string()],
             drain_id: Some("workbench-targeted-later-drain".to_string()),
         };
         let later_output = later_request
@@ -682,7 +682,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-stale-selection"),
             session_id: session_id.clone(),
             reason: "test_stale_selection".to_string(),
-            batch_ids: vec![later.batch_id.clone()],
+            batch_ids: vec![later.batch_id.to_string()],
             drain_id: Some("workbench-stale-selection-drain".to_string()),
         };
         assert!(
@@ -712,7 +712,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-targeted-earlier"),
             session_id: session_id.clone(),
             reason: "test_targeted_earlier".to_string(),
-            batch_ids: vec![earlier.batch_id.clone()],
+            batch_ids: vec![earlier.batch_id.to_string()],
             drain_id: Some("workbench-targeted-earlier-drain".to_string()),
         };
         assert!(

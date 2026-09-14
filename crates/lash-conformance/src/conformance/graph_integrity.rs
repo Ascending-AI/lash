@@ -124,7 +124,7 @@ async fn run_case(
             .leaf_node_id
             .clone()
             .expect("healthy graph has a resident leaf"),
-        missing_node_id: format!("missing-{case}"),
+        missing_node_id: format!("missing-{case}").into(),
         corruption,
         read,
     };
@@ -147,9 +147,9 @@ async fn run_case(
         } => {
             assert_eq!(record_kind, "SessionGraph", "{case}");
             assert!(
-                message.contains(&target.missing_node_id)
-                    || message.contains(&target.leaf_node_id)
-                    || message.contains(&target.root_node_id),
+                message.contains(&*target.missing_node_id)
+                    || message.contains(&*target.leaf_node_id)
+                    || message.contains(&*target.root_node_id),
                 "{} {} diagnostic must identify the corrupt graph row: {message}",
                 corruption.label(),
                 read.label(),

@@ -264,7 +264,7 @@ impl RuntimeCommit {
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
-    ) -> Result<(Self, Vec<String>), StoreError> {
+    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         Self::persisted_state_with_operation_and_budget(
             state,
             usage_deltas,
@@ -277,7 +277,7 @@ impl RuntimeCommit {
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
-    ) -> Result<(Self, Vec<String>), StoreError> {
+    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         Self::persisted_state_with_operation_and_staged_usage_and_budget(
             state,
             usage_deltas,
@@ -635,7 +635,7 @@ pub struct RuntimeCommitReceipt {
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub committed_leaf_node_id: Option<String>,
+    pub committed_leaf_node_id: Option<crate::NodeId>,
     /// Store-realized timestamps for nodes appended by this operation.
     ///
     /// Node timestamps are clock-derived and excluded from commit intent, so a

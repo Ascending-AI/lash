@@ -17,16 +17,16 @@ use super::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkDrainRefusalCause {
     UnclaimableTogether {
-        unclaimed_batch_ids: Vec<String>,
+        unclaimed_batch_ids: Vec<crate::BatchId>,
     },
     InterruptedBatchRequiresFullComposition {
-        required_batch_ids: Vec<String>,
+        required_batch_ids: Vec<crate::BatchId>,
     },
     ExecutionLaneBusy,
     /// One requested row alone renders larger than the whole model context
     /// window, so no drain policy can ever make it fit (FIG-1313).
     QueuedItemExceedsContextWindow {
-        batch_id: String,
+        batch_id: crate::BatchId,
         batch_enqueue_seq: u64,
         required_context_tokens: usize,
         max_context_tokens: usize,
@@ -117,9 +117,9 @@ impl QueuedWorkDrainResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkBatchSatisfaction {
     /// This invocation claimed and executed the durable row.
-    ClaimedNow { batch_id: String },
+    ClaimedNow { batch_id: crate::BatchId },
     /// No durable row remained, so the idempotent request was already done.
-    AlreadySatisfied { batch_id: String },
+    AlreadySatisfied { batch_id: crate::BatchId },
 }
 
 /// Successful result of an exact, host-selected queued-work drain.
@@ -213,7 +213,7 @@ impl LashRuntime {
     pub async fn stream_selected_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
-        batch_ids: &[String],
+        batch_ids: &[crate::BatchId],
     ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>, SelectedQueuedWorkDrainError> {
         self.stream_queued_work(opts, Some(batch_ids))
             .await
@@ -223,7 +223,7 @@ impl LashRuntime {
     async fn stream_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
-        selected_batch_ids: Option<&[String]>,
+        selected_batch_ids: Option<&[crate::BatchId]>,
     ) -> Result<QueuedWorkDrainResult, SelectedQueuedWorkDrainError> {
         let selected_batch_ids = selected_batch_ids.map(|batch_ids| {
             let mut seen = std::collections::BTreeSet::new();
@@ -494,7 +494,12 @@ impl LashRuntime {
                     })?;
                 return Err(SelectedQueuedWorkDrainError::Refused {
                     cause: SelectedQueuedWorkDrainRefusalCause::
-                        InterruptedBatchRequiresFullComposition { required_batch_ids },
+                        InterruptedBatchRequiresFullComposition {
+                            required_batch_ids: required_batch_ids
+                                .into_iter()
+                                .map(crate::BatchId::new)
+                                .collect(),
+                        },
                 });
             }
             Err(crate::StoreError::QueuedWorkRowExceedsContextWindow {
@@ -528,7 +533,7 @@ impl LashRuntime {
                 }
                 return Err(SelectedQueuedWorkDrainError::Refused {
                     cause: SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
-                        batch_id,
+                        batch_id: batch_id.clone(),
                         batch_enqueue_seq,
                         required_context_tokens: rendered_tokens,
                         max_context_tokens,
@@ -549,7 +554,7 @@ impl LashRuntime {
             return if let Some(batch_ids) = selected_batch_ids {
                 let already_satisfied = already_satisfied_batch_ids
                     .iter()
-                    .map(String::as_str)
+                    .map(crate::BatchId::as_str)
                     .collect::<std::collections::BTreeSet<_>>();
                 let unclaimed_batch_ids = batch_ids
                     .iter()

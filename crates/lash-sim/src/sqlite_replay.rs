@@ -524,7 +524,7 @@ impl SqliteRuntimeReplayWorld {
             .await
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
         self.queued_inputs
-            .insert(event.boundary_id.clone(), acceptance.input_id.clone());
+            .insert(event.boundary_id.clone(), acceptance.input_id.to_string());
         let input_state = acceptance.ingress.initial_state();
         Ok(json!({
             "session": event.actor_alias,
@@ -919,7 +919,7 @@ impl SqliteRuntimeReplayWorld {
         })?;
         let outcome = runtime_session
             .session
-            .cancel_pending_turn_input(&input_id)
+            .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
             .await
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
         let (cancelled, cancel_outcome) = match &outcome {

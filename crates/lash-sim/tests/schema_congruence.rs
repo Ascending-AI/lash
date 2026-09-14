@@ -747,7 +747,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     .map(|observer_inheritance| {
         encode(SessionRelation::Fork {
             source_session_id: SessionId::from("source"),
-            source_node_id: "node".to_string(),
+            source_node_id: "node".to_string().into(),
             observer_inheritance,
         })
         .observer_inheritance_kind

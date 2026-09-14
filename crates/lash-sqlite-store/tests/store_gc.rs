@@ -379,7 +379,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         let frame_node_id =
             lash_core::facade_support::frame_node_id(&state.session_id, frame_key.as_str());
         let node = lash_core::SessionNodeRecord {
-            node_id: frame_node_id.to_string(),
+            node_id: frame_node_id.to_string().into(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::FrameOpen {
@@ -454,7 +454,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let frame_node_id =
         lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key.as_str());
     let node = lash_core::SessionNodeRecord {
-        node_id: frame_node_id.to_string(),
+        node_id: frame_node_id.to_string().into(),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
@@ -802,7 +802,7 @@ async fn commit_single_root_node(
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit root node");
-    (store, leaf)
+    (store, leaf.to_string())
 }
 
 /// Unpinning a pinned leaf *after* its owning session was deleted tombstones a
@@ -873,7 +873,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .fork_at(&lash_core::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
-            node_id: parent_leaf.clone(),
+            node_id: parent_leaf.clone().into(),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
         })
@@ -899,7 +899,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             .session_graph
             .apply_append(&lash_core::store::GraphAppend {
                 nodes: vec![lash_core::SessionNodeRecord {
-                    node_id: "orphan-fork-child-node".to_string(),
+                    node_id: "orphan-fork-child-node".to_string().into(),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00Z".to_string(),
                     payload: lash_core::SessionNodePayload::Event {
@@ -912,7 +912,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
                         ),
                     },
                 }],
-                leaf_node_id: Some("orphan-fork-child-node".to_string()),
+                leaf_node_id: Some("orphan-fork-child-node".to_string().into()),
             })
             .expect("append child node");
         child

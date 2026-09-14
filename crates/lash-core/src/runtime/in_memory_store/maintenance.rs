@@ -155,7 +155,7 @@ mod tests {
             .await
             .expect("create vacuum test store");
         let root = SessionNodeRecord {
-            node_id: "vacuum-root".to_string(),
+            node_id: "vacuum-root".into(),
             parent_node_id: None,
             timestamp: "2026-09-01T00:00:00Z".to_string(),
             payload: SessionNodePayload::Plugin {
@@ -164,7 +164,7 @@ mod tests {
             },
         };
         let child = SessionNodeRecord {
-            node_id: "vacuum-child".to_string(),
+            node_id: "vacuum-child".into(),
             parent_node_id: Some(root.node_id.clone()),
             timestamp: "2026-09-01T00:00:01Z".to_string(),
             payload: SessionNodePayload::Plugin {
@@ -177,7 +177,7 @@ mod tests {
                 .expect("seed valid graph");
         factory.global_node_owners.lock_recover().extend([
             (root.node_id.clone(), SessionId::from(session_id)),
-            ("vacuum-child".to_string(), SessionId::from("other-session")),
+            ("vacuum-child".into(), SessionId::from("other-session")),
         ]);
         factory
             .tombstoned_node_ids

@@ -43,7 +43,12 @@ impl SessionCommitStore for PostgresSessionStore {
             return Ok(None);
         };
         let leaf_node_id = meta.leaf_node_id.clone();
-        let graph = load_graph_tx(&mut tx, session_id, leaf_node_id.clone()).await?;
+        let graph = load_graph_tx(
+            &mut tx,
+            session_id,
+            leaf_node_id.clone().map(lash_core::NodeId::into_inner),
+        )
+        .await?;
         let checkpoint = match meta.checkpoint_ref.as_ref() {
             Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
@@ -524,9 +529,9 @@ impl SessionCommitStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?
             .map(|(generation, frame_node_id)| {
                 Ok(lash_core::store::ParentNodeFacts {
-                    node_id: leaf_node_id.to_string(),
+                    node_id: leaf_node_id.to_string().into(),
                     generation: u64_from_sql("SessionGraph node", "generation", generation)?,
-                    frame_node_id,
+                    frame_node_id: frame_node_id.into(),
                 })
             })
             .transpose()?,
@@ -581,6 +586,7 @@ impl SessionCommitStore for PostgresSessionStore {
         .await
         .map_err(store_sqlx_error)?
         .into_iter()
+        .map(lash_core::NodeId::from)
         .collect::<std::collections::HashSet<_>>();
         let selected_leaf_is_live = match commit.graph.leaf_node_id() {
             Some(leaf_node_id) => sqlx::query_scalar::<_, bool>(
@@ -589,7 +595,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     WHERE node_id = $1 AND tombstoned = FALSE
                 )",
             )
-            .bind(leaf_node_id)
+            .bind(leaf_node_id.as_str())
             .fetch_one(&mut *tx)
             .await
             .map_err(store_sqlx_error)?,
@@ -675,12 +681,12 @@ impl SessionCommitStore for PostgresSessionStore {
                      VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(commit.session_id.as_str())
-            .bind(&node.node_id)
-            .bind(&node.parent_node_id)
+            .bind(&*node.node_id)
+            .bind(node.parent_node_id.as_deref())
             .bind(i64::try_from(facts.generation).map_err(|_| {
                 StoreError::Backend("node generation does not fit PostgreSQL BIGINT".to_string())
             })?)
-            .bind(&facts.frame_node_id)
+            .bind(&*facts.frame_node_id)
             .bind(node_json)
             .execute(&mut *tx)
             .await
@@ -824,7 +830,7 @@ impl SessionCommitStore for PostgresSessionStore {
                      WHERE session_id = $1 AND input_id = $2",
                 )
                 .bind(commit.session_id.as_str())
-                .bind(&input_id)
+                .bind(&*input_id)
                 .bind(match disposition {
                     lash_core::TurnCancelDisposition::Defer => {
                         lash_core::TurnInputState::DeferredNextTurn.as_str()

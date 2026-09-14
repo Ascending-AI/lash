@@ -16,8 +16,8 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
         let result = match target.corruption {
             GraphIntegrityCorruption::OrphanLeaf => {
                 sqlx::query("UPDATE lash_graph_nodes SET parent_node_id = $1 WHERE node_id = $2")
-                    .bind(&target.missing_node_id)
-                    .bind(&target.leaf_node_id)
+                    .bind(target.missing_node_id.as_str())
+                    .bind(target.leaf_node_id.as_str())
                     .execute(self.storage.pool())
                     .await
                     .expect("inject orphaned Postgres graph leaf")
@@ -41,14 +41,14 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
                      SELECT session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned
                      FROM lash_graph_nodes WHERE node_id = $1 LIMIT 1",
                 )
-                .bind(&target.leaf_node_id)
+                .bind(target.leaf_node_id.as_str())
                 .execute(self.storage.pool())
                 .await
                 .expect("inject duplicate Postgres graph node id")
             }
             GraphIntegrityCorruption::DanglingLeafId => {
                 sqlx::query("UPDATE lash_sessions SET leaf_node_id = $1 WHERE session_id = $2")
-                    .bind(&target.missing_node_id)
+                    .bind(target.missing_node_id.as_str())
                     .bind(target.session_id.as_str())
                     .execute(self.storage.pool())
                     .await
@@ -59,8 +59,8 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
                     sqlx::query(
                         "UPDATE lash_graph_nodes SET parent_node_id = $1 WHERE node_id = $2",
                     )
-                    .bind(&target.leaf_node_id)
-                    .bind(&target.root_node_id)
+                    .bind(target.leaf_node_id.as_str())
+                    .bind(target.root_node_id.as_str())
                     .execute(self.storage.pool())
                     .await
                     .expect("inject active Postgres graph parent cycle")
@@ -81,7 +81,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
                         )
                         .bind(node_id)
                         .bind(parent_node_id)
-                        .bind(&target.leaf_node_id)
+                        .bind(target.leaf_node_id.as_str())
                         .bind(generation_offset)
                         .execute(self.storage.pool())
                         .await
@@ -108,7 +108,8 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
             .map_err(store_sqlx_error)?;
         let leaf_node_id = load_session_head_meta_tx(&mut tx, session_id, false)
             .await?
-            .and_then(|meta| meta.leaf_node_id);
+            .and_then(|meta| meta.leaf_node_id)
+            .map(lash_core::NodeId::into_inner);
         let graph = load_whole_graph_tx(&mut tx, session_id, leaf_node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(graph)

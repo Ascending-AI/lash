@@ -171,7 +171,7 @@ fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
 #[test]
 fn remaining_host_ui_types_are_constructible_from_the_facade() {
     let node = SessionNodeRecord {
-        node_id: "plugin-node".to_string(),
+        node_id: "plugin-node".to_string().into(),
         parent_node_id: None,
         timestamp: "2026-08-25T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {

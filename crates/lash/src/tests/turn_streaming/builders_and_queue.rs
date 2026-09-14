@@ -763,7 +763,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
         let store = store_factory
             .create_store(&crate::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session.session_id()),
+                session_id: session.session_id(),
                 relation: crate::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
             })
@@ -774,7 +774,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 crate::persistence::TurnWorkPayload::agent_frame_task(
                     lash_core::facade_support::frame_node_id(
-                        &SessionId::from(session.session_id()),
+                        &session.session_id(),
                         "oversized-frame",
                     ),
                     "w".repeat(64 * 1024),
@@ -1031,8 +1031,8 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
             cause,
             SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
                 required_batch_ids: vec![
-                    "recording-qwb-1".to_string(),
-                    "recording-qwb-2".to_string(),
+                    "recording-qwb-1".to_string().into(),
+                    "recording-qwb-2".to_string().into(),
                 ],
             }
         ),
@@ -1043,7 +1043,7 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
         store
             .raw_queued_work_for_testing()
             .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
             .collect::<Vec<_>>(),
         vec![
             (
@@ -1181,7 +1181,7 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_bu
 
     let expected = vec![
         crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
-            batch_id: "absent-batch".to_string(),
+            batch_id: "absent-batch".to_string().into(),
         },
     ];
     let lane_free = session
@@ -1451,8 +1451,8 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
             cause,
             SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
                 required_batch_ids: vec![
-                    "recording-qwb-3".to_string(),
-                    "recording-qwb-4".to_string(),
+                    "recording-qwb-3".to_string().into(),
+                    "recording-qwb-4".to_string().into(),
                 ],
             }
         ),
@@ -1463,7 +1463,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         store
             .raw_queued_work_for_testing()
             .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
             .collect::<Vec<_>>(),
         vec![
             (
@@ -1501,8 +1501,8 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
             cause,
             SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                 unclaimed_batch_ids: vec![
-                    "recording-qwb-3".to_string(),
-                    "recording-qwb-4".to_string(),
+                    "recording-qwb-3".to_string().into(),
+                    "recording-qwb-4".to_string().into(),
                 ],
             }
         ),
@@ -1513,7 +1513,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         store
             .raw_queued_work_for_testing()
             .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id, claim_id))
+            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
             .collect::<Vec<_>>(),
         vec![
             (

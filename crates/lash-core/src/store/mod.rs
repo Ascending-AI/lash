@@ -271,7 +271,7 @@ pub struct SessionHeadMeta {
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
-    pub leaf_node_id: Option<String>,
+    pub leaf_node_id: Option<crate::NodeId>,
 }
 
 impl SessionHeadMeta {
@@ -287,7 +287,7 @@ impl SessionHeadMeta {
         payload: SessionHeadPayload,
         head_revision: u64,
         checkpoint_ref: Option<BlobRef>,
-        leaf_node_id: Option<String>,
+        leaf_node_id: Option<crate::NodeId>,
     ) -> Self {
         Self {
             schema_version: payload.schema_version,
@@ -338,11 +338,11 @@ pub struct PersistedSessionRead {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GraphAppend {
     pub nodes: Vec<crate::SessionNodeRecord>,
-    pub leaf_node_id: Option<String>,
+    pub leaf_node_id: Option<crate::NodeId>,
 }
 
 impl GraphAppend {
-    pub fn leaf_node_id(&self) -> Option<&String> {
+    pub fn leaf_node_id(&self) -> Option<&crate::NodeId> {
         self.leaf_node_id.as_ref()
     }
 }
@@ -562,10 +562,10 @@ impl RuntimeCommit {
         let completed = &self.turn_commit;
         for (ordinal, node) in self.graph.nodes.iter().enumerate() {
             let expected = match &node.payload {
-                crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::new(
                     crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
-                        .into_inner()
-                }
+                        .into_inner(),
+                ),
                 _ => {
                     derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?
                 }
@@ -626,7 +626,7 @@ impl RuntimeCommit {
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
         commit_budget: CommitBudget,
-    ) -> Result<(Self, Vec<String>), StoreError> {
+    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
         state
@@ -650,7 +650,7 @@ impl RuntimeCommit {
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
         commit_budget: CommitBudget,
-    ) -> Result<(Self, Vec<String>), StoreError> {
+    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
         state
@@ -725,7 +725,7 @@ impl RuntimeCommit {
     pub fn with_operation(
         mut self,
         operation: OperationId,
-    ) -> Result<(Self, Vec<(String, String)>), StoreError> {
+    ) -> Result<(Self, Vec<(crate::NodeId, crate::NodeId)>), StoreError> {
         let session_id = self.session_id.clone();
         let node_id_mapping = self.graph.derive_node_ids(&session_id, &operation)?;
         remap_optional_node_id(&mut self.current_frame_node_id, &node_id_mapping);
@@ -851,12 +851,15 @@ pub fn append_request_commit_for_testing(
     )
 }
 
-fn remap_optional_node_id(node_id: &mut Option<crate::FrameNodeId>, mapping: &[(String, String)]) {
+fn remap_optional_node_id(
+    node_id: &mut Option<crate::FrameNodeId>,
+    mapping: &[(crate::NodeId, crate::NodeId)],
+) {
     let Some(current) = node_id.as_mut() else {
         return;
     };
     if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str()) {
-        *current = crate::FrameNodeId::new(derived.clone())
+        *current = crate::FrameNodeId::new(derived.as_str())
             .expect("derived graph node identities are non-empty");
     }
 }
@@ -1600,7 +1603,7 @@ pub trait QueuedWorkStore: Send + Sync {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[crate::BatchId],
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError>;
 

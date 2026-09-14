@@ -1,14 +1,14 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
-use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
+use crate::{NodeId, SessionId};
 
 impl GraphAppend {
     pub fn derive_node_ids(
         &mut self,
         session_id: &SessionId,
         operation: &OperationId,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        let mut remapped = std::collections::HashMap::<String, String>::new();
+    ) -> Result<Vec<(NodeId, NodeId)>, StoreError> {
+        let mut remapped = std::collections::HashMap::<NodeId, NodeId>::new();
         let mut mapping = Vec::with_capacity(self.nodes.len());
         for (ordinal, node) in self.nodes.iter_mut().enumerate() {
             if let Some(parent) = node.parent_node_id.as_mut()
@@ -18,9 +18,10 @@ impl GraphAppend {
             }
             let old = node.node_id.clone();
             let derived = match &node.payload {
-                crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
-                    crate::session_graph::frame_node_id(session_id, frame_key.as_str()).into_inner()
-                }
+                crate::SessionNodePayload::FrameOpen { frame_key, .. } => NodeId::new(
+                    crate::session_graph::frame_node_id(session_id, frame_key.as_str())
+                        .into_inner(),
+                ),
                 _ => derive_history_node_id(session_id, operation, ordinal as u64)?,
             };
             node.node_id = derived.clone();
@@ -50,7 +51,7 @@ impl GraphAppend {
             .find(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
         {
             return Some(
-                crate::FrameNodeId::new(frame_node.node_id.clone())
+                crate::FrameNodeId::new(frame_node.node_id.as_str())
                     .expect("derived graph node identities are non-empty"),
             );
         }
@@ -62,14 +63,14 @@ impl GraphAppend {
         resident_graph
             .nearest_frame_node_id(resident_parent_node_id)
             .map(|frame_node_id| {
-                crate::FrameNodeId::new(frame_node_id)
+                crate::FrameNodeId::new(frame_node_id.as_str())
                     .expect("resident graph node identities are non-empty")
             })
     }
 
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {
         if let Some(last) = self.nodes.last()
-            && self.leaf_node_id.as_deref() != Some(last.node_id.as_str())
+            && self.leaf_node_id.as_ref() != Some(&last.node_id)
         {
             return Err(StoreError::InvalidGraphLeaf {
                 leaf_node_id: self.leaf_node_id.clone(),

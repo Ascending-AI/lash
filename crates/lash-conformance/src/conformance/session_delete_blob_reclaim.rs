@@ -123,7 +123,7 @@ async fn committed_checkpoint(
         checkpoint_ref: receipt.checkpoint_ref,
         manifest: receipt.manifest,
         component_refs,
-        leaf_node_id,
+        leaf_node_id: leaf_node_id.to_string(),
     }
 }
 
@@ -340,7 +340,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     let fork_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("delete-shared-fork"),
-        node_id: committed.leaf_node_id,
+        node_id: committed.leaf_node_id.into(),
         relation: crate::SessionRelation::Root,
         policy: committed.request.policy.clone(),
     };

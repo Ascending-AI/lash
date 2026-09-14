@@ -29,7 +29,7 @@ pub fn append_conformance_event_node(
 ) {
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     let node = crate::SessionNodeRecord {
-        node_id: id.to_string(),
+        node_id: crate::NodeId::from(id),
         parent_node_id,
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {
@@ -46,7 +46,7 @@ pub fn append_conformance_event_node(
         .session_graph
         .apply_append(&crate::GraphAppend {
             nodes: vec![node],
-            leaf_node_id: Some(id.to_string()),
+            leaf_node_id: Some(crate::NodeId::from(id)),
         })
         .expect("append conformance event node");
 }

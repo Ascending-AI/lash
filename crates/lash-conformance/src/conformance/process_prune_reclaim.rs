@@ -303,7 +303,7 @@ async fn commit_root_node(
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit root node");
-    leaf
+    leaf.to_string()
 }
 
 /// Fork `child_session_id` at `node_id` and grow one node of its own, so
@@ -319,7 +319,7 @@ async fn fork_and_advance(
         .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(child_session_id.to_string()),
-            node_id: node_id.to_string(),
+            node_id: node_id.to_string().into(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         })
@@ -344,7 +344,7 @@ async fn fork_and_advance(
         .session_graph
         .apply_append(&crate::GraphAppend {
             nodes: vec![crate::SessionNodeRecord {
-                node_id: child_node_id.to_string(),
+                node_id: child_node_id.to_string().into(),
                 parent_node_id,
                 timestamp: "2026-08-17T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Event {
@@ -357,7 +357,7 @@ async fn fork_and_advance(
                     ),
                 },
             }],
-            leaf_node_id: Some(child_node_id.to_string()),
+            leaf_node_id: Some(child_node_id.to_string().into()),
         })
         .expect("append child node");
     child

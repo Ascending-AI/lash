@@ -263,7 +263,7 @@ fn sqlite_graph_node_insert_error(
         }
         if message.contains("graph_nodes.node_id") {
             return StoreError::NodeIdCollision {
-                node_id: node_id.to_string(),
+                node_id: node_id.to_string().into(),
             };
         }
     }

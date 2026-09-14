@@ -306,7 +306,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 .is_some_and(|read| read.graph.active_path_contains(required_node_id))
         {
             return Err(lash_core::store::StoreError::AppendAncestorNotActive {
-                required_node_id: required_node_id.to_string(),
+                required_node_id: required_node_id.to_string().into(),
             });
         }
         {
@@ -660,7 +660,7 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _batch_ids: &[String],
+        _batch_ids: &[lash_core::BatchId],
         _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::store::StoreError>
     {
@@ -997,7 +997,7 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _owner: &lash_core::LeaseOwnerIdentity,
         _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _batch_ids: &[String],
+        _batch_ids: &[lash_core::BatchId],
         _policy: lash_core::QueuedWorkClaimPolicy,
     ) -> std::result::Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::store::StoreError>
     {

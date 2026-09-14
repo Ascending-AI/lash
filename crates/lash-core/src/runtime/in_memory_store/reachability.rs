@@ -9,8 +9,8 @@ use super::InMemorySessionStore;
 impl InMemorySessionStore {
     pub(super) fn live_child_counts(
         graph: &crate::SessionGraph,
-        tombstoned: &HashSet<String>,
-    ) -> HashMap<String, usize> {
+        tombstoned: &HashSet<crate::NodeId>,
+    ) -> HashMap<crate::NodeId, usize> {
         let mut counts = HashMap::new();
         for child in graph
             .nodes
@@ -30,13 +30,13 @@ impl InMemorySessionStore {
     /// destructive decision tombstones nodes.
     pub(super) fn reclaim_unreachable_ancestry(
         graph: &crate::SessionGraph,
-        live_child_counts: &mut HashMap<String, usize>,
-        tombstoned: &mut HashSet<String>,
+        live_child_counts: &mut HashMap<crate::NodeId, usize>,
+        tombstoned: &mut HashSet<crate::NodeId>,
         first_node_id: &str,
-        session_heads: &HashMap<SessionId, Option<String>>,
-        anchored_node_ids: &HashSet<String>,
+        session_heads: &HashMap<SessionId, Option<crate::NodeId>>,
+        anchored_node_ids: &HashSet<crate::NodeId>,
     ) {
-        let mut node_id = first_node_id.to_string();
+        let mut node_id = crate::NodeId::from(first_node_id);
         loop {
             let is_live = graph.find_node(&node_id).is_some() && !tombstoned.contains(&node_id);
             let has_child = live_child_counts.get(&node_id).copied().unwrap_or_default() > 0;
@@ -187,7 +187,7 @@ mod tests {
     /// Node ids still physically resident in the factory-global graph, tombstoned
     /// or not. `load_node` hides tombstones, so only this raw view can tell a
     /// reclaimed row from a merely hidden one.
-    fn resident_graph_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<String> {
+    fn resident_graph_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<crate::NodeId> {
         let mut ids = factory
             .global_session_graph
             .lock_recover()
@@ -199,7 +199,7 @@ mod tests {
         ids
     }
 
-    fn resident_tombstoned_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<String> {
+    fn resident_tombstoned_node_ids(factory: &InMemorySessionStoreFactory) -> Vec<crate::NodeId> {
         let mut ids = factory
             .tombstoned_node_ids
             .lock_recover()
@@ -224,7 +224,7 @@ mod tests {
             .await
             .expect("create delete test store");
         let root = crate::SessionNodeRecord {
-            node_id: "delete-root".to_string(),
+            node_id: "delete-root".into(),
             parent_node_id: None,
             timestamp: "2026-09-01T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
@@ -233,7 +233,7 @@ mod tests {
             },
         };
         let child = crate::SessionNodeRecord {
-            node_id: "delete-child".to_string(),
+            node_id: "delete-child".into(),
             parent_node_id: Some(root.node_id.clone()),
             timestamp: "2026-09-01T00:00:01Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
@@ -250,12 +250,12 @@ mod tests {
             .insert(SessionId::from(session_id), Some(root.node_id.clone()));
         factory.global_node_owners.lock_recover().extend([
             (root.node_id.clone(), SessionId::from(session_id)),
-            ("delete-child".to_string(), SessionId::from("other-session")),
+            ("delete-child".into(), SessionId::from("other-session")),
         ]);
         factory
             .tombstoned_node_ids
             .lock_recover()
-            .insert("delete-child".to_string());
+            .insert("delete-child".into());
 
         let store = factory
             .raw_store_for_testing(&SessionId::from(session_id))

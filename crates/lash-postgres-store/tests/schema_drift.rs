@@ -2034,7 +2034,7 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
                  claim_fencing_token = 7, claim_session_lease_generation = 0
              WHERE batch_id = $1",
         )
-        .bind(&queued.batch_id)
+        .bind(queued.batch_id.as_str())
         .bind(prior_id)
         .bind(prior_token)
         .execute(&scratch.pool)
@@ -2084,7 +2084,7 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
                     claim_session_lease_generation
              FROM lash_queued_work_batches WHERE batch_id = $1",
         )
-        .bind(&queued.batch_id)
+        .bind(queued.batch_id.as_str())
         .fetch_one(&scratch.pool)
         .await
         .expect("read row after refusal");

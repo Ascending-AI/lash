@@ -113,7 +113,7 @@ mod tests {
             },
             inputs: Vec::new(),
             applications: vec![crate::TurnInputApplication {
-                input_id: "input".to_string(),
+                input_id: "input".into(),
                 source_key: Some("source".to_string()),
                 turn_id: crate::TurnId::from("turn"),
                 committed_message_id: "message".to_string(),
@@ -133,7 +133,7 @@ mod tests {
             claim_id: "claim".to_string(),
             lease_token: "lease".to_string(),
             data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["batch".to_string()],
+                batch_ids: vec!["batch".into()],
             },
         };
         assert_eq!(
@@ -151,9 +151,9 @@ mod tests {
                 lease_token: "lease".to_string(),
             }),
             data: crate::TurnInputCompletionData {
-                input_ids: vec!["input".to_string()],
+                input_ids: vec!["input".into()],
                 applications: vec![crate::TurnInputApplication {
-                    input_id: "input".to_string(),
+                    input_id: "input".into(),
                     source_key: None,
                     turn_id: crate::TurnId::from("turn"),
                     committed_message_id: "message".to_string(),
@@ -180,7 +180,7 @@ mod tests {
             session_id: SessionId::from("session"),
             claim: None,
             data: crate::TurnInputCompletionData {
-                input_ids: vec!["input".to_string()],
+                input_ids: vec!["input".into()],
                 applications: Vec::new(),
             },
         };

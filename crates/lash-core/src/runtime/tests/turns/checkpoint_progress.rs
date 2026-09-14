@@ -1562,7 +1562,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_refuses_when_application_hi
         "the refusal must be typed instead of surfacing a later commit-identity mismatch"
     );
     assert!(
-        error.message.contains(&acceptance.input_id),
+        error.message.contains(&*acceptance.input_id),
         "the refusal must name the journaled acceptance that needs recovery: {error:?}"
     );
     assert!(
@@ -1589,7 +1589,7 @@ pub(super) async fn journaled_acceptance_applied_by_a_foreign_turn_refuses_befor
         inner: Arc::clone(&store),
         application_history_available: true,
         foreign_checkpoint_application: Some((
-            acceptance.input_id,
+            acceptance.input_id.to_string(),
             crate::TurnId::from("foreign-turn"),
         )),
     });

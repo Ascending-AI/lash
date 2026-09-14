@@ -106,7 +106,7 @@ pub(crate) async fn retained_fork_config_tx(
     let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
         .await?
         .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: node_id.to_string(),
+            leaf_node_id: node_id.to_string().into(),
         })?;
     let row = sqlx::query(
         "SELECT parent_node_id, node_json FROM lash_graph_nodes
@@ -168,7 +168,7 @@ pub(crate) fn graph_node_insert_error(
             }
             Some("lash_graph_nodes_pkey") => {
                 return StoreError::NodeIdCollision {
-                    node_id: node_id.to_string(),
+                    node_id: node_id.to_string().into(),
                 };
             }
             _ => {}
@@ -687,7 +687,7 @@ fn decode_session_head_meta_row(
         payload,
         u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
         checkpoint_ref.map(Into::into),
-        leaf_node_id,
+        leaf_node_id.map(lash_core::NodeId::from),
     )))
 }
 
@@ -837,12 +837,12 @@ async fn load_readable_graph_tx(
             message: format!("readable path does not end at leaf `{leaf_node_id}`"),
         });
     }
-    lash_core::SessionGraph::from_nodes(nodes, leaf_node_id).map_err(|error| {
-        StoreError::StoredDataCorrupt {
+    lash_core::SessionGraph::from_nodes(nodes, leaf_node_id.map(lash_core::NodeId::from)).map_err(
+        |error| StoreError::StoredDataCorrupt {
             record_kind: "SessionGraph",
             message: error.to_string(),
-        }
-    })
+        },
+    )
 }
 
 pub(crate) async fn commit_attachment_refs_tx(

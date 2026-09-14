@@ -179,6 +179,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             before
                 .session_graph
                 .nearest_frame_node_id(Some(&node.node_id))
+                .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
                 && node
                     .message()
@@ -247,6 +248,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             after
                 .session_graph
                 .nearest_frame_node_id(Some(&node.node_id))
+                .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
                 && node
                     .message()
@@ -259,6 +261,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
             after
                 .session_graph
                 .nearest_frame_node_id(Some(&node.node_id))
+                .map(lash_core::NodeId::as_str)
                 == after.current_frame_node_id.as_deref()
                 && node.message().is_some_and(|message| {
                     message.parts[0]
@@ -639,7 +642,7 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("nonblocking-observation").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
+    let scoped_effect_controller = turn_scope(&turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("blocked"))
@@ -1067,7 +1070,7 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         .with_observed_processes([&create_process_id]);
         request.relation = lash_core::SessionRelation::Fork {
             source_session_id: SessionId::from(format!("managed-observer-source-{case}")),
-            source_node_id: format!("managed-observer-source-node-{case}"),
+            source_node_id: format!("managed-observer-source-node-{case}").into(),
             observer_inheritance: lash_core::ObserverInheritance::All,
         };
 

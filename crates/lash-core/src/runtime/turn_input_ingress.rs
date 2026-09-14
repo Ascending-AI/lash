@@ -251,7 +251,7 @@ impl PendingTurnInputDraft {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInput {
-    pub input_id: String,
+    pub input_id: crate::InputId,
     pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -269,7 +269,7 @@ pub struct PendingTurnInput {
 /// observed separately through the pending-input reconciliation surface.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputAcceptanceReceipt {
-    pub input_id: String,
+    pub input_id: crate::InputId,
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
@@ -284,7 +284,7 @@ pub struct TurnInputAcceptanceReceipt {
 /// committed message without parsing or retaining display text.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputApplication {
-    pub input_id: String,
+    pub input_id: crate::InputId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub turn_id: crate::TurnId,
@@ -316,7 +316,7 @@ impl PendingTurnInput {
                     .source_key
                     .as_deref()
                     .map(source_key_display_id)
-                    .or_else(|| Some(self.input_id.clone())),
+                    .or_else(|| Some(self.input_id.to_string())),
                 message,
             }
         })
@@ -421,7 +421,7 @@ pub enum TurnInputClaimMode {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputCompletionData {
-    pub input_ids: Vec<String>,
+    pub input_ids: Vec<crate::InputId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }

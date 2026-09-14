@@ -252,15 +252,18 @@ fn persisted_head_and_frame_open_reject_legacy_slot_fields() {
     };
     let current = node.encode_storage_body().unwrap();
     let restored =
-        crate::SessionNodeRecord::decode_storage_body(node.node_id.clone(), None, &current)
+        crate::SessionNodeRecord::decode_storage_body(node.node_id.to_string(), None, &current)
             .unwrap();
     assert_eq!(restored.encode_storage_body().unwrap(), current);
     let mut legacy: serde_json::Value = serde_json::from_str(&current).unwrap();
     legacy["assignment"]["policy"]["prompt"]["slots"]["guidance"]["contributions"][0]["slot"] =
         serde_json::json!("environment");
-    let error =
-        crate::SessionNodeRecord::decode_storage_body(node.node_id, None, &legacy.to_string())
-            .unwrap_err();
+    let error = crate::SessionNodeRecord::decode_storage_body(
+        node.node_id.to_string(),
+        None,
+        &legacy.to_string(),
+    )
+    .unwrap_err();
     assert!(
         error.to_string().contains("unknown field `slot`"),
         "{error}"

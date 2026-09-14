@@ -26,7 +26,7 @@ pub struct SelectedQueuedWorkClaimOutcome {
     /// Newly acquired rows, if the present selection was claimable.
     pub claim: Option<QueuedWorkClaim>,
     /// Requested IDs for which no durable queue row remained.
-    pub already_satisfied_batch_ids: Vec<String>,
+    pub already_satisfied_batch_ids: Vec<crate::BatchId>,
 }
 
 impl SelectedQueuedWorkClaimOutcome {
@@ -36,7 +36,10 @@ impl SelectedQueuedWorkClaimOutcome {
     /// Store implementations must not classify a present but unclaimable row
     /// as already satisfied. The runtime turns that case into a selected-drain
     /// refusal rather than reporting idempotent success.
-    pub fn new(claim: Option<QueuedWorkClaim>, already_satisfied_batch_ids: Vec<String>) -> Self {
+    pub fn new(
+        claim: Option<QueuedWorkClaim>,
+        already_satisfied_batch_ids: Vec<crate::BatchId>,
+    ) -> Self {
         Self {
             claim,
             already_satisfied_batch_ids,
@@ -323,7 +326,7 @@ pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token:
 #[derive(Clone, Debug)]
 pub struct ClaimCandidate {
     /// Durable batch identity, used to name a row in claim diagnostics.
-    pub batch_id: String,
+    pub batch_id: crate::BatchId,
     pub enqueue_seq: u64,
     pub claim_fencing_token: u64,
     /// Durable claim identity left by an interrupted predecessor generation.
@@ -775,12 +778,12 @@ pub fn select_exact_turn_work_claim_prefix(
 /// remain queued for a later drain.
 #[doc(hidden)]
 pub fn select_interrupted_exact_claim_indices(
-    candidate_batch_claims: &[(String, Option<String>)],
-    requested_batch_ids: &[String],
-) -> Result<Option<Vec<usize>>, Vec<String>> {
+    candidate_batch_claims: &[(crate::BatchId, Option<String>)],
+    requested_batch_ids: &[crate::BatchId],
+) -> Result<Option<Vec<usize>>, Vec<crate::BatchId>> {
     let requested = requested_batch_ids
         .iter()
-        .map(String::as_str)
+        .map(crate::BatchId::as_str)
         .collect::<std::collections::BTreeSet<_>>();
     let mut involved_claim_ids = Vec::new();
     for (batch_id, prior_claim_id) in candidate_batch_claims {

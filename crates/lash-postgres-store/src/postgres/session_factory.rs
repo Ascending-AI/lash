@@ -192,7 +192,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             crate::support::retained_checkpoint_tx(&mut tx, node_id)
                 .await?
                 .ok_or_else(|| StoreError::ForkPointNotRetained {
-                    node_id: node_id.to_string(),
+                    node_id: node_id.to_string().into(),
                 })?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &source_session_id)
             .await?;
@@ -208,7 +208,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .map_err(store_sqlx_error)?;
         if live_node.is_none() {
             return Err(StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string(),
+                node_id: node_id.to_string().into(),
             });
         }
         if let Some((checkpoint_ref, source_session_id)) = sqlx::query_as::<_, (String, String)>(
@@ -223,7 +223,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core::ForkPoint {
-                node_id: node_id.to_string(),
+                node_id: node_id.to_string().into(),
                 checkpoint_ref: checkpoint_ref.into(),
                 source_session_id: SessionId::from(source_session_id),
                 config,
@@ -239,7 +239,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await?
         {
             return Err(StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string(),
+                node_id: node_id.to_string().into(),
             });
         }
         sqlx::query(
@@ -255,7 +255,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::ForkPoint {
-            node_id: node_id.to_string(),
+            node_id: node_id.to_string().into(),
             checkpoint_ref: checkpoint_ref.into(),
             source_session_id,
             config,
@@ -319,7 +319,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             let node_id: String = row.get(0);
             points.push(lash_core::ForkPoint {
                 config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
-                node_id,
+                node_id: node_id.into(),
                 checkpoint_ref: BlobRef(row.get(1)),
                 source_session_id: SessionId::from(row.get::<String, _>(2)),
                 pinned: row.get(3),
@@ -409,7 +409,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
              WHERE node_id = $1 AND tombstoned = FALSE
              FOR UPDATE",
         )
-        .bind(&request.node_id)
+        .bind(&*request.node_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -449,7 +449,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                  WHERE node_id = $1 AND tombstoned = FALSE
                  FOR SHARE",
             )
-            .bind(&current_node_id)
+            .bind(&*current_node_id)
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?
@@ -470,18 +470,20 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             }
             let parent_node_id = facts.1.clone();
             edge_path.push(lash_core::store::ForkNodeFacts {
-                node_id: facts.0,
-                parent_node_id: facts.1,
+                node_id: facts.0.into(),
+                parent_node_id: facts.1.map(lash_core::NodeId::from),
                 owning_session_id: SessionId::from(facts.2),
                 generation,
             });
             if expected_generation == 0 {
                 break;
             }
-            current_node_id = parent_node_id.ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "SessionGraph",
-                message: "retained fork path ended before generation zero".to_string(),
-            })?;
+            current_node_id = parent_node_id
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionGraph",
+                    message: "retained fork path ended before generation zero".to_string(),
+                })?
+                .into();
             expected_generation -= 1;
         }
         edge_path.reverse();
@@ -509,7 +511,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .bind(request.session_id.as_str())
         .bind(encode_json(&head.payload())?)
         .bind(&checkpoint_ref)
-        .bind(&request.node_id)
+        .bind(&*request.node_id)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -521,7 +523,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             )
             .bind(fork_plan.session_id())
             .bind(ancestor.ancestor_session_id.as_str())
-            .bind(&ancestor.fork_node_id)
+            .bind(&*ancestor.fork_node_id)
             .bind(i64::try_from(ancestor.fork_generation).map_err(|_| {
                 StoreError::Backend("fork generation does not fit PostgreSQL BIGINT".to_string())
             })?)
@@ -1274,7 +1276,7 @@ pub(crate) async fn queued_work_batch_from_row(
          WHERE batch_id = $1
          ORDER BY item_index ASC",
     )
-    .bind(&row.batch_id)
+    .bind(row.batch_id.as_str())
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -1287,7 +1289,7 @@ pub(crate) async fn queued_work_batch_from_row(
         });
     }
     let batch = QueuedWorkBatch {
-        batch_id: row.batch_id,
+        batch_id: row.batch_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
@@ -1317,7 +1319,7 @@ pub(crate) async fn ensure_queued_work_completion_tx(
              FOR UPDATE",
         )
         .bind(completed.session_id.as_str())
-        .bind(batch_id)
+        .bind(batch_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -1344,7 +1346,7 @@ pub(crate) async fn ensure_queued_work_completion_tx(
             return Err(StoreError::QueuedWorkClaimSuperseded {
                 session_id: completed.session_id.clone(),
                 claim_id: completed.claim_id.clone(),
-                row_id: Some(batch_id.clone().into_boxed_str()),
+                row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
                 superseding_claim_id: authority
                     .as_ref()
                     .and_then(|(claim_id, _, _)| claim_id.clone())
@@ -1414,7 +1416,7 @@ pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core::PendingTurnInput, StoreError> {
     Ok(lash_core::PendingTurnInput {
-        input_id: row.input_id,
+        input_id: row.input_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
@@ -1547,7 +1549,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                  WHERE session_id = $1 AND input_id = $2",
             )
             .bind(row.session_id.as_str())
-            .bind(&row.input_id)
+            .bind(row.input_id.as_str())
             .bind(lash_core::TurnInputState::Cancelled.as_str())
             .execute(&mut **tx)
             .await

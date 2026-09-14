@@ -173,7 +173,7 @@ fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str 
     }
 }
 
-fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<String> {
+fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<crate::BatchId> {
     claim
         .batches
         .iter()
@@ -299,7 +299,10 @@ pub(in crate::runtime) async fn emit_queued_work_started_to_sink(
         turn_id,
         TurnActivity::independent(TurnEvent::QueuedWorkStarted {
             boundary,
-            batch_ids: queued_work_batch_ids(claim),
+            batch_ids: queued_work_batch_ids(claim)
+                .into_iter()
+                .map(crate::BatchId::into_inner)
+                .collect(),
             causes,
         }),
     )
@@ -317,7 +320,10 @@ pub(in crate::runtime) async fn send_queued_work_started_event(
         TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
         TurnEvent::QueuedWorkStarted {
             boundary,
-            batch_ids: queued_work_batch_ids(claim),
+            batch_ids: queued_work_batch_ids(claim)
+                .into_iter()
+                .map(crate::BatchId::into_inner)
+                .collect(),
             causes,
         },
     )

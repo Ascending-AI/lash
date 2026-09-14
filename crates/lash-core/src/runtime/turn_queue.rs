@@ -38,7 +38,7 @@ impl SessionCommand {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionCommandReceipt {
     pub session_id: SessionId,
-    pub batch_id: String,
+    pub batch_id: crate::BatchId,
     pub source_key: String,
 }
 
@@ -454,7 +454,7 @@ pub struct QueuedWorkItem {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkBatch {
-    pub batch_id: String,
+    pub batch_id: crate::BatchId,
     pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -663,7 +663,7 @@ pub enum QueuedWorkClaimBoundary {
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedWorkCompletionData {
-    pub batch_ids: Vec<String>,
+    pub batch_ids: Vec<crate::BatchId>,
 }
 
 /// A shared work completion carrying settled queued-work batch identities.

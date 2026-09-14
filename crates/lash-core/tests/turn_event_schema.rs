@@ -493,7 +493,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             "queued_input_accepted",
             TurnEvent::QueuedInputAccepted {
                 applications: vec![TurnInputApplication {
-                    input_id: "input-1".to_string(),
+                    input_id: "input-1".into(),
                     source_key: Some("host:source-1".to_string()),
                     turn_id: lash_core::TurnId::from("turn-1"),
                     committed_message_id: "message-1".to_string(),

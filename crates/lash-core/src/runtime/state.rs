@@ -740,7 +740,7 @@ pub struct RuntimeSessionState {
     /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
     #[doc(hidden)]
-    pub persisted_node_ids: std::collections::HashSet<String>,
+    pub persisted_node_ids: std::collections::HashSet<crate::NodeId>,
 }
 
 impl RuntimeSessionState {
@@ -1010,7 +1010,7 @@ impl RuntimeSessionState {
 
     pub fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
-        I: IntoIterator<Item = String>,
+        I: IntoIterator<Item = crate::NodeId>,
     {
         self.persisted_node_ids.extend(node_ids);
     }
@@ -1447,7 +1447,7 @@ pub fn append_session_nodes_to_state_with_clock(
     nodes: &[crate::SessionAppendNode],
     draft_namespace: &str,
     clock: &dyn crate::Clock,
-) -> Vec<String> {
+) -> Vec<crate::NodeId> {
     let drafts = session_append_node_drafts(nodes, draft_namespace);
     state.ensure_agent_frame_initialized_with_clock(clock);
     state
@@ -1497,7 +1497,7 @@ pub(crate) fn derive_graph_commit_node_ids(
     state: &mut RuntimeSessionState,
     graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
-) -> Result<Vec<String>, crate::StoreError> {
+) -> Result<Vec<crate::NodeId>, crate::StoreError> {
     let mapping = graph.derive_node_ids(&state.session_id, operation)?;
     apply_graph_commit_node_id_mapping(state, &mapping)?;
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
@@ -1505,7 +1505,7 @@ pub(crate) fn derive_graph_commit_node_ids(
 
 pub(crate) fn apply_graph_commit_node_id_mapping(
     state: &mut RuntimeSessionState,
-    mapping: &[(String, String)],
+    mapping: &[(crate::NodeId, crate::NodeId)],
 ) -> Result<(), crate::StoreError> {
     state
         .session_graph
@@ -1513,7 +1513,7 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
     if let Some(current) = state.current_frame_node_id.as_mut()
         && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
     {
-        *current = crate::FrameNodeId::new(derived.clone())
+        *current = crate::FrameNodeId::new(derived.as_str())
             .expect("derived graph node identities are non-empty");
     }
     state.agent_frames = state
@@ -1525,7 +1525,7 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
 pub(crate) fn receipt_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
     requested_node_count: usize,
-) -> Result<Vec<String>, crate::StoreError> {
+) -> Result<Vec<crate::NodeId>, crate::StoreError> {
     if result.realized_node_timestamps.len() < requested_node_count {
         return Err(crate::StoreError::Backend(format!(
             "append receipt returned {} realized node timestamps for {requested_node_count} requested nodes",
@@ -1584,8 +1584,8 @@ pub(crate) async fn commit_in_lane_context(
 
 pub(crate) fn resolve_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
-    locally_derived_node_ids: Vec<String>,
-) -> Result<Vec<String>, crate::StoreError> {
+    locally_derived_node_ids: Vec<crate::NodeId>,
+) -> Result<Vec<crate::NodeId>, crate::StoreError> {
     if result.receipt_replayed {
         receipt_append_node_ids(result, locally_derived_node_ids.len())
     } else {

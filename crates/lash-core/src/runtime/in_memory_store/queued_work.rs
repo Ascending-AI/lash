@@ -57,7 +57,7 @@ impl InMemorySessionStore {
             "queued_work_enqueue_sequence",
             *next_seq,
         )?;
-        let batch_id = format!("recording-qwb-{next_seq}");
+        let batch_id = crate::BatchId::new(format!("recording-qwb-{next_seq}"));
         let kind = batch.kind();
         let stored = crate::QueuedWorkBatch {
             batch_id: batch_id.clone(),
@@ -234,7 +234,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         owner: &crate::LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[crate::BatchId],
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, crate::store::StoreError> {
         if batch_ids.is_empty() {
@@ -330,7 +330,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             )
             .map_err(|required_batch_ids| {
                 crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                    required_batch_ids,
+                    required_batch_ids: required_batch_ids
+                        .into_iter()
+                        .map(crate::BatchId::into_inner)
+                        .collect(),
                 }
             })?;
         let mut indices = if let Some(interrupted_indices) = interrupted_indices {

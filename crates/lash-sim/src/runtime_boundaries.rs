@@ -1107,7 +1107,7 @@ impl RuntimeBoundaryHarness {
                 )
             })?;
         Ok(WorkerOwnedWork {
-            batch_id: batch.batch_id,
+            batch_id: batch.batch_id.to_string(),
             source_key,
             claim_fencing_token: claim.fencing_token,
             claim,
@@ -1134,7 +1134,7 @@ impl RuntimeBoundaryHarness {
                 &lease.fence(),
                 owner,
                 QueuedWorkClaimBoundary::Idle,
-                std::slice::from_ref(&work.batch_id),
+                std::slice::from_ref(&lash_core::BatchId::from(work.batch_id.as_str())),
                 lash_core::testing::queued_work_claim_policy(1),
             )
             .await

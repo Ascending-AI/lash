@@ -1259,7 +1259,7 @@ async fn rlm_storeless_stale_ancestor_append_keeps_the_accepted_execution() {
     let graph = format!("{:?}", runtime.export_persistence_state().session_graph);
     let outcome = Box::pin(runtime.append_session_nodes(AppendSessionNodesRequest {
         operation_id: "fig2521-stale".to_string(),
-        requires_ancestor_node_id: Some("absent".to_string()),
+        requires_ancestor_node_id: Some("absent".to_string().into()),
         nodes: seed_nodes("discarded"),
     }))
     .await

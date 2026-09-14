@@ -367,7 +367,7 @@ mod semantic_boundary_request_identity_tests {
                 claim_id: "claim".to_string(),
                 lease_token: "token".to_string(),
                 data: crate::QueuedWorkCompletionData {
-                    batch_ids: vec!["batch".to_string()],
+                    batch_ids: vec!["batch".into()],
                 },
             });
         commit

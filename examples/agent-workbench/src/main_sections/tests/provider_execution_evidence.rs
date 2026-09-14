@@ -7,7 +7,7 @@ async fn run_provider_evidence_turn(
     session: &lash::LashSession,
     turn_id: &TurnId,
 ) -> (lash::TurnReport, Arc<Mutex<TurnStreamState>>) {
-    state.track_turn(&SessionId::from(session.session_id()), turn_id);
+    state.track_turn(&session.session_id(), turn_id);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
         .turn(lash::TurnInput::text("answer directly"))

@@ -106,7 +106,7 @@ pub struct ParkedSession {
 }
 
 impl ParkedSession {
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 }

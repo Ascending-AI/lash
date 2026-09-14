@@ -296,7 +296,7 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
                 .with_id(format!("runtime-{turn_id}"))
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id,
-                    input_id: Some(format!("input-{index}")),
+                    input_id: Some(format!("input-{index}").into()),
                 }),
         );
     }

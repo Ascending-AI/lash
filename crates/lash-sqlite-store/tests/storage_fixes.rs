@@ -413,7 +413,7 @@ async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() 
              SET claim_id = ?2, claim_token = ?3,
                  claim_fencing_token = 7, claim_session_lease_generation = 0
              WHERE batch_id = ?1",
-            rusqlite::params![queued.batch_id, prior_id, prior_token],
+            rusqlite::params![queued.batch_id.as_str(), prior_id, prior_token],
         )
         .expect("inject half predecessor pair");
         drop(raw);
@@ -447,7 +447,7 @@ async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() 
                 "SELECT claim_id, claim_token, claim_fencing_token,
                         claim_session_lease_generation
                  FROM queued_work_batches WHERE batch_id = ?1",
-                [queued.batch_id],
+                [queued.batch_id.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("read row after refusal");

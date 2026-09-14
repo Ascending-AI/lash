@@ -1447,7 +1447,7 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
                 .with_id("m_ingress_workbench-input-1")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id: TurnId::from(turn_id),
-                    input_id: Some("workbench-input-1".to_string()),
+                    input_id: Some("workbench-input-1".to_string().into()),
                 }),
         ])
         .await
@@ -1631,7 +1631,7 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
                 .with_id("runtime-first-user")
                 .with_origin(lash::messages::MessageOrigin::TurnInput {
                     turn_id: TurnId::from(first_turn_id),
-                    input_id: Some("first-input".to_string()),
+                    input_id: Some("first-input".to_string().into()),
                 }),
             lash::plugins::PluginMessage::text(
                 lash::messages::MessageRole::Assistant,
@@ -1871,7 +1871,7 @@ async fn attachment_ref_stays_on_the_single_user_row_through_committed_backfill(
             .with_id("m_ingress_workbench-input-fig994")
             .with_origin(lash::messages::MessageOrigin::TurnInput {
                 turn_id: TurnId::from(turn_id),
-                input_id: Some("workbench-input-fig994".to_string()),
+                input_id: Some("workbench-input-fig994".to_string().into()),
             });
     committed
         .attachments
@@ -1963,7 +1963,7 @@ async fn replayed_prompt_keeps_its_attachment_when_the_product_row_was_lost() {
     .with_id("m_ingress_workbench-input-fig994-replay")
     .with_origin(lash::messages::MessageOrigin::TurnInput {
         turn_id: TurnId::from(turn_id),
-        input_id: Some("workbench-input-fig994-replay".to_string()),
+        input_id: Some("workbench-input-fig994-replay".to_string().into()),
     });
     committed
         .attachments
@@ -2203,13 +2203,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         )
         .await
         .expect("record submitted turn output");
-        crate::restate::settle_workbench_turn(
-            &run_state,
-            &SessionId::from(session.session_id()),
-            &run_turn_id,
-        )
-        .await
-        .expect("settle submitted turn");
+        crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)
+            .await
+            .expect("settle submitted turn");
     });
 
     assert_eq!(

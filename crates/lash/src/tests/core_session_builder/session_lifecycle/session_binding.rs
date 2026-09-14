@@ -103,7 +103,7 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
         (
             "created-child-without-catalog",
             lash_core::SessionRelation::Child {
-                parent_session_id: parent.session_id().into(),
+                parent_session_id: parent.session_id(),
                 caused_by: None,
             },
         ),

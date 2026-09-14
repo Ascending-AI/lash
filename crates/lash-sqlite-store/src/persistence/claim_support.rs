@@ -1030,7 +1030,7 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         ])
         .map_err(sqlite_error)?;
         let affected = lash_core::TurnCancelAffectedInput {
-            input_id,
+            input_id: input_id.into(),
             payload,
             disposition,
         };

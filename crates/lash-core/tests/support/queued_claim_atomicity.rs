@@ -21,7 +21,7 @@ pub(super) const ENTRIES: [Entry; 4] = [
 
 pub(super) struct Case {
     pub(super) store: Arc<dyn RuntimePersistence>,
-    pub(super) ids: Vec<String>,
+    pub(super) ids: Vec<lash_core::BatchId>,
     owner: LeaseOwnerIdentity,
     lease: SessionExecutionLease,
     entry: Entry,

@@ -70,7 +70,7 @@ async fn commit_state(
         .commit_runtime_state(commit)
         .await
         .expect("commit benchmark graph");
-    (root_node_id, leaf_node_id)
+    (root_node_id.to_string(), leaf_node_id.to_string())
 }
 
 async fn fork_store(
@@ -81,7 +81,7 @@ async fn fork_store(
     let fork_request = ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        node_id: node_id.to_string(),
+        node_id: node_id.to_string().into(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
@@ -150,7 +150,8 @@ async fn create_fork_chain(
             .graph
             .leaf_node_id
             .clone()
-            .expect("fork-chain leaf");
+            .expect("fork-chain leaf")
+            .to_string();
     }
     (root_node_id, leaf_node_id, terminal)
 }

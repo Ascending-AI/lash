@@ -96,7 +96,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .map(|(ancestor_session_id, fork_node_id, fork_generation)| {
             lash_core::store::ForkLineageAncestor {
                 ancestor_session_id: SessionId::from(ancestor_session_id),
-                fork_node_id,
+                fork_node_id: fork_node_id.into(),
                 fork_generation: u64::try_from(fork_generation)
                     .expect("non-negative fork generation"),
             }
@@ -113,7 +113,8 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .bind(session_id.as_str())
         .fetch_optional(self.storage.pool())
         .await
-        .expect("read Postgres lineage head");
+        .expect("read Postgres lineage head")
+        .map(lash_core::NodeId::from);
         let mut path = Vec::new();
         while let Some(node_id) = current {
             let index = facts
@@ -142,11 +143,11 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .expect("observe Postgres graph facts")
         .into_iter()
         .map(|row| GraphFactObservation {
-            node_id: row.get(0),
-            parent_node_id: row.get(1),
+            node_id: lash_core::NodeId::from(row.get::<String, _>(0)),
+            parent_node_id: row.get::<Option<String>, _>(1).map(lash_core::NodeId::from),
             owning_session_id: SessionId::from(row.get::<String, _>(2)),
             generation: u64::try_from(row.get::<i64, _>(3)).expect("non-negative generation"),
-            frame_node_id: row.get(4),
+            frame_node_id: lash_core::NodeId::from(row.get::<String, _>(4)),
             is_frame: row.get(5),
         })
         .collect()

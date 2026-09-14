@@ -393,7 +393,7 @@ pub struct AppendSessionNodesRequest {
     /// re-parenting onto the leaf it just read, so it never surfaces here as a
     /// conflict a caller could use as a concurrency signal.
     #[serde(default)]
-    pub requires_ancestor_node_id: Option<String>,
+    pub requires_ancestor_node_id: Option<crate::NodeId>,
 }
 
 /// Outcome of [`SessionGraphService::append_session_nodes`].
@@ -410,8 +410,8 @@ pub enum AppendSessionNodesOutcome {
     /// runtime reloaded the head, which is not necessarily
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`]; see that field.
     Appended {
-        node_ids: Vec<String>,
-        leaf_node_id: String,
+        node_ids: Vec<crate::NodeId>,
+        leaf_node_id: crate::NodeId,
     },
     /// Nothing was written: the branch the caller read from has been abandoned.
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`] named a node
@@ -426,6 +426,6 @@ pub enum AppendSessionNodesOutcome {
     StaleBranch {
         /// Echo of the request's `requires_ancestor_node_id`, so a caller with
         /// several derivations in flight can tell which one lost its base.
-        required_node_id: String,
+        required_node_id: crate::NodeId,
     },
 }

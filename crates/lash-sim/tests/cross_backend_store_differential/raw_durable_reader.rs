@@ -36,8 +36,8 @@ impl RawDurableReader {
                     .enumerate()
                     .map(|(ordinal, node)| DurableNode {
                         ordinal,
-                        node_id: node.node_id.clone(),
-                        parent_node_id: node.parent_node_id.clone(),
+                        node_id: node.node_id.to_string(),
+                        parent_node_id: node.parent_node_id.as_ref().map(ToString::to_string),
                         bytes: normalized_in_memory_node_json(&node),
                     })
                     .collect();
@@ -60,7 +60,7 @@ impl RawDurableReader {
                                 fencing_token,
                             );
                             PendingTurnInputObservation {
-                                input_id,
+                                input_id: input_id.to_string(),
                                 state,
                                 claim_session_lease_generation,
                             }
@@ -119,7 +119,7 @@ impl RawDurableReader {
                     .into_iter()
                     .map(
                         |(node_id, checkpoint_ref, source_session_id)| NodeAnchorObservation {
-                            node_id,
+                            node_id: node_id.to_string(),
                             checkpoint_ref,
                             source_session_id,
                         },
@@ -147,7 +147,9 @@ impl RawDurableReader {
                     .collect();
                 RawDurableState {
                     head_revision: store.raw_head_revision_for_testing(),
-                    leaf_node_id: store.raw_leaf_node_id_for_testing(),
+                    leaf_node_id: store
+                        .raw_leaf_node_id_for_testing()
+                        .map(|id| id.to_string()),
                     checkpoint,
                     durable_nodes,
                     runtime_turn_commits,

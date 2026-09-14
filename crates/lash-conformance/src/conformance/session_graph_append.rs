@@ -236,7 +236,7 @@ async fn abandoned_branch_scenario(
     let branch_request = crate::ForkSessionRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(format!("{prefix}-branch")),
-        node_id: fork_point.clone(),
+        node_id: fork_point.clone().into(),
         relation: crate::SessionRelation::Root,
         policy: source_request.policy.clone(),
     };
@@ -354,7 +354,7 @@ async fn assert_appended_onto_current_leaf(
             "{entry_point}: the active path must be a single parent chain"
         );
     }
-    appended
+    appended.to_string()
 }
 
 async fn assert_stale_branch_changed_nothing(
@@ -557,9 +557,11 @@ async fn append_conformance_plugin_node(
     .await
     .expect("seed the append conformance graph");
     match result {
-        crate::AppendSessionNodesOutcome::Appended { node_ids, .. } => {
-            node_ids.into_iter().next().expect("seeded node id")
-        }
+        crate::AppendSessionNodesOutcome::Appended { node_ids, .. } => node_ids
+            .into_iter()
+            .next()
+            .expect("seeded node id")
+            .to_string(),
         other => panic!("an unfenced append must succeed: {other:?}"),
     }
 }
@@ -586,6 +588,7 @@ async fn advance_durable_head_behind_the_runtime(
         .leaf_node_id
         .clone()
         .expect("the advanced leaf")
+        .to_string()
 }
 
 fn derived_append_request(
@@ -598,7 +601,7 @@ fn derived_append_request(
             "append-fence-conformance",
             serde_json::json!({ "derived_from": required_node_id }),
         )],
-        requires_ancestor_node_id: Some(required_node_id.to_string()),
+        requires_ancestor_node_id: Some(required_node_id.to_string().into()),
     }
 }
 

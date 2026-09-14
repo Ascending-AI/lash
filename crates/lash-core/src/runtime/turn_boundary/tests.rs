@@ -145,7 +145,7 @@ fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
         let mut nodes = state.session_graph.nodes.clone();
         nodes.extend(graph.nodes.iter().cloned().map(|mut node| {
             if node.parent_node_id.is_none() {
-                node.parent_node_id = Some(frame_node_id.to_string());
+                node.parent_node_id = Some(frame_node_id.to_string().into());
             }
             node
         }));
@@ -573,7 +573,8 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     assert_eq!(
         state
             .session_graph
-            .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+            .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
+            .map(crate::NodeId::as_str),
         Some(frame_b.frame_node_id.as_str())
     );
 }
@@ -687,7 +688,8 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     assert_eq!(
         state
             .session_graph
-            .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+            .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
+            .map(crate::NodeId::as_str),
         Some(frame_b.frame_node_id.as_str())
     );
 
@@ -738,7 +740,9 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
     let stored_graph = stored_graph_with_head_leaf(&store);
     assert_eq!(
-        stored_graph.nearest_frame_node_id(stored_graph.leaf_node_id.as_deref()),
+        stored_graph
+            .nearest_frame_node_id(stored_graph.leaf_node_id.as_deref())
+            .map(crate::NodeId::as_str),
         Some(frame_b.frame_node_id.as_str())
     );
 }
@@ -1316,7 +1320,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
         claim_id: "queue-claim".to_string(),
         lease_token: "queue-token".to_string(),
         data: crate::QueuedWorkCompletionData {
-            batch_ids: vec!["queue-batch".to_string()],
+            batch_ids: vec!["queue-batch".into()],
         },
     };
     let turn_input_origin = crate::TurnInputCompletion {
@@ -1326,7 +1330,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             lease_token: "turn-input-token".to_string(),
         }),
         data: crate::TurnInputCompletionData {
-            input_ids: vec!["turn-input".to_string()],
+            input_ids: vec!["turn-input".into()],
             applications: Vec::new(),
         },
     };

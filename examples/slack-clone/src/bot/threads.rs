@@ -380,7 +380,7 @@ async fn retain_boundary(
     let input_ids = applications
         .into_iter()
         .filter(|application| application.turn_id == turn_id)
-        .map(|application| application.input_id)
+        .map(|application| application.input_id.to_string())
         .collect();
     ledger
         .record_fork_node_for_inputs(input_ids, leaf)
@@ -457,14 +457,14 @@ fn committed_turn_boundary(
     }) {
         return next_turn
             .parent_node_id
-            .clone()
-            .map(Some)
+            .as_ref()
+            .map(|id| Some(id.to_string()))
             .context("a later committed turn has no preceding graph boundary");
     }
     graph
         .leaf_node_id
-        .clone()
-        .map(Some)
+        .as_ref()
+        .map(|id| Some(id.to_string()))
         .context("committed turn has no graph leaf")
 }
 
@@ -525,7 +525,7 @@ pub async fn retain_admission_boundary(
         .await
         .with_context(|| format!("retain channel admission boundary {node_id}"))?;
     ledger
-        .record_admission_node(event_id.to_string(), node_id)
+        .record_admission_node(event_id.to_string(), node_id.to_string())
         .await
         .context("record channel admission boundary")
 }

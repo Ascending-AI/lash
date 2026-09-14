@@ -15,7 +15,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                    AND claim_token = $4",
             )
             .bind(completed.session_id.as_str())
-            .bind(batch_id)
+            .bind(batch_id.as_str())
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
             .fetch_optional(&mut **tx)
@@ -34,7 +34,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                  LIMIT 1",
             )
             .bind(completed.session_id.as_str())
-            .bind(batch_id)
+            .bind(batch_id.as_str())
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
             .fetch_optional(&mut **tx)
@@ -81,7 +81,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                  WHERE session_id = $1 AND batch_id = $2 AND claim_id = $3 AND claim_token = $4",
             )
             .bind(completed.session_id.as_str())
-            .bind(batch_id)
+            .bind(batch_id.as_str())
             .bind(&completed.claim_id)
             .bind(&completed.lease_token)
             .execute(&mut **tx)
@@ -91,7 +91,7 @@ pub(super) async fn complete_queued_work_claims_tx(
                 return Err(StoreError::QueuedWorkClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: completed.claim_id.clone(),
-                    row_id: Some(batch_id.clone().into_boxed_str()),
+                    row_id: Some(batch_id.as_str().to_string().into_boxed_str()),
                     superseding_claim_id: None,
                     superseding_session_lease_generation: None,
                 });
@@ -139,13 +139,13 @@ pub(crate) async fn complete_turn_input_claims_tx(
                        AND claim_token = $5",
                 )
                 .bind(completed.session_id.as_str())
-                .bind(input_id)
+                .bind(input_id.as_str())
                 .bind(lash_core::TurnInputState::Completed.as_str())
                 .bind(&claim.claim_id)
                 .bind(&claim.lease_token),
                 None => sqlx::query(&unclaimed_settlement_statement)
                     .bind(completed.session_id.as_str())
-                    .bind(input_id)
+                    .bind(input_id.as_str())
                     .bind(lash_core::TurnInputState::Completed.as_str()),
             }
             .execute(&mut **tx)
@@ -156,7 +156,7 @@ pub(crate) async fn complete_turn_input_claims_tx(
                     Some(claim) => StoreError::TurnInputClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: claim.claim_id.clone(),
-                        row_id: Some(input_id.clone().into_boxed_str()),
+                        row_id: Some(input_id.as_str().to_string().into_boxed_str()),
                         superseding_claim_id: None,
                         superseding_session_lease_generation: None,
                     },

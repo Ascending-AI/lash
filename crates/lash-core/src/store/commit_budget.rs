@@ -351,7 +351,7 @@ mod tests {
             ))
         };
         let node = crate::SessionNodeRecord {
-            node_id: "node".to_string(),
+            node_id: "node".into(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
@@ -366,7 +366,7 @@ mod tests {
         commit.graph = crate::GraphAppend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: format!("node-{index}"),
+                    node_id: format!("node-{index}").into(),
                     ..node.clone()
                 })
                 .collect(),
@@ -423,7 +423,7 @@ mod tests {
         let budget = CommitBudget::bounded(128, 512);
         let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
         let node = crate::SessionNodeRecord {
-            node_id: "budget-node".to_string(),
+            node_id: "budget-node".into(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {

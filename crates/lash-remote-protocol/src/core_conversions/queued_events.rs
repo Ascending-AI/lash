@@ -70,9 +70,10 @@ impl From<lash_core::MessageOrigin> for RemoteMessageOrigin {
                 wake_id,
                 caused_by: caused_by.map(Into::into),
             },
-            lash_core::MessageOrigin::TurnInput { turn_id, input_id } => {
-                Self::TurnInput { turn_id, input_id }
-            }
+            lash_core::MessageOrigin::TurnInput { turn_id, input_id } => Self::TurnInput {
+                turn_id,
+                input_id: input_id.map(lash_core::InputId::into_inner),
+            },
             lash_core::MessageOrigin::TurnOutput { turn_id, source } => Self::TurnOutput {
                 turn_id,
                 source: source.into(),

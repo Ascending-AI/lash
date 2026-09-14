@@ -982,7 +982,7 @@ pub(crate) async fn cancel_queued_work_batch(
         state.session_admission_error(&session_id, "api.queued_work.cancel", error)
     })?;
     if session
-        .cancel_queued_work_batch(&batch_id)
+        .cancel_queued_work_batch(&lash::BatchId::from(batch_id.as_str()))
         .await
         .map_err(AppError::internal)?
         .is_none()

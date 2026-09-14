@@ -824,7 +824,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id.to_string(),
+                frame_node_id: seed_frame_node_id.to_string().into(),
             }),
         })
         .expect("plan same-leaf commit");
@@ -864,7 +864,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id.into_inner(),
+                frame_node_id: seed_frame_node_id.into_inner().into(),
             }),
         })
         .expect("plan leaf-changing commit");

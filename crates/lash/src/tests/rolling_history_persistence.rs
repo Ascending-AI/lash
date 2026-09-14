@@ -1449,7 +1449,8 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
                     snapshot.session_graph.find_node(&node_ids[0]).is_some(),
                     std::sync::atomic::Ordering::SeqCst,
                 );
-                *draft_node_ids.lock().expect("draft ids") = node_ids;
+                *draft_node_ids.lock().expect("draft ids") =
+                    node_ids.iter().map(ToString::to_string).collect();
                 Ok(Vec::new())
             })
         })),
