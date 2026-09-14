@@ -2400,3 +2400,88 @@ async fn confidence_seed_claim_before_cancel_replays_exact_outcome() {
         Err(crate::replay::ReplayError::IncompatibleTrace(_))
     ));
 }
+
+/// FIG-3053. Seed `0xfefec57c311b17fb` is the `fast-random` search-mode
+/// determinism sample that exposed a host-timing leak into recorded simulator
+/// evidence: two runs of this workload agreed on every delivery and every
+/// delivery order, yet recorded different `scheduler.pending_before` for a
+/// delivery both runs made at the same simulated time. The cause was that a
+/// provider turn's completion boundary was scheduled from whichever host pass
+/// first observed its join handle as finished, so a busy machine — a CI shard
+/// running the whole crate's tests in one process — could insert a
+/// future-dated completion one or more deliveries earlier and change the queue
+/// depth every delivery in between recorded.
+///
+/// The fix stages harvested completions and admits them on a purely logical
+/// condition, so this pins the property that makes the flake impossible rather
+/// than trying to re-race it: the same workload driven on runtimes with
+/// deliberately different task-poll behaviour must produce byte-identical
+/// simulator evidence.
+#[test]
+fn provider_completion_entry_does_not_depend_on_host_task_poll_timing() {
+    const SEED: u64 = 0xfefe_c57c_311b_17fb;
+
+    fn drive(multi_threaded: bool) -> SimulationTrace {
+        run_on_sim_harness_stack(
+            "fig-3053-provider-completion-entry",
+            SIM_HARNESS_STACK_LIMIT_BYTES,
+            move || {
+                let mut builder = if multi_threaded {
+                    let mut builder = tokio::runtime::Builder::new_multi_thread();
+                    builder.worker_threads(4);
+                    builder
+                } else {
+                    tokio::runtime::Builder::new_current_thread()
+                };
+                let runtime = builder
+                    .enable_all()
+                    .build()
+                    .map_err(FixedScriptRunnerError::Io)?;
+                let workload = generate_workload(SEED, "fast-random", 24)
+                    .map_err(|err| FixedScriptRunnerError::Assertion(err.to_string()))?;
+                runtime.block_on(run_generated_workload_for_fixture(
+                    workload,
+                    "fig-3053-bundle",
+                ))
+            },
+        )
+        .expect("drive seed-fefec57c311b17fb")
+    }
+
+    // A current-thread runtime polls a spawned provider turn only when the
+    // driver itself yields; four worker threads poll it in parallel with the
+    // driver. If completion entry were still decided by the first pass that
+    // observes a finished handle, these two would disagree on the queue depth
+    // recorded for the deliveries between the turn finishing and its
+    // completion's scheduled time.
+    let current_thread = drive(false);
+    let multi_thread = drive(true);
+    // The scheduler record is the simulator's own evidence: which boundary was
+    // delivered, when, out of how deep a queue, and under which seed. All of it
+    // must be a function of the workload. (Runtime-generated identities inside
+    // the durable writes are a separate, already-canonicalized concern and are
+    // not what this seed regressed on.)
+    let scheduler_evidence = |trace: &SimulationTrace| {
+        trace
+            .events
+            .iter()
+            .map(|event| (event.boundary_id.clone(), event.at, event.scheduler.clone()))
+            .collect::<Vec<_>>()
+    };
+    let first = scheduler_evidence(&current_thread);
+    let second = scheduler_evidence(&multi_thread);
+    let difference = first
+        .iter()
+        .zip(second.iter())
+        .position(|(left, right)| left != right);
+    assert!(
+        difference.is_none() && first.len() == second.len(),
+        "seed-{SEED:016x} recorded different scheduler evidence under two host runtimes: \
+         {} deliveries vs {}; first difference at index {:?}: {:?} vs {:?}",
+        first.len(),
+        second.len(),
+        difference,
+        difference.map(|index| &first[index]),
+        difference.map(|index| &second[index]),
+    );
+}

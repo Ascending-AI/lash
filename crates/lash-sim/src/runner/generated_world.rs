@@ -2,6 +2,11 @@ use super::*;
 use crate::backend_fault::GeneratedBackendFaultHarness;
 use lash_sansio::SessionId;
 
+/// Suspend resolutions resume a turn only after the generated workload has
+/// drained, so they are scheduled past every workload boundary. The generator's
+/// boundary times are far below this.
+const SUSPEND_RESOLUTION_BASE_AT: u64 = 1_000_000;
+
 pub(super) struct GeneratedRuntimeWorld {
     clock: Arc<SimClock>,
     sessions: BTreeMap<String, GeneratedRuntimeSession>,
@@ -16,6 +21,27 @@ pub(super) struct GeneratedRuntimeWorld {
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     runtime_boundaries: RuntimeBoundaryHarness,
     suspending_turns: BTreeMap<String, SuspendingTurn>,
+    /// Boundaries the host has discovered but the simulated schedule has not
+    /// reached yet.
+    ///
+    /// A provider turn and a parked suspend turn both run as spawned tasks, so
+    /// *when* the host observes one as finished (or as having registered its
+    /// await key) depends on real task-poll progress, not on the simulated
+    /// schedule. Scheduling the matching boundary straight from that discovery
+    /// let poll speed decide how many boundaries were pending when an *earlier*
+    /// boundary was delivered: the discovered boundary carries an `at` in the
+    /// future, so delivery order never moved, but the `scheduler.pending_before`
+    /// recorded for every delivery in between shifted by one. That is the
+    /// FIG-3053 flake: a CI shard running the whole crate in one process is
+    /// loaded enough to change the discovery pass, and the search-mode
+    /// determinism sample compared the two runs byte for byte.
+    ///
+    /// Staging here and admitting on a purely logical condition
+    /// (`flush_staged_admissions`) takes the host out of that decision: a
+    /// boundary enters the scheduler at the same simulated point on every run of
+    /// a seed, however early or late its task happened to get polled.
+    staged_admissions: BTreeMap<String, BoundaryEvent>,
+    suspends_spawned: u64,
     /// When set, the driver admits at most one live provider turn at a time
     /// (see `RuntimeCompletionState::serialize_provider_turns`). Enabled for the
     /// cross-backend durable re-run; left off for the in-memory reference/search.
@@ -41,6 +67,12 @@ struct SuspendingTurn {
     suspended_before_completion: Option<bool>,
     resolution_scheduled: bool,
     completed_before_resolution: usize,
+    /// The simulated time this turn's resume boundary is scheduled for, fixed
+    /// when the turn is spawned. Spawning happens inside a boundary delivery, so
+    /// this is a function of the workload; deriving it instead from the driver
+    /// pass that later notices the parked await key would make it a function of
+    /// how fast the host polled the turn (see `staged_admissions`).
+    resolution_at: u64,
 }
 
 struct GeneratedRuntimeSession {
@@ -119,6 +151,8 @@ impl GeneratedRuntimeWorld {
             attachment_store,
             process_env_store,
             suspending_turns: BTreeMap::new(),
+            staged_admissions: BTreeMap::new(),
+            suspends_spawned: 0,
             serialize_provider_turns,
         }
     }
@@ -622,10 +656,80 @@ impl GeneratedRuntimeWorld {
                     .finished_provider_turns
                     .insert(turn_id, observed);
                 debug_assert_eq!(completion_event.at, final_ready_at);
-                scheduler.schedule(completion_event);
+                self.stage_admission(completion_event);
             }
         }
+        self.flush_staged_admissions(scheduler);
         Ok(())
+    }
+
+    fn stage_admission(&mut self, event: BoundaryEvent) {
+        self.staged_admissions
+            .insert(event.boundary_id.clone(), event);
+    }
+
+    /// The earliest simulated time still owed to the scheduler by work the host
+    /// has not admitted yet: a live provider turn's completion, a staged
+    /// boundary, or a suspend turn's resume.
+    ///
+    /// Every one of those times is fixed before the work starts, and each piece
+    /// of work contributes its time from the moment it is created until the
+    /// moment it is admitted — whether the host has noticed it finishing yet or
+    /// not. That is what makes this a property of the simulation rather than of
+    /// task-poll progress, and it is why `flush_staged_admissions` can use it to
+    /// decide admission.
+    fn min_unadmitted_at(&self) -> Option<u64> {
+        self.sessions
+            .values()
+            .flat_map(|session| session.active_provider_turns.values())
+            .map(|active| active.final_ready_at)
+            .chain(self.staged_admissions.values().map(|event| event.at))
+            .chain(
+                self.suspending_turns
+                    .values()
+                    .map(|turn| turn.resolution_at),
+            )
+            .min()
+    }
+
+    /// Admit every staged boundary the simulated schedule has reached.
+    ///
+    /// A staged boundary is "reached" when two things hold: nothing pending is
+    /// scheduled strictly before it, and no unadmitted work is owed to an
+    /// earlier time. The second half is the one that matters — without it, a
+    /// scheduler that drains transiently while provider turns are still live
+    /// would admit a far-future boundary (a suspend resume) the instant the host
+    /// happened to discover it, which is exactly the host timing this is meant
+    /// to keep out. With both, admission reads only times the simulation fixed
+    /// in advance, so it — and every `pending_before` the scheduler records —
+    /// lands at the same point on every run of a seed.
+    ///
+    /// This cannot stall: whatever owns the earliest unadmitted time is either
+    /// already staged (admitted right here), a live provider turn (the driver's
+    /// delivery barrier spins on `schedule_finished_provider_turns` until it
+    /// lands), or a suspend turn yet to park (the driver spins on
+    /// `schedule_parked_suspend_resolutions` while any remains).
+    fn flush_staged_admissions(&mut self, scheduler: &mut BoundaryScheduler) {
+        loop {
+            let next_pending_at = scheduler.min_pending_at();
+            let earliest_unadmitted = self.min_unadmitted_at();
+            let Some(ready_id) = self
+                .staged_admissions
+                .iter()
+                .find(|(_, event)| {
+                    next_pending_at.is_none_or(|at| at >= event.at)
+                        && earliest_unadmitted.is_none_or(|at| at >= event.at)
+                })
+                .map(|(id, _)| id.clone())
+            else {
+                return;
+            };
+            let event = self
+                .staged_admissions
+                .remove(&ready_id)
+                .expect("staged boundary just found by id");
+            scheduler.schedule(event);
+        }
     }
 
     pub(super) fn active_provider_turn_count(&self) -> usize {
@@ -887,6 +991,8 @@ impl GeneratedRuntimeWorld {
                 .await
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
         });
+        let resolution_at = SUSPEND_RESOLUTION_BASE_AT + self.suspends_spawned;
+        self.suspends_spawned += 1;
         self.suspending_turns.insert(
             session_alias.clone(),
             SuspendingTurn {
@@ -900,6 +1006,7 @@ impl GeneratedRuntimeWorld {
                 suspended_before_completion: None,
                 resolution_scheduled: false,
                 completed_before_resolution: 0,
+                resolution_at,
             },
         );
         Ok(json!({
@@ -914,16 +1021,24 @@ impl GeneratedRuntimeWorld {
     }
 
     /// Poll the spawned suspend turns. Once a turn has registered its await key
-    /// (it parked on the tool) and is still in flight, schedule the matching
-    /// completion boundary into the scheduler — mirroring how finished provider
-    /// turns schedule their completion. The completion is the only thing that
-    /// can resume the parked turn.
+    /// (it parked on the tool) and is still in flight, stage the matching
+    /// completion boundary — mirroring how finished provider turns stage their
+    /// completion. The completion is the only thing that can resume the parked
+    /// turn, and it is delivered after the generated workload has drained, so it
+    /// is scheduled past every workload boundary.
+    ///
+    /// Its `at` is derived from the parked turn's own alias rather than from how
+    /// many driver iterations had run when the host noticed the key: the pass
+    /// that notices is decided by task-poll progress, so a counter advanced by
+    /// the driver loop would put host timing into recorded simulator evidence
+    /// (see `staged_admissions`). Resolutions are independent of one another, so
+    /// ordering them by the alias the workload already fixed loses nothing.
     pub(super) async fn schedule_parked_suspend_resolutions(
         &mut self,
         scheduler: &mut BoundaryScheduler,
-        ready_at: u64,
     ) -> Result<(), FixedScriptRunnerError> {
         tokio::task::yield_now().await;
+        let mut staged = Vec::new();
         for (session_alias, turn) in self.suspending_turns.iter_mut() {
             if turn.resolution_scheduled {
                 continue;
@@ -932,6 +1047,7 @@ impl GeneratedRuntimeWorld {
             if !key_present {
                 continue;
             }
+            let ready_at = turn.resolution_at;
             // The await key exists, so the tool parked the turn. Record that the
             // turn suspended before any completion was delivered.
             let suspended =
@@ -940,7 +1056,7 @@ impl GeneratedRuntimeWorld {
             turn.completed_before_resolution = turn.events.tool_completed_count().await;
             let boundary_id = format!("{session_alias}:suspend-resume:001");
             let label = format!("suspend.{}.resume", boundary_kind_label(turn.suspend_kind));
-            scheduler.schedule(BoundaryEvent::new(
+            staged.push(BoundaryEvent::new(
                 boundary_id,
                 session_alias.clone(),
                 turn.suspend_kind,
@@ -955,6 +1071,10 @@ impl GeneratedRuntimeWorld {
             ));
             turn.resolution_scheduled = true;
         }
+        for event in staged {
+            self.stage_admission(event);
+        }
+        self.flush_staged_admissions(scheduler);
         Ok(())
     }
 

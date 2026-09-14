@@ -41,7 +41,6 @@ pub(super) async fn drive_generated_workload(
     };
     let mut store = ModelStore::default();
     let mut log = BoundaryDeliveryLog::default();
-    let mut suspend_ready_at = 1_000_000u64;
     loop {
         // A due provider completion must enter the scheduler before a later
         // boundary can overtake it. Task polling speed must not decide whether
@@ -56,9 +55,8 @@ pub(super) async fn drive_generated_workload(
             world
                 .schedule_finished_provider_turns(&mut scheduler)
                 .await?;
-            suspend_ready_at += 1;
             world
-                .schedule_parked_suspend_resolutions(&mut scheduler, suspend_ready_at)
+                .schedule_parked_suspend_resolutions(&mut scheduler)
                 .await?;
             // Spin until the live turn finishes and lands its completion (lowering
             // `min_pending_at` below the barrier), or it is gone. The provider
@@ -76,9 +74,8 @@ pub(super) async fn drive_generated_workload(
             world
                 .schedule_finished_provider_turns(&mut scheduler)
                 .await?;
-            suspend_ready_at += 1;
             world
-                .schedule_parked_suspend_resolutions(&mut scheduler, suspend_ready_at)
+                .schedule_parked_suspend_resolutions(&mut scheduler)
                 .await?;
             if world.active_provider_turn_count() > 0 || world.pending_suspend_turn_count() > 0 {
                 continue;
@@ -111,9 +108,8 @@ pub(super) async fn drive_generated_workload(
         world
             .schedule_finished_provider_turns(&mut scheduler)
             .await?;
-        suspend_ready_at += 1;
         world
-            .schedule_parked_suspend_resolutions(&mut scheduler, suspend_ready_at)
+            .schedule_parked_suspend_resolutions(&mut scheduler)
             .await?;
         log.push(delivered);
     }
