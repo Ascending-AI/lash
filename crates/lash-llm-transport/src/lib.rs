@@ -22,7 +22,7 @@ pub use normalize::{
     openai_terminal_reason_from_response_value, openai_usage_from_response_value,
     openai_usage_from_usage_value, serialize_options_tail, terminal_reason_from_parts,
 };
-pub use response_metadata::ResponseMetadataCapture;
+pub use response_metadata::{GATEWAY_META_KEY, ResponseMetadataCapture};
 pub use timeouts::{
     DEFAULT_CHUNK_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS, LlmTimeouts, build_http_client,
     header_pairs, response_start_timeout, run_with_timeout,

@@ -23,6 +23,7 @@ pub(crate) mod conformance;
 mod driver_stream_tests;
 mod empty_completion_tests;
 mod error_classification_tests;
+mod gateway_meta_tests;
 mod generation_tests;
 mod openrouter_execution_evidence_tests;
 mod output_started_tests;

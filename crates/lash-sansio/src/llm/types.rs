@@ -1764,9 +1764,13 @@ pub struct LlmResponse {
     /// distinct from a report that nothing was requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation_disposition: Option<GenerationReceipt>,
-    /// Allowlisted wire observations captured by the provider driver
-    /// (`header:<lowercased-name>` and `body:<json-pointer>` keys). Population is
-    /// host-supplied endpoint configuration; empty unless explicitly requested.
+    /// Wire observations captured by the provider driver.
+    ///
+    /// `header:<lowercased-name>` and `body:<json-pointer>` keys are
+    /// allowlisted by host-supplied endpoint configuration and are absent
+    /// unless explicitly requested. `gateway:meta` holds an OpenAI-compatible
+    /// gateway's top-level `meta` block verbatim whenever the response carries
+    /// one, so served-route provenance survives; lash never interprets it.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }

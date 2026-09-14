@@ -2230,6 +2230,7 @@ dependencies = [
  "proptest",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
