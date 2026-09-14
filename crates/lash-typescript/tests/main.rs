@@ -8,6 +8,8 @@
 mod advertised_tool_surface;
 #[path = "agent_surface.rs"]
 mod agent_surface;
+#[path = "aggregate_witnesses.rs"]
+mod aggregate_witnesses;
 #[path = "array_append.rs"]
 mod array_append;
 #[path = "assignment_in_operand.rs"]
