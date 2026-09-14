@@ -5,6 +5,8 @@ mod execute_support;
 
 #[path = "builtin_contract.rs"]
 mod builtin_contract;
+#[path = "diagnostic_rendering.rs"]
+mod diagnostic_rendering;
 #[path = "functions.rs"]
 mod functions;
 #[path = "language.rs"]
