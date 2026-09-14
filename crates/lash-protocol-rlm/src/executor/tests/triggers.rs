@@ -1476,11 +1476,15 @@ pub(super) fn foreground_sleep_executes_through_runtime_context() {
 pub(super) fn print_observation_preserves_raw_output_and_records_projection_metadata() {
     block_on(async {
         let large = "x".repeat(60 * 1024);
-        let code = format!(
-            "console.log({{ output: {}, status: \"failed\", error: \"boom\", exit_code: 2, stderr: \"short\" }});",
+        let record = format!(
+            "{{ output: {}, status: \"failed\", error: \"boom\", exit_code: 2, stderr: \"short\" }}",
             serde_json::to_string(&large).expect("string literal")
         );
-        let response = execute_with_abilities(&code, lashlang::LashlangAbilities::default()).await;
+        let response = execute_with_abilities(
+            &format!("print({record});"),
+            lashlang::LashlangAbilities::default(),
+        )
+        .await;
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.observations.len(), 1);
@@ -1491,13 +1495,13 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
         let metadata = &response.observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
         assert_eq!(metadata.original_chars, 61_517);
-        // `console.log` renders its argument to text before the observation is
-        // projected, so the record is truncated by the byte limit rather than
-        // summarised field-by-field the way a bare `print` of a record was.
-        assert_eq!(metadata.projected_chars, 51_216);
+        // `print` hands the host the record itself, so the projector summarises
+        // it field by field instead of cutting the rendering at the byte limit
+        // (FIG-3061).
+        assert_eq!(metadata.projected_chars, 330);
         assert_ne!(metadata.original_chars, metadata.projected_chars);
         assert_eq!(metadata.original_lines, 1);
-        assert_eq!(metadata.projected_lines, 2);
+        assert_eq!(metadata.projected_lines, 1);
         assert_eq!(
             metadata.limit,
             crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes
@@ -1505,6 +1509,29 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
         assert_eq!(
             metadata.max_lines,
             crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_lines
+        );
+    });
+}
+
+/// The byte cap is still the backstop for the rendering route: `console.log`
+/// stringifies before the observation is written, so its projection is a cut
+/// string, not a summary. Both routes stay inside the same budget.
+#[test]
+pub(super) fn console_log_of_a_large_record_still_stops_at_the_byte_cap() {
+    block_on(async {
+        let large = "x".repeat(60 * 1024);
+        let code = format!(
+            "console.log({{ output: {}, status: \"failed\" }});",
+            serde_json::to_string(&large).expect("string literal")
+        );
+        let response = execute_with_abilities(&code, lashlang::LashlangAbilities::default()).await;
+
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let metadata = &response.observations[0].projection;
+        assert!(metadata.truncated, "{metadata:?}");
+        assert!(
+            metadata.projected_chars < metadata.original_chars,
+            "{metadata:?}"
         );
     });
 }
