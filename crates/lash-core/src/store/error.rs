@@ -385,7 +385,6 @@ pub enum StoreError {
         superseding_claim_id: Option<Box<str>>,
         superseding_session_lease_generation: Option<Box<u64>>,
     },
-    #[doc(hidden)]
     #[error(
         "selected queued work intersects an interrupted claim and requires its full composition: {required_batch_ids:?}"
     )]
@@ -616,7 +615,6 @@ pub enum StoreError {
 impl StoreError {
     /// Advances a fence, generation, sequence, or revision without allowing
     /// wraparound or a silent no-op at the numeric ceiling.
-    #[doc(hidden)]
     pub fn checked_monotonic_increment(counter: &'static str, current: u64) -> Result<u64, Self> {
         if current >= i64::MAX as u64 {
             return Err(Self::MonotonicCounterOverflow { counter, current });

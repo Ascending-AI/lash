@@ -51,7 +51,6 @@ pub struct TestLocalProcessRegistry {
 /// This is intentionally not a `ProcessRegistry` read model: it snapshots the
 /// maps that the implementation mutates so a differential does not validate a
 /// write through the same public query path.
-#[doc(hidden)]
 pub struct RawProcessRegistryStateForTesting {
     pub records: Vec<(ProcessRecord, u64)>,
     pub events: Vec<(ProcessId, ProcessEvent)>,

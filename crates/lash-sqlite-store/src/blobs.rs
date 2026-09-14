@@ -25,7 +25,6 @@ impl Store {
 
     /// Decode a checkpoint from a fresh durable connection without calling
     /// the `RuntimePersistence` session read path.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_checkpoint_from_path_for_testing(
         path: &std::path::Path,
@@ -85,7 +84,6 @@ impl Store {
     }
 
     /// Seed an intentionally unrooted artifact for GC and failure-path tests.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub async fn put_unrooted_artifact_blob_for_testing(
         &self,

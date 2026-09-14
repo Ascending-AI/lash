@@ -548,7 +548,6 @@ impl TriggerRouter {
     /// delivery starts are themselves effects, and nesting them inside an outer
     /// effect is what [`crate::ToolContext::triggers`] refuses inside an
     /// atomic tool attempt.
-    #[doc(hidden)]
     pub async fn emit_recorded(
         &self,
         request: TriggerOccurrenceRequest,

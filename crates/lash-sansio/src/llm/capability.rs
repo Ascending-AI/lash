@@ -119,7 +119,6 @@ impl ReasoningRetentionPolicy {
 
 /// The primitive implemented by an adapter. It is determined by the provider
 /// protocol, never by a model-name heuristic.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderReasoningRetentionSupport {
     OpenAiContext,

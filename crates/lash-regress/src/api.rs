@@ -824,7 +824,6 @@ impl FromStr for Regex {
 
 // Support for using regress with different regex backends.
 // Currently there is only the classical backtracking, and PikeVM.
-#[doc(hidden)]
 pub mod backends {
     use super::Regex;
     use super::exec;

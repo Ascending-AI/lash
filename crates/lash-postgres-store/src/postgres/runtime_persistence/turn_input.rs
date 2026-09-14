@@ -953,7 +953,6 @@ impl TurnInputStore for PostgresSessionStore {
 
 #[cfg(any(test, feature = "testing"))]
 impl PostgresSessionStore {
-    #[doc(hidden)]
     pub async fn turn_cancel_request_paused_for_testing(
         &self,
         address: &lash_core::facade_support::TurnAddress,

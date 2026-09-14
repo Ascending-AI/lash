@@ -33,7 +33,7 @@ rust_line_limit_for() {
 
 budget_line_count() {
   local file="$1"
-  # Rustdoc expands the public contract without increasing implementation
+  # Doc comments expand the public contract without increasing implementation
   # complexity. Keep the production ceiling on source lines while allowing a
   # documentation-only change to describe an otherwise unchanged file.
   awk '!/^[[:space:]]*\/\/[/!]/ { lines += 1 } END { print lines + 0 }' "$file"

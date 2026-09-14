@@ -46,7 +46,6 @@ impl<'run> InternalProcessContext<'run> {
 
     /// Construct the runtime-only context in an integrator test.
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn __for_testing(context: &super::ToolContext<'run>) -> Self {
         Self::new(context.clone())
     }
@@ -90,7 +89,6 @@ impl<'run> InternalProcessContext<'run> {
     /// completion keys, so nothing on this route can park: an internal body
     /// asking for a key is a mistake, and it is told which declaration is
     /// missing instead of being handed a key nobody would ever resolve.
-    #[doc(hidden)]
     pub fn __attempt_context(&self) -> crate::AttemptContext<'run> {
         let scope_id = self
             .context

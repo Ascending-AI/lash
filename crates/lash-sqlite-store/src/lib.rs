@@ -196,7 +196,6 @@ pub struct Store {
 
 impl Store {
     /// Replace the process-local enqueue nonce seed for deterministic fixtures.
-    #[doc(hidden)]
     pub fn with_commit_count_seed_for_testing(mut self, seed: u64) -> Self {
         self.commit_count = AtomicU64::new(seed);
         self

@@ -124,7 +124,7 @@ GATED_JOBS = {
 # resolves its own feature graph -- named package features, `lash-runtime`
 # without defaults, and lashlang consumed as an external Git dependency -- so
 # none of them is covered by the workspace check. They stay skipped on
-# pull_request, skip docs-only merge groups (workspace `test-doc` still
+# pull_request, skip docs-only merge groups (workspace `check` still
 # compiles those heads), skip `push` (the queue already witnessed the SHA),
 # and keep `rust` family behaviour on workflow_dispatch.
 QUEUE_REQUIRED_COMPILE_JOBS = {
@@ -158,7 +158,7 @@ TRUNK_ONLY_JOBS = {
 # push so a break is attributed to the merge that caused it.
 PUSH_SKIP_CORE_JOBS = {
     "facade-only-examples",
-    "test-doc",
+    "check",
     "repo-gates",
     "unused-deps",
     "lashlang-git-consumer",
@@ -199,7 +199,7 @@ UNGATED_JOBS = {
     "worker-artifacts",
     "plan",
     "facade-only-examples",
-    "test-doc",
+    "check",
     "repo-gates",
     "lint",
     "diff-hygiene",

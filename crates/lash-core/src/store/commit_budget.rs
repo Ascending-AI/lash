@@ -84,11 +84,9 @@ pub struct RuntimeCommitBudgetMeasurement {
 
 impl RuntimeCommit {
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub const MAX_COMMIT_NODE_COUNT: usize = 512;
 
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub const MAX_COMMIT_BUDGET_BYTES: usize = 1024 * 1024;
 
     /// Bound the complete logical persisted payload carried by this commit

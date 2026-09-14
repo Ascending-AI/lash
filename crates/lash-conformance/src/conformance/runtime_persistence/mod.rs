@@ -119,7 +119,6 @@ mod suite_and_receipts;
 mod turn_inputs_and_reopen;
 
 /// Public implementation paths used only by the exported registration macros.
-#[doc(hidden)]
 pub mod runtime_persistence_macro_support {
     pub use super::append_receipts::*;
     pub use super::attachments_and_queue::*;

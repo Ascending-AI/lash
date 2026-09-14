@@ -50,7 +50,6 @@ pub use commit_identity::{
     derive_history_node_id,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
-#[doc(hidden)]
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
@@ -82,7 +81,6 @@ pub use runtime_commit::{
     AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
     RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,
 };
-#[doc(hidden)]
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
     RuntimeCommitPlan, RuntimeCommitPlanner, RuntimeCommitReceiptRecord, RuntimeCommitReceiptWrite,
@@ -835,7 +833,6 @@ impl RuntimeCommit {
 /// session-execution-lease acquisition. Keep those divergences visible here when
 /// the production append sequence changes.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn append_request_commit_for_testing(
     state: &mut crate::RuntimeSessionState,
     operation_id: &str,
@@ -1540,7 +1537,6 @@ pub trait QueuedWorkStore: Send + Sync {
 
     /// Persist a queued-work batch and expose whether receiver idempotency
     /// absorbed it. The wake driver uses this for delivery evidence.
-    #[doc(hidden)]
     async fn enqueue_queued_work_with_outcome(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -1665,7 +1661,6 @@ pub trait QueuedWorkStore: Send + Sync {
     /// with a session-command head commit. Cancellation removes the queued row
     /// without writing this marker, so an accepted batch that has vanished can
     /// be classified without mistaking cancellation for completion.
-    #[doc(hidden)]
     async fn queued_work_batch_completed(
         &self,
         session_id: &SessionId,

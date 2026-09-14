@@ -800,7 +800,6 @@ fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -
 
 type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError>;
 
-#[doc(hidden)]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CheckpointClaimSet {
     // Checkpoint replay skips the local executor that acquired these claims.

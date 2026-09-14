@@ -15,7 +15,6 @@ impl ToolRegistry {
     /// Build a registry from one leaf provider plus completed first-party
     /// orchestrating definitions. The two registration lanes must have
     /// disjoint tool ids.
-    #[doc(hidden)]
     pub fn from_tool_provider_with_orchestrating_tools(
         provider: Arc<dyn ToolProvider>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,

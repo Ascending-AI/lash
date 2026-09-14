@@ -845,7 +845,7 @@ def cargo_subcommand(command: list[str]) -> str | None:
 
 
 def command_compiles_tests(command: list[str]) -> bool:
-    return (cargo_subcommand(command) == "test" and "--doc" not in command) or any(
+    return cargo_subcommand(command) == "test" or any(
         target in command
         for target in ("--all-targets", "--tests", "--test", "--benches", "--bench")
     )
@@ -1163,13 +1163,13 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     conclusion = workflow_job_block(workflow, "ci-conclusion")
     if re.search(r"^      - package-feature-checks\s*$", conclusion, re.MULTILINE) is None:
         failures.append("ci-conclusion does not require package-feature-checks")
-    if re.search(r"^      - test-doc\s*$", conclusion, re.MULTILINE) is None:
-        failures.append("ci-conclusion does not require the baseline test-doc job")
+    if re.search(r"^      - check\s*$", conclusion, re.MULTILINE) is None:
+        failures.append("ci-conclusion does not require the baseline check job")
 
-    test_doc = workflow_job_block(workflow, "test-doc")
+    check_job = workflow_job_block(workflow, "check")
     baseline_shell = "cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}"
-    if baseline_shell not in test_doc:
-        failures.append("test-doc does not execute the workspace default baseline")
+    if baseline_shell not in check_job:
+        failures.append("check does not execute the workspace default baseline")
 
     repo_gates = workflow_job_block(workflow, "repo-gates")
     for invocation in (
@@ -1354,13 +1354,7 @@ def validate_selected_artifacts(
         )
     subcommand = cargo_subcommand(command)
     expected: list[CargoArtifact]
-    if "--doc" in command:
-        expected = [
-            artifact
-            for artifact in artifacts
-            if "lib" in artifact.target_kinds and not artifact.test
-        ]
-    elif "--test" in command:
+    if "--test" in command:
         index = command.index("--test")
         target_name = command[index + 1] if index + 1 < len(command) else ""
         expected = [

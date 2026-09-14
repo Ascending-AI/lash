@@ -776,7 +776,6 @@ pub async fn abandoned_predecessor_claim_pair_is_only_reclaimable_across_lease_g
     );
 }
 
-#[doc(hidden)]
 /// FIG-1575: a lane holding a deferred row is not an exhausted lane.
 ///
 /// Both states present the same "no claimable candidate" view to the claim

@@ -229,7 +229,8 @@ authoritative.
   facade-gap moves, then the remaining facade-only items. Each wave is
   breaking for direct `lash-core` consumers and carries `Breaking:` release
   notes naming the facade or seam replacement.
-- New public items in `lash-core` must name their integrator class in rustdoc.
+- New public items in `lash-core` must name their integrator class in the
+  item's doc comment.
   An item that cannot name one belongs behind the facade.
 - FIG-863's measured facade-seam floor is 3,193 `lash-core` rows, replacing
   wave D's 3,050–3,150 forecast; the count is an outcome of applying the rule,

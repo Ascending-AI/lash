@@ -27,17 +27,14 @@ macro_rules! string_identity {
         pub struct $name(String);
 
         impl $name {
-            #[doc = concat!("Wraps an already-minted ", $what, " identity.")]
             pub fn new(value: impl Into<String>) -> Self {
                 Self(value.into())
             }
 
-            #[doc = concat!("Borrows the ", $what, " identity as text for store and durable-substrate implementors.")]
             pub fn as_str(&self) -> &str {
                 &self.0
             }
 
-            #[doc = concat!("Returns the owned ", $what, " identity to store and durable-substrate implementors.")]
             pub fn into_inner(self) -> String {
                 self.0
             }

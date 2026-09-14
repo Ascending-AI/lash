@@ -244,7 +244,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// the live caller attribution. The admitted parent address supplies the
     /// durable identity; attribution and descriptive parent labels are not part
     /// of that decision and must not make recovery hash a different envelope.
-    #[doc(hidden)]
     pub async fn journaled_deferred_resolution_with<F, Fut>(
         &self,
         effect_id: String,
@@ -298,7 +297,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Records a classified nested runtime-effect failure so the enclosing
     /// `ExecCode` effect aborts instead of journaling a model-visible response.
-    #[doc(hidden)]
     pub fn record_nested_runtime_effect_error(&self, error: crate::RuntimeEffectControllerError) {
         self.record_nested_effect_error(error);
     }
@@ -587,7 +585,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    #[doc(hidden)]
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
     }

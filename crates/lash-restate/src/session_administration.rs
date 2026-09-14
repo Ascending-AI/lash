@@ -62,7 +62,6 @@ impl<'a, 'ctx, C> RestateSessionDeleteExecution<'a, 'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    #[doc(hidden)]
     pub fn controller(&self) -> &RestateRuntimeEffectController<'ctx, C> {
         &self.controller
     }

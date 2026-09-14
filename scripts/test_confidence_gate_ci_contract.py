@@ -475,10 +475,10 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("default-filter", ci_heavy_profile)
         self.assertIn(heavy_filter, ci_heavy_profile)
         # The trybuild ui binary leaves the workspace job without a heavy-side run;
-        # its per-push gate is test-doc's seal step.
+        # its per-push gate is check's seal step.
         self.assertIn("binary(ui)", ci_profile)
         self.assertNotIn("binary(ui)", ci_heavy_profile)
-        self.assertIn("--test ui", workflow_job_block(workflow, "test-doc"))
+        self.assertIn("--test ui", workflow_job_block(workflow, "check"))
 
     def test_trunk_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
         """Heavy suites run on trunk (push/dispatch) only: 2026-08-25 ruling.
@@ -1998,7 +1998,7 @@ derive_mutation_jobs() {{
         # feature graph and profile while removing multi-gigabyte archive
         # transport and four repeated runner setup paths.
         self.assertNotIn("  test:\n", workflow)
-        self.assertIn("  test-doc:\n", workflow)
+        self.assertIn("  check:\n", workflow)
         self.assertIn("  workspace-tests:\n", workflow)
         self.assertNotIn("  nextest-archive:\n", workflow)
         self.assertNotIn("  test-shard:\n", workflow)
@@ -2032,30 +2032,30 @@ derive_mutation_jobs() {{
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workspace_tests)
 
-        # test-doc is the cache writer and the workspace check, nothing else.
+        # check is the cache writer and the workspace check, nothing else.
         # Gates that neither warm nor consume that superset are sibling jobs,
         # not serial steps behind twelve minutes of compilation. Doctests were
         # removed from the repository by ruling (2026-09-13), so no half of
         # this job runs them on either trust path.
-        test_doc = workflow_job_block(workflow, "test-doc")
-        self.assertIn("cargo check --workspace --all-targets --locked", test_doc)
-        self.assertNotIn("--doc ", test_doc)
+        check_job = workflow_job_block(workflow, "check")
+        self.assertIn("cargo check --workspace --all-targets --locked", check_job)
+        self.assertNotIn("--doc ", check_job)
         # The trybuild fixture graph is part of that superset. It only reaches
         # the shared cache if the writer builds it, and it is invisible in the
         # workflow's shape — dropping this step costs no gate and no red run,
         # just three shards rebuilding a second copy of lash forever.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
-            test_doc,
+            check_job,
         )
         for foreign in (
             "cargo check -p agent-service --features restate --all-targets --locked",
             "cargo check -p lash-runtime --no-default-features --locked",
         ):
-            self.assertNotIn(foreign, test_doc)
+            self.assertNotIn(foreign, check_job)
 
         # Every gate that moved is pinned to the job that now owns it. Asserting
-        # only that test-doc no longer runs them would be satisfied by deleting
+        # only that check no longer runs them would be satisfied by deleting
         # them outright, which is the way a decomposition silently drops
         # coverage: the split is a scheduling change, so each command has to be
         # somewhere, and named.
@@ -2316,7 +2316,7 @@ derive_mutation_jobs() {{
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
         for job_id in (
-            "test-doc",
+            "check",
             "workspace-tests",
             "package-feature-checks",
             "runtime-feature-boundary",

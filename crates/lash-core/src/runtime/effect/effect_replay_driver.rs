@@ -727,7 +727,6 @@ pub fn decide_effect_claim(
 /// `lash-sqlite-store` and `lash-postgres-store`, so a crate-private supertrait
 /// would exclude them too. What the seal buys is that the backends-only intent
 /// is in the type system instead of only in prose.
-#[doc(hidden)]
 pub mod sealed {
     /// Marker every [`EffectReplayRowStore`](super::EffectReplayRowStore)
     /// implementation must also carry. See [the seal](super::sealed).
@@ -986,7 +985,6 @@ pub fn scope_retired(scope_id: &str) -> RuntimeEffectControllerError {
     )
 }
 
-#[doc(hidden)]
 pub fn tool_intent_replay_key_format_cutover(
     recorded_replay_key: &str,
     requested_replay_key: &str,

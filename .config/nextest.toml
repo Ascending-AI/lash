@@ -97,7 +97,7 @@ test-group = "docker-services"
 # executes them as cached actions on every trusted event and hiding them here
 # would leave the Cargo path (untrusted forks) with no run of them at all. The
 # trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
-# `Seal-test the API surface` step in the test-doc job already runs the same
+# `Seal-test the API surface` step in the `check` job already runs the same
 # suite on every push, so a workspace-side run would be a second report of the
 # same defect. Keep this expression and the `ci-heavy` default-filter exact
 # complements over the heavy set.
@@ -163,7 +163,7 @@ slow-timeout = { period = "600s", terminate-after = 1 }
 
 # The trunk-only heavy profile: the exact complement of `profile.ci`'s
 # default-filter, minus the trybuild `ui` binary (whose per-push gate is the
-# test-doc seal step, not this job). Run by the `Test heavy suites` job in
+# `check` seal step, not this job). Run by the `Test heavy suites` job in
 # `.github/workflows/ci.yml` on push and workflow_dispatch. Same failure
 # semantics as `ci`: report the whole run, and a flaky pass is a failure.
 #

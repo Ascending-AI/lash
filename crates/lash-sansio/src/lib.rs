@@ -1,6 +1,5 @@
 pub mod attachment;
 pub mod causal;
-#[doc(hidden)]
 pub mod core_support;
 mod effect_identity;
 mod frame_key;
@@ -81,7 +80,6 @@ pub use session_model::{
     TurnCancelMode, TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop,
     default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };
-#[doc(hidden)]
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{
     ToolCatalog, ToolCatalogBuildError, ToolCatalogBuildInput, ToolCatalogContribution,

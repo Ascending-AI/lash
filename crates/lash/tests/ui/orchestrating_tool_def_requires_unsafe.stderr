@@ -1,4 +1,4 @@
-error[E0133]: call to unsafe function `lash_core::facade_support::OrchestratingToolDef::from_first_party` is unsafe and requires unsafe block
+error[E0133]: call to unsafe function `OrchestratingToolDef::from_first_party` is unsafe and requires unsafe block
  --> tests/ui/orchestrating_tool_def_requires_unsafe.rs:7:19
   |
 7 |       let _forged = lash_core::facade_support::OrchestratingToolDef::from_first_party(

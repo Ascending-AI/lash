@@ -85,7 +85,6 @@ pub use runtime::{
     compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
     execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
-#[doc(hidden)]
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
     TYPESCRIPT_REGEXP_EXECUTION_FUEL, TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION,

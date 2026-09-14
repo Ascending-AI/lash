@@ -612,7 +612,6 @@ impl QueuedWorkBatchDraft {
         self.kind().work_class()
     }
 
-    #[doc(hidden)]
     pub fn validate_process_wake_source(&self) -> Result<(), String> {
         let mut payloads = self.payloads.iter();
         match (

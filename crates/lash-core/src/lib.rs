@@ -28,7 +28,6 @@ pub mod panic_containment {
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
 #[cfg(feature = "perf-witness")]
-#[doc(hidden)]
 pub use lash_core_ids::perf_witness;
 pub mod plugin;
 mod plugin_stack;
@@ -59,7 +58,6 @@ pub mod sync {
     pub use lash_sansio::sync::*;
 }
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub mod test_support;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_ids::test_watchdog;
@@ -79,7 +77,6 @@ pub mod trace;
 mod trace;
 pub mod triggers;
 
-#[doc(hidden)]
 pub mod store_backend_support {
     use lash_sansio::SessionId;
 
@@ -294,13 +291,11 @@ pub mod store_backend_support {
     };
 }
 
-#[doc(hidden)]
 pub mod facade_support {
     pub use crate::runtime::effect::bind_store_turn_control_authority;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
-    #[doc(hidden)]
     pub fn trace_context_for_runtime_invocation(
         context: lash_trace::TraceContext,
         invocation: &crate::RuntimeInvocation,
@@ -309,7 +304,6 @@ pub mod facade_support {
     }
 
     /// Apply the canonical effect-header projection to an existing trace context.
-    #[doc(hidden)]
     pub fn trace_context_for_runtime_effect_invocation(
         context: lash_trace::TraceContext,
         invocation: &crate::RuntimeEffectInvocation,
@@ -577,13 +571,11 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
-    #[doc(hidden)]
     pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
     pub use crate::runtime::diff_usage_reports;
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
-    #[doc(hidden)]
     pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::facade_ops::TurnContextFacadeOps;
@@ -594,19 +586,15 @@ pub mod facade_support {
     pub use crate::runtime::promise_semantics;
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::refuse_unhonored_group_membership;
-    #[doc(hidden)]
     pub use crate::runtime::registry_transitions;
-    #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::trigger_delivery_reconcile_scope;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
-    #[doc(hidden)]
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
-    #[doc(hidden)]
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
         crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
     }
@@ -630,7 +618,6 @@ pub mod facade_support {
     pub use crate::store::LeaseTimingsError;
     pub use crate::store::SessionHead;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
-    #[doc(hidden)]
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_provider::ToolTriggerClient;
@@ -1213,7 +1200,6 @@ pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
 pub(crate) use runtime::default_queued_drain_policy;
-#[doc(hidden)]
 pub use runtime::drive_with_event_pump;
 
 // This block includes the effect / process-control types consumed by external

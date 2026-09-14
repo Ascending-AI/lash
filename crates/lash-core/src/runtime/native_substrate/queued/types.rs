@@ -10,7 +10,6 @@ static RETRY_JITTER_SEQUENCE: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
 ///
 /// The sequence is process-local and affects pacing only. It is deliberately
 /// independent of durable identities, replay, and the store's authority.
-#[doc(hidden)]
 pub fn bounded_multiplicative_jitter(
     base: Duration,
     floor: Duration,

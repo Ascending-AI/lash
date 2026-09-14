@@ -155,7 +155,6 @@ impl NativeQueuedWork {
     }
 
     /// Construct an native reference-substrate driver admitted by `supplier`.
-    #[doc(hidden)]
     pub fn with_worker_slot_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         supplier: Arc<dyn WorkerSlotSupplier>,

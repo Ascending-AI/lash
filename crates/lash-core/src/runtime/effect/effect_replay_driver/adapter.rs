@@ -12,9 +12,8 @@
 //! copy of all three impls for each of its two types; a change to any port
 //! method had to land four times and could drift on each.
 //!
-//! The integration traits are `#[doc(hidden)]`, like the driver module that
-//! owns them: they are the plug-in seam of lash's own SQL tier, not a host
-//! API.
+//! The integration traits are internal, like the driver module that owns
+//! them: they are the plug-in seam of lash's own SQL tier, not a host API.
 
 use super::*;
 use crate::SessionId;
@@ -24,7 +23,6 @@ use crate::{AwaitEventResolver, EffectHost, RuntimeEffectController, ScopedEffec
 ///
 /// Implemented by each store's public host and controller types, whose only
 /// state is an `Arc` of the driver (plus a scope, for a controller).
-#[doc(hidden)]
 pub trait StoreReplayAdapter: Send + Sync {
     /// The backend's atomic journal rows.
     type Persistence: EffectReplayRowStore + 'static;
@@ -43,7 +41,6 @@ pub trait StoreReplayAdapter: Send + Sync {
 
 /// Marks a store's deployment-level host: the type that mints scoped
 /// controllers. Gets [`EffectHost`] for free.
-#[doc(hidden)]
 #[async_trait]
 pub trait StoreReplayHost: StoreReplayAdapter {
     /// Stable identity of the await-event deployment backing this host.
@@ -92,7 +89,6 @@ pub trait StoreReplayHost: StoreReplayAdapter {
 
 /// Marks a store's scoped controller and names the scope it executes against.
 /// Gets [`RuntimeEffectController`] for free.
-#[doc(hidden)]
 pub trait StoreReplayController: StoreReplayAdapter {
     /// The scope whose journal this controller executes against.
     fn execution_scope(&self) -> &ExecutionScope;

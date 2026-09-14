@@ -821,7 +821,6 @@ impl<'run> ToolContext<'run> {
 
     /// Overrides the current frame lineage in an isolated tool-provider test.
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn with_agent_frame_id_for_testing(mut self, agent_frame_id: crate::FrameNodeId) -> Self {
         self.agent_frame_id = agent_frame_id;
         self
@@ -915,7 +914,6 @@ impl<'run> ToolContext<'run> {
         self.cancellation_token.as_ref()
     }
 
-    #[doc(hidden)]
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         match self.runtime_execution_context.as_ref() {
             Some(context) => context.named_phase(phase),
@@ -1043,7 +1041,6 @@ impl<'run> ToolContext<'run> {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn with_process_events_for_testing(
         mut self,
         process_id: impl Into<ProcessId>,
@@ -1115,7 +1112,6 @@ impl<'run> ToolContext<'run> {
     /// Constructor reserved for `lash_core::testing` helpers. Do not call directly;
     /// use [`lash_core::testing::mock_tool_context`] instead.
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     #[expect(
         clippy::too_many_arguments,
         reason = "test-only constructor mirrors the sealed runtime tool context"

@@ -11,7 +11,6 @@ pub struct InMemoryTriggerStore {
 }
 
 /// Concrete in-memory trigger rows exposed to raw differential readers.
-#[doc(hidden)]
 #[cfg(any(test, feature = "testing"))]
 pub struct RawTriggerStateForTesting {
     pub subscriptions: Vec<TriggerSubscriptionRecord>,
@@ -36,19 +35,16 @@ impl InMemoryTriggerStore {
 
     /// Fail the next reconciliation delete of `occurrence_id`. Used only by
     /// transactional retention conformance.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn fail_occurrence_delete_for_testing(&self, occurrence_id: impl Into<String>) {
         *self.occurrence_delete_failure.lock_recover() = Some(occurrence_id.into());
     }
 
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn clear_occurrence_delete_failure_for_testing(&self) {
         self.occurrence_delete_failure.lock_recover().take();
     }
 
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_state_for_testing(&self) -> RawTriggerStateForTesting {
         let state = self.state.lock_recover();
@@ -90,7 +86,6 @@ impl InMemoryTriggerStore {
     }
 
     /// Insert one receipt encoded exactly as an older SQL backend stored it.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn insert_legacy_mutation_receipt_for_testing(
         &self,
@@ -107,7 +102,6 @@ impl InMemoryTriggerStore {
     }
 
     /// Report whether one raw receipt remains in the in-memory store.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn has_mutation_receipt_for_testing(&self, operation_id: &str) -> bool {
         self.state

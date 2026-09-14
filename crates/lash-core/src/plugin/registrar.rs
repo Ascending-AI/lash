@@ -126,7 +126,6 @@ impl ToolRegistrations<'_> {
         self.reg.add_tool_provider(provider)
     }
 
-    #[doc(hidden)]
     pub fn orchestrating(
         self,
         definition: crate::tool_provider::orchestration::OrchestratingToolDef,

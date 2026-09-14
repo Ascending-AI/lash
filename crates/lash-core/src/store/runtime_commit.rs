@@ -164,7 +164,6 @@ impl RuntimeCommit {
         super::CommitBudget::bounded(1024 * 1024, 512)
     }
 
-    #[doc(hidden)]
     #[track_caller]
     pub fn persisted_state_for_test(
         state: &crate::RuntimeSessionState,
@@ -178,7 +177,6 @@ impl RuntimeCommit {
     }
 
     /// Build a test commit with explicit host-owned byte and node limits.
-    #[doc(hidden)]
     #[track_caller]
     pub fn persisted_state_for_test_with_budget(
         state: &crate::RuntimeSessionState,
@@ -210,7 +208,6 @@ impl RuntimeCommit {
     }
 
     /// Build a test commit with a fixed operation identity.
-    #[doc(hidden)]
     pub fn persisted_state_with_operation_for_testing(
         state: &crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -230,7 +227,6 @@ impl RuntimeCommit {
         .expect("fixed-identity test commit must be hashable")
     }
 
-    #[doc(hidden)]
     #[track_caller]
     pub fn persisted_state_with_graph_commit(
         state: &crate::RuntimeSessionState,

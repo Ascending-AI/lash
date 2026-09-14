@@ -27,7 +27,6 @@ mod turn_cancel;
 /// submodule; these are the names the registration macro sees.
 macro_rules! turn_cancel_law {
     ($($name:ident: $what:literal,)*) => {$(
-        #[doc = concat!("Prove that ", $what, ".")]
         pub async fn $name(factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>) {
             turn_cancel::$name(factory).await;
         }

@@ -405,7 +405,6 @@ pub fn claim_scan_limit(max_batches: usize) -> i64 {
 /// coalesce. A longer FIFO prefix remains queued and drains through later
 /// commits; bounding this claim also bounds every SQL candidate scan that
 /// feeds it.
-#[doc(hidden)]
 pub const MAX_SESSION_COMMAND_BATCHES_PER_CLAIM: usize = 64;
 
 /// Select a leading session-command claim.
@@ -776,7 +775,6 @@ pub fn select_exact_turn_work_claim_prefix(
 /// When every touched identity is complete, one selected drain reclaims exactly
 /// the physically earliest interrupted composition; later complete identities
 /// remain queued for a later drain.
-#[doc(hidden)]
 pub fn select_interrupted_exact_claim_indices(
     candidate_batch_claims: &[(crate::BatchId, Option<String>)],
     requested_batch_ids: &[crate::BatchId],

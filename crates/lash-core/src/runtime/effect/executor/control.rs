@@ -457,7 +457,6 @@ pub(crate) mod facade_ops {
         /// available to the local process command itself. Borrowed controllers
         /// are proxied across the process task boundary; shared controllers can
         /// be passed through directly.
-        #[doc(hidden)]
         async fn execute_process_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -533,7 +532,6 @@ pub struct ToolIntentSubmissionGuard(tokio::sync::OwnedMutexGuard<()>);
 impl ToolIntentSubmissionGuard {
     /// Wrap the owned mutex guard supplied by the facade's submission-gate
     /// collaborator.
-    #[doc(hidden)]
     pub fn from_owned_mutex_guard(guard: tokio::sync::OwnedMutexGuard<()>) -> Self {
         Self(guard)
     }

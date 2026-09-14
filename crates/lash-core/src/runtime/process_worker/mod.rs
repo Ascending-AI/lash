@@ -21,7 +21,6 @@ mod registration;
 #[path = "../native_substrate/worklist.rs"]
 mod worklist;
 
-#[doc(hidden)]
 pub use permit::release_process_execution_permit_while;
 
 /// The runtime-operation scope under which the worker starts a trigger
@@ -123,7 +122,6 @@ pub struct DurableProcessWorkerConfig {
     pub native_substrate: crate::NativeSubstrateConfig,
     process_work: WorkerProcessWork,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
-    #[doc(hidden)]
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
     /// Maximum processes this worker executes natively at once. A run holds its
     /// slot while doing its own work and releases it while parked on work that
@@ -214,7 +212,6 @@ impl DurableProcessWorkerConfig {
     }
 
     /// Replace fixed process admission with a host-owned worker slot supplier.
-    #[doc(hidden)]
     pub fn with_worker_slot_supplier(
         mut self,
         supplier: Arc<dyn super::WorkerSlotSupplier>,
@@ -229,7 +226,6 @@ impl DurableProcessWorkerConfig {
         self
     }
 
-    #[doc(hidden)]
     pub fn with_turn_phase_probe_slot(
         mut self,
         slot: crate::runtime::RuntimeTurnPhaseProbeSlot,

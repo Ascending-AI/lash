@@ -373,7 +373,6 @@ pub(crate) fn has_v2_tool_intent_replay_key(identity: &ToolIntentIdentity) -> bo
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
-#[doc(hidden)]
 pub fn legacy_tool_intent_v1_lookup_key(
     invocation: &crate::RuntimeEffectInvocation,
 ) -> Option<String> {

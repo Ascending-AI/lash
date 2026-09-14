@@ -29,7 +29,7 @@ use serde_json::json;
 fn trace_schema_version_is_pinned_at_21() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
-    // deliberate, documented schema bump — see the crate-level rustdoc and the
+    // deliberate, documented schema bump — see the crate-level doc comment and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
     assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 21);

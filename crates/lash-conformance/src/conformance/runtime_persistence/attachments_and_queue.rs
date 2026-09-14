@@ -743,7 +743,6 @@ pub async fn queued_work_exact_claim_uses_selected_batch_ids(store: Arc<dyn Runt
     release_session_execution_lease_for_test(&store, &accepted_session_lease).await;
 }
 
-#[doc(hidden)]
 pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
     store: Arc<dyn RuntimePersistence>,
 ) {

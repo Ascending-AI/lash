@@ -168,19 +168,25 @@ IDENTIFIER_RENAME_BASELINES = {
     #     SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6.
     #   FIG-2880: removing tool_access's serde default changed head-owned
     #     PersistedSessionConfig only; head version 8 fences those bytes.
-    #   All three superseded by FIG-1040.
-    # FIG-1040 (live): the identity-newtype wave retyped raw `String` id fields
-    # to the transparent NodeId/InputId/BatchId/SessionId/ProcessId/TurnId
-    # newtypes. Every identity is #[repr(transparent)] + #[serde(transparent)]
-    # with its JsonSchema delegated to String, and the identity
-    # transparent-serde and JSON-schema tests in
-    # crates/lash-sansio/src/identity.rs are byte-for-byte unchanged by this
-    # diff, so the guarded session-node body text moved while the serialized
-    # bytes cannot have. No field name, variant name, serde attribute or
-    # constant value changed, so SESSION_NODE_BODY_SCHEMA_VERSION stays 14.
-    # Any further guarded-shape drift re-fails the gate.
+    #   FIG-1040: the identity-newtype wave retyped raw `String` id fields to
+    #     the transparent NodeId/InputId/BatchId/SessionId/ProcessId/TurnId
+    #     newtypes, each #[repr(transparent)] + #[serde(transparent)] with its
+    #     JsonSchema delegated to String; the guarded text moved, the bytes
+    #     could not. (Superseded state:
+    #     sha256:1a59dad63420820eca62f134f5c011b2aa38f4d773e7bc5199cde23ff19a98db.)
+    #   All four superseded by FIG-3067.
+    # FIG-3067 (live): removing rustdoc from the workspace deletes every
+    # #[doc(hidden)] attribute, six of them inside the guarded
+    # crates/lash-sansio/src/llm/types.rs region (two ResponseTextMeta fields
+    # and four inherent methods). #[doc(hidden)] is read by rustdoc alone: it
+    # is not a visibility, not a serde attribute, and not part of any derive
+    # input, so the guarded Rust text moved while the serialized bytes cannot
+    # have. The whole diff for that file is attribute-line deletions -- no
+    # field name, variant name, serde attribute, type or constant value
+    # changed -- so SESSION_NODE_BODY_SCHEMA_VERSION stays 14. Any further
+    # guarded-shape drift re-fails the gate.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:1a59dad63420820eca62f134f5c011b2aa38f4d773e7bc5199cde23ff19a98db"
+        "sha256:3d39e0ec853e4865725d7f3fa5a0a4b0fce67753aa01b98e5ad9c20cb37cc69d"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (

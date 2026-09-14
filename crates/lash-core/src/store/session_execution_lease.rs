@@ -23,7 +23,6 @@ impl LeaseClaimNonce {
 
     /// Constructs a fixed nonce for deterministic durable-store fixtures.
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn for_testing(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -50,7 +49,6 @@ impl std::fmt::Debug for LeaseClaimNonce {
 }
 
 /// The token-scoped lease operation that refused stale authority.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionExecutionLeaseRefusalOperation {
     ExecutionFence,
@@ -80,7 +78,6 @@ impl SessionExecutionLeaseRefusalOperation {
 }
 
 /// Durable facts consulted while diagnosing a lease refusal.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SessionExecutionLeaseRefusalFacts<'a> {
     pub(crate) current_owner: Option<&'a LeaseOwnerIdentity>,
@@ -118,7 +115,6 @@ impl<'a> SessionExecutionLeaseRefusalFacts<'a> {
 /// either nonce.
 /// For `renewal_install`, `current_*` describes the returned response rather
 /// than the durable row, and `expiry_matched` means that response did not regress.
-#[doc(hidden)]
 pub fn trace_session_execution_lease_refusal(
     operation: SessionExecutionLeaseRefusalOperation,
     decision_basis: &'static str,
@@ -333,7 +329,6 @@ pub struct SessionExecutionLeaseAuthority {
 /// the row the claim writes. As loose parameters, the executor id and the lease
 /// token are two adjacent `&str`s that a backend could silently transpose,
 /// which would make one host's executor another's lease authority.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct SessionExecutionLeaseClaimIdentity<'a> {
     pub session_id: &'a SessionId,
@@ -347,7 +342,6 @@ pub struct SessionExecutionLeaseClaimIdentity<'a> {
 /// Released rows carry no owner, executor, or lease token while retaining their
 /// fencing generation. A live row carries all three. The conversion into
 /// [`SessionExecutionLease`] rejects every partial identity.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionExecutionLeaseRow {
     pub owner: Option<LeaseOwnerIdentity>,
@@ -360,7 +354,6 @@ pub struct SessionExecutionLeaseRow {
 }
 
 /// Decode the strictly paired columns that identify a lease owner.
-#[doc(hidden)]
 pub fn lease_owner_from_columns(
     owner_id: Option<String>,
     incarnation_id: Option<String>,
@@ -381,7 +374,6 @@ pub fn lease_owner_from_columns(
 }
 
 /// Convert a raw durable row into the live lease it represents.
-#[doc(hidden)]
 pub fn row_to_session_execution_lease(
     session_id: &SessionId,
     row: SessionExecutionLeaseRow,
@@ -409,7 +401,6 @@ pub fn row_to_session_execution_lease(
 ///
 /// Storage implementations own how these facts are read and locked. Core owns
 /// their meaning so an execution fence cannot silently differ by backend.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct SessionExecutionLeaseFenceFacts<'a> {
     pub owner: Option<&'a LeaseOwnerIdentity>,
@@ -425,7 +416,6 @@ pub struct SessionExecutionLeaseFenceFacts<'a> {
 /// the current holder executor (owner, incarnation, and executor id), the current fencing generation, the current
 /// lease token, and a lease whose expiry is strictly after `now_epoch_ms`.
 /// Every refusal uses the same typed error construction from this function.
-#[doc(hidden)]
 pub fn require_current_session_execution_lease(
     session_id: &SessionId,
     current: Option<SessionExecutionLeaseFenceFacts<'_>>,

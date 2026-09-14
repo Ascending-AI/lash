@@ -23,7 +23,6 @@ pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
 /// Backends perform their own transactional reads and writes, but must use this
 /// decision so exact-hash, append-identity, encoding-version, and node-count
 /// precedence cannot drift between implementations.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeCommitReceiptDecision {
     /// Return the stored first-attempt result without applying the attempted commit.
@@ -55,7 +54,6 @@ pub enum RuntimeCommitReceiptDecision {
 /// comparable identity and continue through exact-hash semantics.
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-#[doc(hidden)]
 pub fn decide_runtime_commit_receipt(
     stored_commit_hash: &str,
     attempted_commit_hash: &str,

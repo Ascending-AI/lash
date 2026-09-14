@@ -111,7 +111,6 @@ pub struct ResponseTextMeta {
     ///
     /// This is identity-compatibility material only. Because the legacy pair
     /// has no endpoint, it never certifies replay for a current route.
-    #[doc(hidden)]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -120,7 +119,6 @@ pub struct ResponseTextMeta {
     pub legacy_origin_provider: Option<String>,
     /// Model decoded from the pre-route-identity JSON vocabulary. See
     /// [`ResponseTextMeta::legacy_origin_provider`].
-    #[doc(hidden)]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -308,7 +306,6 @@ pub enum LlmOutputPart {
 }
 
 impl LlmOutputPart {
-    #[doc(hidden)]
     pub fn stamp_replay_origin(
         &mut self,
         route: &ProviderRouteIdentity,
@@ -979,7 +976,6 @@ impl LlmRequest {
     /// copied. Reasoning keeps non-empty neutral text (falling back to its
     /// non-empty summary), tool-call content remains, and empty reasoning is
     /// removed instead of manufacturing an empty text block.
-    #[doc(hidden)]
     pub fn drop_foreign_replay(
         &mut self,
         serving_route: &ProviderRouteIdentity,
@@ -1074,7 +1070,6 @@ impl LlmRequest {
     /// provider serializes the request. Native policies leave the HTTP history
     /// intact; only the explicit client-side fallback removes whole genuine
     /// user segments.
-    #[doc(hidden)]
     pub fn reasoning_retention_safe_for<'a>(
         &'a self,
         serving_route: &ProviderRouteIdentity,
@@ -1787,7 +1782,6 @@ impl LlmResponse {
 
     /// Stamp LLM Provider-owned replay state at the capture boundary without
     /// ever overwriting an existing, contradictory origin.
-    #[doc(hidden)]
     pub fn stamp_replay_origin(
         &mut self,
         route: &ProviderRouteIdentity,

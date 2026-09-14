@@ -1082,7 +1082,6 @@ impl InMemoryAttachmentStore {
 
     /// Snapshot concrete blob bytes without calling the `AttachmentStore`
     /// read path. Intended for cross-backend durable-state differentials.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_blobs_for_testing(&self) -> Vec<(AttachmentId, Vec<u8>)> {
         let mut rows = self

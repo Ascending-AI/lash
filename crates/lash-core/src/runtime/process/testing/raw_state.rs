@@ -1,7 +1,6 @@
 use super::*;
 
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
     pub async fn raw_state_for_testing(&self) -> RawProcessRegistryStateForTesting {
         let managed = self.managed.lock().await;
         let mut records = managed
