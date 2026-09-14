@@ -2196,7 +2196,7 @@ fn test_button_trigger_source() -> &'static str {
         const handle = await registerTrigger({
           source: ui.button.pressed({}),
           target: remember,
-          inputs: { event: trigger.event },
+          inputs: (event) => ({ event: event }),
           name: "remembered"
         });
         finish("registered");
