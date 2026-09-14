@@ -5,8 +5,10 @@
 > runbook adds only the engine-restart scenario.
 
 
-> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
-> below is retained as an acceptance contract and is not currently executable. See the
+> **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
+> journals and the application data. A step below still marked blocked stays blocked until its
+> own row is re-authored. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -196,12 +198,14 @@ lease TTL and use monotonic timestamps to prove both post-loss commits start bef
 worker's original lease could expire.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
-   PID, and gate a real `exec_code_started` record. **This comparison arm is blocked by
-   FIG-1164:** retain the historical `just agent-workbench-restart <port>` command, but do not
-   execute it until a verified immutable same-configuration host restart exists. That mechanism
-   must not change the data directory or Restate. Require the PID to change and the run log
-   to gain a fresh `starting agent-workbench` line, while the session and turn address remain
-   exact.
+   PID, and gate a real `exec_code_started` record. Then run
+   `just agent-workbench-restart <port>` in the shell that still exports this row's
+   `RESTATE_AUTHORITY_ID`: it replaces only the Workbench process and keeps the data directory
+   and the Restate engine, and it refuses rather than replacing anything if the data directory,
+   endpoints, store backend or authority id differ from boot. Never substitute
+   `just agent-workbench-reset`, which deletes the durable state this arm exists to observe.
+   Require the PID to change and the run log to gain a fresh `starting agent-workbench` line,
+   while the session and turn address remain exact.
 
    Record the dead worker's lane row on both sides of the restart:
    `session_execution_leases` in `<data-dir>/lash-sessions/durable-core.db`, columns

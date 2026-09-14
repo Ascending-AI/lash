@@ -5,8 +5,10 @@
 > the execution-state rehydration scenario.
 
 
-> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
-> below is retained as an acceptance contract and is not currently executable. See the
+> **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
+> journals and the application data. A step below still marked blocked stays blocked until its
+> own row is re-authored. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -54,11 +56,11 @@ the post-restart code ran — never on the assistant's ability to recall.
    Its absence cannot discriminate a reference-only commit from a dirty executor. The
    browser and `/api/state` prove the turn settled; `trace.jsonl` proves what code
    executed.
-4. **Replace only the web process (blocked by FIG-1164).** The historical
-   `agent-workbench-restart` invocation used the same data directory and backend environment as
-   boot. Do not execute it until a verified immutable same-configuration host restart exists.
-   That mechanism must preserve the Restate container and, in the PostgreSQL pass, the managed
-   Postgres container. Reloading the page,
+4. **Replace only the web process.** `just agent-workbench-restart <port>` replaces the
+   Workbench process and keeps the Restate container and its journals, the application data
+   directory and, in the PostgreSQL pass, the managed Postgres container. Invoke it with the
+   same data directory, backend environment and `RESTATE_AUTHORITY_ID` as boot; the launcher
+   refuses rather than replacing anything if any of those differ. Reloading the page,
    changing configuration, or tearing anything else down forfeits the cold-open proof.
 5. **Both geometries or no verdict.** Run the whole scenario twice: the default SQLite
    stack and the PostgreSQL stack. A pass in one geometry and a failure in the other is a
@@ -179,14 +181,16 @@ trace end offset as the restart boundary, and screenshot the settled pair as
 
 ## Phase 3 — Replace the web process
 
-**Blocked by FIG-1164.** The historical command was:
+Run the non-destructive same-configuration replacement, in the shell that still exports this
+row's `RESTATE_AUTHORITY_ID`:
 
 ```sh
 AGENT_WORKBENCH_DATA_DIR=<same-tmp> [AGENT_WORKBENCH_POSTGRES=1] just agent-workbench-restart <port>
 ```
 
-Do not execute it until a verified immutable same-configuration host restart exists. After that
-mechanism runs, poll `/healthz` until ready. Omit the bracketed PostgreSQL setting only for the
+It keeps the Restate journals and the application data; never substitute
+`just agent-workbench-reset`, which deletes exactly the evidence this phase needs. After it
+returns, poll `/healthz` until ready. Omit the bracketed PostgreSQL setting only for the
 SQLite pass. Require a new PID and an unchanged session id across the rendered page,
 `/api/state`, and `<data-dir>/session-id`. Reload the browser and require all six
 pre-restart rows to render in their original order. Screenshot `03-reconstructed.png`.

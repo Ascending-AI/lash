@@ -240,17 +240,26 @@ runtime dependencies, and the `--profile judged` on every judged boot command.
 
 ## Agent Workbench lifecycle constraint (FIG-1164)
 
-The bundled launcher cannot safely replace a Workbench process behind a Restate deployment
-that may replay. `just agent-workbench-restart <port>` therefore refuses without stopping or
-mutating the stack. `just agent-workbench-reset <port>` is an explicitly destructive recovery
-command: it clears Restate journals and the corresponding application data, and works only for
-a wholly launcher-owned disposable stack. Legacy, external, mixed, or ambiguous stacks are
-refused.
+`just agent-workbench-restart <port>` (`scripts/agent-workbench-dev.sh restart`) is the
+non-destructive same-configuration replacement (FIG-3035). It replaces **only** the Workbench
+process, at the same address, endpoints, store backend and `RESTATE_AUTHORITY_ID`, and keeps
+the Restate engine and its journals, any managed Postgres, the registered deployment and the
+application data directory. It re-registers no deployment. This is the command a phase that
+proves durable state survives a process replacement uses.
 
-Any runbook that requires durable state to survive a Workbench process replacement is blocked at
-that phase until a separately verified immutable, same-configuration host-restart mechanism is
-available. Keep its state-survival assertions as the acceptance contract. Never substitute
-`agent-workbench-reset`, because deleting the evidence cannot prove persistence.
+It refuses before stopping anything unless the launcher's own run metadata proves it owns a
+matching stack at exactly the current settings — including the recorded Restate trust domain,
+so a row that exports a different `RESTATE_AUTHORITY_ID` is refused rather than silently bound
+to a new durable state, and a stack started by an older launcher, which recorded no trust
+domain, is refused too. Because no deployment is re-registered, a rebuild that changes the
+Restate service surface needs the reset path instead. An interrupted replacement is retryable
+with the same command.
+
+`just agent-workbench-reset <port>` (`restart --reset-dev-state`) is unchanged and remains an
+explicitly destructive recovery command: it clears Restate journals and the corresponding
+application data, and works only for a wholly launcher-owned disposable stack. Legacy,
+external, mixed, or ambiguous stacks are refused. Never substitute it for a
+process-replacement phase, because deleting the evidence cannot prove persistence.
 
 For an Abort/RCA, use the app's pipeline — UI event handling / HTTP API / turn or trigger
 execution / durable process / store persistence / render — and name the stage the failure
@@ -269,8 +278,8 @@ Browser runbooks inject faults with shell commands — stop a container, replace
 your driver is inside that command it cannot poll the page, so any state that exists **only**
 during the fault is invisible to a driver-side loop: an outage banner, a degraded pill, a
 transient affordance. Its absence from your evidence then proves nothing about the app. These
-fault windows may be short, so this is the normal case rather than an edge case. Workbench
-process-replacement phases are currently blocked by the FIG-1164 lifecycle constraint above.
+fault windows may be short, so this is the normal case rather than an edge case. A Workbench
+process replacement is one such command; the lifecycle section above names it.
 
 Move the observation into the page (an interval recording the state into an array the driver
 reads afterwards) or launch the injecting command non-blocking. If an affordance must be *used*

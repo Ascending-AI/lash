@@ -399,24 +399,68 @@ assert_count 1 "$mock_state/registration-payloads"
 
 printf 'durable application state\n' > "$data_sqlite/durable-seed"
 old_pid_record="$(<"$pid_file")"
-old_restate_record="$(<"$data_sqlite/run/restate-127.0.0.1_${port_sqlite}.container")"
+restate_marker_probe="$data_sqlite/run/restate-127.0.0.1_${port_sqlite}.container"
+old_restate_record="$(<"$restate_marker_probe")"
 old_restate_id="${old_restate_record#* }"
 old_restate_id="${old_restate_id%% *}"
 printf 'durable Restate journal\n' > "$mock_state/journal-$old_restate_id"
-builds_before="$(<"$mock_state/build-count")"
-if run_launcher "$data_sqlite" "$port_sqlite" restart > "$test_tmp/restart-refusal.log" 2>&1; then
-  fail "ordinary restart unexpectedly succeeded"
+meta_file="$data_sqlite/run/workbench-127.0.0.1_${port_sqlite}.meta"
+grep -Eq '^restate_authority_digest=' "$meta_file" \
+  || fail "fresh stack did not record its Restate authority digest"
+
+# A recorded stack with no authority digest predates this launcher and cannot
+# prove its durable trust domain is unchanged, so it is not replaceable.
+cp "$meta_file" "$test_tmp/meta-with-authority"
+grep -v '^restate_authority_digest=' "$test_tmp/meta-with-authority" > "$meta_file"
+if run_launcher "$data_sqlite" "$port_sqlite" restart \
+  > "$test_tmp/restart-legacy-meta.log" 2>&1; then
+  fail "restart of a stack with no recorded authority unexpectedly succeeded"
 fi
-grep -Fq 'restart --reset-dev-state' "$test_tmp/restart-refusal.log" \
-  || fail "ordinary restart refusal omitted the explicit reset command"
 [[ "$(<"$pid_file")" = "$old_pid_record" ]] && pid_identity "$pid_file" \
-  || fail "ordinary restart changed the live PID"
+  || fail "legacy-metadata restart refusal changed the live PID"
+cp "$test_tmp/meta-with-authority" "$meta_file"
+
+# The durable trust domain is part of the configuration a replacement keeps.
+if launcher_env "$data_sqlite" "$port_sqlite" \
+  RESTATE_AUTHORITY_ID=some-other-authority \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --port "$port_sqlite" \
+  > "$test_tmp/restart-authority-refusal.log" 2>&1; then
+  fail "restart under a different RESTATE_AUTHORITY_ID unexpectedly succeeded"
+fi
+grep -Fq 'RESTATE_AUTHORITY_ID' "$test_tmp/restart-authority-refusal.log" \
+  || fail "authority refusal did not name the setting that must stay stable"
+[[ "$(<"$pid_file")" = "$old_pid_record" ]] && pid_identity "$pid_file" \
+  || fail "authority refusal changed the live PID"
 [[ -f "$data_sqlite/durable-seed" && -f "$mock_state/journal-$old_restate_id" ]] \
-  || fail "ordinary restart mutated durable state"
-[[ "$(<"$mock_state/build-count")" = "$builds_before" ]] \
-  || fail "ordinary restart built before refusing"
+  || fail "authority refusal mutated durable state"
+
+# A restart at a configuration this launcher has no run metadata for is refused
+# before anything is stopped.
+if run_launcher "$data_sqlite" 3033 restart > "$test_tmp/restart-unowned.log" 2>&1; then
+  fail "restart of an unrecorded workbench address unexpectedly succeeded"
+fi
+[[ "$(<"$pid_file")" = "$old_pid_record" ]] && pid_identity "$pid_file" \
+  || fail "unowned restart refusal changed the live PID"
+
+# The non-destructive restart: a new process, everything durable retained.
+run_launcher "$data_sqlite" "$port_sqlite" restart > "$test_tmp/restart-replace.log" 2>&1
+pid_identity "$pid_file" || fail "replacement workbench process is not alive"
+[[ "$(<"$pid_file")" != "$old_pid_record" ]] \
+  || fail "non-destructive restart reused the old process identity"
+[[ -f "$data_sqlite/durable-seed" ]] \
+  || fail "non-destructive restart deleted application data"
+[[ -f "$mock_state/journal-$old_restate_id" ]] \
+  || fail "non-destructive restart discarded the Restate journal"
+[[ "$(<"$restate_marker_probe")" = "$old_restate_record" ]] \
+  || fail "non-destructive restart replaced the Restate container"
 assert_count 1 "$mock_state/registration-payloads"
 assert_count 0 "$mock_state/docker-rm.log"
+replaced_pid_record="$(<"$pid_file")"
+grep -Fq "owned_pid_record=${replaced_pid_record/ /\\ }" "$reset_file" \
+  || fail "non-destructive restart left disposable-stack ownership on the retired process"
+[[ ! -e "$data_sqlite/run/workbench-127.0.0.1_${port_sqlite}.process-retired" ]] \
+  || fail "non-destructive restart left its process retirement receipt behind"
+old_pid_record="$(<"$pid_file")"
 
 run_launcher "$data_sqlite" "$port_sqlite" restart --reset-dev-state \
   > "$test_tmp/reset-success.log" 2>&1

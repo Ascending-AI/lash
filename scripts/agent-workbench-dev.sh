@@ -44,6 +44,20 @@ restate_retirement_authorized=0
 foreground_cleanup_done=0
 foreground_cleanup_status=0
 process_observation_uncertain=0
+# A non-destructive restart owns only the replacement process. It inherits the
+# managed-service facts of the stack it continues so the run metadata it
+# rewrites keeps naming the engine, stores and deployment that outlive it.
+replacing_process=0
+inherited_service_facts=0
+inherited_restate_managed=""
+inherited_restate_name=""
+inherited_restate_id=""
+inherited_postgres_managed=""
+inherited_postgres_name=""
+inherited_postgres_id=""
+inherited_retirement_authorized=""
+inherited_deployment_id=""
+inherited_registry_hash=""
 
 log() {
   printf '[agent-workbench] %s\n' "$*" >&2
@@ -59,6 +73,7 @@ usage() {
 Usage:
   scripts/agent-workbench-dev.sh [up] [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh foreground [--port PORT | --addr HOST:PORT]
+  scripts/agent-workbench-dev.sh restart [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh restart --reset-dev-state [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh status [--port PORT | --addr HOST:PORT]
   scripts/agent-workbench-dev.sh logs [--port PORT | --addr HOST:PORT] [-f]
@@ -66,10 +81,18 @@ Usage:
 
 Defaults:
   up is detached and idempotent.
-  restart refuses unless --reset-dev-state is present. The explicit reset is
-  destructive: it replaces a wholly launcher-owned disposable stack, including
-  its Restate journals and corresponding application data. External, mixed,
-  legacy, or ambiguous ownership is refused before anything is stopped.
+  restart without a flag is non-destructive: it replaces only the workbench
+  process, at the same address, endpoints, store and RESTATE_AUTHORITY_ID, and
+  keeps the Restate engine and its journals, any managed Postgres, the
+  registered deployment, and the application data directory. It refuses unless
+  this launcher's own run metadata proves it owns a matching stack here, and it
+  never re-registers a deployment, so a rebuild that changes the Restate service
+  surface needs --reset-dev-state instead. Interrupting it is retryable: rerun
+  the same command.
+  restart --reset-dev-state is destructive: it replaces a wholly launcher-owned
+  disposable stack, including its Restate journals and corresponding application
+  data. External, mixed, legacy, or ambiguous ownership is refused before
+  anything is stopped.
   down stops the workbench and any Restate or Postgres container it started.
   AGENT_WORKBENCH_POSTGRES=1 starts a port-isolated managed Postgres container
   unless AGENT_WORKBENCH_DATABASE_URL points at an existing database.
@@ -2324,6 +2347,21 @@ cleanup_attempt_postgres_service() {
 }
 
 cleanup_start_attempt() {
+  if (( replacing_process )); then
+    # A process replacement created nothing but the replacement process. The
+    # engine, its journals, the managed stores, the registered deployment, the
+    # run footprint and the application data all predate this attempt and are
+    # never retired here.
+    if (( started_workbench_this_attempt )); then
+      if ! stop_attempt_workbench; then
+        log "replacement cleanup could not stop the process it started; retaining the engine, application state, and ownership metadata"
+        return 1
+      fi
+      started_workbench_this_attempt=0
+    fi
+    log "replacement cleanup retained the engine, managed services, deployment, and application data"
+    return 0
+  fi
   if (( reset_finalization_active )); then
     log "reset finalization remains retryable; retaining its authoritative ownership receipt"
     return 1
@@ -2784,8 +2822,42 @@ endpoint_url() {
   fi
 }
 
+# Digest of the durable Restate trust domain this stack is bound to. Lash
+# persists only the digest of RESTATE_AUTHORITY_ID and puts it in every
+# durable-wait address, so a process replacement carrying a different value
+# would not continue the same durable state. `-` records that the launcher ran
+# without one (the workbench itself refuses to boot in that case).
+current_restate_authority_digest() {
+  local value="${RESTATE_AUTHORITY_ID:-}"
+  if [[ -z "$value" ]]; then
+    printf -- '-\n'
+    return
+  fi
+  printf '%s' "$value" | sha256sum | awk '{print $1}'
+}
+
 write_meta() {
   local content
+  local meta_restate_managed="$started_restate_this_attempt"
+  local meta_restate_name="$started_restate_name"
+  local meta_restate_id="$started_restate_id"
+  local meta_postgres_managed="$started_postgres_this_attempt"
+  local meta_postgres_name="$started_postgres_name"
+  local meta_postgres_id="$started_postgres_id"
+  local meta_retirement_authorized="$restate_retirement_authorized"
+  local meta_deployment_id="$registered_deployment_id"
+  local meta_registry_hash="$restate_registry_hash"
+  if (( inherited_service_facts )); then
+    meta_restate_managed="$inherited_restate_managed"
+    meta_restate_name="$inherited_restate_name"
+    meta_restate_id="$inherited_restate_id"
+    meta_postgres_managed="$inherited_postgres_managed"
+    meta_postgres_name="$inherited_postgres_name"
+    meta_postgres_id="$inherited_postgres_id"
+    meta_retirement_authorized="$inherited_retirement_authorized"
+    meta_deployment_id="$inherited_deployment_id"
+    meta_registry_hash="$inherited_registry_hash"
+  fi
   content="$({
     printf 'meta_schema=3\n'
     printf 'workbench_addr=%q\n' "$workbench_addr"
@@ -2800,17 +2872,18 @@ write_meta() {
     printf 'data_dir=%q\n' "$data_dir"
     printf 'database_fingerprint=%q\n' "$database_fingerprint"
     printf 'ownership_token=%q\n' "$ownership_token"
-    printf 'restate_managed=%q\n' "$started_restate_this_attempt"
-    printf 'postgres_managed=%q\n' "$started_postgres_this_attempt"
-    printf 'restate_container_name=%q\n' "$started_restate_name"
-    printf 'restate_container_id=%q\n' "$started_restate_id"
-    printf 'postgres_container_name=%q\n' "$started_postgres_name"
-    printf 'postgres_container_id=%q\n' "$started_postgres_id"
-    printf 'restate_retirement_authorized=%q\n' "$restate_retirement_authorized"
-    printf 'restate_deployment_id=%q\n' "$registered_deployment_id"
-    printf 'restate_registry_hash=%q\n' "$restate_registry_hash"
+    printf 'restate_managed=%q\n' "$meta_restate_managed"
+    printf 'postgres_managed=%q\n' "$meta_postgres_managed"
+    printf 'restate_container_name=%q\n' "$meta_restate_name"
+    printf 'restate_container_id=%q\n' "$meta_restate_id"
+    printf 'postgres_container_name=%q\n' "$meta_postgres_name"
+    printf 'postgres_container_id=%q\n' "$meta_postgres_id"
+    printf 'restate_retirement_authorized=%q\n' "$meta_retirement_authorized"
+    printf 'restate_deployment_id=%q\n' "$meta_deployment_id"
+    printf 'restate_registry_hash=%q\n' "$meta_registry_hash"
     printf 'postgres_host=%q\n' "$postgres_host"
     printf 'postgres_port=%q\n' "$postgres_port"
+    printf 'restate_authority_digest=%q\n' "$(current_restate_authority_digest)"
     printf 'log_file=%q\n' "$log_file"
   })"
   printf '%s\n' "$content" | publish_private_record replace "$meta_file"
@@ -3310,6 +3383,215 @@ run_up() {
     || die "could not clear a stale reset recovery command"
   [[ ! -e "$reset_recovery_file" && ! -L "$reset_recovery_file" ]] \
     || die "could not prove a stale reset recovery command was cleared"
+  log "ready: $workbench_url"
+  open_browser "$workbench_url"
+}
+
+# Reads the run metadata of the stack this launcher is asked to replace and
+# proves, before anything is stopped, that it is this launcher's own stack at
+# exactly the current configuration. Runs in a subshell because the metadata
+# assigns the launcher's own live globals. Prints the facts the replacement
+# inherits, unit-separated: the separator must not be IFS whitespace, or `read`
+# would collapse the empty fields an unmanaged store leaves.
+replacement_target_record() (
+  local expected_addr="$workbench_addr"
+  local expected_endpoint_addr="$restate_endpoint_addr"
+  local expected_ingress_url="$restate_ingress_url"
+  local expected_admin_url="$restate_admin_url"
+  local expected_deployment_url
+  expected_deployment_url="$(endpoint_url)"
+  local expected_store_backend="$store_backend"
+  local expected_data_dir="$data_dir"
+  local expected_database_fingerprint="$database_fingerprint"
+  local expected_log_file="$log_file"
+  local expected_restate_container="$restate_container"
+
+  regular_private_file "$meta_file" || return 1
+  unset meta_schema workbench_addr workbench_pid workbench_start_time
+  unset workbench_url restate_endpoint_addr restate_ingress_url restate_admin_url
+  unset deployment_url store_backend data_dir database_fingerprint ownership_token
+  unset restate_managed postgres_managed restate_container_name restate_container_id
+  unset postgres_container_name postgres_container_id restate_retirement_authorized
+  unset restate_deployment_id restate_registry_hash postgres_host postgres_port
+  unset restate_authority_digest log_file
+  # shellcheck disable=SC1090
+  source "$meta_file"
+
+  [[ "${meta_schema:-}" = 3 \
+    && "${ownership_token:-}" =~ ^[0-9a-fA-F-]{36}$ \
+    && "${workbench_pid:-}" =~ ^[0-9]+$ && "${workbench_start_time:-}" =~ ^[0-9]+$ \
+    && "${restate_managed:-}" =~ ^[01]$ && "${postgres_managed:-}" =~ ^[01]$ \
+    && "${store_backend:-}" =~ ^(sqlite|postgres)$ ]] || return 1
+  # Written only by launchers that record the durable trust domain. An older
+  # stack cannot prove its authority did not change, so it is not replaceable.
+  [[ -n "${restate_authority_digest:-}" ]] || return 1
+  [[ "${restate_managed:-}" != 1 \
+    || ( -n "${restate_container_name:-}" \
+      && "${restate_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ) ]] || return 1
+  [[ "${postgres_managed:-}" != 1 \
+    || ( -n "${postgres_container_name:-}" \
+      && "${postgres_container_id:-}" =~ ^[0-9a-fA-F]{12,64}$ ) ]] || return 1
+  [[ "${restate_managed:-}" != 1 || "${restate_container_name:-}" = "$expected_restate_container" ]] \
+    || return 1
+
+  [[ "$workbench_addr" = "$expected_addr" \
+    && "$restate_endpoint_addr" = "$expected_endpoint_addr" \
+    && "$restate_ingress_url" = "$expected_ingress_url" \
+    && "$restate_admin_url" = "$expected_admin_url" \
+    && "$deployment_url" = "$expected_deployment_url" \
+    && "$store_backend" = "$expected_store_backend" \
+    && "$data_dir" = "$expected_data_dir" \
+    && "$database_fingerprint" = "$expected_database_fingerprint" \
+    && "$log_file" = "$expected_log_file" ]] || return 1
+
+  printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
+    "$workbench_pid" "$workbench_start_time" "$ownership_token" \
+    "$restate_managed" "${restate_container_name:-}" "${restate_container_id:-}" \
+    "$postgres_managed" "${postgres_container_name:-}" "${postgres_container_id:-}" \
+    "${restate_retirement_authorized:-0}" "${restate_deployment_id:-}" \
+    "${restate_registry_hash:-}" "$restate_authority_digest"
+)
+
+# Keeps the disposable-stack ownership record pointing at the live process, so
+# a later `restart --reset-dev-state` still recognizes the stack it owns.
+reset_ownership_names_process() {
+  local expected_record="$1"
+  [[ -e "$reset_file" || -L "$reset_file" ]] || return 0
+  regular_private_file "$reset_file" || return 1
+  (
+    unset reset_schema owned_token owned_state_key owned_data_dir owned_pid_record
+    # shellcheck disable=SC1090
+    source "$reset_file"
+    [[ "$reset_schema" = 6 && "$owned_token" = "$ownership_token" \
+      && "$owned_state_key" = "$state_key" && "$owned_data_dir" = "$data_dir" \
+      && "$owned_pid_record" = "$expected_record" ]]
+  )
+}
+
+rebind_reset_ownership_process() {
+  [[ -e "$reset_file" || -L "$reset_file" ]] || return 0
+  regular_private_file "$reset_file" || return 1
+  local new_record updated matched line
+  new_record="$(pid_file_identity "$pid_file")" || return 1
+  matched="$(grep -c '^owned_pid_record=' -- "$reset_file" || true)"
+  [[ "$matched" = 1 ]] || return 1
+  updated="$(
+    while IFS= read -r line; do
+      if [[ "$line" = owned_pid_record=* ]]; then
+        printf 'owned_pid_record=%q\n' "$new_record"
+      else
+        printf '%s\n' "$line"
+      fi
+    done < "$reset_file"
+  )" || return 1
+  printf '%s\n' "$updated" | publish_private_record replace "$reset_file" || return 1
+  reset_ownership_names_process "$new_record"
+}
+
+wait_replaced_endpoint_free() {
+  local label="$1" host="$2" port="$3"
+  local deadline=$((SECONDS + 30))
+  while tcp_ready "$host" "$port"; do
+    if (( SECONDS >= deadline )); then
+      die "restart stopped after retiring the recorded process: $label port $host:$port did not become free; the engine, managed services and application data are retained and the same command is retryable"
+    fi
+    sleep 1
+  done
+}
+
+run_replace_process() {
+  local record=""
+  record="$(replacement_target_record)" \
+    || die "restart refused: no run metadata here proves this launcher owns a workbench stack at $workbench_addr with the current settings; use up to start one, or restart --reset-dev-state to replace a wholly launcher-owned disposable stack"
+
+  local prior_pid prior_start prior_token prior_restate_managed prior_restate_name
+  local prior_restate_id prior_postgres_managed prior_postgres_name prior_postgres_id
+  local prior_retirement_authorized prior_deployment_id prior_registry_hash prior_authority
+  IFS=$'\x1f' read -r prior_pid prior_start prior_token prior_restate_managed \
+    prior_restate_name prior_restate_id prior_postgres_managed prior_postgres_name \
+    prior_postgres_id prior_retirement_authorized prior_deployment_id \
+    prior_registry_hash prior_authority <<<"$record"
+
+  [[ "$prior_authority" = "$(current_restate_authority_digest)" ]] \
+    || die "restart refused: RESTATE_AUTHORITY_ID does not match the durable trust domain this stack is bound to; export the original value, or use restart --reset-dev-state to start a new durable state"
+
+  # Continue the recorded stack's ownership: its containers, service leases,
+  # run footprint and application data all carry this token.
+  ownership_token="$prior_token"
+  local prior_record="$prior_pid $prior_start"
+
+  [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" \
+    = "1 $ownership_token $state_key $data_path_hash" ]] \
+    || die "restart refused: run-footprint ownership does not match the recorded stack"
+  if [[ -e "$data_owner_file" || -L "$data_owner_file" ]]; then
+    local owned_token="$ownership_token" owned_data_dir="$data_dir"
+    data_owner_matches \
+      || die "restart refused: application data ownership does not match the recorded stack"
+  fi
+  reset_ownership_names_process "$prior_record" \
+    || die "restart refused: disposable-stack ownership metadata does not name the recorded process"
+
+  local published_record observation
+  published_record="$(read_pid_file "$pid_file" 2>/dev/null || true)"
+  observation="$(process_identity_observation "$prior_pid" "$prior_start")"
+  case "$observation" in
+    running|retired) ;;
+    mismatch)
+      die "restart refused: the recorded workbench PID belongs to a different process incarnation"
+      ;;
+    *)
+      die "restart refused: the recorded workbench process identity could not be observed"
+      ;;
+  esac
+  if [[ "$published_record" = "$prior_record" ]]; then
+    log "replacing workbench process $prior_pid at $workbench_addr; engine, managed services and application data are retained"
+    retire_persisted_process "$pid_file" "$process_retirement_receipt_file" \
+      "$ownership_token" "$prior_pid" "$prior_start" \
+      || die "restart stopped before replacement: could not retire the recorded workbench process; nothing else was stopped and the same command is retryable"
+    rm -f -- "$pid_file" \
+      || die "restart stopped before replacement: could not clear the retired process metadata"
+  elif [[ -n "$published_record" ]]; then
+    die "restart refused: workbench process metadata does not match the recorded stack"
+  else
+    [[ "$observation" = retired ]] \
+      || die "restart refused: the recorded workbench process is still running without its process metadata"
+    log "resuming an interrupted replacement of workbench process $prior_pid at $workbench_addr"
+  fi
+  [[ ! -e "$pid_file" && ! -L "$pid_file" ]] \
+    || die "restart stopped before replacement: workbench process metadata reappeared"
+  if [[ -e "$process_retirement_receipt_file" || -L "$process_retirement_receipt_file" ]]; then
+    [[ "$(read_process_retirement_receipt "$process_retirement_receipt_file" 2>/dev/null || true)" \
+      = "2 retired $ownership_token $prior_pid $prior_start" ]] \
+      || die "restart stopped before replacement: the process retirement receipt is invalid or names another process"
+    rm -f -- "$process_retirement_receipt_file" \
+      || die "restart stopped before replacement: could not clear the process retirement receipt"
+    [[ ! -e "$process_retirement_receipt_file" && ! -L "$process_retirement_receipt_file" ]] \
+      || die "restart stopped before replacement: the process retirement receipt remains"
+  fi
+
+  wait_replaced_endpoint_free "workbench UI" "$workbench_wait_host" "$workbench_port"
+  wait_replaced_endpoint_free "workbench Restate endpoint" "$endpoint_wait_host" "$endpoint_port"
+
+  replacing_process=1
+  inherited_service_facts=1
+  inherited_restate_managed="$prior_restate_managed"
+  inherited_restate_name="$prior_restate_name"
+  inherited_restate_id="$prior_restate_id"
+  inherited_postgres_managed="$prior_postgres_managed"
+  inherited_postgres_name="$prior_postgres_name"
+  inherited_postgres_id="$prior_postgres_id"
+  inherited_retirement_authorized="$prior_retirement_authorized"
+  inherited_deployment_id="$prior_deployment_id"
+  inherited_registry_hash="$prior_registry_hash"
+  start_attempt_active=1
+  start_detached
+  wait_workbench_ready 90
+  wait_workbench_endpoint_ready 90
+  rebind_reset_ownership_process \
+    || die "the replacement process is running but its disposable-stack ownership record could not be rebound; rerun the same restart command"
+  require_workbench_alive "before reporting ready"
+  start_attempt_active=0
+  log "replaced process; the Restate deployment, its journals and the application data at $data_dir were retained"
   log "ready: $workbench_url"
   open_browser "$workbench_url"
 }
@@ -3993,10 +4275,11 @@ case "$action" in
     run_foreground
     ;;
   restart)
-    if (( ! reset_dev_state )); then
-      die "restart cannot replace a replayable deployment; use restart --reset-dev-state only for a wholly launcher-owned disposable stack"
+    if (( reset_dev_state )); then
+      run_reset_dev_state
+    else
+      run_replace_process
     fi
-    run_reset_dev_state
     ;;
   status)
     if [[ -z "$explicit_target" ]]; then

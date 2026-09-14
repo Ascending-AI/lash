@@ -11,6 +11,10 @@ agent-workbench port='3030':
 agent-workbench-up port='3030':
   ./scripts/agent-workbench-dev.sh up --port "{{port}}"
 
+# Non-destructive: replaces only the workbench process and keeps the Restate
+# engine and its journals, any managed Postgres, the registered deployment, and
+# the application data. Export the same RESTATE_AUTHORITY_ID as the running
+# stack.
 agent-workbench-restart port='3030':
   ./scripts/agent-workbench-dev.sh restart --port "{{port}}"
 
