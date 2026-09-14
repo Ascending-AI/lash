@@ -1715,15 +1715,22 @@ derive_mutation_jobs() {{
             store_suite_for_step(runtime_scenarios)
         )
         self.assertIn(
-            "cargo nextest run --profile ci -p lash-runtime --features rlm",
+            "cargo nextest run --profile ci -p lash-internal-postgres-store",
             scenario_cargo,
         )
+        self.assertIn("--test integration", scenario_cargo)
+        # One named test, pinned on both branches. A libtest filter that
+        # matches nothing exits 0, so a rename that leaves this leg pointing
+        # at a deleted test turns the slot green without running anything.
         oracle = (
-            "agent_scenario_public_process_parents_are_literal_and"
-            "_crash_atomic_on_postgres"
+            "public_provider_parent_end_row_is_recovered_after_a_crash"
+            "_before_the_ledger_write_on_postgres"
         )
         self.assertIn(f"test({oracle})", scenario_cargo)
-        self.assertIn(oracle, scenario_bazel)
+        self.assertIn(f"--test_arg={oracle}", scenario_bazel)
+        self.assertIn(
+            "//crates/lash-postgres-store:integration__test", scenario_bazel
+        )
         self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
         self.assertIn("github.event_name != 'push'", postgres_store_job)
 
