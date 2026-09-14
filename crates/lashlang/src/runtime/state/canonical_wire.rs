@@ -98,6 +98,10 @@ fn take_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, SnapshotDecodeError
     Ok(u64::from_be_bytes(value))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the slice length was checked by endian-fixed take_length arithmetic above, per the message"
+)]
 fn take_array<const N: usize>(
     bytes: &[u8],
     cursor: &mut usize,

@@ -132,6 +132,10 @@ impl BenchmarkToolCatalogObserver {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "finish is the single consumer of the observer armed by arm_tool_catalog_observation, per the message"
+    )]
     pub(crate) fn finish(&self) -> BenchmarkToolCatalogObservation {
         let active = self
             .state

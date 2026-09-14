@@ -391,6 +391,10 @@ fn measure_hardening_identity_phases(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the attachment id is synthesized from a session id and turn index, which the parse accepts, per the message"
+)]
 async fn measure_store_hardening_backend_turn(
     store: &Arc<dyn lash_core::RuntimePersistence>,
     session_id: &SessionId,

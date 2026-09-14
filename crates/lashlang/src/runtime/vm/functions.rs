@@ -71,6 +71,10 @@ pub(super) fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the Map receiver was checked and map_set stored the key above, so the stored pair resolves, per both messages"
+    )]
     pub(super) fn map_set_live(
         &mut self,
         receiver: HeapId,
@@ -102,6 +106,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(deleted)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the Set receiver was checked and set_add stored the value above, per both messages"
+    )]
     pub(super) fn set_add_live(
         &mut self,
         receiver: HeapId,
@@ -442,6 +450,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the URLSearchParams receiver was checked by heap guards above, per the message"
+    )]
     pub(super) fn begin_url_search_params_for_each(
         &mut self,
         function: Value,

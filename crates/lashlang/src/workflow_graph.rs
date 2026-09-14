@@ -357,6 +357,10 @@ fn collect_subgraph_nodes<'a>(graph: &'a WorkflowSubgraph, nodes: &mut Vec<&'a W
 ///
 /// Node identity is path-keyed, so the projector and the execution-site walk
 /// must agree on how a child path is spelled; this is that single spelling.
+#[expect(
+    clippy::expect_used,
+    reason = "a child index into an in-memory AST whose children are enumerated far below u32::MAX fits, per the message"
+)]
 pub fn child_path(path: &[u32], child: impl TryInto<u32>) -> Vec<u32> {
     let mut result = path.to_vec();
     result.push(child.try_into().ok().expect("AST child index fits u32"));

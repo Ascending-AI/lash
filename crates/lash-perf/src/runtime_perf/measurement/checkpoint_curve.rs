@@ -132,6 +132,10 @@ struct DurableCheckpointCurveFixture {
     store: Arc<dyn lash_core::RuntimePersistence>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the postgres database or the SQLite root is provisioned by the caller for exactly the scenario being run, which each site's message states"
+)]
 pub(crate) async fn run_once_durable_checkpoint_curve(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
@@ -487,6 +491,10 @@ fn append_checkpoint_curve_graph(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the generator only emits bytes in 33..127, so the UTF-8 conversion cannot fail, per the message"
+)]
 fn checkpoint_curve_ascii(len: usize, seed: usize) -> String {
     // Keep the commit-size benchmark's deterministic printable-payload shape:
     // logical byte targets stay exact without compression-friendly zero fill.

@@ -116,6 +116,10 @@ impl Heap {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the slot was resolved and its old object cloned a few lines above"
+    )]
     pub(crate) fn delete_javascript_member(
         &mut self,
         receiver: &Value,

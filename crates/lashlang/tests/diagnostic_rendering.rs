@@ -41,6 +41,10 @@ impl ExecutionHost for DiagnosticHost {
 
 /// The same `tools` surface the unit-test corpus linked against, so the
 /// "available operations" hint below is the one the corpus recorded.
+#[expect(
+    clippy::expect_used,
+    reason = "fixture catalog registers each operation once into a fresh catalog, per the message"
+)]
 fn environment() -> LashlangHostEnvironment {
     let mut resources = LashlangHostCatalog::new();
     for operation in ["echo", "err", "missing", "spawn"] {
@@ -58,6 +62,10 @@ fn environment() -> LashlangHostEnvironment {
     LashlangHostEnvironment::new(resources, LashlangAbilities::all())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture lowers a known TypeScript source, per the message"
+)]
 fn lower(source: &str) -> lashlang::Program {
     let environment = environment();
     lash_typescript::parse_with_globals(source, &environment.globals)

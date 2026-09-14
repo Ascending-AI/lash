@@ -240,6 +240,10 @@ impl Compiler {
         true
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the comprehension body compiled once earlier in this same compile, filling element_shape before the aggregate is shaped, per the message"
+    )]
     fn compile_aggregate_await_shape(
         &mut self,
         expr: &Expr,

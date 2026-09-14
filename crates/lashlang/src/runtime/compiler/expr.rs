@@ -35,6 +35,10 @@ impl Compiler {
     /// exactly-once identity and its workflow node; a function body cannot
     /// perform one, so a call is ordinary computation and stays invisible to
     /// the graph.
+    #[expect(
+        clippy::expect_used,
+        reason = "the linker records every declared function before lowering calls to it, per the message"
+    )]
     fn compile_declared_call(&mut self, function: &str, args: &[Expr]) {
         let index = self
             .declared_functions
@@ -51,6 +55,10 @@ impl Compiler {
         self.code.push(Instruction::Call { argc: args.len() });
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the tool call instruction was emitted by this function two lines above"
+    )]
     fn emit_builtin_call(&mut self, name: &str, args: &[Expr]) {
         // Source spells a declared call and a builtin call the same way, and
         // the linker normally resolves which one it is. The unlinked compile
@@ -209,6 +217,10 @@ impl Compiler {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "validate_ast rejects break or continue outside loops, per the messages, so a loop context exists here"
+    )]
     pub(super) fn compile_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::LabelAnnotated { label, expr } => {
@@ -659,6 +671,10 @@ impl Compiler {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each handler scope pushed in this same compile is popped exactly once, and the cleanup ip was just emitted where the message says"
+    )]
     fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr) {
         if scope.catch.is_none() && scope.finally.is_none() {
             self.compile_expr(&scope.body);

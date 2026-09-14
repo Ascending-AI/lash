@@ -195,6 +195,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "active_function.is_some() above guarantees a first frame to mutate, per the guarded split"
+    )]
     pub(super) fn execute_javascript_global_delete(&mut self) -> Result<(), RuntimeError> {
         let name = self.pop_stack()?;
         let Value::String(name) = name else {
@@ -226,6 +230,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "active_function.is_some() means a first frame exists to read, per the guarded split"
+    )]
     pub(super) fn execute_javascript_global_has(&mut self) -> Result<(), RuntimeError> {
         let name = self.pop_stack()?;
         let Value::String(name) = name else {
@@ -254,6 +262,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "active_function.is_some() means a first frame exists to mutate, per the guarded split"
+    )]
     pub(super) fn execute_javascript_global_set(&mut self) -> Result<(), RuntimeError> {
         let value = self.pop_stack()?;
         let name = self.pop_stack()?;
@@ -546,6 +558,10 @@ fn javascript_json_stringify_with_errors(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "heap record keys are Rust strings and JSON strings by construction, per the message"
+)]
 fn stringify_heap_record(
     heap: &Heap,
     record: &Record,
@@ -811,6 +827,10 @@ fn write_console_record(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serde_json::to_string of a plain string cannot fail, per the message"
+)]
 fn write_json_string(value: &str, out: &mut String) -> Result<(), RuntimeError> {
     push_console_text(
         out,

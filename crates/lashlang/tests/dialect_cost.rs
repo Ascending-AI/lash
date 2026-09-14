@@ -23,8 +23,6 @@
 //! the allocator for, and every figure below is allocated bytes per iteration.
 //! Nothing here is a timing assertion, so a loaded box does not move it.
 
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -78,6 +76,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 const PERF_GUARD_BUDGETS: &str = include_str!("../../../scripts/perf_guard_budgets.json");
 
 /// `allocated_bytes_per_iter_max` for one corpus scenario and perf mode.
+#[expect(
+    clippy::expect_used,
+    reason = "the checked-in budgets JSON in scripts/perf_guard_budgets.json parses once here, per the message"
+)]
 fn budgeted_bytes_per_iter(scenario: &str, mode: &str) -> f64 {
     let budgets: serde_json::Value = serde_json::from_str(PERF_GUARD_BUDGETS)
         .expect("the perf guard budgets must be valid JSON");
@@ -178,6 +180,10 @@ for (let n = 0; n < 200; n++) {
 finish(rows.length);
 ";
 
+#[expect(
+    clippy::expect_used,
+    reason = "the dialect cost probe's source compiles, per the message"
+)]
 fn typescript(source: &str) -> CompiledProgram {
     lash_typescript::compile(source).expect("dialect program should compile")
 }

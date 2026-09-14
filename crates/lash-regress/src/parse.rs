@@ -293,6 +293,10 @@ where
     })
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the match on nodes.len() above establishes exactly one element before draining it"
+)]
 fn make_cat(nodes: ir::NodeList) -> ir::Node {
     match nodes.len() {
         0 => ir::Node::Empty,
@@ -436,6 +440,10 @@ where
     I: Iterator<Item = u32> + Clone,
 {
     /// Consume a character, returning it.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the debug_assert one line above binds the caller contract that the yielded char is the one sent"
+    )]
     fn consume<C: Into<u32>>(&mut self, c: C) -> u32 {
         let nc = self.input.next();
         core::debug_assert!(nc == Some(c.into()), "char was not next");
@@ -511,6 +519,11 @@ where
     }
 
     /// ES6 21.2.2.5 Term.
+    #[expect(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        reason = "the is_none() guard above establishes the character, and the later expects re-read chars peeked on the immediately preceding line"
+    )]
     fn consume_term(&mut self) -> Result<ir::Node, Error> {
         let mut result: Vec<ir::Node> = Vec::new();
         loop {
@@ -897,6 +910,11 @@ where
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        reason = "the is_none() guard above establishes the character, and the two expects re-read characters peeked on the immediately preceding lines"
+    )]
     fn try_consume_bracket_class_atom(&mut self) -> Result<Option<ClassAtom>, Error> {
         let c = self.peek();
         if c.is_none() {
@@ -1361,6 +1379,10 @@ where
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the is_none() guard above establishes the character"
+    )]
     fn try_consume_quantifier_prefix(&mut self) -> Result<Option<ir::Quantifier>, Error> {
         let nc = self.peek();
         if nc.is_none() {
@@ -1473,6 +1495,10 @@ where
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the caller peeks the escape's character one line above, and the octal continuation re-reads a peeked digit"
+    )]
     fn consume_character_escape(&mut self) -> Result<u32, Error> {
         let c = self.next().expect("Should have a character");
         let ch = to_char_sat(c);
@@ -1572,6 +1598,10 @@ where
     }
 
     // AtomEscape
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the arms dispatch on a digit just seen, so the integer literal parses and the backreference reduce is non-empty"
+    )]
     fn consume_atom_escape(&mut self) -> Result<ir::Node, Error> {
         let Some(c) = self.peek() else {
             return error("Incomplete escape");

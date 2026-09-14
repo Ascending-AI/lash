@@ -209,6 +209,10 @@ impl DeferredTriggerResolutionError {
 
 /// Resolve and atomically fold missing trigger constructors and their event
 /// schema dependencies into a link-scoped surface.
+#[expect(
+    clippy::expect_used,
+    reason = "both journaled identities here are validated call-path or route values: the strings encode as canonical JSON (see each site's message)"
+)]
 pub async fn resolve_and_fold_deferred_triggers(
     referenced: &BTreeSet<String>,
     mut surface: LashlangSurface,

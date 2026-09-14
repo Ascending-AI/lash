@@ -437,6 +437,10 @@ fn normalize_number(value: f64) -> f64 {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serde_json::to_string of a plain string cannot fail, per the message"
+)]
 pub(crate) fn child_location(parent: &str, name: &str) -> String {
     if is_path_identifier(name) {
         format!("{parent}.{name}")

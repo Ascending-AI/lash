@@ -352,6 +352,10 @@ fn to_iso_string(milliseconds: f64) -> Option<String> {
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    #[expect(
+        clippy::expect_used,
+        reason = "Date receiver kind was checked by the match guard above, per the message"
+    )]
     pub(super) fn construct_javascript_date(
         &mut self,
         args: &[Value],
@@ -420,6 +424,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the receiver is a Date heap object, checked above the method dispatch, per the message"
+    )]
     pub(super) fn execute_javascript_date_method(
         &mut self,
         method: &str,

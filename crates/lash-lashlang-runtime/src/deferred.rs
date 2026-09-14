@@ -414,6 +414,10 @@ pub async fn resolve_and_build_deferred_environment_from_references(
     Ok(host_environment)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the journaled deferred-tool identity is a call path of validated strings, so it encodes as canonical JSON, as the site's own message states"
+)]
 async fn journal_deferred_outcomes<F>(
     referenced: BTreeSet<String>,
     ambient_paths: F,

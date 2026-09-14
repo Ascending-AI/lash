@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 mod namespace;
 
 mod artifact;

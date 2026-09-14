@@ -20,8 +20,6 @@
 //! those spellings mean is pinned next door in
 //! `crates/lash-typescript/tests/array_append.rs`.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -83,6 +81,10 @@ impl ExecutionHost for Host {
 /// than authored: what they pin is the cost of the two lowered append forms,
 /// and stating those forms is the only way to be sure the measurement is of
 /// them (ADR 0096).
+#[expect(
+    clippy::expect_used,
+    reason = "the measured append probe compiles and executes its fixture cell, per each message"
+)]
 fn run_measured(program: &Program) -> (Value, u64) {
     let compiled = compile_ast(program).expect("cost probe should compile");
     let mut state = State::new();

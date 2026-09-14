@@ -101,6 +101,10 @@ where
 // Here are some optimizations we support.
 
 // Remove empty Nodes.
+#[expect(
+    clippy::unwrap_used,
+    reason = "the match on nodes.len() above establishes exactly one node before popping it"
+)]
 fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
         Node::Empty | Node::Goal | Node::Char { .. } => PassAction::Keep,
@@ -244,6 +248,10 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
 }
 
 // Remove excess cats.
+#[expect(
+    clippy::unwrap_used,
+    reason = "the len() == 1 branch above establishes the single node before popping it"
+)]
 fn decat(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
         Node::Cat(nodes) => {

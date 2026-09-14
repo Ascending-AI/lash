@@ -31,6 +31,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(Value::Bool(result))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each URLSearchParams arm's receiver kind was checked by the dispatch, per each message"
+    )]
     pub(super) fn execute_url_heap_method(
         &mut self,
         kind: &str,

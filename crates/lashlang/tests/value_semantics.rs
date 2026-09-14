@@ -51,6 +51,10 @@ fn finished(outcome: ExecutionOutcome) -> Value {
 /// heap's behaviour under aliasing and snapshotting, which is a property of the
 /// IR and not of any dialect (ADR 0096). The program each one replaces is kept
 /// verbatim as a comment above it.
+#[expect(
+    clippy::expect_used,
+    reason = "the probe cell compiles and executes against the probe host, per each message"
+)]
 async fn run(state: &mut State, cell: Program) -> Value {
     let compiled = compile_ast(&cell).expect("probe cell should compile");
     finished(
@@ -64,6 +68,10 @@ async fn run(state: &mut State, cell: Program) -> Value {
 ///
 /// Both directions matter: the encoder must be able to emit the state, and the
 /// decoder must accept what it emitted.
+#[expect(
+    clippy::expect_used,
+    reason = "the emitted snapshot bytes decode by construction of the writer, per the message"
+)]
 fn round_trip(state: &State) -> State {
     let bytes = state
         .snapshot()

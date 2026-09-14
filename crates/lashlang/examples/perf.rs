@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 mod bench_support;
 
 use bench_support::{
@@ -100,6 +98,10 @@ enum Mode {
     PhaseBreakdown,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark entry point: the fixed-configuration tokio runtime is built per the constants above"
+)]
 fn main() {
     let mut args = env::args().skip(1);
     if matches!(args.next().as_deref(), Some("--list-scenarios")) {
@@ -140,6 +142,10 @@ fn main() {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "each mode's step is a checked benchmark fact: snapshot round trip, store put/get, process export and cache miss compile, per each message"
+)]
 fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterations: usize) {
     let cache_key = scenario.to_string();
     let projected = projected_bindings(scenario);
@@ -390,6 +396,10 @@ impl PhaseBreakdownMetric {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark module links against the fixture host environment twice for the phase breakdown"
+)]
 fn run_phase_breakdown(
     rt: &tokio::runtime::Runtime,
     scenario: Scenario,
@@ -448,6 +458,10 @@ fn measure_phase(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark's canonical fixture executes to completion, per the execute below"
+)]
 fn execute_benchmark(
     rt: &tokio::runtime::Runtime,
     compiled: &lashlang::CompiledProgram,

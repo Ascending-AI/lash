@@ -12,6 +12,10 @@ use super::super::{javascript_to_string, to_json_direct};
 use super::javascript::{ecma_record_entries, js_stdlib_error};
 use super::*;
 
+#[expect(
+    clippy::expect_used,
+    reason = "record keys are Rust strings and JSON strings by construction, per the message"
+)]
 pub(super) fn javascript_json_stringify(value: &Value) -> Result<String, RuntimeError> {
     match value {
         Value::Null | Value::Undefined => Ok("null".to_string()),

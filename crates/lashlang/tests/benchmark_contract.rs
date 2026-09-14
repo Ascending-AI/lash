@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 #[path = "../examples/bench_support/mod.rs"]
 mod bench_support;
 
@@ -36,6 +34,10 @@ async fn benchmark_scenarios_have_golden_outputs() {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark-contract snapshot is a crate-owned JSON structure, which serializes, per the message"
+)]
 fn stable_json(value: Value) -> serde_json::Value {
     serde_json::to_value(value).expect("benchmark output should be JSON serializable")
 }

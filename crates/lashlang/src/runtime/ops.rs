@@ -370,6 +370,10 @@ fn validate_comparable_items(builtin: &'static str, items: &[Value]) -> Result<(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "validate_comparable_items() rejected incomparable shapes one line above, so the comparison cannot fail, per the message"
+)]
 async fn execute_sort_builtin(
     values: &[Value],
     instructions_executed: &mut u64,
@@ -401,6 +405,10 @@ fn field_path_value<'value>(value: &'value Value, path: &str) -> Option<&'value 
     Some(current)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "validate_comparable_items() rejected incomparable keys two lines above, per the message"
+)]
 async fn execute_sort_by_builtin(
     values: &[Value],
     instructions_executed: &mut u64,

@@ -6,8 +6,6 @@
 //! measurement helpers (`perf_support`). Host applications own their own UI
 //! measurement support.
 
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 pub mod perf_support;
 pub mod runtime_perf;
 

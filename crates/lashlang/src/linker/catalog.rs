@@ -91,6 +91,10 @@ impl LashlangHostCatalog {
         Self::default()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each operation registration in this loop is the first for its name in a freshly built catalog, per the message"
+    )]
     pub fn tool_default(operations: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut catalog = Self::new();
         for operation in operations {
@@ -237,6 +241,10 @@ impl LashlangHostCatalog {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the module instance was inserted into the same map a few lines above under the same key"
+    )]
     fn insert_module_operation_binding(
         &mut self,
         module_path: impl IntoIterator<Item = impl Into<String>>,
@@ -301,6 +309,10 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "requirement modules were inserted before requiring their operations, per the message"
+    )]
     pub(crate) fn require_module_operation_binding(
         &mut self,
         module_path: impl IntoIterator<Item = impl Into<String>>,

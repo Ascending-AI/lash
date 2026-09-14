@@ -1,6 +1,10 @@
 #![allow(clippy::uninlined_format_args)]
 
 #[track_caller]
+#[expect(
+    clippy::unwrap_used,
+    reason = "the fixture compiles a known-invalid pattern and asserts the returned error, per the compile above"
+)]
 fn test_1_error(pattern: &str, expected_err: &str) {
     let res = lash_regress::Regex::with_flags(pattern, "u");
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);

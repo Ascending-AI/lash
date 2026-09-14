@@ -77,10 +77,18 @@ fn link(program: Program) -> Result<lashlang::LinkedModule, LinkError> {
     lashlang::LinkedModule::link(program, test_host_environment())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture asserts this program fails to link, per the message"
+)]
 fn link_error(program: Program) -> LinkError {
     link(program).expect_err("linking should fail")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture links a known-good program and executes it, per each message"
+)]
 async fn finish_value(program: Program) -> Value {
     let linked = link(program).expect("linking should succeed");
     let compiled = lashlang::compile_linked(&linked);

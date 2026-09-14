@@ -35,6 +35,10 @@ fn non_matching_captures() {
     test_with_configs(non_matching_captures_tc)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the fixture compiles a known-good pattern and the assertions below assume a match at a known range, per each result"
+)]
 fn test_captures_tc(tc: TestConfig) {
     // Zero explicit groups - but group zero is the entire match.
     let m = tc.compile("derp").find("derp").unwrap();
@@ -1177,6 +1181,10 @@ fn run_regexp_regexp_tc(tc: TestConfig) {
     tc.compilef("\\uDB88|\\uDBEC|aa", "").test_fails("");
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the fixture compiles a known-good pattern and the assertions below assume a match at a known range, per each result"
+)]
 fn named_capture_groups_in_order_tc(tc: TestConfig) {
     // Named capture groups are returned in their definition order.
     let re = tc.compile("(?<zoo>a)(?<apple>b)(?<space>c)(?<nothing>d)?");
@@ -1956,6 +1964,10 @@ mod utf16_tests {
         test_with_configs(test_utf16_byte_sequences_tc)
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the fixture compiles a known-good pattern and the assertions below assume a match at a known range, per each result"
+    )]
     fn test_utf16_byte_sequences_tc(tc: TestConfig) {
         // Regress emits byte sequences for e.g. 'abc'.
         // Ensure these are properly decoded in UTF-16/UCS2.
@@ -1987,6 +1999,10 @@ mod utf16_tests {
         test_with_configs(test_utf16_regression_101_tc)
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the fixture compiles a known-good pattern and the assertions below assume a match at a known range, per each result"
+    )]
     fn test_utf16_regression_101_tc(tc: TestConfig) {
         for flags in ["", "i", "u", "iu"] {
             let re = tc.compilef(r"foo", flags);
@@ -2150,6 +2166,10 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
 }
 
 // TC39 proposal: duplicate named capturing groups in different alternatives
+#[expect(
+    clippy::unwrap_used,
+    reason = "the fixture compiles a known-good pattern and the assertions below assume a match at a known range, per each result"
+)]
 fn test_duplicate_named_groups_tc(tc: TestConfig) {
     // Basic duplicate named groups in alternatives - the example from the TC39 proposal
     let m = tc

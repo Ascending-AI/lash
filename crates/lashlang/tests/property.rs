@@ -12,8 +12,6 @@
 //! is pinned there against the TypeScript printer rather than here against a
 //! retired one.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
@@ -58,6 +56,10 @@ impl ExecutionHost for DeterministicHost {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "proptest driver builds the fixed-configuration tokio runtime, per the message"
+)]
 fn run_execute(
     source: &str,
     state: &mut State,
@@ -78,6 +80,10 @@ fn finished(outcome: ExecutionOutcome) -> Value {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "fixture catalog registers each host operation once into a fresh catalog, per each message"
+)]
 fn property_host_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
@@ -288,6 +294,10 @@ fn snapshot_string_strategy() -> impl Strategy<Value = String> {
     .prop_map(|characters| characters.into_iter().collect())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the corpus strategy seeds a literal image/png attachment, which parses, per the message"
+)]
 fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Value>> {
     (
         any::<u64>(),
@@ -347,6 +357,10 @@ fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Val
         )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the round-trip property holds per the same-name rule, so the field is present, per the message"
+)]
 fn assert_canonical_value_round_trip(expected: &Value, actual: &Value) {
     match (expected, actual) {
         (Value::Null, Value::Null) => {}

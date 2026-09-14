@@ -54,6 +54,10 @@ const BENCHMARK_MAIL_RESOURCE: &str = "Mail";
 const BENCHMARK_MAIL_ALIAS: &str = "mail";
 const BENCHMARK_MAIL_EVENT: &str = "received";
 
+#[expect(
+    clippy::expect_used,
+    reason = "the mock model spec is built from fixed constants with no validation to fail"
+)]
 fn benchmark_model_spec() -> lash::ModelSpec {
     lash::ModelSpec::builder("mock-model")
         .context_window_tokens(200_000)
@@ -166,6 +170,10 @@ pub(crate) struct RuntimePerfTraceConfig {
 }
 
 impl BenchmarkRuntime {
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before any measurement can read it; the accessor is the panicking half of the Option field"
+    )]
     pub(crate) fn usage_report(&self) -> lash::usage::SessionUsageReport {
         self.session
             .as_ref()
@@ -173,6 +181,10 @@ impl BenchmarkRuntime {
             .usage_report()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the in-memory store is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
+    )]
     pub(crate) fn store(&self) -> Arc<RuntimePerfStore> {
         Arc::clone(self.store.as_ref().expect("runtime perf in-memory store"))
     }
@@ -181,6 +193,10 @@ impl BenchmarkRuntime {
         Arc::clone(&self.store_metrics)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the persistence handle is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
+    )]
     pub(crate) fn persistence(&self) -> Arc<dyn lash::persistence::RuntimePersistence> {
         Arc::clone(
             self.persistence
@@ -193,6 +209,10 @@ impl BenchmarkRuntime {
         self.core.as_lash_core()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before any measurement begins; the accessor is the panicking half of the Option field"
+    )]
     pub(crate) fn session(&self) -> lash::LashSession {
         self.session.as_ref().expect("benchmark session").clone()
     }
@@ -263,10 +283,18 @@ impl BenchmarkRuntime {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "take_session is the teardown-side accessor: the session is present exactly once and consumed here by contract"
+    )]
     pub(crate) fn take_session(&mut self) -> lash::LashSession {
         self.session.take().expect("benchmark session")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before any probe can be installed"
+    )]
     pub(crate) async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,
@@ -278,6 +306,10 @@ impl BenchmarkRuntime {
             .await;
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before measurement runs that read turn scopes"
+    )]
     pub(crate) fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash::runtime::ExecutionScope {
         self.session
             .as_ref()
@@ -285,6 +317,10 @@ impl BenchmarkRuntime {
             .turn_scope(turn_id)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before turn work runs"
+    )]
     pub(crate) async fn run_turn(
         &self,
         input: lash::TurnInput,
@@ -313,6 +349,10 @@ impl BenchmarkRuntime {
             .map_err(anyhow::Error::from)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before turn work runs"
+    )]
     pub(crate) async fn run_turn_with_id(
         &self,
         input: lash::TurnInput,
@@ -337,6 +377,10 @@ impl BenchmarkRuntime {
             .map_err(anyhow::Error::from)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before ingress enqueueing runs"
+    )]
     pub(crate) async fn enqueue_active_turn_input(
         &self,
         turn_id: &TurnId,
@@ -357,6 +401,10 @@ impl BenchmarkRuntime {
             .map_err(anyhow::Error::from)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up; the provider control a few lines up propagates its absence, but the session never is"
+    )]
     pub(crate) async fn run_cancel_round_trip(
         &self,
         input: lash::TurnInput,
@@ -439,6 +487,10 @@ impl BenchmarkRuntime {
         turn.await.map(|turn| (turn, projection_started.elapsed()))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before scoped-effect turn work runs"
+    )]
     pub(crate) async fn run_turn_with_execution_scope(
         &self,
         input: lash::TurnInput,
@@ -457,6 +509,10 @@ impl BenchmarkRuntime {
             .map_err(anyhow::Error::from)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before background work can be awaited"
+    )]
     pub(crate) async fn await_background_work(&self) -> anyhow::Result<()> {
         self.session
             .as_ref()
@@ -466,6 +522,10 @@ impl BenchmarkRuntime {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before state can be exported"
+    )]
     pub(crate) async fn export_state(&self) -> SessionSnapshot {
         self.session
             .as_ref()
@@ -581,6 +641,10 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a TurnReport always commits into one active runtime frame scope, so its read view resolves; also stated by the message"
+)]
 fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
     turn.state
         .read_view()
@@ -1035,6 +1099,10 @@ impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
         "runtime_perf_workbench_trigger"
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the extension id and contribution are workspace constants wired by the benchmark itself, so construction cannot fail"
+    )]
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
         vec![
             PluginExtensionContribution::new(
@@ -1087,6 +1155,10 @@ impl SessionPlugin for BenchmarkWorkbenchTriggerPlugin {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark's own trigger source constructor is added to a freshly built catalog and cannot conflict, per the site's message"
+)]
 fn benchmark_workbench_lashlang_resources() -> lash::rlm::LashlangHostCatalog {
     let mut resources = lash::rlm::LashlangHostCatalog::new();
     resources
@@ -1099,6 +1171,10 @@ fn benchmark_workbench_lashlang_resources() -> lash::rlm::LashlangHostCatalog {
     resources
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the mail.Received type is built from three Str fields fixed here, so validation passes, per the site's message"
+)]
 fn benchmark_mail_received_event_type() -> lash::rlm::NamedDataType {
     lash::rlm::NamedDataType::object(
         "mail.Received",
@@ -1495,6 +1571,10 @@ pub(crate) async fn build_runtime_with_postgres_store(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the serialized benchmark messages are appended through the benchmark runtime's admin session, taken by set_up"
+)]
 pub(crate) async fn seed_runtime_state(
     runtime: &mut BenchmarkRuntime,
     scenario: RuntimePerfScenario,
@@ -1532,6 +1612,10 @@ pub(crate) async fn seed_runtime_state(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark runtime's admin session is taken by set_up before the RLM session projection is applied"
+)]
 async fn install_rlm_session_projection(runtime: &mut BenchmarkRuntime) -> anyhow::Result<()> {
     runtime
         .session

@@ -18,6 +18,10 @@ pub fn default_dhat_output_path(report_out: &Path, fallback_stem: &str) -> PathB
     report_out.with_file_name(format!("{stem}.dhat.json"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "CARGO_MANIFEST_DIR of this crate is <repo>/crates/lash-perf, which the message states, so two parents exist"
+)]
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

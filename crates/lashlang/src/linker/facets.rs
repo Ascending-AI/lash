@@ -344,6 +344,10 @@ pub(super) fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, 
     spans
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "an AST child index of a source file far below u32::MAX fits, per the message"
+)]
 fn collect_expression_spans_by_pointer(
     expr: &Expr,
     path: &mut Vec<u32>,

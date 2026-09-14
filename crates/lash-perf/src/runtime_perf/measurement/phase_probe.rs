@@ -206,6 +206,10 @@ pub(crate) async fn run_once(
     Ok(result)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the run commits into one active runtime frame scope, so its read view resolves after the run, per the message"
+)]
 async fn run_once_inner(
     scenario: RuntimePerfScenario,
     chat_turns: usize,

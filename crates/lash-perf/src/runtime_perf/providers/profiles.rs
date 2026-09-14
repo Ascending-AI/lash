@@ -4,6 +4,10 @@ pub(crate) fn benchmark_stream_profile(scenario: RuntimePerfScenario) -> Benchma
     benchmark_stream_profile_for_request(scenario, &empty_request())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the settlement scenario below resolves its configured child count in this same profile builder, which the message states"
+)]
 pub(super) fn benchmark_stream_profile_for_request(
     scenario: RuntimePerfScenario,
     request: &LlmRequest,
@@ -596,6 +600,10 @@ finish(result);"#,
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the trigger name is a plain string produced a few lines above, so it always serializes, per the message"
+)]
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
     if kind == Some("tool") {

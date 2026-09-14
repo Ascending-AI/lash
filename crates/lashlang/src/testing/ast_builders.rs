@@ -274,6 +274,10 @@ pub fn type_literal(ty: TypeExpr) -> Expr {
 }
 
 /// `Process<(<params>), <output>>` — a known, checked process-callable type.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support builder fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper, per the message"
+)]
 pub fn process_type(params: Vec<ProcessParam>, output: TypeExpr) -> TypeExpr {
     TypeExpr::Process(ProcessType::known(
         ProcessSignature::try_new(params, output).expect("process signature should validate"),

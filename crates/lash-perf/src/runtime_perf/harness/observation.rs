@@ -11,6 +11,10 @@ pub(crate) struct TriggerDeliveryTerminalObservation {
 }
 
 impl BenchmarkRuntime {
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before tool-catalog refresh runs"
+    )]
     pub(crate) async fn refresh_tool_catalog(&self, idempotency_key: &str) -> anyhow::Result<()> {
         self.session
             .as_ref()
@@ -23,6 +27,10 @@ impl BenchmarkRuntime {
             .map_err(anyhow::Error::from)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the observer is installed by arm_tool_catalog_observation before suppression can be requested, per the site's message"
+    )]
     pub(crate) fn suppress_tool_catalog_composition_counting(&self) {
         self.tool_catalog_observer
             .as_ref()
@@ -30,6 +38,10 @@ impl BenchmarkRuntime {
             .suppress_composition_counting();
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the observer is installed by arm_tool_catalog_observation before resumption, per the site's message"
+    )]
     pub(crate) fn resume_tool_catalog_composition_counting(&self) {
         self.tool_catalog_observer
             .as_ref()
@@ -37,6 +49,10 @@ impl BenchmarkRuntime {
             .resume_composition_counting();
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session and the tool-catalog observer are both installed before arming, per each site's message"
+    )]
     pub(crate) fn arm_tool_catalog_observation(
         &self,
         variant: &'static str,
@@ -54,6 +70,10 @@ impl BenchmarkRuntime {
             .arm(variant, session_id, phase_probe, observation_stage);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "finishing returns the observation armed by arm_tool_catalog_observation; taking it again would panic by design, per the message"
+    )]
     pub(crate) fn finish_tool_catalog_observation(&self) -> BenchmarkToolCatalogObservation {
         self.tool_catalog_observer
             .as_ref()
@@ -67,6 +87,10 @@ impl BenchmarkRuntime {
         Ok((manifests.len(), rendered_bytes))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the benchmark session is taken by set_up before delivery observation runs"
+    )]
     pub(crate) async fn observe_trigger_delivery_terminals(
         &self,
     ) -> anyhow::Result<TriggerDeliveryTerminalObservation> {

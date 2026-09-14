@@ -776,6 +776,10 @@ impl RuntimePerfScenario {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "every scenario declares its metadata once in this single table, which the message asserts"
+    )]
     fn metadata(self) -> &'static RuntimePerfScenarioMetadata {
         Self::METADATA
             .iter()

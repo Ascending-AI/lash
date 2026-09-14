@@ -289,6 +289,10 @@ impl ProjectedBindings {
         Self::default()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "insert is the panicking half of the pair: try_insert is the fallible twin, per the message"
+    )]
     pub fn insert(&mut self, name: impl Into<String>, value: ProjectedValue) {
         let name = name.into();
         self.try_insert(name, value)

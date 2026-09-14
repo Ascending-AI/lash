@@ -869,6 +869,10 @@ impl Heap {
     /// Staging keeps the operation atomic: IDs are reserved and objects built
     /// before anything is charged or committed, so a rejected copy leaves the
     /// heap byte-identical.
+    #[expect(
+        clippy::expect_used,
+        reason = "isolation staging reserved one id per object collected above, so every staged slot is filled, per the message"
+    )]
     pub(crate) fn isolate_value(&mut self, value: &Value) -> Result<Value, RuntimeError> {
         let mut staging = IsolationStaging {
             base: self.next_id,
@@ -1191,6 +1195,10 @@ impl Heap {
     /// proportional to the accumulator into one proportional to what is being
     /// appended. The members are copied, not moved: `other` is a binding of its
     /// own and keeps what it holds.
+    #[expect(
+        clippy::expect_used,
+        reason = "isolation staging reserved one id per object collected above, so every staged slot is filled, per the message"
+    )]
     pub(crate) fn extend_list(
         &mut self,
         target: &Value,
@@ -1282,6 +1290,10 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the slot index resolved and the entry kind checked above, so the heap slot exists at all three reads, per each message"
+    )]
     pub(crate) fn add_assign_index_number(
         &mut self,
         target: &Value,
@@ -1541,6 +1553,10 @@ impl Heap {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the slot was marked live this collect before being taken, per the message"
+    )]
     pub(crate) fn collect<'a>(&mut self, roots: impl IntoIterator<Item = &'a Value>) {
         let mut marked = BTreeSet::new();
         let mut pending = Vec::new();
