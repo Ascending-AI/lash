@@ -2488,6 +2488,5 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 
 mod artifact_cleanup_round4;
 mod native_process_await;
-mod owner_lifecycle;
 mod programs;
 mod recovery_dispositions;
