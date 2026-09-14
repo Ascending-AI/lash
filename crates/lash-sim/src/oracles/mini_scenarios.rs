@@ -14,6 +14,9 @@ pub fn scenario_contract_oracles(
         .collect()
 }
 
+/// A derived fact, or the reason its contract rejected the proof event.
+type DerivedFact = Result<ScenarioContractGeneratedFact, String>;
+
 /// Derived contract facts, keyed by the proof event they were derived from.
 ///
 /// A contract's generated fact is a pure function of one `contract_execution`
@@ -29,9 +32,6 @@ pub fn scenario_contract_oracles(
 /// into lookups. A memo must therefore not outlive one trace: boundary ids are
 /// unique within a trace, not across traces, so every entry point that does not
 /// take a memo builds a fresh one.
-/// A derived fact, or the reason its contract rejected the proof event.
-type DerivedFact = Result<ScenarioContractGeneratedFact, String>;
-
 #[derive(Default)]
 pub struct ScenarioFactMemo {
     facts: std::cell::RefCell<std::collections::BTreeMap<(&'static str, String), DerivedFact>>,
@@ -1016,8 +1016,8 @@ pub(super) fn scenario_contract_semantics(
 ) -> ScenarioSemanticVerdict {
     match contract.suite {
         "runtime" => runtime_contract_semantics(contract.semantic_oracle, events, summary),
-        "standard" => standard_contract_semantics(contract.semantic_oracle, events, summary),
-        "rlm" => rlm_contract_semantics(contract.semantic_oracle, events, summary),
+        "standard" => standard_contract_semantics(contract.semantic_oracle, events, summary, memo),
+        "rlm" => rlm_contract_semantics(contract.semantic_oracle, events, summary, memo),
         "agent" => agent_contract_semantics(contract.semantic_oracle, events, summary, memo),
         other => ScenarioSemanticVerdict::failed(format!(
             "suite `{other}` has no per-contract semantic adapter dispatcher"
@@ -1094,8 +1094,9 @@ pub(super) fn standard_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
     _summary: &AbstractWorldSummary,
+    memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
-    match scenario_contract_generated_facts_for_semantic(semantic_oracle, events) {
+    match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {
         Ok(facts) => ScenarioSemanticVerdict::passed(format!(
             "generated contract facts held: {}",
             fact_names(&facts)
@@ -1108,8 +1109,9 @@ pub(super) fn rlm_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
     _summary: &AbstractWorldSummary,
+    memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
-    match scenario_contract_generated_facts_for_semantic(semantic_oracle, events) {
+    match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {
         Ok(facts) => ScenarioSemanticVerdict::passed(format!(
             "generated contract facts held: {}",
             fact_names(&facts)
