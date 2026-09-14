@@ -17,6 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXPECTED_INTERNAL_PACKAGES = {
     "lash-core": "lash-internal-core",
     "lash-core-ids": "lash-internal-core-ids",
+    "lash-core-llm": "lash-internal-core-llm",
     "lash-http-transport": "lash-internal-http-transport",
     "lash-lashlang-runtime": "lash-internal-lashlang-runtime",
     "lash-llm-tools": "lash-internal-llm-tools",

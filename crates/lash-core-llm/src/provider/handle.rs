@@ -32,7 +32,7 @@ struct ProviderCompletionSidebandState {
 /// Replay safety state shared with the runtime independently of the spawned
 /// LLM Provider task's terminal return.
 #[derive(Clone, Debug)]
-pub(crate) struct ProviderCompletionSideband {
+pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
 }
 
@@ -66,7 +66,7 @@ impl ProviderCompletionSideband {
         });
     }
 
-    pub(crate) fn replay_drops(&self) -> Vec<crate::ProviderReplayDrop> {
+    pub fn replay_drops(&self) -> Vec<crate::ProviderReplayDrop> {
         self.with_state(|state| state.replay_drops.clone())
     }
 
@@ -74,14 +74,11 @@ impl ProviderCompletionSideband {
         self.with_state(|state| state.serving_route.clone())
     }
 
-    pub(crate) fn origin_conflict(&self) -> Option<ProviderReplayOriginConflict> {
+    pub fn origin_conflict(&self) -> Option<ProviderReplayOriginConflict> {
         self.with_state(|state| state.origin_conflict.clone())
     }
 
-    pub(crate) fn fence_response(
-        &self,
-        response: &mut LlmResponse,
-    ) -> Result<(), LlmTransportError> {
+    pub fn fence_response(&self, response: &mut LlmResponse) -> Result<(), LlmTransportError> {
         let serving_route = self.serving_route();
         if let Err(conflict) = response.stamp_replay_origin(&serving_route) {
             self.record_origin_conflict(conflict);
@@ -262,10 +259,7 @@ impl ProviderHandle {
             .await
     }
 
-    pub(crate) fn prepare_completion(
-        &self,
-        request: &mut LlmRequest,
-    ) -> ProviderCompletionSideband {
+    pub fn prepare_completion(&self, request: &mut LlmRequest) -> ProviderCompletionSideband {
         let serving_route = self.route_identity(&request.model);
         // Do not manufacture trace evidence containing an invalid endpoint:
         // URL userinfo may itself be credential material. `complete_prepared`
@@ -296,7 +290,7 @@ impl ProviderHandle {
         sideband
     }
 
-    pub(crate) async fn complete_prepared(
+    pub async fn complete_prepared(
         &mut self,
         request: LlmRequest,
         sideband: ProviderCompletionSideband,
@@ -1063,7 +1057,7 @@ fn charge_safety_refusal(
     failure
 }
 
-pub(crate) fn synthetic_terminal_call_record(
+pub fn synthetic_terminal_call_record(
     started_at: u64,
     duration: Duration,
     outcome: AttemptOutcome,

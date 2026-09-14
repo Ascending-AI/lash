@@ -183,10 +183,18 @@ IDENTIFIER_RENAME_BASELINES = {
     # input, so the guarded Rust text moved while the serialized bytes cannot
     # have. The whole diff for that file is attribute-line deletions -- no
     # field name, variant name, serde attribute, type or constant value
-    # changed -- so SESSION_NODE_BODY_SCHEMA_VERSION stays 14. Any further
-    # guarded-shape drift re-fails the gate.
+    # changed -- so SESSION_NODE_BODY_SCHEMA_VERSION stayed 14 at that reading
+    # (sha256:3d39e0ec853e4865725d7f3fa5a0a4b0fce67753aa01b98e5ad9c20cb37cc69d).
+    # FIG-3042 step 2 (live): the guarded crates/lash-core/src/model.rs file
+    # moved verbatim to crates/lash-core-llm/src/model.rs (the path in
+    # versioned-surfaces.toml follows it) and two pub(crate) inherent methods
+    # with their test (`clamp_generation_options`, `clamped_generation`) left
+    # the file for a crate-internal extension trait in lash-core. No struct,
+    # field, variant, serde attribute, derive input or constant changed, so the
+    # serialized bytes are identical and SESSION_NODE_BODY_SCHEMA_VERSION stays
+    # 14. Any further guarded-shape drift re-fails the gate.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:3d39e0ec853e4865725d7f3fa5a0a4b0fce67753aa01b98e5ad9c20cb37cc69d"
+        "sha256:20844e5b59c7ab9b340af3d7d06b285dbe0740a011ea73e95936311b46ebc11e"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (

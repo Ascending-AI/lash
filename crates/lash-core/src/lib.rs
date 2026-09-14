@@ -14,9 +14,11 @@ pub mod attachments;
 pub mod chronological;
 pub mod direct;
 pub(crate) use lash_core_ids::identity_json;
-pub mod llm;
-mod model;
+pub use lash_core_llm::llm;
+pub(crate) use lash_core_llm::model;
+mod model_clamp;
 pub(crate) use lash_core_ids::operational_metrics;
+pub(crate) use model_clamp::ModelGenerationClamp;
 /// Panic containment for runtime-owned work.
 ///
 /// The module lives in `lash-core-ids`; this facade re-exports its public
@@ -32,7 +34,14 @@ pub use lash_core_ids::perf_witness;
 pub mod plugin;
 mod plugin_stack;
 mod protocol_build;
-pub mod provider;
+/// Provider components for pluggable LLM backends.
+///
+/// The module lives in `lash-core-llm`; this facade re-exports its public
+/// surface unchanged and keeps the crate-internal helper crate-internal.
+pub mod provider {
+    pub(crate) use lash_core_llm::core_internal::synthetic_terminal_call_record;
+    pub use lash_core_llm::provider::*;
+}
 pub mod runtime;
 pub mod session;
 pub mod session_graph;
@@ -1167,14 +1176,14 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
-    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError, durable_identity_conflict,
-    is_durable_identity_conflict,
+    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
     SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
     SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, durable_identity_conflict,
+    is_durable_identity_conflict,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,

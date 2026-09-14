@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 
 /// Runtime and embedded-store time source. Cloneable as `Arc<dyn Clock>`;
-/// carried on [`RuntimeHostConfig`](super::RuntimeHostConfig).
+/// carried on the runtime host configuration.
 ///
 /// SQLite and in-memory persistence read this host-injectable clock because
 /// they run in the same clock domain as their host. PostgreSQL lease decisions
