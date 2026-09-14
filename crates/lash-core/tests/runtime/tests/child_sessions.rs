@@ -613,7 +613,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     assert!(
         handles
             .iter()
-            .any(|handle| handle.id == "child-first-turn-process"),
+            .any(|handle| handle.process_id == "child-first-turn-process"),
         "the observed process must remain reachable from the durable child frame after commit: {handles:?}"
     );
 }

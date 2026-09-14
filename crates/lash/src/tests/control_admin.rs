@@ -504,7 +504,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
         .await?;
     assert_eq!(
-        lash_core::ProcessQuery::get_process(registry.as_ref(), &started.id)
+        lash_core::ProcessQuery::get_process(registry.as_ref(), &started.process_id)
             .await?
             .expect("started record")
             .lifecycle,

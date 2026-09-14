@@ -1215,7 +1215,7 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
                   run: async () => await triggers.list({})
                 });
                 const handle = start(registrar);
-                finish(handle.id);
+                finish(handle.process_id);
             "#,
             Some(lash_core::ProcessOriginator::host()),
             None,
@@ -1244,7 +1244,7 @@ pub(super) fn typescript_process_body_uses_trigger_command_handler() {
                   run: async () => await triggers.list({})
                 });
                 const handle = start(registrar);
-                finish(handle.id);
+                finish(handle.process_id);
             "#,
         )
         .await;
@@ -1284,7 +1284,7 @@ pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() 
                   }
                 });
                 const handle = start(registrar);
-                finish(handle.id);
+                finish(handle.process_id);
             "#,
         )
         .await;

@@ -287,9 +287,18 @@ impl ExecutionHost for StackBudgetHost {
                 // A started process is a handle record; the finished value
                 // only appears once the guest awaits it.
                 let mut handle = Record::new();
-                handle.insert("__handle__".to_string(), Value::String("process".into()));
-                handle.insert("id".to_string(), Value::String("stack-budget".into()));
-                handle.insert("incarnation".to_string(), Value::Number(1.0));
+                handle.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
+                handle.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process("stack-budget", 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
                 handle.insert("value".to_string(), Value::String(value));
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }

@@ -2167,9 +2167,12 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .expect("valid recorded-intent engine start");
     let expected = admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
         .expect("known payload");
-    assert_eq!(started_row_identity(&registry, &direct.id).await, expected);
     assert_eq!(
-        started_row_identity(&registry, &recorded.id).await,
+        started_row_identity(&registry, &direct.process_id).await,
+        expected
+    );
+    assert_eq!(
+        started_row_identity(&registry, &recorded.process_id).await,
         expected,
         "the recorded-intent start must carry the same engine identity stamp"
     );
@@ -2262,7 +2265,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .await
         .expect("a direct start captures the live session env for itself");
     assert_eq!(
-        started_row_identity(&registry, &direct_no_env.id).await,
+        started_row_identity(&registry, &direct_no_env.process_id).await,
         admit_payload_gated_engine(PAYLOAD_GATED_ENGINE_KIND, &valid_payload, None)
             .expect("known payload")
     );

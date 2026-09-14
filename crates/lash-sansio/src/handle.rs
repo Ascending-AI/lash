@@ -33,15 +33,6 @@ pub const HANDLE_FIELD: &str = "__handle__";
 /// The one handle kind. Every handle record carries this as [`HANDLE_FIELD`].
 pub const HANDLE_KIND: &str = "lash";
 
-/// The handle kind minted before ADR 0095 collapsed the two encodings.
-///
-/// FIG-2996 part 2 moves the process handle views onto [`HANDLE_KIND`] and
-/// deletes this constant together with the [`parse_handle`] arm that reads it.
-/// It is not a reader for stored artifacts — ADR 0095 admits none, and no
-/// pre-cutover handle loads — only for the record the process views still emit
-/// between part 1 and part 2 of the same cutover.
-pub const LEGACY_PROCESS_HANDLE_KIND: &str = "process";
-
 /// An opaque handle id.
 ///
 /// Ordering is over the id text, which makes a `BTreeMap` keyed by `HandleId`
@@ -163,20 +154,12 @@ impl std::fmt::Display for HandleId {
 /// own value type spells them. Returns `None` when the record is not a handle,
 /// which is how a plain value handed to `await` is told apart from a handle.
 ///
-/// The [`LEGACY_PROCESS_HANDLE_KIND`] arm additionally takes the incarnation,
-/// which that record carries in its own field; it goes away with the constant
-/// in part 2.
-pub fn parse_handle(kind: &str, id: &str, legacy_incarnation: Option<u64>) -> Option<HandleId> {
-    match kind {
-        HANDLE_KIND => Some(HandleId::from_text(id)),
-        LEGACY_PROCESS_HANDLE_KIND => {
-            if id.is_empty() {
-                return None;
-            }
-            Some(HandleId::process(id, legacy_incarnation?))
-        }
-        _ => None,
-    }
+/// There is one kind and one place the parts live. A record that spells its
+/// incarnation beside the id is not a handle: the incarnation belongs inside
+/// the id, so a handle that names an incarnation it was not taken against
+/// cannot be built.
+pub fn parse_handle(kind: &str, id: &str) -> Option<HandleId> {
+    (kind == HANDLE_KIND).then(|| HandleId::from_text(id))
 }
 
 /// Whether a record carrying these field names is the handle shape.
@@ -193,7 +176,7 @@ pub fn is_handle_shape<'a>(names: impl IntoIterator<Item = &'a str>) -> bool {
 pub fn parse_handle_json(value: &serde_json::Value) -> Option<HandleId> {
     let kind = value.get(HANDLE_FIELD)?.as_str()?;
     let id = value.get("id")?.as_str()?;
-    parse_handle(kind, id, value.get("incarnation").and_then(|v| v.as_u64()))
+    parse_handle(kind, id)
 }
 
 /// Builds the one handle record as JSON.
@@ -314,25 +297,40 @@ mod tests {
     }
 
     #[test]
-    fn the_legacy_process_record_parses_to_the_same_id_the_mint_produces() {
-        // Part 2 deletes this arm; until it lands the process views still emit
-        // the two-field record, and it must name the same handle.
-        let legacy = serde_json::json!({
-            "__handle__": "process",
-            "id": "p-7",
-            "incarnation": 2,
-        });
-        assert_eq!(
-            parse_handle_json(&legacy),
-            Some(HandleId::process("p-7", 2))
-        );
+    fn the_retired_process_record_is_not_a_handle() {
+        // Before ADR 0095 a process handle was `{__handle__: "process", id,
+        // incarnation}`, with the incarnation in its own field and back-filled
+        // after the fact by the attempt coordinator. There is one kind now and
+        // the incarnation rides inside the id, so the retired spelling names
+        // nothing.
+        for value in [
+            serde_json::json!({ "__handle__": "process", "id": "p-7", "incarnation": 2 }),
+            serde_json::json!({ "__handle__": "process", "id": "p-7" }),
+        ] {
+            assert_eq!(parse_handle_json(&value), None, "{value} read as a handle");
+        }
     }
 
     #[test]
-    fn a_legacy_process_record_without_an_incarnation_is_refused() {
+    fn a_process_handle_is_the_one_record_and_carries_its_incarnation_inside_the_id() {
+        let id = HandleId::process("p-7", 2);
+        let record = handle_record_json(&id);
         assert_eq!(
-            parse_handle_json(&serde_json::json!({ "__handle__": "process", "id": "p-7" })),
-            None
+            record,
+            serde_json::json!({ "__handle__": "lash", "id": "p.2.p-7" })
         );
+        assert_eq!(parse_handle_json(&record), Some(id.clone()));
+        assert_eq!(
+            id.target(),
+            Some(HandleTarget::Process {
+                process_id: "p-7".to_string(),
+                incarnation: 2,
+            })
+        );
+        // An incarnation spelled beside the id is not consulted, so it cannot
+        // disagree with the one the handle was taken against.
+        let mut shouted = handle_record_json(&id);
+        shouted["incarnation"] = serde_json::json!(99);
+        assert_eq!(parse_handle_json(&shouted), Some(id));
     }
 }

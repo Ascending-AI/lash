@@ -119,9 +119,18 @@ impl ExecutionHost for AggregateProcessHost {
             )),
             AbilityOp::StartProcess(_) => {
                 let mut handle = Record::new();
-                handle.insert("__handle__".to_string(), Value::String("process".into()));
-                handle.insert("id".to_string(), Value::String("h".into()));
-                handle.insert("incarnation".to_string(), Value::Number(1.0));
+                handle.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
+                handle.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process("h", 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::Await(_) => {
@@ -288,12 +297,12 @@ async fn bound_process_containers_are_carried_through_unsettled() {
         (
             "list of one handle",
             awaited("hs", builders::list(vec![builders::var("h")])),
-            r#"[[{"__handle__":"process","id":"h","incarnation":1}],7]"#,
+            r#"[[{"__handle__":"lash","id":"p.1.h"}],7]"#,
         ),
         (
             "record holding a handle",
             awaited("hr", builders::record(vec![("child", builders::var("h"))])),
-            r#"[{"child":{"__handle__":"process","id":"h","incarnation":1}},7]"#,
+            r#"[{"child":{"__handle__":"lash","id":"p.1.h"}},7]"#,
         ),
         (
             "handle nested three lists deep",
@@ -303,7 +312,7 @@ async fn bound_process_containers_are_carried_through_unsettled() {
                     builders::var("h"),
                 ])])]),
             ),
-            r#"[[[[{"__handle__":"process","id":"h","incarnation":1}]]],7]"#,
+            r#"[[[[{"__handle__":"lash","id":"p.1.h"}]]],7]"#,
         ),
         (
             "handle beside plain values",
@@ -315,7 +324,7 @@ async fn bound_process_containers_are_carried_through_unsettled() {
                     builders::record(vec![("note", builders::string("kept"))]),
                 ]),
             ),
-            r#"[[1,{"__handle__":"process","id":"h","incarnation":1},{"note":"kept"}],7]"#,
+            r#"[[1,{"__handle__":"lash","id":"p.1.h"},{"note":"kept"}],7]"#,
         ),
     ] {
         let host = AggregateProcessHost::default();

@@ -484,11 +484,36 @@ impl RemoteProcessRef {
     }
 }
 
+/// Writes the handle marker field as the one kind, and refuses any other.
+pub(crate) mod handle_kind_field {
+    pub fn serialize<S: serde::Serializer>(_: &(), serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(lash_sansio::handle::HANDLE_KIND)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+        use serde::Deserialize as _;
+        let kind = String::deserialize(deserializer)?;
+        if kind == lash_sansio::handle::HANDLE_KIND {
+            return Ok(());
+        }
+        Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Str(&kind),
+            &lash_sansio::handle::HANDLE_KIND,
+        ))
+    }
+}
+
+/// A process handle as it crosses the wire.
+///
+/// `handle_kind` is the ADR 0095 marker field, written and required as the one
+/// kind rather than carried as a peer-supplied string: before the cutover a
+/// peer could send any non-empty `handle_type` and it survived validation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessHandleView {
-    #[serde(rename = "__handle__")]
-    pub handle_type: String,
-    pub id: ProcessId,
+    #[serde(rename = "__handle__", with = "handle_kind_field")]
+    #[schemars(with = "String")]
+    pub handle_kind: (),
+    pub id: String,
     pub process_id: ProcessId,
     pub incarnation: u64,
     pub kind: String,
@@ -501,7 +526,6 @@ pub struct RemoteProcessHandleView {
 
 impl RemoteProcessHandleView {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "handle_type", &self.handle_type)?;
         require_non_empty(type_name, "id", &self.id)?;
         require_non_empty(type_name, "process_id", &self.process_id)?;
         RemoteProcessRef {

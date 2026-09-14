@@ -12,11 +12,10 @@ fn tools() -> SessionProcessAdminTools {
 }
 
 fn process_handle(process_id: &str, incarnation: u64) -> Value {
-    serde_json::json!({
-        "__handle__": "process",
-        "id": process_id,
-        "incarnation": incarnation,
-    })
+    lash_core::RuntimeExecutionContext::process_handle_json(&lash_core::ProcessRef::new(
+        process_id,
+        lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+    ))
 }
 
 fn intents(outcome: ToolAttemptOutcome) -> (Value, Vec<ToolIntent>) {

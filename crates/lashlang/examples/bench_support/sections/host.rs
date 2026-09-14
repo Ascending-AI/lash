@@ -278,17 +278,35 @@ fn string_ref(value: &Value) -> Option<&str> {
 
 fn process_handles_record() -> Value {
     let mut chunk_1 = Record::default();
-    chunk_1.insert("__handle__".to_string(), Value::String("process".into()));
-    chunk_1.insert("id".to_string(), Value::String("spawn-one".into()));
-    chunk_1.insert("incarnation".to_string(), Value::Number(1.0));
+    chunk_1.insert(
+        lash_sansio::handle::HANDLE_FIELD.to_string(),
+        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+    );
+    chunk_1.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process("spawn-one", 1)
+                .as_str()
+                .into(),
+        ),
+    );
     chunk_1.insert("process_id".to_string(), Value::String("spawn-one".into()));
     chunk_1.insert("tool".to_string(), Value::String("spawn_child".into()));
     chunk_1.insert("value".to_string(), spawn_child_value("inspect auth"));
 
     let mut chunk_2 = Record::default();
-    chunk_2.insert("__handle__".to_string(), Value::String("process".into()));
-    chunk_2.insert("id".to_string(), Value::String("spawn-two".into()));
-    chunk_2.insert("incarnation".to_string(), Value::Number(1.0));
+    chunk_2.insert(
+        lash_sansio::handle::HANDLE_FIELD.to_string(),
+        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+    );
+    chunk_2.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process("spawn-two", 1)
+                .as_str()
+                .into(),
+        ),
+    );
     chunk_2.insert("process_id".to_string(), Value::String("spawn-two".into()));
     chunk_2.insert("tool".to_string(), Value::String("spawn_child".into()));
     chunk_2.insert("value".to_string(), spawn_child_value("inspect api"));
@@ -320,9 +338,18 @@ impl BenchHost {
         match name {
             "echo" | "query_llm" | "spawn_child" | "continue_as" => {
                 let mut record = Record::default();
-                record.insert("__handle__".to_string(), Value::String("process".into()));
-                record.insert("id".to_string(), Value::String(name.to_string().into()));
-                record.insert("incarnation".to_string(), Value::Number(1.0));
+                record.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
+                record.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process(name, 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
                 record.insert("tool".to_string(), Value::String(name.to_string().into()));
                 record.insert("value".to_string(), bench_call(name, args)?);
                 Ok(Value::Record(Arc::new(record)))

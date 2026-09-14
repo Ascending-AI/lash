@@ -441,12 +441,12 @@ symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
 
 [[surface]]
 constant = "PROCESS_LEASE_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/model.rs"
+constant_path = "crates/lash-core/src/runtime/process/model/lease.rs"
 description = "persisted ProcessLease wire record"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/model.rs"]
+paths = ["crates/lash-core/src/runtime/process/model/lease.rs"]
 symbols = ["ProcessLease"]
 
 [[surface.guard]]

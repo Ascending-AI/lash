@@ -688,7 +688,7 @@ pub mod process {
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
-        CausalRef, DeclaredProcessIdentity, NativeProcessWork, OnParentEnd, ParentScope,
+        CausalRef, DeclaredProcessIdentity, HandleId, NativeProcessWork, OnParentEnd, ParentScope,
         ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
         ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore,
         ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,

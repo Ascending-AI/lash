@@ -261,9 +261,9 @@ pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
-    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, InMemoryProcessExecutionEnvStore,
-    ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,
-    ObserverInheritance, OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION,
+    DEFAULT_WAKE_DELIVERY_EXPIRY_MS, DeclaredProcessIdentity, HandleId,
+    InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
+    ObservedWorkItemState, ObserverInheritance, OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, ParentScope, PersistedSegmentHandover,
     ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
     ProcessChange, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,

@@ -282,7 +282,7 @@ async fn execute_one(
                 .await?;
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
-                    process_id: summary.id.clone(),
+                    process_id: summary.process_id.clone(),
                     child_entry_name: None,
                 });
             }

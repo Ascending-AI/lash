@@ -1635,12 +1635,18 @@ async fn await_list_process_starts_and_joins_handles() {
                 AbilityOp::StartProcess(start) => {
                     self.calls.fetch_add(1, Ordering::Relaxed);
                     let mut handle = Record::new();
-                    handle.insert("__handle__".to_string(), Value::String("process".into()));
+                    handle.insert(
+                        lash_sansio::handle::HANDLE_FIELD.to_string(),
+                        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                    );
                     handle.insert(
                         "id".to_string(),
-                        Value::String(start.process_name.clone().into()),
+                        Value::String(
+                            lash_sansio::handle::HandleId::process(&start.process_name, 1)
+                                .as_str()
+                                .into(),
+                        ),
                     );
-                    handle.insert("incarnation".to_string(), Value::Number(1.0));
                     handle.insert(
                         "process".to_string(),
                         Value::String(start.process_name.into()),

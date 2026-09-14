@@ -176,7 +176,7 @@ const worker = defineProcess({
   }
 });
 const running = start(worker);
-const cancelled = await processes.cancel({ process_id: running.id });
+const cancelled = await processes.cancel({ process_id: running.process_id });
 const child = await agents.spawn({
   capability: "default",
   task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
@@ -309,7 +309,7 @@ fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Res
             )
             .response(typescript_block(
                 r#"
-const handle = { __handle__: "process", id: "awaited-attachment-child", incarnation: 1 };
+const handle = { __handle__: "lash", id: "p.1.awaited-attachment-child" };
 const attachment = await handle;
 finish(attachment);"#,
             ))

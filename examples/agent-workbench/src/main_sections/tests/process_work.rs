@@ -880,9 +880,15 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
             json!({ "workflow": "invoice-export", "revision": 7 }),
         ),
     ));
-    assert_eq!(handle.handle_type, "process");
-    assert_eq!(handle.id, process_id);
+    // The handle id is opaque: it is the value to carry and hand back, not the
+    // process id. Before ADR 0095 it was a copy of `process_id` and a separate
+    // `__handle__` string said what kind of handle it was.
     assert_eq!(handle.process_id, process_id);
+    assert_ne!(handle.id.as_str(), process_id);
+    assert_eq!(
+        handle.id,
+        lash::process::HandleId::process(process_id, handle.incarnation.registration_sequence())
+    );
     assert_eq!(handle.kind, "report-export");
     assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
     assert_eq!(

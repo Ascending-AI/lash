@@ -603,7 +603,7 @@ finish({{
   foreground: foreground.value,
   attachment_id: attachment.id,
   attachment_mime: attachment.mime,
-  wake_process: waker_handle.id,
+  wake_process: waker_handle.process_id,
   process: process_result,
   final: "{EXPECTED_FINAL_TEXT}"
 }});
@@ -660,7 +660,7 @@ const waiter = defineProcess({{
 const handle = start(waiter, {{ workflow_id: "{workflow_id}" }});
 finish({{
   workflow_id: "{workflow_id}",
-  process_id: handle.id,
+  process_id: handle.process_id,
   final: "signal-suspend-started"
 }});
 </typescript>

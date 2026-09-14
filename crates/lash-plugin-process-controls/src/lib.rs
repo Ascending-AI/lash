@@ -368,15 +368,16 @@ pub fn process_handle_view_schema() -> Value {
         "properties": {
             "__handle__": {
                 "type": "string",
+                "enum": ["lash"],
                 "description": "Handle marker; pass the whole record where a process handle is needed."
             },
             "id": {
                 "type": "string",
-                "description": "Process handle id."
+                "description": "Opaque handle id. Carry it and hand it back; do not read its parts or build one."
             },
             "process_id": {
                 "type": "string",
-                "description": "Same process id, repeated for tools that ask for process_id."
+                "description": "The process this handle names, for tools that ask for a process_id."
             },
             "incarnation": {
                 "type": "integer",
@@ -525,13 +526,7 @@ mod tests {
         let result = tools
             .execute_attempt(ToolCall {
                 name: "cancel_process",
-                args: &serde_json::json!({
-                    "handle": {
-                        "__handle__": "process",
-                        "id": "handle-process",
-                        "incarnation": 2,
-                    }
-                }),
+                args: &serde_json::json!({ "handle": handle_json("handle-process", 2) }),
                 context: &context,
             })
             .await;
@@ -604,14 +599,16 @@ mod tests {
         )
     }
 
-    /// The process-handle record a cell actually holds, as
-    /// `session::process_handles::process_handle_json` mints it.
+    /// The process-handle record a cell actually holds.
+    ///
+    /// Minted rather than spelled out: a copy of the record drifts from the
+    /// mint the moment the mint changes, which is exactly what happened when
+    /// ADR 0095 folded the incarnation into the id.
     fn handle_json(id: &str, incarnation: u64) -> serde_json::Value {
-        serde_json::json!({
-            "__handle__": "process",
-            "id": id,
-            "incarnation": incarnation,
-        })
+        lash_core::RuntimeExecutionContext::process_handle_json(&lash_core::ProcessRef::new(
+            id,
+            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
+        ))
     }
 
     #[tokio::test]
