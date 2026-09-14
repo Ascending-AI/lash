@@ -42,13 +42,13 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
 ];
 
 /// Append-only builder for one family-owned durable identity preimage.
-pub(crate) struct IdentityEncoder {
+pub struct IdentityEncoder {
     bytes: Vec<u8>,
 }
 
 impl IdentityEncoder {
     /// Starts a preimage with `magic || salt || family-version || domain`.
-    pub(crate) fn new(domain: &str, family_version: u8) -> Self {
+    pub fn new(domain: &str, family_version: u8) -> Self {
         debug_assert!(
             domain == "test" || FAMILY_DOMAINS.contains(&domain),
             "durable identity family domain `{domain}` is missing from FAMILY_DOMAINS"
@@ -63,38 +63,38 @@ impl IdentityEncoder {
 
     /// Emits a reserved integer tag. Tags are permanent and must never be
     /// reused after a variant or field is retired.
-    pub(crate) fn tag(&mut self, tag: u8) {
+    pub fn tag(&mut self, tag: u8) {
         self.u8(tag);
     }
 
-    pub(crate) fn u8(&mut self, value: u8) {
+    pub fn u8(&mut self, value: u8) {
         self.bytes.push(value);
     }
 
-    pub(crate) fn u32(&mut self, value: u32) {
+    pub fn u32(&mut self, value: u32) {
         self.raw_bytes(&value.to_be_bytes());
     }
 
-    pub(crate) fn u64(&mut self, value: u64) {
+    pub fn u64(&mut self, value: u64) {
         self.raw_bytes(&value.to_be_bytes());
     }
 
-    pub(crate) fn i64(&mut self, value: i64) {
+    pub fn i64(&mut self, value: i64) {
         self.raw_bytes(&value.to_be_bytes());
     }
 
-    pub(crate) fn string(&mut self, value: &str) {
+    pub fn string(&mut self, value: &str) {
         self.bytes(value.as_bytes());
     }
 
-    pub(crate) fn bytes(&mut self, value: &[u8]) {
+    pub fn bytes(&mut self, value: &[u8]) {
         self.u64(value.len() as u64);
         self.raw_bytes(value);
     }
 
     /// Emits the universal optional-value presence tags: 0 = absent, 1 =
     /// present. Family projections append the present value immediately.
-    pub(crate) fn optional<T>(&mut self, value: Option<T>, present: impl FnOnce(&mut Self, T)) {
+    pub fn optional<T>(&mut self, value: Option<T>, present: impl FnOnce(&mut Self, T)) {
         match value {
             None => self.tag(0),
             Some(value) => {
@@ -106,7 +106,7 @@ impl IdentityEncoder {
 
     /// Emits an ordered sequence as a fixed-width element count followed by
     /// the family projection of each element in source order.
-    pub(crate) fn sequence<T>(
+    pub fn sequence<T>(
         &mut self,
         values: impl IntoIterator<Item = T>,
         mut element: impl FnMut(&mut Self, T),
@@ -118,7 +118,7 @@ impl IdentityEncoder {
         }
     }
 
-    pub(crate) fn finish(self) -> Vec<u8> {
+    pub fn finish(self) -> Vec<u8> {
         self.bytes
     }
 
@@ -127,7 +127,7 @@ impl IdentityEncoder {
     }
 }
 
-pub(crate) fn provider_route(
+pub fn provider_route(
     identity: &mut IdentityEncoder,
     route: &lash_sansio::llm::types::ProviderRouteIdentity,
 ) {
@@ -136,7 +136,7 @@ pub(crate) fn provider_route(
     identity.string(&route.model);
 }
 
-pub(crate) fn rendered_hash(prefix: &str, family_version: u8, preimage: &[u8]) -> String {
+pub fn rendered_hash(prefix: &str, family_version: u8, preimage: &[u8]) -> String {
     format!(
         "{prefix}:v{family_version}:blake3:{}",
         crate::stable_hash::blake3_hex("lash-stable-identity/v2", preimage)

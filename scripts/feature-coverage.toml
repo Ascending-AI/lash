@@ -12,6 +12,7 @@ command = ["cargo", "check", "--workspace", "--all-targets", "--locked"]
 features = [
   "agent-workbench/default",
   "lash-internal-core/default",
+  "lash-internal-core-ids/default",
   "lash-internal-llm-tools/default",
   "lash-internal-plugin-mcp/default",
   "lash-internal-plugin-process-controls/default",
@@ -49,12 +50,22 @@ features = [
   "lash-internal-trace/otel:off",
   "lash-internal-core/otel-trace:on",
   "lash-internal-core/otel-trace:off",
+  "lash-internal-core-ids/otel-trace:on",
+  "lash-internal-core-ids/otel-trace:off",
+  "lash-internal-core-ids/testing:on",
+  "lash-internal-core-ids/testing:off",
   "lash-runtime/otel-trace:on",
   "lash-runtime/otel-trace:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--features", "otel", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
@@ -69,8 +80,12 @@ features = [
   "lash-internal-core/perf-witness:off",
   "lash-internal-core/testing:on",
   "lash-internal-core/testing:off",
+  "lash-internal-core-ids/perf-witness:on",
+  "lash-internal-core-ids/perf-witness:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "testing", "--locked"],

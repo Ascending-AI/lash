@@ -13,14 +13,23 @@
 pub mod attachments;
 pub mod chronological;
 pub mod direct;
-mod identity_json;
+pub(crate) use lash_core_ids::identity_json;
 pub mod llm;
 mod model;
-mod operational_metrics;
-pub mod panic_containment;
+pub(crate) use lash_core_ids::operational_metrics;
+/// Panic containment for runtime-owned work.
+///
+/// The module lives in `lash-core-ids`; this facade re-exports its public
+/// surface unchanged and keeps the crate-internal helpers crate-internal.
+pub mod panic_containment {
+    pub(crate) use lash_core_ids::panic_containment::{
+        enforce_loudness, enforce_message, payload_message,
+    };
+    pub use lash_core_ids::panic_containment::{is_loud, set_loud};
+}
 #[cfg(feature = "perf-witness")]
 #[doc(hidden)]
-pub mod perf_witness;
+pub use lash_core_ids::perf_witness;
 pub mod plugin;
 mod plugin_stack;
 mod protocol_build;
@@ -30,13 +39,21 @@ pub mod session;
 pub mod session_graph;
 pub(crate) mod session_graph_integrity;
 pub mod session_model;
+/// Stable hashing primitives, re-exported from `lash-core-ids`. The helpers
+/// stay crate-internal; the module itself is public under `testing` exactly as
+/// it was before the carve-out.
 #[cfg(feature = "testing")]
-pub mod stable_hash;
+pub mod stable_hash {
+    pub use lash_core_ids::stable_hash::sha256_hex;
+    #[cfg(test)]
+    pub(crate) use lash_core_ids::stable_hash::stable_json_sha256_hex;
+    pub(crate) use lash_core_ids::stable_hash::{blake3_hex, stable_json_string};
+}
 #[cfg(not(feature = "testing"))]
-mod stable_hash;
-mod stable_identity;
+pub(crate) use lash_core_ids::stable_hash;
+pub(crate) use lash_core_ids::stable_identity;
 pub mod store;
-pub mod task;
+pub use lash_core_ids::task;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
 pub mod sync {
     pub use lash_sansio::sync::*;
@@ -45,7 +62,7 @@ pub mod sync {
 #[doc(hidden)]
 pub mod test_support;
 #[cfg(any(test, feature = "testing"))]
-pub mod test_watchdog;
+pub use lash_core_ids::test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;

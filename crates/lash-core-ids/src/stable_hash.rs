@@ -1,14 +1,14 @@
 use serde::Serialize;
 use sha2::Digest as _;
 
-pub(crate) fn stable_json_string<T>(value: &T) -> Result<String, serde_json::Error>
+pub fn stable_json_string<T>(value: &T) -> Result<String, serde_json::Error>
 where
     T: Serialize + ?Sized,
 {
     serde_json::to_string(value)
 }
 
-pub(crate) fn blake3_hex(domain: &str, bytes: &[u8]) -> String {
+pub fn blake3_hex(domain: &str, bytes: &[u8]) -> String {
     lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
 }
 
@@ -19,8 +19,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
-#[cfg(test)]
-pub(crate) fn stable_json_sha256_hex<T>(value: &T) -> Result<String, serde_json::Error>
+#[cfg(any(test, feature = "testing"))]
+pub fn stable_json_sha256_hex<T>(value: &T) -> Result<String, serde_json::Error>
 where
     T: Serialize + ?Sized,
 {

@@ -12,8 +12,8 @@ fn with_runtime_tuning_metrics(record: impl Fn(&lash_trace::otel::RuntimeTuningM
     record(runtime_tuning_metrics());
 }
 
-pub(crate) fn record_provider_retry(provider: &str, kind: &'static str) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_provider_retry(provider: &str, kind: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.provider.retries");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(|metrics| metrics.record_provider_retry(provider, kind));
@@ -21,8 +21,8 @@ pub(crate) fn record_provider_retry(provider: &str, kind: &'static str) {
     let _ = (provider, kind);
 }
 
-pub(crate) fn record_provider_throttle_wait(provider: &str, wait: Duration) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_provider_throttle_wait(provider: &str, wait: Duration) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.provider.throttle_wait.duration");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(|metrics| metrics.record_provider_throttle_wait(provider, wait));
@@ -31,16 +31,16 @@ pub(crate) fn record_provider_throttle_wait(provider: &str, wait: Duration) {
 }
 
 #[cfg(feature = "otel-trace")]
-pub(crate) fn record_session_lane_contention_wait(wait: Duration, outcome: &'static str) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_session_lane_contention_wait(wait: Duration, outcome: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.session_execution_lane.contention_wait.duration");
     with_runtime_tuning_metrics(|metrics| {
         metrics.record_session_lane_contention_wait(wait, outcome);
     });
 }
 
-pub(crate) fn record_session_lane_give_up(reason: &'static str) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_session_lane_give_up(reason: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.session_execution_lane.give_ups");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(|metrics| metrics.record_session_lane_give_up(reason));
@@ -48,8 +48,8 @@ pub(crate) fn record_session_lane_give_up(reason: &'static str) {
     let _ = reason;
 }
 
-pub(crate) fn record_queued_work_wake_retry() {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_queued_work_wake_retry() {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.queued_work.wake_retries");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(
@@ -57,8 +57,8 @@ pub(crate) fn record_queued_work_wake_retry() {
     );
 }
 
-pub(crate) fn record_postgres_pool_acquire_wait(wait: Duration, outcome: &'static str) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_postgres_pool_acquire_wait(wait: Duration, outcome: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.postgres.pool.acquire_wait.duration");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(|metrics| {
@@ -68,8 +68,8 @@ pub(crate) fn record_postgres_pool_acquire_wait(wait: Duration, outcome: &'stati
     let _ = (wait, outcome);
 }
 
-pub(crate) fn record_runtime_commit_budgeted_size(bytes: usize, outcome: &'static str) {
-    #[cfg(all(test, feature = "otel-trace"))]
+pub fn record_runtime_commit_budgeted_size(bytes: usize, outcome: &'static str) {
+    #[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
     observe_test_metric("lash.runtime_commit.budgeted_size");
     #[cfg(feature = "otel-trace")]
     with_runtime_tuning_metrics(|metrics| {
@@ -79,7 +79,7 @@ pub(crate) fn record_runtime_commit_budgeted_size(bytes: usize, outcome: &'stati
     let _ = (bytes, outcome);
 }
 
-#[cfg(all(test, feature = "otel-trace"))]
+#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
 fn observe_test_metric(name: &'static str) {
     TEST_OBSERVATIONS.with(|slot| {
         if let Some(observations) = slot.borrow_mut().as_mut() {
@@ -88,18 +88,18 @@ fn observe_test_metric(name: &'static str) {
     });
 }
 
-#[cfg(all(test, feature = "otel-trace"))]
+#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
 thread_local! {
     static TEST_OBSERVATIONS: std::cell::RefCell<Option<Vec<&'static str>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(all(test, feature = "otel-trace"))]
-pub(crate) struct TestMetrics;
+#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
+pub struct TestMetrics;
 
-#[cfg(all(test, feature = "otel-trace"))]
+#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
 impl TestMetrics {
-    pub(crate) fn install() -> Self {
+    pub fn install() -> Self {
         TEST_OBSERVATIONS.with(|slot| {
             assert!(
                 slot.borrow_mut().replace(Vec::new()).is_none(),
@@ -109,11 +109,11 @@ impl TestMetrics {
         Self
     }
 
-    pub(crate) fn counter_value(&self, name: &str) -> u64 {
+    pub fn counter_value(&self, name: &str) -> u64 {
         self.observation_count(name)
     }
 
-    pub(crate) fn histogram_count(&self, name: &str) -> u64 {
+    pub fn histogram_count(&self, name: &str) -> u64 {
         self.observation_count(name)
     }
 
@@ -129,7 +129,7 @@ impl TestMetrics {
     }
 }
 
-#[cfg(all(test, feature = "otel-trace"))]
+#[cfg(all(any(test, feature = "testing"), feature = "otel-trace"))]
 impl Drop for TestMetrics {
     fn drop(&mut self) {
         TEST_OBSERVATIONS.with(|slot| {

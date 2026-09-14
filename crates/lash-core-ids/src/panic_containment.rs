@@ -21,7 +21,7 @@ pub fn is_loud() -> bool {
     LOUD.load(Ordering::SeqCst)
 }
 
-pub(crate) fn payload_message(payload: &(dyn Any + Send)) -> String {
+pub fn payload_message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -32,13 +32,13 @@ pub(crate) fn payload_message(payload: &(dyn Any + Send)) -> String {
 }
 
 /// Re-raises `payload` only when process-wide loud containment is enabled.
-pub(crate) fn enforce_loudness(payload: Box<dyn Any + Send>) {
+pub fn enforce_loudness(payload: Box<dyn Any + Send>) {
     if is_loud() {
         std::panic::resume_unwind(payload);
     }
 }
 
-pub(crate) fn enforce_message(code: &'static str, message: &str) {
+pub fn enforce_message(code: &'static str, message: &str) {
     enforce_loudness(Box::new(format!("{code}: {message}")));
 }
 
