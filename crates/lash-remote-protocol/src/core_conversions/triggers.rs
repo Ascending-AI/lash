@@ -431,6 +431,58 @@ impl TryFrom<RemoteTriggerOwnerScope> for lash_core::TriggerOwnerScope {
     }
 }
 
+impl From<RemoteTriggerSourceCapture> for lash_core::TriggerSourceCapture {
+    fn from(value: RemoteTriggerSourceCapture) -> Self {
+        let RemoteTriggerSourceCapture {
+            constructor_path,
+            config_schema,
+            route,
+        } = value;
+        Self {
+            constructor_path,
+            config_schema: lash_core::LashSchema::new(config_schema),
+            route: route.into(),
+        }
+    }
+}
+
+impl From<lash_core::TriggerSourceCapture> for RemoteTriggerSourceCapture {
+    fn from(value: lash_core::TriggerSourceCapture) -> Self {
+        let lash_core::TriggerSourceCapture {
+            constructor_path,
+            config_schema,
+            route,
+        } = value;
+        Self {
+            constructor_path,
+            config_schema: config_schema.schema,
+            route: route.into(),
+        }
+    }
+}
+
+impl From<RemoteTriggerProviderRoute> for lash_core::TriggerProviderRoute {
+    fn from(value: RemoteTriggerProviderRoute) -> Self {
+        match value {
+            RemoteTriggerProviderRoute::Resident => Self::Resident,
+            RemoteTriggerProviderRoute::Provider { provider_id, route } => {
+                Self::Provider { provider_id, route }
+            }
+        }
+    }
+}
+
+impl From<lash_core::TriggerProviderRoute> for RemoteTriggerProviderRoute {
+    fn from(value: lash_core::TriggerProviderRoute) -> Self {
+        match value {
+            lash_core::TriggerProviderRoute::Resident => Self::Resident,
+            lash_core::TriggerProviderRoute::Provider { provider_id, route } => {
+                Self::Provider { provider_id, route }
+            }
+        }
+    }
+}
+
 impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionDraft {
     type Error = RemoteProtocolError;
 
@@ -445,6 +497,7 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
             source_key,
             source,
             payload_schema,
+            source_capture,
             target,
             target_identity,
             event_types,
@@ -460,6 +513,7 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
             source_key,
             source,
             payload_schema: lash_core::LashSchema::new(payload_schema),
+            source_capture: source_capture.into(),
             target: target.try_into()?,
             target_identity: target_identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
@@ -482,6 +536,7 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
             source_key,
             source,
             payload_schema,
+            source_capture,
             target,
             target_identity,
             event_types,
@@ -497,6 +552,7 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
             source_key,
             source,
             payload_schema: payload_schema.schema,
+            source_capture: source_capture.into(),
             target: target
                 .try_into()
                 .expect("core process input serializes remotely"),
@@ -527,6 +583,7 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerSubscription
             source_key,
             source,
             payload_schema,
+            source_capture,
             target,
             target_identity,
             event_types,
@@ -553,6 +610,7 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerSubscription
             source_key,
             source,
             payload_schema: payload_schema.schema,
+            source_capture: source_capture.into(),
             target: target
                 .try_into()
                 .expect("core process input serializes remotely"),
@@ -589,6 +647,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
             source_key,
             source,
             payload_schema,
+            source_capture,
             target,
             target_identity,
             event_types,
@@ -615,6 +674,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
             source_key,
             source,
             payload_schema: lash_core::LashSchema::new(payload_schema),
+            source_capture: source_capture.into(),
             target: target.try_into()?,
             target_identity: target_identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),

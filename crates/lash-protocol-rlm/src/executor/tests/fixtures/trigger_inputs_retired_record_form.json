@@ -413,6 +413,32 @@
         "tz": "UTC"
       }
     },
+    "source_capture": {
+      "config_schema": {
+        "schema": {
+          "additionalProperties": true,
+          "properties": {
+            "expr": {
+              "type": "string"
+            },
+            "tz": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "type": "object"
+        }
+      },
+      "constructor_path": [
+        "timer",
+        "Schedule"
+      ],
+      "route": {
+        "kind": "resident"
+      }
+    },
     "source_key": "trigger-source:v1:blake3:1df8ceb8c447dace217ee8674ea4e52237459280901e26e29ca0a0c6a69d97d7",
     "source_type": "timer.Schedule",
     "subscription_key": "remembered-key",

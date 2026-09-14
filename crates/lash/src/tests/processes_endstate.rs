@@ -256,6 +256,12 @@ impl LinkedTestProcess {
         env_ref: lash_core::ProcessExecutionEnvRef,
     ) -> lash_core::TriggerSubscriptionDraft {
         lash_core::TriggerSubscriptionDraft {
+            source_capture: lash_core::TriggerSourceCapture::provider(
+                ["ui", "button"],
+                lash_core::LashSchema::any(),
+                "ui-provider",
+                serde_json::json!({"account": "a"}),
+            ),
             subscription_key: "host-owned-test-trigger".to_string(),
             env_ref,
             wake_target: None,
@@ -874,6 +880,12 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                     session_id,
                 )),
                 draft: lash_core::TriggerSubscriptionDraft {
+                    source_capture: lash_core::TriggerSourceCapture::provider(
+                        ["ui", "button"],
+                        lash_core::LashSchema::any(),
+                        "ui-provider",
+                        serde_json::json!({"account": "a"}),
+                    ),
                     subscription_key: "sqlite-facade-prune-key".to_string(),
                     env_ref: lash_core::ProcessExecutionEnvRef::new(
                         "process-env:sqlite-facade-prune",

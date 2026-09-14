@@ -1,9 +1,13 @@
 use super::*;
 
-const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 2;
-// Bumped to 4 (FIG-1383): the subscription-definition preimage's process-status
-// tag registry gained `caller_departed`; see the process-registration family note.
-const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 4;
+// Bumped to 3 (FIG-2913): the preimage projects the admitted source
+// contract and provider route the subscription now captures.
+const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
+// Bumped to 5 (FIG-2913): the subscription-definition preimage projects the
+// admitted source contract and provider route captured at registration. It was
+// 4 (FIG-1383) when the process-status tag registry gained `caller_departed`;
+// see the process-registration family note.
+pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 5;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
@@ -133,6 +137,7 @@ pub(super) fn project_trigger_draft(
         source_key,
         source,
         payload_schema,
+        source_capture,
         target,
         target_identity,
         event_types,
@@ -156,6 +161,7 @@ pub(super) fn project_trigger_draft(
     identity.string(source_key);
     project_trigger_payload_leaf(identity, source);
     project_trigger_schema_leaf(identity, &payload_schema.schema);
+    project_trigger_source_capture(identity, source_capture);
     project_trigger_process_input(identity, target, family_version);
     let crate::ProcessIdentity {
         kind,
@@ -190,6 +196,34 @@ pub(super) fn project_trigger_draft(
     identity.optional(target_label.as_deref(), |identity, label| {
         identity.string(label)
     });
+}
+
+/// Projects the admitted source contract and provider route.
+///
+/// Route tags: 1 resident, 2 provider. The opaque route is one canonical
+/// payload leaf; the configuration contract is one canonical schema leaf.
+/// Retired tags remain burned.
+pub(super) fn project_trigger_source_capture(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    capture: &TriggerSourceCapture,
+) {
+    let TriggerSourceCapture {
+        constructor_path,
+        config_schema,
+        route,
+    } = capture;
+    identity.sequence(constructor_path.iter(), |identity, segment| {
+        identity.string(segment);
+    });
+    project_trigger_schema_leaf(identity, &config_schema.schema);
+    match route {
+        TriggerProviderRoute::Resident => identity.tag(1),
+        TriggerProviderRoute::Provider { provider_id, route } => {
+            identity.tag(2);
+            identity.string(provider_id);
+            project_trigger_payload_leaf(identity, route);
+        }
+    }
 }
 
 fn project_trigger_event_type(
@@ -495,6 +529,7 @@ pub struct TriggerRouter {
     process_work: crate::ProcessWorkWiring,
     process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     process_engines: Option<crate::ProcessEngineRegistry>,
+    route_restorer: Option<Arc<dyn TriggerRouteRestorer>>,
 }
 
 impl TriggerRouter {
@@ -504,7 +539,21 @@ impl TriggerRouter {
             process_work,
             process_env_store: None,
             process_engines: None,
+            route_restorer: None,
         }
+    }
+
+    /// Bind the host component that reinstalls a captured provider route before
+    /// an unrecorded delivery executes.
+    pub fn with_route_restorer(mut self, restorer: Arc<dyn TriggerRouteRestorer>) -> Self {
+        self.route_restorer = Some(restorer);
+        self
+    }
+
+    /// The engine registry this router admits trigger targets against, when the
+    /// deployment wired one.
+    pub fn process_engines(&self) -> Option<&crate::ProcessEngineRegistry> {
+        self.process_engines.as_ref()
     }
 
     /// Bind the exact artifact stores used by the runtime that will execute
@@ -674,6 +723,11 @@ impl TriggerRouter {
     ) -> Result<(), PluginError> {
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
+        // Delivery validates against the contract this subscription captured at
+        // registration, never against whatever the live catalog now says. The
+        // reservation carries the subscription snapshot the store pinned when
+        // it reserved, so a catalog edit or a later explicit update cannot
+        // rewrite an already-reserved delivery's contract or route.
         subscription
             .payload_schema
             .validate(&occurrence.payload)
@@ -683,6 +737,20 @@ impl TriggerRouter {
                     subscription.subscription_key
                 ))
             })?;
+        if let Some(source) = occurrence.source.as_ref() {
+            subscription
+                .source_capture
+                .config_schema
+                .validate(source)
+                .map_err(|err| {
+                    PluginError::Session(format!(
+                        "trigger `{}` occurrence source does not match the captured source contract: {err}",
+                        subscription.subscription_key
+                    ))
+                })?;
+        }
+        self.restore_captured_route(&subscription.source_capture)
+            .await?;
         let args =
             materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)?;
         let target = apply_trigger_inputs(subscription.target.clone(), args)?;
@@ -798,6 +866,29 @@ impl TriggerRouter {
     }
 }
 
+impl TriggerRouter {
+    /// Reinstalls the captured provider route for one unrecorded delivery.
+    ///
+    /// A resident source needs nothing. A provider route with no restorer wired
+    /// is left as captured: the host that never installed a restorer has no
+    /// revocation policy to consult, and inventing one here would be a fresh
+    /// authorization decision. A restorer that answers `Unavailable` leaves the
+    /// reservation durable so the next attempt retries the identical delivery
+    /// identity; `Revoked` refuses visibly and nothing re-resolves the source.
+    async fn restore_captured_route(
+        &self,
+        capture: &TriggerSourceCapture,
+    ) -> Result<(), PluginError> {
+        if matches!(capture.route, TriggerProviderRoute::Resident) {
+            return Ok(());
+        }
+        let Some(restorer) = self.route_restorer.as_ref() else {
+            return Ok(());
+        };
+        restorer.restore(capture).await.map_err(PluginError::from)
+    }
+}
+
 fn materialize_trigger_process_args(
     input_template: &BTreeMap<String, TriggerInputBinding>,
     event_payload: &serde_json::Value,
@@ -897,751 +988,5 @@ pub fn trigger_occurrence_request_matches_record(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-
-    #[test]
-    fn residual_trigger_projection_identity_goldens() {
-        let source = serde_json::json!({"b": [1, true], "a": "λ"});
-        assert_eq!(
-            hex(&trigger_source_preimage("webhook\0type", &source)),
-            "6c6173682d737461626c652d6964656e74697479020100000000000000136c6173682e747269676765722d736f75726365000000000000000c776562686f6f6b007479706500000000000000177b2261223a22cebb222c2262223a5b312c747275655d7d"
-        );
-        assert_eq!(
-            default_trigger_source_key("webhook\0type", &source),
-            "trigger-source:v1:blake3:c8840de389d5af3008240cb4a75277c96a958037c9a7249e7e2a184400c7cfb0"
-        );
-
-        assert_eq!(
-            hex(&trigger_delivery_process_preimage(
-                "trigger:key:a:b",
-                "subscription\0x",
-                "inc:λ",
-                42,
-            )),
-            "6c6173682d737461626c652d6964656e746974790201000000000000001d6c6173682e747269676765722d64656c69766572792d70726f63657373000000000000000f747269676765723a6b65793a613a62000000000000000e737562736372697074696f6e00780000000000000006696e633acebb000000000000002a"
-        );
-        assert_eq!(
-            deterministic_delivery_process_id("trigger:key:a:b", "subscription\0x", "inc:λ", 42,)
-                .unwrap(),
-            "process:trigger-delivery:v1:blake3:7ff0a51d9a9d0e1e854502116f8b2d9a1b467b0169a5ad7b1cbc4b74e87e2919"
-        );
-        assert_eq!(
-            derived_trigger_subscription_key("worker\0name", "source:λ", "key\0route"),
-            "derived/v3/5737eff4c14bed2a7dc7e7eb4a68c5b9968dd56a4aac8cffcfb9e0f64436d443"
-        );
-    }
-
-    #[test]
-    fn occurrence_uses_idempotency_key_and_structural_conflict_material() {
-        let request = TriggerOccurrenceRequest::new(
-            "source",
-            "key",
-            serde_json::json!({"value": 1}),
-            "caller:key",
-        )
-        .with_source(serde_json::json!({"origin": true}));
-        assert_eq!(deterministic_occurrence_id(&request), "trigger:caller:key");
-        let record = TriggerOccurrenceRecord {
-            occurrence_id: "trigger:caller:key".to_string(),
-            source_type: request.source_type.clone(),
-            source_key: request.source_key.clone(),
-            payload: request.payload.clone(),
-            idempotency_key: request.idempotency_key.clone(),
-            source: request.source.clone(),
-            session_id: None,
-            outcome: TriggerOccurrenceOutcome::Fired,
-            occurred_at_ms: 42,
-        };
-        assert_eq!(
-            serde_json::to_string(&request).expect("serialize fired occurrence request"),
-            r#"{"source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true}}"#,
-            "the default fired request must stay byte-for-byte stable"
-        );
-        assert_eq!(
-            serde_json::to_string(&record).expect("serialize fired occurrence record"),
-            r#"{"occurrence_id":"trigger:caller:key","source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true},"occurred_at_ms":42}"#,
-            "the default fired record must stay byte-for-byte stable"
-        );
-        assert_eq!(
-            serde_json::from_str::<TriggerOccurrenceRecord>(
-                r#"{"occurrence_id":"trigger:caller:key","source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true},"occurred_at_ms":42}"#,
-            )
-            .expect("decode a pre-outcome occurrence record")
-            .outcome,
-            TriggerOccurrenceOutcome::Fired,
-            "records written before the outcome field must decode as fired"
-        );
-        assert!(trigger_occurrence_request_matches_record(&request, &record));
-        let mut normalized = request.clone();
-        normalized.payload = serde_json::json!({"value": -0.0});
-        let mut normalized_record = record.clone();
-        normalized_record.payload = serde_json::json!({"value": 0.0});
-        normalized.source = Some(serde_json::Value::Null);
-        normalized_record.source = None;
-        assert!(trigger_occurrence_request_matches_record(
-            &normalized,
-            &normalized_record
-        ));
-        let mut changed = request;
-        changed.payload = serde_json::json!({"value": 2});
-        assert!(!trigger_occurrence_request_matches_record(
-            &changed, &record
-        ));
-    }
-
-    fn minimal_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscriptionDraft {
-        TriggerSubscriptionDraft::for_process(
-            "sub",
-            crate::ProcessExecutionEnvRef::new("env"),
-            "source",
-            "key",
-            input,
-            crate::ProcessIdentity::new("kind"),
-        )
-    }
-
-    fn enriched_identity_corpus_draft(input: crate::ProcessInput) -> TriggerSubscriptionDraft {
-        let mut bindings = BTreeMap::new();
-        bindings.insert("event".to_string(), TriggerInputBinding::Event);
-        bindings.insert(
-            "fixed".to_string(),
-            TriggerInputBinding::Fixed {
-                value: serde_json::json!([null, false, true, -1, 0, u64::MAX, 1.5, "a:b", [], {"x": 0}]),
-            },
-        );
-        let mut selector_fields = BTreeMap::new();
-        selector_fields.insert(
-            "const".to_string(),
-            crate::ProcessValueSelector::Const(serde_json::json!(0)),
-        );
-        selector_fields.insert("payload".to_string(), crate::ProcessValueSelector::Payload);
-        selector_fields.insert(
-            "pointer".to_string(),
-            crate::ProcessValueSelector::Pointer("/x".to_string()),
-        );
-        selector_fields.insert(
-            "present".to_string(),
-            crate::ProcessValueSelector::Present("/y".to_string()),
-        );
-        let mut draft = minimal_identity_corpus_draft(input)
-            .with_source(serde_json::json!({"source": [0, "0"]}))
-            .with_payload_schema(crate::LashSchema::new(
-                serde_json::json!({"type": "object"}),
-            ))
-            .with_wake_target(crate::SessionScope::for_agent_frame(
-                "session",
-                crate::FrameNodeId::new("frame").expect("test frame identity is non-empty"),
-            ))
-            .with_event_types([crate::ProcessEventType {
-                name: "app.event".to_string(),
-                payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),
-                semantics: crate::ProcessEventSemanticsSpec {
-                    terminal: Some(crate::ProcessTerminalSpec {
-                        status: crate::ProcessStatus::Completed,
-                        await_output: Some(crate::ProcessValueSelector::Template {
-                            template: "{payload}:{pointer}:{const}:{present}".to_string(),
-                            fields: selector_fields,
-                        }),
-                    }),
-                    wake: Some(crate::ProcessWakeSpec {
-                        when: None,
-                        input: crate::ProcessValueSelector::Payload,
-                    }),
-                },
-            }])
-            .with_input_template(bindings)
-            .with_name("name")
-            .with_target_label("label");
-        draft.target_identity = crate::ProcessIdentity::for_definition(
-            crate::ProcessDefinitionRef::unclaimed("kind", serde_json::json!({"definition": 0})),
-            Some("label"),
-        );
-        draft
-    }
-
-    #[test]
-    fn trigger_definition_identity_golden_corpus() {
-        let tool = crate::ProcessInput::ToolCall {
-            call: crate::PreparedToolCall::from_parts(
-                "call",
-                crate::ToolId::new("tool-id"),
-                "tool",
-                serde_json::json!({"arg": 0}),
-                Some(lash_sansio::llm::types::ProviderReplayMeta {
-                    item_id: Some("item".to_string()),
-                    opaque: None,
-                    ..Default::default()
-                }),
-                serde_json::json!({"prepared": true}),
-            ),
-        };
-        let inputs = [
-            tool,
-            crate::ProcessInput::Engine {
-                kind: "engine".to_string(),
-                payload: serde_json::json!({"payload": 0}),
-            },
-            crate::ProcessInput::SessionTurn {
-                definition_key: "golden-session-turn:v1".to_string(),
-                create_request: Box::new(crate::SessionCreateRequest::root(
-                    crate::SessionStartPoint::Empty,
-                    crate::PluginOptions::default(),
-                )),
-                turn_input: Box::new(crate::TurnInput::empty()),
-                output_contract: crate::ToolOutputContract::FromInputSchema {
-                    input_field: "field".to_string(),
-                    default_schema: Some(serde_json::json!({})),
-                },
-            },
-            crate::ProcessInput::External {
-                metadata: serde_json::json!({"metadata": 0}),
-            },
-            crate::ProcessInput::SessionTurn {
-                definition_key: "golden-session-turn-static:v1".to_string(),
-                create_request: Box::new(crate::SessionCreateRequest::root(
-                    crate::SessionStartPoint::Empty,
-                    crate::PluginOptions::default(),
-                )),
-                turn_input: Box::new(crate::TurnInput::empty()),
-                output_contract: crate::ToolOutputContract::Static,
-            },
-        ];
-        let owners = [
-            TriggerOwnerScope::session("owner"),
-            TriggerOwnerScope::host("owner").expect("host owner"),
-            TriggerOwnerScope::Platform,
-            TriggerOwnerScope::session("owner"),
-            TriggerOwnerScope::host("static-owner").expect("host owner"),
-        ];
-        let actual = owners
-            .iter()
-            .zip(inputs)
-            .enumerate()
-            .map(|(index, (owner, input))| {
-                let draft = if index == 0 {
-                    enriched_identity_corpus_draft(input)
-                } else {
-                    minimal_identity_corpus_draft(input)
-                };
-                (
-                    hex(&trigger_subscription_definition_preimage(owner, &draft)),
-                    trigger_subscription_definition_fingerprint(owner, &draft),
-                )
-            })
-            .collect::<Vec<_>>();
-        let expected = [
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7601000000000000000773657373696f6e0100000000000000056672616d650100000000000000046e616d650000000000000006736f7572636500000000000000036b657900000000000000127b22736f75726365223a5b302c2230225d7d00000000000000117b2274797065223a226f626a656374227d01000000000000000463616c6c0000000000000007746f6f6c2d69640000000000000004746f6f6c00000000000000097b22617267223a307d010100000000000000046974656d0000000000000000117b227072657061726564223a747275657d00000000000000046b696e640100000000000000056c6162656c0100000000000000107b22646566696e6974696f6e223a307d000000000000000100000000000000096170702e6576656e7400000000000000117b2274797065223a226f626a656374227d0103010400000000000000257b7061796c6f61647d3a7b706f696e7465727d3a7b636f6e73747d3a7b70726573656e747d00000000000000040000000000000005636f6e73740300000000000000013000000000000000077061796c6f6164010000000000000007706f696e7465720200000000000000022f78000000000000000770726573656e740500000000000000022f79010001000000000000000200000000000000056576656e7401000000000000000566697865640200000000000000405b6e756c6c2c66616c73652c747275652c2d312c302c31383434363734343037333730393535313631352c312e352c22613a62222c5b5d2c7b2278223a307d5d0100000000000000056c6162656c",
-                "trigger-definition:v2:blake3:0941e39a74803bae5d9a87f1295705713df58ecf34548e62a6259ea20ded84bb",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0200000000000000056f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d020000000000000006656e67696e65000000000000000d7b227061796c6f6164223a307d00000000000000046b696e6400000000000000000000000000000000000000",
-                "trigger-definition:v2:blake3:0d623fbcbf9f3794bfa2beeb6c63e71c41f1e78a7674f862bab445fc50a9d1df",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0300000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d030000000000000016676f6c64656e2d73657373696f6e2d7475726e3a76310200000000000000056669656c640100000000000000027b7d00000000000000046b696e6400000000000000000000000000000000000000",
-                "trigger-definition:v2:blake3:2a6ef8c3e60bf8327d42ea7ef458e37ccaaa918be0c81fab5287bf4cec3b75c3",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e0100000000000000056f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d04000000000000000e7b226d65746164617461223a307d00000000000000046b696e6400000000000000000000000000000000000000",
-                "trigger-definition:v2:blake3:a48ed8fa401e21506a98b299a33ff1f06bebef20acd6cd1f1574d651478f4bb3",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000246c6173682e747269676765722d737562736372697074696f6e2d646566696e6974696f6e02000000000000000c7374617469632d6f776e657200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d03000000000000001d676f6c64656e2d73657373696f6e2d7475726e2d7374617469633a76310100000000000000046b696e6400000000000000000000000000000000000000",
-                "trigger-definition:v2:blake3:f7245bd1c52ed0bfc78e48ced9a07100cc44c9994d411b5e8494c9e35e63c8a3",
-            ),
-        ];
-        assert_eq!(actual.len(), expected.len());
-        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
-            assert_eq!(preimage, expected_preimage);
-            assert_eq!(key, expected_key);
-        }
-    }
-
-    #[test]
-    fn replay_route_rotates_trigger_definition_to_the_current_family_without_moving_v2() {
-        let owner = TriggerOwnerScope::session("owner");
-        let mut draft = minimal_identity_corpus_draft(crate::ProcessInput::ToolCall {
-            call: crate::PreparedToolCall::from_parts(
-                "call",
-                crate::ToolId::new("tool-id"),
-                "tool",
-                serde_json::json!({}),
-                Some(lash_sansio::llm::types::ProviderReplayMeta {
-                    item_id: Some("item".to_string()),
-                    opaque: None,
-                    origin: None,
-                }),
-                serde_json::Value::Null,
-            ),
-        });
-        let legacy = trigger_subscription_definition_fingerprint(&owner, &draft);
-        assert!(legacy.starts_with("trigger-definition:v2:blake3:"));
-
-        let crate::ProcessInput::ToolCall { call } = &mut draft.target else {
-            unreachable!()
-        };
-        call.replay.as_mut().expect("replay").origin =
-            Some(lash_sansio::llm::types::ProviderRouteIdentity::new(
-                "openai-compatible",
-                "https://gateway.example/v1",
-                "shared-model",
-            ));
-        let routed = trigger_subscription_definition_fingerprint(&owner, &draft);
-        assert!(routed.starts_with("trigger-definition:v4:blake3:"));
-        assert_ne!(legacy, routed);
-    }
-
-    #[test]
-    fn executable_trigger_definition_changes_rotate_the_fingerprint() {
-        let mut first = minimal_identity_corpus_draft(crate::ProcessInput::External {
-            metadata: serde_json::json!({"revision": 1}),
-        });
-        first.event_types = vec![crate::ProcessEventType {
-            name: "app.event".to_string(),
-            payload_schema: crate::LashSchema::new(serde_json::json!({"type": "string"})),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        }];
-        let mut second = first.clone();
-        second.event_types[0].payload_schema =
-            crate::LashSchema::new(serde_json::json!({"type": "number"}));
-        assert_ne!(
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &first),
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &second)
-        );
-
-        let mut annotated = first.clone();
-        annotated.event_types[0].payload_schema = crate::LashSchema::new(
-            serde_json::json!({"type": "string", "description": "display only"}),
-        );
-        assert_eq!(
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &first),
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &annotated),
-            "schema annotations are not executable trigger definition"
-        );
-
-        let mut ordered = first.clone();
-        ordered.event_types.push(crate::ProcessEventType {
-            name: "app.another".to_string(),
-            payload_schema: crate::LashSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        });
-        let mut reversed = ordered.clone();
-        reversed.event_types.reverse();
-        assert_eq!(
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &ordered),
-            trigger_subscription_definition_fingerprint(&TriggerOwnerScope::Platform, &reversed),
-            "event declaration source order is not executable trigger definition"
-        );
-    }
-
-    #[test]
-    fn trigger_operation_identity_golden_corpus() {
-        let owner = TriggerOwnerScope::session("owner");
-        let actor = crate::ProcessOriginator::host_scoped("actor");
-        let session_actor = crate::ProcessOriginator::session(crate::SessionScope::new("actor"));
-        let draft = minimal_identity_corpus_draft(crate::ProcessInput::External {
-            metadata: serde_json::json!({"metadata": 0}),
-        });
-        let commands = [
-            TriggerCommand::Register {
-                owner_scope: owner.clone(),
-                actor: actor.clone(),
-                draft: draft.clone(),
-            },
-            TriggerCommand::List {
-                owner_scope: owner.clone(),
-                filter: TriggerSubscriptionFilter {
-                    registrant_scope_id: Some("r".to_string()),
-                    subscription_key: Some("s".to_string()),
-                    name: None,
-                    source_type: Some("t".to_string()),
-                    source_key: None,
-                    target: Some(serde_json::json!({"target": 0})),
-                    enabled: Some(false),
-                },
-            },
-            TriggerCommand::List {
-                owner_scope: TriggerOwnerScope::Platform,
-                filter: TriggerSubscriptionFilter {
-                    registrant_scope_id: None,
-                    subscription_key: None,
-                    name: None,
-                    source_type: None,
-                    source_key: None,
-                    target: None,
-                    enabled: Some(true),
-                },
-            },
-            TriggerCommand::Update {
-                owner_scope: owner.clone(),
-                actor: actor.clone(),
-                subscription_key: "sub".to_string(),
-                draft: draft.clone(),
-                expected_revision: 0,
-            },
-            TriggerCommand::Enable {
-                owner_scope: owner.clone(),
-                actor: actor.clone(),
-                subscription_key: "sub".to_string(),
-                expected_revision: 0,
-            },
-            TriggerCommand::Disable {
-                owner_scope: owner.clone(),
-                actor: actor.clone(),
-                subscription_key: "sub".to_string(),
-                expected_revision: 0,
-            },
-            TriggerCommand::Delete {
-                owner_scope: owner.clone(),
-                actor: crate::ProcessOriginator::host(),
-                subscription_key: "sub".to_string(),
-                expected_revision: 0,
-            },
-            TriggerCommand::Revive {
-                owner_scope: owner.clone(),
-                actor: actor.clone(),
-                subscription_key: "sub".to_string(),
-                draft,
-                expected_revision: 0,
-            },
-            TriggerCommand::Prune {
-                owner_scope: owner.clone(),
-                actor: session_actor,
-                subscription_keys: vec!["ab".to_string(), "a".to_string()],
-            },
-        ];
-        let actual = commands
-            .iter()
-            .map(|command| {
-                (
-                    hex(&super::super::trigger_command_preimage(command)),
-                    super::super::trigger_command_fingerprint(command),
-                )
-            })
-            .collect::<Vec<_>>();
-        let expected = [
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64010100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d04000000000000000e7b226d65746164617461223a307d00000000000000046b696e6400000000000000000000000000000000000000",
-                "trigger-command:v2:blake3:e7768d867c7d29aca05aefc3bf91a1ea5b340294ea10bdc0b2b25c4428492e60",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020500000000000000146c6173682e747269676765722d636f6d6d616e64020100000000000000056f776e657201000000000000000172000100000000000000017300010000000000000001740001000000000000000c7b22746172676574223a307d0100",
-                "trigger-command:v5:blake3:37624f473a2296417fe3c15d2c0f6c96fc8243f8f505211f02630fc1ecb5368b",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020500000000000000146c6173682e747269676765722d636f6d6d616e640203000000000000000101",
-                "trigger-command:v5:blake3:3beb265c709d5dfedeeb95ed0e2f9df98f603a0ff49cbcc1e00e8c575258aefb",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64030100000000000000056f776e6572010100000000000000056163746f72000000000000000373756200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d04000000000000000e7b226d65746164617461223a307d00000000000000046b696e64000000000000000000000000000000000000000000000000000000",
-                "trigger-command:v2:blake3:ec2bdf1707596e8b31a43bb3c662e291b9da31071a6b4f7d1da5e53564a6c4d3",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64040100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000000",
-                "trigger-command:v2:blake3:2df18bebb043ebd558c25336a87e5e3251902f29ef3fee159471c63cbe0dd98c",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64050100000000000000056f776e6572010100000000000000056163746f7200000000000000037375620000000000000000",
-                "trigger-command:v2:blake3:573888b2a92165d5137be571cc4e5609f6c821ff6e557e8cfc5f2eb2b638121f",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64060100000000000000056f776e6572010000000000000000037375620000000000000000",
-                "trigger-command:v2:blake3:82e473eb21fcf52319c17c35e7b0d7172640525119d873c19be824496a074fc7",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64070100000000000000056f776e6572010100000000000000056163746f72000000000000000373756200000000000000037375620000000000000003656e7600000000000000000006736f7572636500000000000000036b657900000000000000027b7d00000000000000027b7d04000000000000000e7b226d65746164617461223a307d00000000000000046b696e64000000000000000000000000000000000000000000000000000000",
-                "trigger-command:v2:blake3:46d32fb41ca5ba53012480fb1d906d852b91892f4fe3f20f02e871f302e962d0",
-            ),
-            (
-                "6c6173682d737461626c652d6964656e74697479020200000000000000146c6173682e747269676765722d636f6d6d616e64080100000000000000056f776e65720200000000000000056163746f72000000000000000200000000000000026162000000000000000161",
-                "trigger-command:v2:blake3:7b5263dcfa2dfaeb602a02b947842471bcf6c2eb80896cacded7ec3ee58b29eb",
-            ),
-        ];
-        assert_eq!(actual.len(), expected.len());
-        for ((preimage, key), (expected_preimage, expected_key)) in actual.iter().zip(expected) {
-            assert_eq!(preimage, expected_preimage);
-            assert_eq!(key, expected_key);
-        }
-
-        assert_eq!(
-            (
-                hex(&trigger_subscription_address_preimage(
-                    &TriggerOwnerScope::session("ab"),
-                    "c",
-                )),
-                deterministic_subscription_id(&TriggerOwnerScope::session("ab"), "c"),
-            ),
-            ("6c6173682d737461626c652d6964656e74697479020200000000000000216c6173682e747269676765722d737562736372697074696f6e2d616464726573730100000000000000026162000000000000000163".to_string(), "trigger-subscription:v2:blake3:b509fac416c668d5f457e8dcdc96be35efb397a5584e3b4d2745c97ac115b248".to_string())
-        );
-        assert_eq!(
-            deterministic_subscription_id(&TriggerOwnerScope::session("a"), "bc"),
-            "trigger-subscription:v2:blake3:03b6c9ef0ec67e6deb429d74ac6e1d8e596d161aa4add887fd232e0796c260e8"
-        );
-        assert_eq!(
-            (
-                hex(&super::super::trigger_operation_receipt_preimage(
-                    &TriggerOwnerScope::Platform,
-                    "op:0",
-                )),
-                super::super::trigger_operation_receipt_id(&TriggerOwnerScope::Platform, "op:0"),
-            ),
-            ("6c6173682d737461626c652d6964656e746974790202000000000000001e6c6173682e747269676765722d6f7065726174696f6e2d616464726573730300000000000000046f703a30".to_string(), "trigger-operation:v2:blake3:46b0b5f8027144df9bb5e7e175ba3aa82f973b797b0c66ee3194e8bd6657e3f4".to_string())
-        );
-    }
-
-    fn button_payload_schema() -> crate::LashSchema {
-        crate::LashSchema::any()
-    }
-
-    fn trigger_process_draft(
-        source_key: &str,
-        process_name: &str,
-        env_ref: crate::ProcessExecutionEnvRef,
-    ) -> TriggerSubscriptionDraft {
-        TriggerSubscriptionDraft::for_process(
-            format!("test/{process_name}"),
-            env_ref,
-            "ui.button.pressed",
-            source_key,
-            crate::ProcessInput::Engine {
-                kind: "testing-fixture".to_string(),
-                payload: serde_json::json!({ "process": process_name }),
-            },
-            crate::ProcessIdentity::labelled("testing-fixture", Some(process_name)),
-        )
-        .with_payload_schema(crate::LashSchema::any())
-    }
-
-    async fn register(
-        store: &InMemoryTriggerStore,
-        operation_id: &str,
-        draft: TriggerSubscriptionDraft,
-    ) -> TriggerSubscriptionRecord {
-        let outcome = store
-            .execute_command(
-                operation_id,
-                TriggerCommand::Register {
-                    owner_scope: TriggerOwnerScope::host("test").unwrap(),
-                    actor: crate::ProcessOriginator::host_scoped("test"),
-                    draft,
-                },
-            )
-            .await
-            .expect("execute registration")
-            .expect("register subscription");
-        let TriggerCommandOutcome::Mutation { receipt } = outcome else {
-            panic!("expected mutation receipt")
-        };
-        receipt.record_snapshot
-    }
-
-    async fn register_for_session(
-        store: &InMemoryTriggerStore,
-        operation_id: &str,
-        session_id: &SessionId,
-        draft: TriggerSubscriptionDraft,
-    ) -> TriggerSubscriptionRecord {
-        let outcome = store
-            .execute_command(
-                operation_id,
-                TriggerCommand::Register {
-                    owner_scope: TriggerOwnerScope::session(session_id),
-                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id)),
-                    draft,
-                },
-            )
-            .await
-            .expect("execute session registration")
-            .expect("register session subscription");
-        let TriggerCommandOutcome::Mutation { receipt } = outcome else {
-            panic!("expected mutation receipt")
-        };
-        receipt.record_snapshot
-    }
-
-    fn button_occurrence(
-        source_key: impl Into<String>,
-        idempotency_key: impl Into<String>,
-    ) -> TriggerOccurrenceRequest {
-        TriggerOccurrenceRequest::new(
-            "ui.button.pressed",
-            source_key,
-            serde_json::json!({ "button": "Blue" }),
-            idempotency_key,
-        )
-    }
-
-    #[test]
-    fn trigger_catalog_rejects_duplicate_trigger_source_identity() {
-        let mut catalog = TriggerEventCatalog::new();
-        catalog
-            .declare(TriggerEvent::new(
-                "Button",
-                "ui.button",
-                "pressed",
-                button_payload_schema(),
-            ))
-            .expect("first trigger occurrence");
-
-        let err = catalog
-            .declare(TriggerEvent::new(
-                "AlternateButton",
-                "ui.button",
-                "pressed",
-                button_payload_schema(),
-            ))
-            .expect_err("duplicate public source identity should be rejected");
-
-        assert!(err.contains("duplicate trigger source `ui.button.pressed`"));
-    }
-
-    #[tokio::test]
-    async fn trigger_store_rejects_mismatched_target_label() {
-        let store = InMemoryTriggerStore::default();
-        let draft = TriggerSubscriptionDraft::for_process(
-            "mismatched-label",
-            crate::ProcessExecutionEnvRef::new("process-env:test"),
-            "ui.button.pressed",
-            "source-key",
-            crate::ProcessInput::External {
-                metadata: serde_json::json!({}),
-            },
-            crate::ProcessIdentity::labelled("external", Some("expected")),
-        )
-        .with_target_label("other");
-
-        let err = store
-            .execute_command(
-                "mismatched-label",
-                TriggerCommand::Register {
-                    owner_scope: TriggerOwnerScope::host("test").unwrap(),
-                    actor: crate::ProcessOriginator::host_scoped("test"),
-                    draft,
-                },
-            )
-            .await
-            .expect("store execution")
-            .expect_err("mismatched target labels should be rejected");
-        assert!(err.to_string().contains("target_label must match"));
-    }
-
-    #[tokio::test]
-    async fn trigger_emit_report_records_started_and_already_reserved_deliveries() {
-        let store = Arc::new(InMemoryTriggerStore::default());
-        let registry: Arc<dyn crate::ProcessRegistry> =
-            Arc::new(crate::TestLocalProcessRegistry::default());
-        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
-        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-        let subscription = register(
-            store.as_ref(),
-            "started-register",
-            trigger_process_draft(&source_key, "started", env_ref),
-        )
-        .await;
-        let router = TriggerRouter::new(
-            store,
-            crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
-        )
-        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
-        let controller = crate::NativeRuntimeEffectController::default();
-        let scoped_controller = crate::ScopedEffectController::borrowed(
-            &controller,
-            crate::ExecutionScope::runtime_operation("trigger-blue-report"),
-        )
-        .expect("bind trigger report scope");
-
-        let report = router
-            .emit(
-                button_occurrence(source_key.clone(), "button-blue-report"),
-                &scoped_controller,
-            )
-            .await
-            .expect("emit trigger");
-        assert_eq!(report.deliveries.len(), 1);
-        let delivery = &report.deliveries[0];
-        assert_eq!(delivery.occurrence_id, report.occurrence_id);
-        assert_eq!(delivery.subscription_id, subscription.subscription_id);
-        assert_eq!(delivery.outcome, TriggerDeliveryEmitOutcome::Started);
-        let record = registry
-            .get_process(&delivery.process_id)
-            .await
-            .expect("read process")
-            .expect("started process record");
-        assert!(matches!(
-            record.provenance.caused_by,
-            Some(crate::CausalRef::TriggerOccurrence {
-                occurrence_id,
-                subscription_id: Some(subscription_id),
-                ..
-            }) if occurrence_id == report.occurrence_id
-                && subscription_id == subscription.subscription_id
-        ));
-
-        let replay = router
-            .emit(
-                button_occurrence(source_key, "button-blue-report"),
-                &scoped_controller,
-            )
-            .await
-            .expect("replay trigger");
-        assert_eq!(replay.deliveries.len(), 1);
-        assert_eq!(
-            replay.deliveries[0].outcome,
-            TriggerDeliveryEmitOutcome::AlreadyReserved
-        );
-        assert_eq!(replay.deliveries[0].process_id, delivery.process_id);
-    }
-
-    #[tokio::test]
-    async fn session_trigger_process_is_observed_by_its_registrant() {
-        let store = Arc::new(InMemoryTriggerStore::default());
-        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-        let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
-        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-        register_for_session(
-            store.as_ref(),
-            "session-register",
-            &SessionId::from("session-owner"),
-            trigger_process_draft(&source_key, "session-owned", env_ref),
-        )
-        .await;
-        let router = TriggerRouter::new(
-            store,
-            crate::testing::process_work_wiring_for_registry(
-                Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
-            ),
-        )
-        .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
-        let controller = crate::NativeRuntimeEffectController::default();
-        let scoped_controller = crate::ScopedEffectController::borrowed(
-            &controller,
-            crate::ExecutionScope::runtime_operation("session-trigger-blue"),
-        )
-        .expect("bind session trigger scope");
-
-        let report = router
-            .emit(
-                button_occurrence(source_key, "session-button-blue"),
-                &scoped_controller,
-            )
-            .await
-            .expect("emit session trigger");
-        let process_id = &report.deliveries[0].process_id;
-        assert!(
-            crate::ProcessObserverRegistry::is_observer(
-                registry.as_ref(),
-                &SessionId::from("session-owner"),
-                process_id
-            )
-            .await
-            .expect("read initial observer"),
-            "the session that explicitly registered the trigger must observe its process"
-        );
-    }
-}
+#[path = "router/tests.rs"]
+mod tests;

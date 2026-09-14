@@ -354,7 +354,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // with cancel_requested_at_ms, the timestamp of the first accepted cancel, and
 // adds the partial index a pending-cancel list reads. Component-93 stores carry
 // a boolean this schema no longer has, so they are rejected and recreated.
-const SCHEMA_VERSION: i32 = 94;
+const SCHEMA_VERSION: i32 = 95;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

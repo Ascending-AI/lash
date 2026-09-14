@@ -728,21 +728,36 @@ pub struct TriggerCompatibility {
     pub event_type: NamedDataType,
     pub resolved_event_type: TypeExpr,
     pub inputs: TriggerInputTemplate,
+    /// The admitted source's configuration contract, from the constructor the
+    /// captured requirements record. A registration pins this so a later
+    /// catalog edit cannot change what the subscription validates against.
+    pub config_type: TypeExpr,
+    /// The trigger provider that admitted the source, when it was resolved
+    /// through a deferred trigger provider rather than resident.
+    pub provider_id: Option<String>,
+    /// That provider's opaque authorized route, as canonical JSON text.
+    pub route: Option<String>,
 }
 
 pub fn check_trigger_compatibility(
     request: TriggerCompatibilityRequest<'_>,
 ) -> Result<TriggerCompatibility, TriggerCompatibilityError> {
-    let event_type = event_type_for_source(
-        &request.artifact.host_requirements.resources,
-        request.source_type,
-    )
-    .map_err(|err| match err {
-        TriggerRequestDecodeError::UnknownSourceType { source_type } => {
-            TriggerCompatibilityError::UnknownSourceType { source_type }
-        }
-        other => TriggerCompatibilityError::Source(other.to_string()),
-    })?;
+    let resources = &request.artifact.host_requirements.resources;
+    let binding = resources
+        .resolve_trigger_source(request.source_type)
+        .ok_or_else(|| TriggerCompatibilityError::UnknownSourceType {
+            source_type: request.source_type.to_string(),
+        })?;
+    let event_type = binding.event_type().clone();
+    let provider_id = binding.provider_id().map(ToString::to_string);
+    let route = binding.route().map(ToString::to_string);
+    // The constructor that produced the source value carries the configuration
+    // contract; the trigger binding carries the event contract. Both are read
+    // from the immutable captured requirements, never from a live catalog.
+    let config_type = resources
+        .resolve_value_constructor(&[request.source_type])
+        .map(|constructor| constructor.input_ty.clone())
+        .unwrap_or(TypeExpr::Any);
     let validation = validate_trigger_compatibility_target(
         request.definition,
         &event_type,
@@ -754,6 +769,9 @@ pub fn check_trigger_compatibility(
         event_type,
         resolved_event_type: validation.event_ty,
         inputs: validation.inputs,
+        config_type,
+        provider_id,
+        route,
     })
 }
 

@@ -83,3 +83,38 @@ FIG-2502 implements `RetentionBound` for runtime commit receipts and usage
 evidence, with terminal-session gating and atomic dependent-root reconciliation
 (ADR 0023). It does not authorize age-only reclamation of host/platform trigger
 mutation receipts or change trigger-delivery lifecycle ownership.
+
+## Amendment: a subscription carries its own source contract and route
+
+A subscription used to name its source only by `source_type` plus a free-form `source`
+document, and resolved the meaning of that name against whatever the live catalog said at
+delivery time. That is a recovery hole. The registrant's session is gone by the time a
+delivery runs; a catalog edit, a re-linked module, or a provider whose grant moved silently
+changed what the subscription meant, and the change was invisible — delivery either validated
+against a contract nobody registered against, or "succeeded" into a route that no longer
+existed.
+
+A registration therefore captures, at admission time and durably on the subscription row, the
+source contract it was admitted against and the provider route it was admitted through:
+the constructor path, the config schema, and either the resident marker or the provider id
+plus its opaque route document. Delivery validates the occurrence against the *captured*
+contract, never the current catalog, and restores the *captured* route rather than
+re-resolving the source name. A reserved delivery keeps the subscription snapshot it reserved
+with, so a later catalog edit or explicit `Update` cannot rewrite work already in flight.
+
+Route restoration distinguishes two failures, and the distinction is the whole point: a
+temporarily unavailable provider is retryable — the delivery stays reserved, and a retry
+resumes the same delivery identity and the same deterministic process id — while a revoked
+route refuses visibly and permanently, with no re-resolution and no false success.
+
+The same admission boundary runs the engine target through `ProcessEngineRegistry`
+(FIG-1522): a subscription naming an engine kind this host never registered is refused at
+registration with the registry's typed `UnknownEngine` refusal, and a registration naming a
+registered engine stores the engine's authoritative signature rather than the claim that
+arrived. A dead target is now a registration-time error rather than a first-delivery mystery.
+
+The capture is new durable data, not a reshaping of existing data, so it lands as a
+reject-and-recreate cutover: the store schema versions, the remote protocol window, the module
+artifact host requirements, the durable-read fixture and the trigger definition fingerprint
+family all move together, and a pre-capture row is refused at decode rather than defaulted
+into a contract nobody ever admitted. There is no shim and no automatic store reset.

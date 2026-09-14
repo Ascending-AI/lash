@@ -151,6 +151,7 @@ pub(super) fn subscription_record_from_draft(
         source_key: draft.source_key,
         source: draft.source,
         payload_schema: draft.payload_schema,
+        source_capture: draft.source_capture,
         target: draft.target,
         target_identity: draft.target_identity,
         event_types: draft.event_types,

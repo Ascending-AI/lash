@@ -655,7 +655,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// `cancel_requested_at_ms` instead of a boolean, and gains the partial index a
 /// pending-cancel list reads. A pre-63 database has the boolean column, so it
 /// is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 63;
+pub(crate) const SCHEMA_VERSION: i32 = 64;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

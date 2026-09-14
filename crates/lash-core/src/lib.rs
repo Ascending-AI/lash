@@ -884,8 +884,9 @@ pub use triggers::{
     TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceOutcome,
     TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
     TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
-    TriggerRetentionReconciliationReport, TriggerStore, TriggerSubscriptionDraft,
-    TriggerSubscriptionFilter, TriggerSubscriptionRecord,
+    TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
+    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
+    TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
 };
 pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 

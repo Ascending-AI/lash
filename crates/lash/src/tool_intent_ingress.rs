@@ -172,6 +172,9 @@ pub enum ToolIntentIngressOutcome {
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
     Trigger(lash_core::facade_support::TriggerEmitReport),
+    // Boxed: a registration receipt carries the whole admitted subscription
+    // record, including its captured source contract and route, and is an
+    // order of magnitude larger than the other two variants.
     TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
 }
 

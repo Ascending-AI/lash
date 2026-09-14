@@ -2026,6 +2026,12 @@ fn trigger_input_template() -> BTreeMap<String, lash_core::TriggerInputBinding> 
 
 fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
+        source_capture: lash_core::TriggerSourceCapture::provider(
+            ["ui", "button"],
+            lash_core::LashSchema::any(),
+            "ui-provider",
+            serde_json::json!({"account": "a"}),
+        ),
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
             "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -2047,6 +2053,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
 fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
     let draft = trigger_subscription_draft();
     lash_core::TriggerSubscriptionRecord {
+        source_capture: draft.source_capture,
         subscription_id: "trigger-subscription:v2:blake3:test".to_string(),
         owner_scope: lash_core::TriggerOwnerScope::session("session-a"),
         subscription_key: draft.subscription_key,

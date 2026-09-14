@@ -406,6 +406,185 @@ pub enum TriggerInputBinding {
     Fixed { value: serde_json::Value },
 }
 
+/// The authorized route a trigger subscription pins for its source.
+///
+/// Core records the route and never interprets, widens or re-derives one. A
+/// resident source needs none: its definition travels inside the captured
+/// execution requirements the subscription already pins. A source admitted from
+/// a deferred trigger provider carries that provider's identity and its opaque
+/// routing reference, exactly as the grant delivered it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TriggerProviderRoute {
+    /// The source is resident in the captured execution requirements.
+    Resident,
+    /// A trigger provider authorized this route at link time.
+    Provider {
+        provider_id: String,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        route: serde_json::Value,
+    },
+}
+
+impl TriggerProviderRoute {
+    /// The provider that authorized this route, or `None` for a resident source.
+    pub fn provider_id(&self) -> Option<&str> {
+        match self {
+            Self::Resident => None,
+            Self::Provider { provider_id, .. } => Some(provider_id),
+        }
+    }
+
+    /// The opaque routing reference, or `None` for a resident source.
+    pub fn route(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Resident => None,
+            Self::Provider { route, .. } => Some(route),
+        }
+    }
+}
+
+/// The admitted source contract and provider route one subscription captured
+/// when its registration executed.
+///
+/// A definition resolved in a foreground session cannot be the only record a
+/// durable subscription relies on: a later catalog edit would silently change
+/// which event shape is delivered and where it is routed. Registration copies
+/// the admitted contract here, and every later delivery validates against this
+/// capture rather than against whatever the live catalog now says.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TriggerSourceCapture {
+    /// Fully qualified source-constructor path the registration admitted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constructor_path: Vec<String>,
+    /// The configuration contract that constructor declared.
+    pub config_schema: crate::LashSchema,
+    /// The authorized provider route, opaque to core.
+    pub route: TriggerProviderRoute,
+}
+
+impl TriggerSourceCapture {
+    /// Captures a resident source: no provider route, only its contract.
+    pub fn resident(
+        constructor_path: impl IntoIterator<Item = impl Into<String>>,
+        config_schema: crate::LashSchema,
+    ) -> Self {
+        Self {
+            constructor_path: constructor_path.into_iter().map(Into::into).collect(),
+            config_schema,
+            route: TriggerProviderRoute::Resident,
+        }
+    }
+
+    /// Captures a provider-admitted source with its opaque authorized route.
+    pub fn provider(
+        constructor_path: impl IntoIterator<Item = impl Into<String>>,
+        config_schema: crate::LashSchema,
+        provider_id: impl Into<String>,
+        route: serde_json::Value,
+    ) -> Self {
+        Self {
+            constructor_path: constructor_path.into_iter().map(Into::into).collect(),
+            config_schema,
+            route: TriggerProviderRoute::Provider {
+                provider_id: provider_id.into(),
+                route,
+            },
+        }
+    }
+
+    /// A capture that names no contract, for the host-owned subscriptions whose
+    /// source is not a linked constructor.
+    pub fn untyped() -> Self {
+        Self::resident(Vec::<String>::new(), crate::LashSchema::any())
+    }
+
+    /// The provider that authorized the route, or `None` for a resident source.
+    pub fn provider_id(&self) -> Option<&str> {
+        self.route.provider_id()
+    }
+
+    /// Rejects a provider route with no provider identity, which would name an
+    /// authority no host can restore.
+    pub fn validate(&self) -> Result<(), PluginError> {
+        if let TriggerProviderRoute::Provider { provider_id, .. } = &self.route
+            && provider_id.trim().is_empty()
+        {
+            return Err(PluginError::Session(
+                "trigger source capture carries a provider route with no provider id".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Why a captured provider route could not be restored for one delivery.
+///
+/// The two cases are not interchangeable. A provider that is temporarily down
+/// has said nothing about the authorization, so the reserved work stays durable
+/// and the next attempt retries the same delivery identity. A revoked or
+/// incompatible route is a decision: the attempt refuses visibly, the
+/// reservation is neither deleted nor marked started, and nothing re-resolves
+/// the source against a live catalog to find a replacement grant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TriggerRouteRefusal {
+    /// The provider is unreachable right now. Retryable, same identity.
+    Unavailable {
+        provider_id: String,
+        message: String,
+    },
+    /// The provider revoked or refuses this route. Terminal for the attempt.
+    Revoked {
+        provider_id: String,
+        message: String,
+    },
+}
+
+impl TriggerRouteRefusal {
+    /// Whether the runtime may retry this delivery under the same identity.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Unavailable { .. })
+    }
+}
+
+impl std::fmt::Display for TriggerRouteRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable {
+                provider_id,
+                message,
+            } => write!(
+                formatter,
+                "trigger provider `{provider_id}` is temporarily unavailable: {message}"
+            ),
+            Self::Revoked {
+                provider_id,
+                message,
+            } => write!(
+                formatter,
+                "trigger provider `{provider_id}` refuses the captured route: {message}"
+            ),
+        }
+    }
+}
+
+impl From<TriggerRouteRefusal> for PluginError {
+    fn from(refusal: TriggerRouteRefusal) -> Self {
+        PluginError::Session(refusal.to_string())
+    }
+}
+
+/// Reinstalls a captured provider route before a delivery executes.
+///
+/// This runs only for an unrecorded delivery attempt. It may not widen the
+/// grant, consult a catalog, or resolve a replacement definition: the capture
+/// is the whole authority, and the only answers are "restored", "not right
+/// now", and "refused".
+#[async_trait::async_trait]
+pub trait TriggerRouteRestorer: Send + Sync {
+    async fn restore(&self, capture: &TriggerSourceCapture) -> Result<(), TriggerRouteRefusal>;
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerSubscriptionDraft {
     pub subscription_key: String,
@@ -418,6 +597,11 @@ pub struct TriggerSubscriptionDraft {
     pub source_key: String,
     pub source: serde_json::Value,
     pub payload_schema: crate::LashSchema,
+    /// The admitted source contract and provider route this registration
+    /// captured. Required: a subscription with no capture cannot validate a
+    /// delivery or restore its route, so a record written before the capture
+    /// existed is refused rather than defaulted into a false authority.
+    pub source_capture: TriggerSourceCapture,
     pub target: crate::ProcessInput,
     pub target_identity: crate::ProcessIdentity,
     #[serde(default)]
@@ -452,6 +636,7 @@ impl TriggerSubscriptionDraft {
             payload_schema: crate::LashSchema::new(serde_json::Value::Object(
                 serde_json::Map::new(),
             )),
+            source_capture: TriggerSourceCapture::untyped(),
             target,
             target_identity,
             event_types: Vec::new(),
@@ -478,6 +663,14 @@ impl TriggerSubscriptionDraft {
     /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_payload_schema(mut self, payload_schema: crate::LashSchema) -> Self {
         self.payload_schema = payload_schema;
+        self
+    }
+
+    /// Sets the admitted source contract and provider route captured by a
+    /// `TriggerSubscriptionDraft`, which every later delivery validates and
+    /// routes against instead of consulting the live catalog.
+    pub fn with_source_capture(mut self, source_capture: TriggerSourceCapture) -> Self {
+        self.source_capture = source_capture;
         self
     }
 
@@ -526,11 +719,49 @@ impl TriggerSubscriptionDraft {
                 "trigger session-turn definition_key must not be empty".to_string(),
             ));
         }
+        self.source_capture.validate()?;
         validate_trigger_subscription_target_label(
             self.target_label.as_deref(),
             self.target_identity.label.as_deref(),
         )
     }
+}
+
+/// Runs the process-engine registry's admission on a trigger registration's
+/// target before the subscription becomes durable (FIG-1522).
+///
+/// The delivery side deliberately stays outside the per-start gate: a delivery
+/// replays the target and identity the subscription recorded, so the admission
+/// decision has to be made once, here, when that record is created. Without it
+/// a registration naming an engine kind this host never registered would
+/// produce starts that were admitted nowhere.
+///
+/// An engine target resolves its definition reference through the owning
+/// engine, so the durable row pins the engine's authoritative signature rather
+/// than whatever the registrant claimed; a target that names no definition is
+/// admitted on its engine kind alone. Non-engine targets (tool calls, session
+/// turns, external inputs) name no engine and are not gated here.
+pub async fn admit_trigger_registration_target(
+    registry: &crate::ProcessEngineRegistry,
+    draft: &mut TriggerSubscriptionDraft,
+) -> Result<(), PluginError> {
+    if !matches!(draft.target, crate::ProcessInput::Engine { .. }) {
+        return Ok(());
+    }
+    let Some(reference) = draft.target_identity.definition.clone() else {
+        // Refuses an unregistered kind with the registry's own typed error.
+        registry.require(draft.target_identity.kind.as_str())?;
+        return Ok(());
+    };
+    let resolution = registry
+        .resolve(&reference)
+        .await
+        .map_err(crate::PluginError::from)?;
+    draft.target_identity = crate::ProcessIdentity::for_definition(
+        reference.with_resolved_signature(resolution.signature),
+        draft.target_identity.label.clone(),
+    );
+    Ok(())
 }
 
 pub const INTERNAL_TRIGGER_KEY_PREFIX: &str = "lash.internal/";
@@ -616,6 +847,10 @@ pub struct TriggerSubscriptionRecord {
     pub source_key: String,
     pub source: serde_json::Value,
     pub payload_schema: crate::LashSchema,
+    /// The source contract and provider route admitted at registration. A row
+    /// written before the capture existed has no authority to deliver against
+    /// and is refused at decode; see the store's format-version refusal.
+    pub source_capture: TriggerSourceCapture,
     pub target: crate::ProcessInput,
     pub target_identity: crate::ProcessIdentity,
     #[serde(default)]
@@ -1145,13 +1380,18 @@ pub fn evaluate_trigger_prune(
     Ok(TriggerCommandOutcome::Prune { receipts })
 }
 
-const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 2;
-// Definition-bearing commands remain at v4 (FIG-1383): their preimage's
+// Rotated past the whole retired 1..=5 band by FIG-2913: a draft-bearing
+// command now projects the admitted source contract and provider route, so
+// every draft-bearing command preimage moved. The list preimage did not move
+// on its own, but the three tags share one family namespace and are rotated
+// together so no retired encoding can be re-read under a live tag.
+const LEGACY_TRIGGER_COMMAND_FAMILY_VERSION: u8 = 6;
+// Definition-bearing commands were v4 (FIG-1383) when their preimage's
 // process-status tag registry gained `caller_departed`.
-const TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION: u8 = 4;
-// Bumped to 5 (FIG-2886): list filters carry the canonical owner scope and
-// retain an absent slot for the retired raw session-id spelling.
-const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 5;
+const TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION: u8 = 7;
+// Was 5 (FIG-2886): list filters carry the canonical owner scope and retain an
+// absent slot for the retired raw session-id spelling.
+const TRIGGER_COMMAND_FAMILY_VERSION: u8 = 8;
 const TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION: u8 = 2;
 
 /// Fingerprint one trigger command independently of its caller-supplied
@@ -1173,7 +1413,7 @@ fn trigger_command_family_version(command: &TriggerCommand) -> u8 {
     };
     if draft.is_some_and(|draft| {
         router::trigger_definition_family_version(draft)
-            == TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION
+            == router::TRIGGER_DEFINITION_FAMILY_VERSION
     }) {
         TRIGGER_DEFINITION_COMMAND_FAMILY_VERSION
     } else {
