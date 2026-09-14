@@ -211,6 +211,10 @@ impl TurnCommitDraft {
         Self::from_state_with_graph_appends(state, clock, draft_namespace, graph_appends)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the runtime's current frame resolves in its own graph"
+    )]
     pub(super) fn from_state_with_graph_appends(
         mut state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
@@ -352,6 +356,10 @@ impl TurnCommitDraft {
         self.graph.mark_node_ids_persisted(node_ids);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "derived graph node identities are non-empty"
+    )]
     pub(super) fn remap_node_ids(
         &mut self,
         session_id: &SessionId,

@@ -158,6 +158,10 @@ impl CommitAdmissionCoordinator {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the claim's session row is held under this same lock"
+    )]
     async fn acquire_typed(
         &self,
         claim: CommitAdmissionClaim,
@@ -452,6 +456,10 @@ impl Drop for CommitAdmissionGuard {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the claim's session row is held under this same lock"
+)]
 fn release_session(
     inner: &CommitAdmissionInner,
     claim: &CommitAdmissionClaim,

@@ -4,6 +4,10 @@ use std::sync::Arc;
 
 #[async_trait::async_trait]
 impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
+    #[expect(
+        clippy::expect_used,
+        reason = "the process worker installs the write authority"
+    )]
     async fn run_process(
         &self,
         registration: crate::ProcessRegistration,
@@ -85,6 +89,10 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
 }
 
 impl RuntimeSessionServices {
+    #[expect(
+        clippy::expect_used,
+        reason = "the process worker installs its process wiring and write authority"
+    )]
     fn process_engine_run_context<'run>(
         &self,
         registration: crate::ProcessRegistration,

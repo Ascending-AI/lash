@@ -171,6 +171,10 @@ pub struct RuntimeEffectInvocation {
 }
 
 impl RuntimeEffectInvocation {
+    #[expect(
+        clippy::expect_used,
+        reason = "the panicking form of `try_new`, kept for implementors"
+    )]
     pub fn new(
         address: EffectAddress,
         attribution: RuntimeAttribution,
@@ -344,6 +348,10 @@ const _: () = assert!(std::mem::size_of::<RuntimeEffectEnvelope>() <= 1024);
 impl RuntimeEffectEnvelope {
     /// Constructs a validated effect envelope for effect-host implementors and panics if the
     /// invocation and command violate the durable-effect contract.
+    #[expect(
+        clippy::expect_used,
+        reason = "the panicking form of `try_new`, kept for implementors"
+    )]
     pub fn new(invocation: RuntimeEffectInvocation, command: RuntimeEffectCommand) -> Self {
         Self::try_new(invocation, command).expect("valid runtime effect invocation")
     }

@@ -444,6 +444,10 @@ pub struct WakeDeliveryReport {
 impl WakeDeliveryReport {
     /// Counts delivery states and discard reasons for process-store embedders, then identifies each
     /// target/process ordering group blocked behind a discarded head with later work.
+    #[expect(
+        clippy::expect_used,
+        reason = "the filter above matched a typed discard reason"
+    )]
     pub fn from_deliveries<'a>(deliveries: impl IntoIterator<Item = &'a WakeDelivery>) -> Self {
         let deliveries = deliveries.into_iter().collect::<Vec<_>>();
         let mut report = Self::default();

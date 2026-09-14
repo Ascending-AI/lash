@@ -163,6 +163,10 @@ impl LashRuntime {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a follow-on failure follows a committed turn"
+    )]
     fn record_follow_on_failure(&mut self, turns: &mut [AssembledTurn], err: RuntimeError) {
         self.invalidate_resident_session_state();
         turns

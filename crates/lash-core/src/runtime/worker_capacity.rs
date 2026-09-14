@@ -91,6 +91,10 @@ impl DefaultWorkerSlotSupplier {
 
 #[async_trait::async_trait]
 impl WorkerSlotSupplier for DefaultWorkerSlotSupplier {
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixed worker slot semaphore is never closed"
+    )]
     async fn reserve_slot(&self, kind: WorkerSlotKind) -> WorkerSlotPermit {
         let permit = Arc::clone(self.semaphore(kind))
             .acquire_owned()

@@ -470,6 +470,10 @@ pub(crate) mod facade_ops {
             &self.scope
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the effect-task proxy owns the controller it lends"
+        )]
         async fn execute_process_effect(
             &self,
             envelope: RuntimeEffectEnvelope,

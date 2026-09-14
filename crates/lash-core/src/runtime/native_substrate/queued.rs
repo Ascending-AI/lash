@@ -110,6 +110,10 @@ impl NativeQueuedWork {
     /// owns backpressure, and Lash only coalesces same-session
     /// notifications. A host that wants Lash to bound admission uses
     /// [`Self::with_execution_concurrency`] instead.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default work cadence policy is valid"
+    )]
     pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
         Self::from_parts_with_work_cadence(
             run_handle,
@@ -125,6 +129,10 @@ impl NativeQueuedWork {
     ///
     /// Engine-backed submitters should use [`Self::new`]: their substrate owns
     /// backpressure and Lash only coalesces same-session notifications.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default work cadence policy is valid"
+    )]
     pub fn with_execution_concurrency(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
@@ -155,6 +163,10 @@ impl NativeQueuedWork {
     }
 
     /// Construct an native reference-substrate driver admitted by `supplier`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default work cadence policy is valid"
+    )]
     pub fn with_worker_slot_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         supplier: Arc<dyn WorkerSlotSupplier>,

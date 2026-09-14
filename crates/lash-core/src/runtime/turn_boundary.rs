@@ -549,6 +549,10 @@ impl TurnBoundary {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::expect_used,
+        reason = "derived graph node identities are non-empty"
+    )]
     async fn apply_commit(
         &mut self,
         store: &(dyn RuntimePersistence + '_),

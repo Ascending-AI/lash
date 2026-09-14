@@ -119,6 +119,10 @@ impl ProcessLocalExecution {
                 };
                 let engine_artifacts = match registration.input.as_ref() {
                     crate::ProcessInput::Engine { kind, payload } if process_engines.is_some() => {
+                        #[expect(
+                            clippy::expect_used,
+                            reason = "the match guard checked this option"
+                        )]
                         let engine = process_engines
                             .as_ref()
                             .expect("checked above")
@@ -266,6 +270,7 @@ impl ProcessLocalExecution {
                         biased;
                         output = await_terminal() => output?,
                         _ = turn_cancellation.cancellation.cancelled() => {
+                            #[expect(clippy::expect_used, reason = "execution scopes are plain string identities")]
                             NativeRuntimeEffectController::request_process_cancel_ref(
                                 Arc::clone(&registry),
                                 &process_ref,

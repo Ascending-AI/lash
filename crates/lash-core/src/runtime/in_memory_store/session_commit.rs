@@ -227,6 +227,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 result: stored.result,
                 append_request_identity: stored.append_request_identity,
             };
+            #[expect(
+                clippy::expect_used,
+                reason = "a prior receipt yields a replay or an error"
+            )]
             let replay = planner
                 .decide_receipt(Some(prior))?
                 .expect("an existing receipt must produce replay or an error");
@@ -673,6 +677,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             transaction_now,
         );
         *meta = Some(plan.head_meta(checkpoint_ref.clone()));
+        #[expect(
+            clippy::expect_used,
+            reason = "the head metadata is assigned on the line above"
+        )]
         let head_revision = meta
             .as_ref()
             .expect("fresh commit publishes session head metadata")

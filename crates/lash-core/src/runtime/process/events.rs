@@ -234,12 +234,20 @@ pub fn terminal_append_request(
     await_output: &ProcessAwaitOutput,
     authority: Option<&ProcessCompletionAuthority>,
 ) -> ProcessEventAppendRequest {
+    #[expect(
+        clippy::expect_used,
+        reason = "only terminal outcomes reach this append"
+    )]
     let event_type = terminal_event_type_name(
         await_output
             .terminal_status()
             .expect("only terminal outcomes may be appended"),
     );
     let mut payload = serde_json::json!({ "await_output": await_output });
+    #[expect(
+        clippy::expect_used,
+        reason = "a crate-owned completion authority serializes"
+    )]
     if let Some(authority) = authority {
         payload["completion_authority"] =
             serde_json::to_value(authority).expect("completion authority serializes");

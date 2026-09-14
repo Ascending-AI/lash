@@ -39,6 +39,10 @@ impl ProcessLiveReferenceView {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a crate-owned definition value serializes"
+)]
 fn live_reference_sort_key(summary: &ProcessLiveReferenceView) -> (String, String) {
     let definition = summary
         .definition

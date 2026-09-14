@@ -50,6 +50,10 @@ enum CurrentSnapshot {
 }
 
 impl CurrentSnapshot {
+    #[expect(
+        clippy::expect_used,
+        reason = "a managed read model resolves in its source session graph"
+    )]
     fn to_runtime_state(&self) -> RuntimeSessionState {
         match self {
             Self::Owned(snapshot) => snapshot.clone(),
@@ -226,6 +230,10 @@ impl CurrentSessionCapability {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "turn-scoped state is normalized before service creation"
+    )]
     fn new(
         runtime: &LashRuntime,
         plugins: Arc<crate::PluginSession>,
@@ -458,6 +466,10 @@ impl RuntimeSessionServices {
 }
 
 #[cfg(any(test, feature = "testing"))]
+#[expect(
+    clippy::expect_used,
+    reason = "test-support conformance fixture: a broken setup assumption aborts the test"
+)]
 pub async fn append_receipt_mixed_usage_envelope_conformance(
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
@@ -768,6 +780,10 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
 }
 
 #[cfg(any(test, feature = "testing"))]
+#[expect(
+    clippy::expect_used,
+    reason = "test-support conformance fixture: a broken setup assumption aborts the test"
+)]
 pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     store: Arc<dyn crate::RuntimePersistence>,
     arm_and_wait: A,

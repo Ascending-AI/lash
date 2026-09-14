@@ -56,6 +56,10 @@ impl PreparedExecutionEnvironment {
 }
 
 impl RuntimeTurnDriver<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "an admitted turn has a committed active agent frame"
+    )]
     pub(super) async fn prepare_turn_machine(
         &mut self,
         messages: crate::MessageSequence,

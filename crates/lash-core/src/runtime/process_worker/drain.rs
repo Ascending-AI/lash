@@ -35,6 +35,10 @@ impl DurableProcessWorker {
     /// Externally-Owned rows are all left untouched.
     ///
     /// [ADR 0011]: durable process registration is session-independent.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default process concurrency is a non-zero literal"
+    )]
     pub async fn drain_owner_bound_work(&self) -> Result<ProcessDrainReport, PluginError> {
         let mut abandoned = Vec::new();
         let mut deferred = Vec::new();
