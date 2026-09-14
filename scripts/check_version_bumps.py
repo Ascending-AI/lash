@@ -133,6 +133,14 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
+    # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the
+    # workspace-wide expect/unwrap denial. A lint attribute and prose; no
+    # field, variant, serde attribute, constant or encoding step changed, so
+    # the append-request identity bytes are identical and
+    # APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4.
+    'crates/lash-core/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:24244e89d86a4ca909abb06815828b9d16c143e416861c3fb3619735dacc7cdf',
+
     # FIG-2360: the reviewed version fence replaces derived decoding while
     # preserving version-2 serialization and current-format input semantics.
     # Both HARD review scopes confirmed exact JSON/MessagePack output parity.
