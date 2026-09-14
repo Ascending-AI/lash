@@ -511,6 +511,280 @@ mod terminal_wait_tests {
 }
 
 #[cfg(test)]
+mod attach_terminal_tests {
+    use super::*;
+    use crate::ProcessId;
+    use crate::{
+        ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
+    };
+
+    const WAIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+    fn registration(process_id: &str) -> crate::ProcessRegistration {
+        crate::ProcessRegistration::new(
+            process_id,
+            crate::ProcessInput::ToolCall {
+                call: crate::PreparedToolCall::from_parts(
+                    process_id,
+                    crate::ToolId::new("test-tool"),
+                    "test_tool",
+                    serde_json::Value::Null,
+                    None,
+                    serde_json::Value::Null,
+                ),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+        .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(format!(
+            "process-env:{process_id}"
+        ))))
+    }
+
+    struct AttachFixture {
+        controller: Arc<NativeRuntimeEffectController>,
+        registry: Arc<crate::TestLocalProcessRegistry>,
+        process_ref: crate::ProcessRef,
+        key: crate::AwaitEventKey,
+        session_id: crate::SessionId,
+    }
+
+    impl AttachFixture {
+        async fn new(process_id: &str) -> Self {
+            let controller = Arc::new(NativeRuntimeEffectController::default());
+            let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+            let record = registry
+                .register_process(registration(process_id))
+                .await
+                .expect("register the process the parked call waits on");
+            let session_id = crate::SessionId::from(format!("{process_id}-session"));
+            let key = controller
+                .await_event_key(
+                    &crate::ExecutionScope::turn(session_id.clone(), "waiting-turn"),
+                    crate::AwaitEventWaitIdentity::ToolCompletion {
+                        tool_call_id: format!("{process_id}-await-call"),
+                    },
+                )
+                .await
+                .expect("reserve the parked call's completion key");
+            Self {
+                controller,
+                process_ref: crate::ProcessRef::from_record(&record),
+                registry,
+                key,
+                session_id,
+            }
+        }
+
+        /// Runs the journaled arming exactly as a (re)driven turn does.
+        async fn arm(&self, effect_id: &str) {
+            let outcome = self
+                .controller
+                .execute_effect(
+                    crate::RuntimeEffectEnvelope::new(
+                        crate::RuntimeEffectInvocation::new(
+                            crate::EffectAddress::new(
+                                crate::ExecutionScope::runtime_operation("runtime"),
+                                effect_id,
+                            )
+                            .expect("valid attach test address"),
+                            crate::RuntimeAttribution::none(),
+                            effect_id,
+                        ),
+                        crate::RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
+                            process_ref: self.process_ref.clone(),
+                            key: self.key.clone(),
+                        }),
+                    ),
+                    crate::RuntimeEffectLocalExecutor::processes(
+                        Arc::clone(&self.registry) as Arc<dyn crate::ProcessRegistry>,
+                        Arc::new(crate::NativeProcessWork::for_registry(
+                            Arc::clone(&self.registry) as Arc<dyn crate::ProcessRegistry>,
+                        )),
+                    )
+                    .with_process_effect_controller(self.controller.clone()),
+                )
+                .await
+                .expect("arming the process terminal must succeed");
+            assert!(
+                matches!(
+                    outcome,
+                    crate::RuntimeEffectOutcome::Process {
+                        result: ProcessEffectOutcome::AttachTerminal
+                    }
+                ),
+                "arming must return so the turn can park, never carry a terminal"
+            );
+        }
+
+        /// Terminalizes the awaited process the way its executor does: under
+        /// the lease that fences the row's single writer.
+        async fn complete(&self, value: serde_json::Value) -> crate::ProcessAwaitOutput {
+            let terminal =
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value));
+            let process_id = ProcessId::from(self.process_ref.process_id.clone());
+            let owner = crate::LeaseOwnerIdentity::opaque(
+                "attach-terminal-test-writer",
+                "attach-terminal-test-writer:001",
+            );
+            let crate::ProcessLeaseClaimOutcome::Acquired(lease) = self
+                .registry
+                .claim_process_lease(&process_id, &owner, 60_000)
+                .await
+                .expect("claim the awaited process row")
+            else {
+                panic!("the test is the only writer of this row")
+            };
+            self.registry
+                .complete_process_with_lease(&lease, terminal.clone())
+                .await
+                .expect("the awaited process reaches its terminal");
+            terminal
+        }
+
+        async fn resolution(&self) -> crate::Resolution {
+            self.controller
+                .await_await_event(
+                    &self.key,
+                    tokio_util::sync::CancellationToken::new(),
+                    Some(std::time::Instant::now() + WAIT_DEADLINE),
+                )
+                .await
+                .expect("the parked wait must settle")
+        }
+    }
+
+    /// The park is only worth anything if the terminal actually lands on it:
+    /// the call parks with nothing in hand, and the process finishing later is
+    /// what resolves it.
+    #[tokio::test]
+    async fn an_armed_process_terminal_resolves_the_parked_wait_when_the_process_finishes() {
+        let fixture = AttachFixture::new("attach-resolves").await;
+        fixture.arm("attach-resolves").await;
+        assert_eq!(
+            fixture
+                .controller
+                .peek_await_event(&fixture.key)
+                .await
+                .expect("peek the parked wait"),
+            None,
+            "the wait must still be open while the process runs, or the call \
+             never parked at all"
+        );
+
+        let terminal = fixture.complete(serde_json::json!({"done": true})).await;
+
+        assert_eq!(
+            fixture.resolution().await,
+            process_terminal_resolution(terminal),
+            "the terminal is the parked call's answer"
+        );
+    }
+
+    /// Turn cancel disarms the *wait*, not the process: the waiter stops
+    /// waiting, and the process it was watching keeps running to its own
+    /// terminal, which a later reader can still observe.
+    #[tokio::test]
+    async fn turn_cancel_disarms_the_wait_while_the_process_reaches_its_terminal() {
+        let fixture = AttachFixture::new("attach-cancelled").await;
+        fixture.arm("attach-cancelled").await;
+
+        // The cancel sweep reaches waits that are outstanding, so the waiter
+        // has to be parked before it lands; retrying until the parked waiter
+        // settles is what removes the race, not a weaker assertion.
+        let mut waiter = Box::pin(fixture.resolution());
+        let deadline = std::time::Instant::now() + WAIT_DEADLINE;
+        let resolution = loop {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "turn cancel never reached the parked wait"
+            );
+            fixture
+                .controller
+                .cancel_await_events_for_session(&fixture.session_id)
+                .await
+                .expect("turn cancel reaches the parked wait");
+            if let Ok(resolution) =
+                tokio::time::timeout(std::time::Duration::from_millis(20), &mut waiter).await
+            {
+                break resolution;
+            }
+        };
+        assert_eq!(
+            resolution,
+            crate::Resolution::Cancelled,
+            "a cancelled turn must stop waiting instead of parking forever"
+        );
+
+        let terminal = fixture
+            .complete(serde_json::json!({"done": "anyway"}))
+            .await;
+        let record = fixture
+            .registry
+            .get_process(&ProcessId::from(fixture.process_ref.process_id.clone()))
+            .await
+            .expect("read the awaited process")
+            .expect("the cancelled wait must not have removed the process");
+        assert!(
+            record.is_terminal(),
+            "cancelling the wait must not cancel the process it was watching"
+        );
+        assert_eq!(
+            fixture
+                .controller
+                .peek_await_event(&fixture.key)
+                .await
+                .expect("peek the cancelled wait"),
+            Some(crate::Resolution::Cancelled),
+            "the terminal must not overwrite the cancellation the turn already \
+             observed: {terminal:?}"
+        );
+    }
+
+    /// A crash of the waiting turn redrives the journaled arming, so the arm
+    /// runs again against a wait that is still open. The wait is
+    /// single-assignment, so however many armings race the same terminal, the
+    /// parked call is answered exactly once.
+    #[tokio::test]
+    async fn a_redriven_arming_resolves_the_same_wait_exactly_once() {
+        let fixture = AttachFixture::new("attach-redrive").await;
+        fixture.arm("attach-redrive").await;
+        fixture.arm("attach-redrive").await;
+
+        let terminal = fixture.complete(serde_json::json!({"done": "once"})).await;
+        let resolved = process_terminal_resolution(terminal);
+        assert_eq!(fixture.resolution().await, resolved);
+
+        assert_eq!(
+            fixture
+                .controller
+                .resolve_await_event(
+                    &fixture.key,
+                    crate::Resolution::Ok(serde_json::json!({"done": "twice"})),
+                )
+                .await
+                .expect("a duplicate resolution is reported, not an error"),
+            crate::ResolveOutcome::AlreadyResolved {
+                terminal: resolved.clone()
+            },
+            "the second arming's resolution must not overwrite the first"
+        );
+        assert_eq!(
+            fixture
+                .controller
+                .peek_await_event(&fixture.key)
+                .await
+                .expect("peek the settled wait"),
+            Some(resolved),
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::ProcessExecutionEnvStore as _;

@@ -354,7 +354,10 @@ mod tests {
             .map(|tool| tool.name().to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["list_process_handles", "cancel_process"]);
+        assert_eq!(
+            names,
+            vec!["list_process_handles", "await_process", "cancel_process"]
+        );
         #[cfg(not(feature = "lashlang"))]
         for definition in &definitions {
             assert_eq!(
@@ -425,6 +428,113 @@ mod tests {
         };
         assert_eq!(intent.session_id, "test-session");
         assert_eq!(intent.process_id, "literal-process");
+    }
+
+    fn parked_attempt_context<'run>(
+        tool_context: &lash_core::ToolContext<'run>,
+    ) -> lash_core::AttemptContext<'run> {
+        lash_core::testing::mock_attempt_context_with_completion_key(
+            tool_context,
+            lash_core::AwaitEventKey {
+                scope: lash_core::ExecutionScope::turn("test-session", "test-turn"),
+                wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
+                    tool_call_id: "await-process-call".to_string(),
+                },
+                key_id: "await-process-key".to_string(),
+                signature: "await-process-signature".to_string(),
+            },
+        )
+    }
+
+    fn handle_json(id: &str, incarnation: u64) -> serde_json::Value {
+        serde_json::json!({
+            "__handle__": lash_core::PROCESS_HANDLE_KIND,
+            "id": id,
+            "incarnation": incarnation,
+        })
+    }
+
+    #[tokio::test]
+    async fn await_process_parks_naming_the_process_terminal_as_its_resolver() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = parked_attempt_context(&tool_context);
+        let outcome = tools
+            .execute_attempt(ToolCall {
+                name: "await_process",
+                args: &serde_json::json!({ "handle": handle_json("proc-1", 3) }),
+                context: &context,
+            })
+            .await;
+        let lash_core::ToolAttemptOutcome::Pending(pending) = outcome else {
+            panic!("processes.await must park instead of answering inline")
+        };
+        let Some(lash_core::PendingResolver::ProcessTerminal { process_ref }) = pending.resolved_by
+        else {
+            panic!("a parked processes.await must name the process terminal as its resolver")
+        };
+        assert_eq!(process_ref.process_id, "proc-1");
+        assert_eq!(
+            process_ref.incarnation.registration_sequence(),
+            3,
+            "the arming must pin the incarnation the caller held, not the id alone"
+        );
+    }
+
+    /// The park is what makes the wait durable, so a call that cannot be parked
+    /// must fail loudly rather than answer inline: an inline answer would be a
+    /// silent downgrade to a non-durable await.
+    #[tokio::test]
+    async fn await_process_refuses_a_value_that_is_not_a_process_handle() {
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        let tool_context = lash_core::testing::mock_tool_context();
+        let context = parked_attempt_context(&tool_context);
+        for (label, args) in [
+            ("missing handle", serde_json::json!({})),
+            (
+                "wrong marker",
+                serde_json::json!({ "handle": { "__handle__": "tool", "id": "x", "incarnation": 1 } }),
+            ),
+            (
+                "missing incarnation",
+                serde_json::json!({ "handle": { "__handle__": "process", "id": "x" } }),
+            ),
+        ] {
+            let outcome = tools
+                .execute_attempt(ToolCall {
+                    name: "await_process",
+                    args: &args,
+                    context: &context,
+                })
+                .await;
+            assert!(
+                matches!(outcome, lash_core::ToolAttemptOutcome::Done { .. }),
+                "{label} must be refused, not parked"
+            );
+        }
+    }
+
+    #[test]
+    fn await_process_declares_a_deferring_attempt_and_a_handle_typed_argument() {
+        let definition = process_await_tool_definition();
+        let tools = SessionProcessAdminTools {
+            include_cancel_process: true,
+        };
+        assert!(
+            StaticToolExecute::attempt_may_defer(&tools, definition.id()),
+            "the runtime only pre-derives a completion key for a tool that declares it defers"
+        );
+        // A `{"type":"object"}` parameter would refuse a nominally typed cell
+        // handle in the type checker before the handler ran (FIG-2989), which
+        // is exactly what the `x-lash` handle keyword exists to avoid.
+        assert_eq!(
+            definition.contract.input_schema.canonical["properties"]["handle"]["x-lash"],
+            serde_json::json!({ "kind": "handle" })
+        );
     }
 
     #[test]

@@ -1687,6 +1687,127 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
     );
 }
 
+fn attach_key(key_id: &str) -> lash_core::AwaitEventKey {
+    lash_core::AwaitEventKey {
+        scope: lash_core::ExecutionScope::turn("session", "turn"),
+        wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
+            tool_call_id: format!("{key_id}-call"),
+        },
+        key_id: key_id.to_string(),
+        signature: format!("{key_id}-signature"),
+    }
+}
+
+/// Replay fixture for the attach: the parked turn's handler re-runs the same
+/// journaled `AttachTerminal` on every redrive, and each replay must reissue
+/// the identical one-way send. The attach is keyed by the wait's own durable
+/// wait workflow key, so Restate attaches every replay to the one in-flight
+/// attach run rather than starting a second waiter — which is what makes the
+/// parked call resolve exactly once no matter how often the turn is redriven.
+#[tokio::test]
+pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waiter() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
+    let registry = process_registry();
+    let process_id = "task-attach-replay";
+    registry
+        .register_process(external_registration(process_id))
+        .await
+        .expect("register the process the parked call waits on");
+    let process_ref = registry
+        .resolve_process_ref(&ProcessId::from(process_id))
+        .await
+        .expect("resolve the awaited process incarnation");
+    let key = attach_key("attach-replay");
+    let attach = || {
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, "process-attach-replay"),
+            RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
+                process_ref: process_ref.clone(),
+                key: key.clone(),
+            }),
+        )
+    };
+
+    for attempt in ["first arm", "redrive"] {
+        let outcome = host
+            .execute_effect(attach(), registry_local_executor(registry.clone()))
+            .await
+            .unwrap_or_else(|error| panic!("{attempt} must arm the attach: {error}"));
+        assert!(
+            matches!(
+                outcome,
+                RuntimeEffectOutcome::Process {
+                    result: ProcessEffectOutcome::AttachTerminal
+                }
+            ),
+            "{attempt} must report the arming, never a terminal: reading the \
+             terminal inside the parked handler is what the attach exists to avoid"
+        );
+    }
+
+    let attachments = context.process_attachments.lock_recover().clone();
+    assert_eq!(
+        attachments,
+        vec![
+            crate::process_attach::RestateProcessAttachRequest {
+                process_ref: process_ref.clone(),
+                key: key.clone(),
+            };
+            2
+        ],
+        "every redrive must reissue the same attach request"
+    );
+    let workflow_keys = attachments
+        .iter()
+        .map(|request| crate::process_attach::process_attach_workflow_key(&request.key))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        workflow_keys.len(),
+        1,
+        "replays must collapse onto one attach workflow key, or a redrive would \
+         start a second waiter on the same terminal"
+    );
+    assert_eq!(
+        workflow_keys.into_iter().next().expect("one key"),
+        crate::RestateDurableWaitAddress::for_key(&key).workflow_key,
+        "the attach must be keyed by the wait it resolves, so the arming and the \
+         wait share one identity"
+    );
+}
+
+/// An attach for a process the registry never registered must refuse: arming a
+/// waiter on an unknown incarnation would park the caller on a wait nothing can
+/// ever resolve.
+#[tokio::test]
+pub(super) async fn restate_controller_refuses_attach_for_an_unregistered_process() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
+    let registry = process_registry();
+    let process_ref = lash_core::ProcessRef::new(
+        ProcessId::from("task-attach-unknown"),
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    );
+
+    let error = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::Process, "process-attach-unknown"),
+                RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
+                    process_ref,
+                    key: attach_key("attach-unknown"),
+                }),
+            ),
+            registry_local_executor(registry),
+        )
+        .await
+        .expect_err("an attach on an unregistered process must refuse");
+    assert!(
+        context.process_attachments.lock_recover().is_empty(),
+        "a refused attach must not have sent an arming: {error}"
+    );
+}
+
 #[tokio::test]
 pub(super) async fn restate_controller_start_emits_send_when_external_ref_already_exists() {
     let context = Arc::new(RecordingContext::default());
