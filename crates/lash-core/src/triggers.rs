@@ -1401,8 +1401,14 @@ pub struct TriggerOccurrenceReclamationReport {
     /// the existing cascade (normally zero deliveries remain at this point).
     pub reclaimed_occurrence_count: usize,
     /// Occurrences whose delivery fan-out is still live and therefore has not
-    /// armed reclaim eligibility.
+    /// armed reclaim eligibility. Non-fired audit rows are never counted here:
+    /// they have no fan-out to be stuck on.
     pub live_fan_out_count: usize,
+    /// Non-fired occurrences observed and left alone. They are durable audit
+    /// history (ADR 0067), so they are not a blocker and never make the sweep
+    /// incomplete; only [`TriggerStore::prune_non_fired_occurrences`] reclaims
+    /// them.
+    pub audit_retained_count: usize,
     /// Armed occurrences whose eligibility time is newer than the host cutoff.
     pub grace_deferred_count: usize,
     /// Eligible occurrences whose per-row delete no longer matched after the
@@ -1448,8 +1454,25 @@ fn raced_occurrence_delete_requires_reinspection_instead_of_claiming_emptiness()
         report.reclaimed_occurrence_count
             + report.live_fan_out_count
             + report.grace_deferred_count
-            + report.reinspection_deferred_count,
+            + report.reinspection_deferred_count
+            + report.audit_retained_count,
         report.inspected_occurrence_count
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn retained_audit_rows_are_not_a_blocker_in_the_reclamation_sweep() {
+    let report = TriggerOccurrenceReclamationReport {
+        inspected_occurrence_count: 1,
+        audit_retained_count: 1,
+        ..TriggerOccurrenceReclamationReport::default()
+    };
+
+    assert_eq!(
+        crate::store::MaintenanceReport::sweep(&report),
+        crate::store::MaintenanceSweep::NothingToDo,
+        "durable audit history is not stuck fan-out and must not report an incomplete sweep"
     );
 }
 
@@ -1611,4 +1634,17 @@ pub trait TriggerStore: Send + Sync {
     /// Lists do not create receipts. No public facade or production schedule is
     /// exposed until FIG-653 proves terminal-gated eligibility.
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError>;
+
+    /// Low-level primitive for dropping non-fired occurrence rows recorded
+    /// before an explicit cutoff, returning the number deleted.
+    ///
+    /// Non-fired occurrences are durable audit history under ADR 0067: no
+    /// delivery-fan-out retention path reclaims them, and
+    /// [`TriggerStore::reclaim_trigger_occurrences`] still cannot reach them.
+    /// This is the host's only escape hatch for a producer that records a
+    /// non-fired outcome per tick, and it is deliberately explicit: the host
+    /// names the audit window it is discarding. Fired occurrences are never
+    /// selected, whatever the cutoff.
+    async fn prune_non_fired_occurrences(&self, cutoff_epoch_ms: u64)
+    -> Result<usize, PluginError>;
 }

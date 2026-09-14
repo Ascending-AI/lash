@@ -332,6 +332,15 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
     ) -> std::result::Result<usize, lash::plugins::PluginError> {
         self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
     }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> std::result::Result<usize, lash::plugins::PluginError> {
+        self.inner
+            .prune_non_fired_occurrences(cutoff_epoch_ms)
+            .await
+    }
 }
 
 struct RetiringQueuedWorkRunHandle {

@@ -112,6 +112,63 @@ pub(crate) async fn reclaim_trigger_occurrences(
     Ok(Json(report))
 }
 
+/// Operator-supplied audit-retention cutoff for non-fired trigger occurrences.
+///
+/// Absolute, with no default and no relative form, for the same reason the
+/// receipt cutoff has none: only the caller knows how far back this
+/// deployment's audit history has to reach.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct PruneNonFiredOccurrencesRequest {
+    pub(crate) before_epoch_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct PruneNonFiredOccurrencesResponse {
+    pub(crate) pruned: usize,
+    pub(crate) before_epoch_ms: u64,
+}
+
+/// Operator-invoked reclamation of non-fired trigger occurrences.
+///
+/// A non-fired occurrence is durable audit history (ADR 0067): it never
+/// reserved a delivery, no retention path reclaims it, and
+/// `/api/admin/trigger-occurrences/reclaim` above cannot reach it at any
+/// cutoff. This route is its only reclaim path, and what it deletes is the
+/// record that a tick was observed and deliberately dropped — the evidence an
+/// operator would later use to explain why a job did not run. The bound is
+/// therefore the caller's: `before_epoch_ms` must sit outside every window
+/// anyone might still ask that question about. Rows recorded at or after it are
+/// untouched, and a fired occurrence is never selected whatever the cutoff.
+///
+/// Like the other two levers it is operator-composed, absent from the UI, and
+/// unscheduled.
+pub(crate) async fn prune_non_fired_occurrences(
+    State(state): State<AppState>,
+    Json(request): Json<PruneNonFiredOccurrencesRequest>,
+) -> Result<Json<PruneNonFiredOccurrencesResponse>, AppError> {
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::RunStoreMaintenance)?;
+    let pruned = state
+        .trigger_store
+        .prune_non_fired_occurrences(request.before_epoch_ms)
+        .await
+        // Audited: first-party trigger-store maintenance has no session
+        // tombstone path or effect-controller boundary.
+        .map_err(AppError::internal)?;
+    state.trace(
+        "admin.trigger_occurrences.audit_pruned",
+        json!({
+            "before_epoch_ms": request.before_epoch_ms,
+            "pruned": pruned,
+        }),
+    );
+    Ok(Json(PruneNonFiredOccurrencesResponse {
+        pruned,
+        before_epoch_ms: request.before_epoch_ms,
+    }))
+}
+
 /// Operator-supplied plan for one store-growth maintenance pass.
 ///
 /// Both levers are opt-in and neither has a default: a request that names no

@@ -11,6 +11,40 @@ registry, modelled on `trigger_subscriptions` and covered by the same
 ownership axiom. Session-scoped names follow the ADR 0049 frontier;
 host- and platform-scoped tombstones are never collected.
 
+Amended 2026-09-14 (FIG-2367): non-fired trigger occurrences gain a host-invoked
+audit-retention cutoff, `TriggerStore::prune_non_fired_occurrences`. Their
+reclaim trigger in the ownership map below is no longer "never": it is that
+lever and nothing else. Every delivery-fan-out retention path — ordinary
+reconciliation and `reclaim_trigger_occurrences` at any cutoff — still cannot
+reach a non-fired row, and the lever still cannot reach a fired one.
+
+The lever mirrors `prune_mutation_receipts`: the host names a cutoff epoch, only
+rows recorded strictly before it are deleted, and the count deleted is returned.
+The reason it is a separate, explicit operation rather than a widening of
+reconciliation is section 2's rule that reclamation is armed by an owner's
+terminal transition, never by age. Audit history has no such transition — its
+owner is the factory, which never terminates — so age is the only predicate
+available, and a predicate that unsafe must be spoken by the host each time it
+runs rather than configured once into a sweep. Nothing in the runtime invokes
+it; the only caller is a host that has decided which audit window it is
+discarding.
+
+The cutoff exists because the non-fired outcome is public
+(`TriggerOccurrenceRequest::with_outcome`, on `lash::triggers` and the remote
+protocol), so a host can record one per tick without a lash change. Today's only
+in-repo producer, the workbench zombie guard, fires once per job and is bounded;
+the first per-tick producer would otherwise grow a table nothing can prune.
+`prune_non_fired_occurrences` is host-local, like `prune_mutation_receipts`: it
+is a `TriggerStore` primitive, not a remote-protocol operation, so the remote
+protocol version is unchanged.
+
+Reclamation reports gained `audit_retained_count` in the same change. Non-fired
+rows were previously counted as `live_fan_out_count`, which reported permanent
+audit history as a stuck delivery fan-out and held every sweep at `Incomplete`
+forever. Retained audit rows are now their own counter and are not a blocker:
+they do not make a sweep incomplete, and a host reads the counter to decide
+whether the cutoff above is worth invoking.
+
 ## Context
 
 Lash's durable state grew one row class at a time, and each class arrived with
@@ -219,7 +253,7 @@ terminal frontier, so its name fence remains durable.
 | Session mutation receipt | Registering session's replay eligibility | The same ADR 0049 frontier and trigger-store reconciliation transaction. Receipts survive while any delivery owned by that session remains. Once the frontier is crossed and the delivery set is witnessed empty, post-deletion replay is impossible and the journal is reclaimed. |
 | Host or platform mutation receipt | Host or platform replay eligibility | The existing host-invoked `prune_mutation_receipts` cutoff. This policy is unchanged. |
 | Fired trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match fired occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched fired occurrence waits for its last delivery. |
-| Non-fired trigger occurrence | Factory-owned durable audit history | Never through delivery-fan-out retention. Its typed outcome is the history being retained, including after a scoped session crosses the deleted frontier. |
+| Non-fired trigger occurrence | Factory-owned durable audit history | Never through delivery-fan-out retention. Its typed outcome is the history being retained, including after a scoped session crosses the deleted frontier. The host-invoked `prune_non_fired_occurrences` cutoff (2026-09-14 amendment) is the sole reclaim path, and selects only non-fired rows recorded before an explicit epoch. |
 | Trigger delivery | Deterministic process run | ADR 0021 process retention. This policy is unchanged. |
 
 The owner namespace added to new receipt JSON is not retroactive. Legacy

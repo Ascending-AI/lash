@@ -740,12 +740,19 @@ impl TriggerStore for PostgresTriggerStore {
                  SELECT COUNT(*) AS inspected_count,
                         COUNT(*) FILTER (
                             WHERE reclaimable_at_ms IS NULL
-                               OR COALESCE(
+                              AND COALESCE(
+                                      record_json::jsonb #>> '{outcome,kind}',
+                                      'fired'
+                                  ) = 'fired'
+                        )
+                            AS live_fan_out_count,
+                        COUNT(*) FILTER (
+                            WHERE COALESCE(
                                       record_json::jsonb #>> '{outcome,kind}',
                                       'fired'
                                   ) != 'fired'
                         )
-                            AS live_fan_out_count,
+                            AS audit_retained_count,
                         COUNT(*) FILTER (
                             WHERE reclaimable_at_ms > $1
                               AND COALESCE(
@@ -768,6 +775,7 @@ impl TriggerStore for PostgresTriggerStore {
              SELECT scope.inspected_count,
                     scope.live_fan_out_count,
                     scope.grace_deferred_count,
+                    scope.audit_retained_count,
                     candidates.occurrence_id
              FROM scope
              LEFT JOIN candidates ON TRUE
@@ -786,11 +794,12 @@ impl TriggerStore for PostgresTriggerStore {
             inspected_occurrence_count: first.get::<i64, _>(0) as usize,
             live_fan_out_count: first.get::<i64, _>(1) as usize,
             grace_deferred_count: first.get::<i64, _>(2) as usize,
+            audit_retained_count: first.get::<i64, _>(3) as usize,
             ..lash_core::TriggerOccurrenceReclamationReport::default()
         };
         let candidates = rows
             .into_iter()
-            .filter_map(|row| row.get::<Option<String>, _>(3))
+            .filter_map(|row| row.get::<Option<String>, _>(4))
             .collect::<Vec<_>>();
 
         for occurrence_id in candidates {
@@ -868,6 +877,26 @@ impl TriggerStore for PostgresTriggerStore {
                            AND length(classified_receipts.owner_scope) > 5
                        )
                    )",
+        )
+        .bind(cutoff_epoch_ms)
+        .execute(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected() as usize)
+    }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, PluginError> {
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        Ok(sqlx::query(
+            "DELETE FROM lash_trigger_occurrences
+             WHERE occurred_at_ms < $1
+               AND COALESCE(
+                       record_json::jsonb #>> '{outcome,kind}',
+                       'fired'
+                   ) <> 'fired'",
         )
         .bind(cutoff_epoch_ms)
         .execute(&self.pool)

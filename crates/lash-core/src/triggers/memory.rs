@@ -634,7 +634,12 @@ impl TriggerStore for InMemoryTriggerStore {
             ..TriggerOccurrenceReclamationReport::default()
         };
         let mut candidates = Vec::new();
-        for occurrence_id in state.occurrences.keys() {
+        for (occurrence_id, occurrence) in state.occurrences.iter() {
+            if occurrence.outcome != TriggerOccurrenceOutcome::Fired {
+                // Durable audit history, not a fan-out that is stuck.
+                report.audit_retained_count += 1;
+                continue;
+            }
             match state.occurrence_reclaimable_at_ms.get(occurrence_id) {
                 Some(armed_at_ms) if *armed_at_ms <= cutoff_epoch_ms => {
                     candidates.push(occurrence_id.clone());
@@ -698,6 +703,35 @@ impl TriggerStore for InMemoryTriggerStore {
                 },
             );
         Ok(before.saturating_sub(state.mutation_receipts.len()))
+    }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, PluginError> {
+        let mut state = self.state.lock_recover();
+        let condemned = state
+            .occurrences
+            .values()
+            .filter(|occurrence| {
+                occurrence.outcome != TriggerOccurrenceOutcome::Fired
+                    && occurrence.occurred_at_ms < cutoff_epoch_ms
+            })
+            .map(|occurrence| {
+                (
+                    occurrence.occurrence_id.clone(),
+                    occurrence.idempotency_key.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (occurrence_id, idempotency_key) in &condemned {
+            state.occurrences.remove(occurrence_id);
+            state
+                .occurrence_id_by_idempotency_key
+                .remove(idempotency_key);
+            state.occurrence_reclaimable_at_ms.remove(occurrence_id);
+        }
+        Ok(condemned.len())
     }
 }
 
