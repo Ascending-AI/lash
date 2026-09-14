@@ -406,13 +406,18 @@ def classify(
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
         return outputs
-    rust = not only_workbench
+    # `rust` gates the Bazel partition, which now owns every agent-workbench
+    # unit case except the Node-gated browser-projection ones. A workbench-only
+    # diff therefore has to run it -- the Cargo job alone would execute one
+    # test and leave the other 259 unrun. The breadth families stay off for
+    # such a diff: the workbench is an example host, not a store or a worker.
+    breadth = not only_workbench
     outputs.update(
         {
-            "rust": str(rust).lower(),
-            "stores": str(rust).lower(),
-            "functional_e2e": str(rust).lower(),
-            "workers_e2e": str(rust).lower(),
+            "rust": "true",
+            "stores": str(breadth).lower(),
+            "functional_e2e": str(breadth).lower(),
+            "workers_e2e": str(breadth).lower(),
             "workbench": str(workbench_hit).lower(),
             "regress": str(any(_is_regress_path(path) for path in paths)).lower(),
             "schema": str(any(_is_schema_path(path) for path in paths)).lower(),
@@ -528,10 +533,16 @@ def evaluate_conclusion(
             continue
         if job == "workspace-tests":
             # On a trusted event the Bazel partition owns every deterministic
-            # Rust binary, so the Cargo job runs only for the workbench
-            # binary. An untrusted event has no Bazel partition and keeps the
-            # full Cargo workspace run. A trunk push always runs it: main is
-            # the tree the workbench binary has to stay green on.
+            # Rust binary -- the agent-workbench unit cases included -- so the
+            # Cargo job runs only the workbench's Node-gated browser-projection
+            # cases, which need a Node toolchain and the Cargo-relative asset
+            # tree. Those cases exercise the workbench's own projection code,
+            # which compiles against the whole dependency closure, so the
+            # `workbench` family stays closure-derived; the build is scoped to
+            # the one package instead. An untrusted event has no Bazel
+            # partition and keeps the full Cargo workspace run. A trunk push
+            # always runs it: main is the tree the workbench has to stay green
+            # on.
             if event_name == "push":
                 required = ref == "refs/heads/main"
             else:

@@ -98,8 +98,10 @@ if [ "$rust" = "true" ]; then
   fi
 fi
 
+# The rest of the workbench unit binary rides `kiln test` above; this is the
+# Node-gated remainder, and it needs only its own package built.
 if [ "$workbench" = "true" ]; then
-  run cargo nextest run --profile ci --workspace --locked \
+  run cargo nextest run --profile ci --package agent-workbench --locked \
     -E "$(<tools/bazel/workbench_nextest_filter.txt)"
 fi
 

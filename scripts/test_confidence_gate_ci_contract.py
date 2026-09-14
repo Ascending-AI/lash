@@ -455,7 +455,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         nextest = (ROOT / ".config" / "nextest.toml").read_text(encoding="utf-8")
 
         workspace_tests = workflow_job_block(workflow, "workspace-tests")
-        self.assertIn("--profile ci --workspace", workspace_tests)
+        # The workspace job's scope is now branch-dependent (trusted events run
+        # the workbench's Node-gated cases out of one package; untrusted events
+        # keep `--workspace`), so pin the profile and the untrusted breadth
+        # separately rather than as one adjacent string.
+        self.assertIn("cargo nextest run --profile ci --locked", workspace_tests)
+        self.assertIn('nextest_args=(--workspace -E "${skip}")', workspace_tests)
         heavy = workflow_job_block(workflow, "heavy-tests")
         self.assertIn("--profile ci-heavy --workspace", heavy)
 
@@ -1995,16 +2000,25 @@ derive_mutation_jobs() {{
         workspace_tests = workflow_job_block(workflow, "workspace-tests")
         self.assertIn("Install Node for browser projection gates", workspace_tests)
         self.assertIn("node-version: 24", workspace_tests)
+        # One build command, two scopes. The untrusted branch keeps the full
+        # workspace build and the store conformance helper example; the trusted
+        # branch builds only `agent-workbench`'s test targets, because the only
+        # thing it runs is that package's Node-gated browser-projection cases
+        # (FIG-3054: a `--workspace` build to execute one test made this job
+        # the CI tail at 836 s).
         self.assertIn(
-            "cargo build --workspace --locked ${LASH_CI_FEATURES}",
+            'cargo build --locked ${LASH_CI_FEATURES} "${build_args[@]}"',
             workspace_tests,
         )
         self.assertIn(
-            "--example sqlite-await-event-helper",
+            'build_args=(--workspace "${excludes[@]}"'
+            " --example sqlite-await-event-helper)",
             workspace_tests,
         )
+        self.assertIn("scope=(--package agent-workbench)", workspace_tests)
+        self.assertIn('build_args=("${scope[@]}" --tests)', workspace_tests)
         self.assertIn(
-            "cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES}",
+            "cargo nextest run --profile ci --locked ${LASH_CI_FEATURES}",
             workspace_tests,
         )
         self.assertIn("Logical CPUs: $(nproc)", workspace_tests)

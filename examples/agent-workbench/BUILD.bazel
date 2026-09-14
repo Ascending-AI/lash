@@ -36,6 +36,9 @@ lash_rust_binary(
 
 lash_rust_unit_test(
     name = "agent-workbench__unit_test",
+    args = [
+        "--skip=tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
+    ],
     crate_features = [
         "default",
     ],
@@ -52,10 +55,7 @@ lash_rust_unit_test(
     library_crate_name = None,
     manifest_dir = "examples/agent-workbench",
     package_name = "agent-workbench",
-    tags = [
-        "cargo-frontend-assets",
-        "manual",
-    ],
+    tags = [],
     version = "0.0.0-dev",
 )
 

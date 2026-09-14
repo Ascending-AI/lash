@@ -1,1 +1,1 @@
-(package(agent-workbench) & kind(bin) & binary(agent-workbench))
+((package(agent-workbench) & kind(bin) & binary(agent-workbench)) & test(=tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors))
