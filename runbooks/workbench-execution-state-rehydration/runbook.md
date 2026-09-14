@@ -7,8 +7,7 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. No step of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -79,21 +78,34 @@ the post-restart code ran — never on the assistant's ability to recall.
 - **Do:** in Phase 1, also ask the agent to bind `fig1196_payload` to a string built from
   512 repetitions of the run's unique marker, and `fig1196_counter` to 137. Ask for only
   `stored` as the answer. **Expect:** executed source creates all three bindings; the
-  payload exceeds the 512-byte leaf threshold. Record its expected length and SHA-256
-  independently from the operator's marker; save those as `01-payload-oracle.json`.
+  payload exceeds the 512-byte leaf threshold. Record its expected length
+  independently from the operator's marker; save that as `01-payload-oracle.json`.
   Keep `fig636_marker` small for the pre-execution prompt gate.
-- **Do:** after Phase 1, submit a turn that increments only `fig1196_counter` by 29 and
-  finishes with that counter. **Expect:** rendered answer contains 166; API and trace
+- **Do:** after Phase 1, submit a turn that binds a **new** name
+  `fig1196_counter_next` to `fig1196_counter + 29` and finishes with it.
+  **A later cell cannot mutate an earlier cell's binding:** every hydrated session
+  global is re-declared `BindingKind::Const` in the next cell's ambient scope
+  (`crates/lash-typescript/src/lower/mod.rs`), so `fig1196_counter += 29` always
+  fails `TS_ASSIGN_CONST` and `let fig1196_counter = fig1196_counter + 29`
+  fails `TS_TEMPORAL_DEAD_ZONE`, whatever keyword Phase 1 used. Dirty the root
+  with a new name, not with a mutation; an accepted in-place mutation would be
+  the finding. **Expect:** rendered answer contains 166; API and trace
   agree on one additional completed pair, and source does not rebind the payload. Save
   `01-dirty-root.png` and `01-dirty-root-exec.json`. Take the Phase-2 trace boundary after
-  this turn. The later reconstruction gate now expects six pre-restart message rows.
+  this turn. The reconstruction gate expects every pre-restart row this row's
+  phases actually committed, counted from `/api/state.messages` before the restart.
 - **Do:** preserve Phase 2's no-new-binding turn and Phase 3's cold process replacement.
   **Expect:** both the changed root and retained payload leaf resolve after reopen.
 - **Do:** in Phase 4, also ask the agent to read the existing payload and counter, returning
-  the payload length, SHA-256, and counter without creating or assigning any binding.
-  **Expect:** rendered values match `01-payload-oracle.json` and 166, the executed source
-  reads those variables, and the API agrees. The prompt may truncate the payload; do not
-  require its full contents in the provider request. Capture `04-leaf-recall.png`.
+  the payload length and counter without creating or assigning any binding. **Do not ask
+  for a SHA-256:** the RLM TypeScript surface exposes no hashing helper, so a digest gate
+  can only be answered "unavailable". Take the content witness from the hydrated
+  bound-variable preamble instead, whose payload preview must show the run's marker
+  repeated and the exact `len=` from the oracle.
+  **Expect:** rendered length matches `01-payload-oracle.json` and the counter is 166, the
+  executed source reads those variables, and the API agrees. The prompt truncates the
+  payload; do not require its full contents in the provider request. Capture
+  `04-leaf-recall.png`.
 The deterministic `session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize`
 test separately observes accepted commit inputs with production budget accounting. It
 checks forty dirty turns retain sixteen large leaf identities, excludes unchanged bodies,
@@ -104,7 +116,7 @@ traces establish executed operations; they do not expose exact submitted compone
 
 - Require `OPENROUTER_API_KEY`; a missing key is a harness gap → Abort before boot.
 - Execute the `typescript` row on SQLite and on PostgreSQL with independent fresh data
-  directories, ports, markers, and artifacts. Set `LASH_RUNBOOK_DIALECT=typescript` and
+  directories, ports, markers, and artifacts. Set a fresh `RESTATE_AUTHORITY_ID` and
   `OPENROUTER_MODEL=deepseek/deepseek-v4-pro` on boot and restart; verify the served
   dialect and model from the request/execution trace. Prompts ask for outcomes and every
   gate reads the TypeScript surface.
@@ -192,8 +204,9 @@ It keeps the Restate journals and the application data; never substitute
 `just agent-workbench-reset`, which deletes exactly the evidence this phase needs. After it
 returns, poll `/healthz` until ready. Omit the bracketed PostgreSQL setting only for the
 SQLite pass. Require a new PID and an unchanged session id across the rendered page,
-`/api/state`, and `<data-dir>/session-id`. Reload the browser and require all six
-pre-restart rows to render in their original order. Screenshot `03-reconstructed.png`.
+`/api/state`, and `<data-dir>/session-id`. Reload the browser and require every
+pre-restart row, counted before the restart, to render in its original order. Screenshot
+`03-reconstructed.png`.
 
 ## Phase 4 — Prove the variable returned before the model spoke
 
@@ -240,10 +253,10 @@ its Restate container, and (PostgreSQL pass) its Postgres container are gone.
 | Boot identity | rendered/API/disk session ids agree; Postgres pass reports its backend | | `00-ready.png` |
 | Variable bound | `exec_code_started.code` binds the name to the marker | | `01-bound-exec.json`, `01-bound-state.json` |
 | No-new-binding turn | one further committed pair; traced code mutates no binding and finishes | | `02-reference-only-exec.json`, `02-no-new-binding-turn.png` |
-| Cold reconstruction | PID changed; session id and all six rows survived | | `03-reconstructed.png` |
+| Cold reconstruction | PID changed; session id and every pre-restart row survived | | `03-reconstructed.png` |
 | Hydration before execution | post-restart provider request carries the bound variable and marker | | `04-provider-request.json` |
 | Recall by reading | traced code references the variable without assigning it | | `04-recall-exec.json`, `04-recall.png` |
-| Retained large leaf | payload length/digest and counter 166 survive dirty-root and cold reopen | | `01-payload-oracle.json`, `04-leaf-recall.png` |
+| Retained large leaf | payload length and marker preview, and `fig1196_counter_next` 166, survive dirty-root and cold reopen | | `01-payload-oracle.json`, `04-provider-request.json`, `04-leaf-recall.png` |
 | Cross-backend agreement | SQLite and PostgreSQL passes reach identical per-gate verdicts | | both artifact sets |
 
 **Aggregate:** did a cold process recover the session's bound TypeScript state — not merely

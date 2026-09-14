@@ -34,12 +34,12 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
    address must stay unchanged. Removing/recreating the container or restarting the web
    process invalidates this geometry.
 2. **Prove execution, not prompt echo.** Before stopping Restate, require the running
-   pill, visible **stop turn**, exactly one `/api/state.active_turns` address, an
+   pill, visible **stop after step**, exactly one `/api/state.active_turns` address, an
    `exec_code_started` trace record for that turn, and its `/api/work` entry with
    `lifecycle: "running"`. LLM request trace records echo the prompt and are never gate
    evidence. A turn that already settled is a retry of this phase.
 3. **Reconverge before Stop.** After Restate is ready again, reload/poll until the UI and
-   `/api/state` show the exact pre-bounce address as running and Stop is visible. Do not
+   `/api/state` show the exact pre-bounce address as running and **stop after step** is visible. Do not
    press a stale button during the engine outage.
 4. **Committed cancellation is authoritative.** `POST /api/turn/cancel` must settle as
    `TurnStop::Cancelled` and carry non-empty evidence with `origin: "user"`. The rendered
@@ -67,7 +67,10 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
   `docker stop <restate-container>` then `docker start <restate-container>`. Gate the
   container state after each command and poll the port-isolated Restate admin/ingress
   endpoints until ready after start.
-- UI: session id, idle/running pill, transcript, composer, **stop turn**.
+- UI: session id, idle/running pill, transcript, composer, and the Stop control.
+  The Workbench does not label that control "stop turn": the rendered affordance
+  is **stop after step** (with "stop the running turn" as its title) on the
+  `#abort` element. Gate on that control, not on the string `stop turn`.
 - HTTP truth: `GET /healthz`, `GET /api/state`, `POST /api/turn`,
   `POST /api/turn/cancel`, `GET /api/work`.
 - Disk/trace truth: `<data-dir>/session-id`, `<data-dir>/active-turns.json`, and
@@ -90,7 +93,7 @@ shape; ordinary tool work or a top-level turn-scoped sleep does not qualify.
 
 Poll until all of these agree:
 
-- the running pill and **stop turn** are visible;
+- the running pill and **stop after step** are visible;
 - `/api/state.active_turns` contains exactly one address for the rendered session;
 - `active-turns.json` contains that exact session/turn pair;
 - `trace.jsonl` contains an `exec_code_started` record for that exact turn after the
@@ -127,7 +130,7 @@ not permission to continue without the post-start gates.
 
 **Reload once during the outage and gate the outage render.** The parked turn is durable
 truth; the shell must not contradict it. Require that the reloaded page still shows the
-running pill and **stop turn**, that `/api/state.active_turns` still carries the exact
+running pill and **stop after step**, that `/api/state.active_turns` still carries the exact
 Phase 1 address, and that the page renders **neither** an `idle` pill **nor** "no turns
 yet". A render that is indistinguishable from an empty, idle session is a failure of this
 phase even though the engine is down. Screenshot `02-outage-reload.png`.
@@ -141,7 +144,7 @@ Run `docker start <restate-container>`. Poll—not sleep—until its admin and i
 are ready. Require the container id, Workbench PID, session id, and endpoint-worker
 address are unchanged from Phase 0/1.
 
-Reload and poll until the page reconverges on the running pill and **stop turn**, and
+Reload and poll until the page reconverges on the running pill and **stop after step**, and
 `/api/state.active_turns` contains the exact Phase 1 address. `active-turns.json` must
 still agree. For the baseline shape, `/api/work` must show the exact Phase 1 process id
 still at `lifecycle: "running"`. Screenshot `03-reconverged-running.png`; save the state
@@ -149,7 +152,7 @@ and work snapshot as `03-reconverged-state.json` and `03-reconverged-work.json`.
 
 ## Phase 3 — Stop the replayed turn
 
-Press **stop turn** while capturing `POST /api/turn/cancel`. Gate:
+Press **stop after step** (`#abort`) while capturing `POST /api/turn/cancel`. Gate:
 
 1. the response is accepted for the exact Phase 1 address;
 2. the gate outcome is `requested` or `already_requested`;
@@ -194,8 +197,17 @@ state as `05-post-restart-state.json`.
 
 Run this companion after Phase 4, with Restate healthy. It is a separate worker-restart
 geometry: do not count the engine bounce above as either arm. Record the configured session
-lease TTL and use monotonic timestamps to prove both post-loss commits start before the dead
-worker's original lease could expire.
+lease TTL from the store row before the restart.
+
+**Do not gate on either commit landing inside that TTL.** The Workbench pins a
+two-second lease TTL (`apply_workbench_lease_timings` in
+`examples/agent-workbench/src/main_sections/bootstrap.rs`, chosen to keep takeover
+terminal inside the 5s attach budget), while replacing the Workbench process costs a
+rebuild and a boot — tens of seconds at best. No live run can commit within two
+seconds of the dead worker's last renewal, so a "commit before `lease_expires_at_ms`"
+gate is unreachable on this host and a run that appeared to satisfy it would be the
+finding. The deterministic companions configure a long recovery TTL precisely because
+they are the ones that can hold that window open.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
    PID, and gate a real `exec_code_started` record. Then run
@@ -212,23 +224,25 @@ worker's original lease could expire.
    `lease_owner_id`, `lease_owner_incarnation_id`, `lease_executor_id`,
    `lease_fencing_token`, and `lease_expires_at_ms`. Copy the database together with its
    `-wal` and `-shm` files before querying; reading the main file alone reports empty tables.
-   Do not gate on that row changing. The replacement worker does not claim the lane: it
-   commits under the CAS fence (ADR 0029) while the dead row stays live, so the row is
-   expected to keep the dead worker's owner, incarnation, executor, and fencing token for the
-   whole window. Each arm proves the fence instead: exactly one `runtime_turn_commits` row
-   for the arm's turn, whose `committed_at_ms` is below the recorded `lease_expires_at_ms`.
-   A commit at or after that expiry says nothing about the dead TTL and is a retry of the
-   arm. A moved `lease_fencing_token` or `lease_expires_at_ms` means something re-claimed or
-   renewed the lane, so the arm no longer describes a commit inside a dead holder's TTL;
-   record that and rerun.
+   Do not gate on that row changing, and do not gate on the commit time. The
+   replacement worker does not claim the lane: it commits under the CAS fence
+   (ADR 0029), not under lease liveness. Each arm proves the fence instead:
+   **exactly one** `runtime_turn_commits` row with `key: "final"` for the arm's turn,
+   and no duplicate node append for it. The lease row after a clean settlement
+   releases its owner columns (`lease_owner_id`, `lease_owner_incarnation_id`,
+   `lease_executor_id`, `lease_token` all null, `lease_term_ms` and
+   `lease_expires_at_ms` zero) with a monotonically advanced `lease_fencing_token`;
+   that release, together with the single commit, is the observable evidence that no
+   second writer ever held the lane. A second `final` commit row for one turn id is
+   the failure.
 2. **Same-turn successor arm:** allow Restate to redrive that exact turn. Require its user and
    assistant nodes to commit exactly once, the UI/API/store projections to agree, and a second
    `turn_started` for that exact turn id after the restart. Its single `runtime_turn_commits`
    row carries the fence evidence. Do not gate on `session_execution_lease.*`: those are
    `tracing` events and the Workbench installs no `tracing` subscriber, so they reach neither
    `trace.jsonl` nor the process log. Save `06a-same-turn-{state,store,trace}.json` and report this arm separately.
-3. **New-turn-within-TTL arm:** immediately submit a fresh marker turn through the replacement
-   worker, while the timestamp is still inside that same original TTL window. Require its
+3. **New-turn arm:** immediately submit a fresh marker turn through the replacement
+   worker. Require its
    distinct turn id and ordered user/assistant nodes to commit exactly once, with UI/API/store
    agreement. A busy-lease error is a failure; a typed `HeadRevisionConflict` is acceptable
    only for an actual overlapping writer and must carry complete loser evidence. Save
@@ -253,8 +267,8 @@ Restate container are gone.
 | UI reconvergence | exact pre-bounce address restores running pill + Stop | | `03-reconverged-*` |
 | Stop after reconnect | committed Cancelled terminal carries matching user evidence; baseline process reaches Cancelled with `process.cancel_requested` | | `04-restarted-cancelled.png`, receipt/state/work JSON |
 | Normal post-restart commit | new turn commits and UI/API transcript agree | | `05-post-restart-*` |
-| FIG-1117 same-turn successor | replacement boot commits the exact redriven turn inside the dead lease TTL | | `06a-same-turn-*` |
-| FIG-1117 new turn inside TTL | replacement boot commits a distinct new turn inside the same dead lease TTL | | `06b-new-turn-*` |
+| FIG-1117 same-turn successor | replacement boot redrives the exact turn (second `turn_started`, same id) and commits it exactly once under the CAS fence | | `06a-same-turn-*` |
+| FIG-1117 new turn after replacement | replacement boot commits a distinct new turn exactly once, UI/API/store agreeing | | `06b-new-turn-*` |
 | No break-glass substitution | no Restate Admin cancel/kill used | | command log |
 
 **Aggregate:** after bouncing only the Restate engine, did the unchanged Workbench

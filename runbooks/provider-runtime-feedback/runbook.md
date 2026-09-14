@@ -30,11 +30,12 @@ it does not substitute for the judged browser row.
 ## Phase 0: isolated Workbench
 
 1. Set fresh `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_DATA_DIR`, and
-   `AGENT_WORKBENCH_TRACE` paths, a free port, `LASH_RUNBOOK_DIALECT`, and
+   `AGENT_WORKBENCH_TRACE` paths, a free port, a fresh `RESTATE_AUTHORITY_ID`, and
    `OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, and
    `AGENT_WORKBENCH_OUTPUT_TOKEN_CAP=256`. Start with
    `just agent-workbench <port>`; poll `/healthz` and the rendered compose form.
-   Expect the judged host and the selected dialect. Save `00-ready.png` and
+   Expect the judged host, and confirm the served model and the `typescript`
+   dialect from the host's own `agent_workbench.startup` record. Save `00-ready.png` and
    `/api/state` as `00-state.json`.
 2. Workbench enables `TraceLevel::Extended` at bootstrap, so its trace carries
    the outgoing provider request. **Gate it on what that record can actually
@@ -73,8 +74,15 @@ it does not substitute for the judged browser row.
    unique marker such as `feedback-position-2505-<run nonce>`. Do not request
    filesystem, shell, process, or other host-affecting tools.
 2. Poll the trace for a provider response with output-limit termination followed
-   by the runtime's retry request. Expect the original user marker, assistant
-   partial, and runtime retry instruction in that order. Save
+   by the runtime's retry request. Expect the original user marker and the
+   runtime retry instruction in that order. **The partial answer is not a wire
+   message on this route.** An RLM conversation carries no assistant message at
+   all — every request's roles are `user` and the host instruction role — and
+   the truncated reply is retained by the RLM protocol in its bound `history`
+   variable, witnessed by the paired `protocol_step` record whose
+   `RlmDiagnostic.decision` is `retry_output_limit_cell`. Require that record
+   for the same turn rather than an assistant message; an assistant message
+   here would be the finding. Save
    `02-truncated-response.json` (the `llm_call_completed` record with its
    attempts) and `03-retry-request.json` (the retry's `llm_call_started`
    request together with the `provider_request` accounting fields for the same
@@ -86,9 +94,15 @@ it does not substitute for the judged browser row.
    emitted only when the fingerprint of the instruction slot plus the tool
    contracts changes, so one such event spanning both LLM calls, with no second
    event between them, is the byte-equality witness; its
-   `rendered_system_prompt` must carry no retry text. Expect the retry after
-   the partial and before any later user content in the `llm_call_started`
-   messages of `03-retry-request.json`. On this Chat route its role is the host's
+   `rendered_system_prompt` must carry no runtime retry text — static tool
+   contracts may legitimately discuss output limits, so read the surrounding
+   text before calling a substring a violation. Expect the retry instruction to
+   follow the user content of the turn that produced the truncated reply and to
+   precede any later user content, in the `llm_call_started` messages of
+   `03-retry-request.json`: the observed shape is
+   `[user(marker), instruction-role(feedback), user(next iteration frame)]`, and
+   further retries accumulate their feedback in place, each still ahead of the
+   next user frame. On this Chat route its role is the host's
    instruction role. Other provider forms are proved by the deterministic
    companion; do not label this one live route as seven live provider runs.
 4. Allow a short completion. Poll the UI and `/api/state` for settlement, scroll
@@ -105,7 +119,7 @@ it does not substitute for the judged browser row.
 | Cap on the wire | `generation_disposition.output_token_cap` is `applied` or `clamped_to_capacity` on the response and its attempts | | |
 | Request accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason: "size_limit"` whenever `body_len` exceeds the 2 KiB cap | | |
 | Instructions | One `composition_changed` fingerprint spans both calls; retry text absent from `rendered_system_prompt` | | |
-| Position | Partial precedes retry; later user content follows it | | |
+| Position | Retry instruction follows its turn's user content and precedes the next user frame; `protocol_step` `retry_output_limit_cell` witnesses the partial; no assistant message exists | | |
 | Product agreement | Rendered outcome, API state, and trace identities agree | | |
 | Ownership | Only this row's Workbench and containers stopped | | |
 
