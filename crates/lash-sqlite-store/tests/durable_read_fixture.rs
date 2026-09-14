@@ -197,6 +197,7 @@ async fn regenerate_sqlite_durable_fixture() {
     let handles = open_handles(temp.path(), fixture::FIXTURE_WRITE_MS).await;
     let expected = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
+    pin_attachment_write_token(&temp.path().join("durable-core.db"));
     checkpoint_files(temp.path());
 
     let destination = fixture_dir();
@@ -217,17 +218,54 @@ async fn regenerate_sqlite_durable_fixture() {
     .expect("write SQLite fixture versions");
 }
 
+/// Replace the random write token `begin_attachment_write` minted while seeding
+/// with the fixture's fixed one.
+///
+/// The token is minted inside the store, so it cannot be handed in; it is
+/// rewritten afterwards instead. The row must exist and must be the only one,
+/// or the fixture no longer matches what this generator believes it wrote.
+fn pin_attachment_write_token(core_path: &Path) {
+    let connection = rusqlite::Connection::open(core_path)
+        .expect("open SQLite durable-core fixture to pin the attachment write token");
+    let rewritten = connection
+        .execute(
+            "UPDATE attachment_manifest SET write_id = ?1 WHERE attachment_id = ?2",
+            rusqlite::params![
+                fixture::FIXTURE_ATTACHMENT_WRITE_ID,
+                fixture::FIXTURE_ATTACHMENT_ID
+            ],
+        )
+        .expect("pin the SQLite fixture attachment write token");
+    assert_eq!(
+        rewritten, 1,
+        "the fixture seeds exactly one attachment manifest row to pin; {rewritten} were rewritten"
+    );
+}
+
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
     let clock = Arc::new(lash_core::testing::TestClock::new(timestamp_ms));
-    let runtime = Arc::new(
-        Store::open_with_clock(
-            &root.join("durable-core.db"),
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+    // Durable core carries its own `await_event_meta` row, seeded by the schema
+    // with `randomblob(32)`. Pin it before anything is written, so that nothing
+    // the fixture seeds can be derived from a secret that changes per run.
+    let core_path = root.join("durable-core.db");
+    let priming_runtime =
+        Store::open_with_clock(&core_path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            .await
+            .expect("prime SQLite durable-core fixture schema");
+    drop(priming_runtime);
+    rusqlite::Connection::open(&core_path)
+        .expect("open SQLite durable-core fixture for deterministic secret")
+        .execute(
+            "UPDATE await_event_meta SET signing_secret = ?1 WHERE singleton = 1",
+            rusqlite::params![fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec()],
         )
-        .await
-        .expect("open SQLite durable-core fixture")
-        .with_commit_count_seed_for_testing(0),
+        .expect("install deterministic SQLite durable-core await-event signing secret");
+    let runtime = Arc::new(
+        Store::open_with_clock(&core_path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            .await
+            .expect("open SQLite durable-core fixture")
+            .with_commit_count_seed_for_testing(0),
     );
     let processes = Arc::new(
         SqliteProcessRegistry::open_with_clock(
@@ -259,9 +297,9 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         .expect("open SQLite effect fixture for deterministic secret")
         .execute(
             "UPDATE await_event_meta SET signing_secret = ?1 WHERE singleton = 1",
-            rusqlite::params![vec![0x88_u8; 32]],
+            rusqlite::params![fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec()],
         )
-        .expect("install deterministic SQLite await-event signing secret");
+        .expect("install deterministic SQLite effect await-event signing secret");
     let effects = Arc::new(
         SqliteEffectHost::open_with_clock(
             &effect_path,

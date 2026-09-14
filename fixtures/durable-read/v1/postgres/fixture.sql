@@ -878,7 +878,7 @@ INSERT INTO lash_durable_read_fixture.lash_artifact_owners VALUES ('process_exec
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, '1c11e1bd047b4a58bc94c6981785bc58', 1700000000000, 1700000000000, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, '88888888888848888888888888888888', 1700000000000, 1700000000000, NULL, NULL, NULL);
 
 
 --
