@@ -145,6 +145,17 @@ pub enum RuntimeErrorCode {
     ProcessParentEnded,
     /// Effect-host implementor diagnostic for a conflicting cancellation request.
     ProcessCancelConflict,
+    /// A durable identity was re-presented with content the store already
+    /// holds different content for.
+    ///
+    /// The stores fence re-submitted identities at the point they mutate: a
+    /// process registration fingerprint, a process-event replay key, a trigger
+    /// occurrence idempotency key. Matching content replays the first writer's
+    /// result; differing content cannot, because the identity is already bound.
+    /// Retrying the same changed payload fails identically, so this is terminal
+    /// rather than retryable. Hosts see it as one refusal vocabulary at the
+    /// tool-intent front door (FIG-1489).
+    DurableIdentityConflict,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
@@ -468,6 +479,7 @@ impl RuntimeErrorCode {
             Self::ProcessAlreadyTerminal => "process_already_terminal",
             Self::ProcessParentEnded => "process_parent_ended",
             Self::ProcessCancelConflict => "process_cancel_conflict",
+            Self::DurableIdentityConflict => "durable_identity_conflict",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
             Self::ProcessIncarnationSuperseded => "process_incarnation_superseded",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
@@ -706,6 +718,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessAlreadyTerminal
                 | Self::ProcessParentEnded
                 | Self::ProcessCancelConflict
+                | Self::DurableIdentityConflict
                 | Self::ProcessNoLongerRetained
                 | Self::ProcessIncarnationSuperseded
                 | Self::ProcessRegistryUnavailable
@@ -864,6 +877,7 @@ impl RuntimeErrorCode {
             "process_already_terminal" => Self::ProcessAlreadyTerminal,
             "process_parent_ended" => Self::ProcessParentEnded,
             "process_cancel_conflict" => Self::ProcessCancelConflict,
+            "durable_identity_conflict" => Self::DurableIdentityConflict,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
             "process_incarnation_superseded" => Self::ProcessIncarnationSuperseded,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,

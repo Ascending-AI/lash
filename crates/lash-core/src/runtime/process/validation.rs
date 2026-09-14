@@ -622,7 +622,7 @@ pub fn prepare_process_event_append(
                 wake_delivery,
             });
         }
-        return Err(PluginError::Session(format!(
+        return Err(crate::durable_identity_conflict(format!(
             "process `{process_id}` event replay key `{replay_key}` conflicts with an existing event"
         )));
     }

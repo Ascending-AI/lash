@@ -371,9 +371,14 @@ impl ToolIntentIngress {
     /// controller-owned key-addressed tier, reuse of an identity returns the
     /// first writer's outcome with `replayed: true`; the later payload is not
     /// realized. Runtime-owned tiers report process-store identity collisions as
-    /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. Ordinal-addressed tiers
-    /// do not key-replay submissions, so the host must avoid resubmitting an
-    /// identity as a new invocation.
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. Controller-owned tiers
+    /// report the same refusal: every shape lands on a durable key at the point
+    /// it mutates, so a re-submitted identity realizes once and a changed
+    /// payload under a bound identity is refused at the store. The one shape
+    /// whose identity is not bound to its subject across invocations is
+    /// `CancelProcess`, whose fence lives on the target record: it requests one
+    /// cancellation per target, but a re-used identity naming a *different*
+    /// target cancels that other process rather than being refused.
     ///
     /// `StartProcess` and `EmitTrigger` submissions do not retain their
     /// host-chosen realization identifiers. Lash replaces a start's
@@ -649,7 +654,7 @@ impl ToolIntentIngress {
         let (result, replayed) = self
             .realize_inner(identity, intent)
             .await
-            .map_err(|error| RealizationFailure::Command(kind, error))?;
+            .map_err(|error| Self::realization_failure(kind, error))?;
         let result = match result {
             RealizedIntent::Trigger(report) => {
                 let value = serde_json::to_value(report).unwrap_or(serde_json::Value::Null);
@@ -781,6 +786,32 @@ impl ToolIntentIngress {
                 )
             })?;
         Ok(((kind, value), replayed))
+    }
+
+    /// Classify one realization error.
+    ///
+    /// Every shape this ingress realizes is fenced by a durable key at the
+    /// point it mutates: the process registration fingerprint for a start, the
+    /// event replay key for a signal or an emitted event, the cancel replay
+    /// override, the occurrence idempotency key for a trigger. When one of
+    /// those keys is re-presented with different content the store refuses with
+    /// [`lash_core::durable_identity_conflict`], and that refusal is the same
+    /// fact the runtime-owned tier reports from its submission ledger. Mapping
+    /// it here is what gives hosts one refusal vocabulary across both tiers
+    /// (FIG-1489) instead of a typed refusal on one and a generic command
+    /// failure on the other.
+    fn realization_failure(
+        kind: lash_core::ToolIntentKind,
+        error: crate::EmbedError,
+    ) -> RealizationFailure {
+        if let crate::EmbedError::Plugin(plugin) = &error
+            && lash_core::is_durable_identity_conflict(plugin)
+        {
+            return RealizationFailure::Refused(ToolIntentIngressRefusal::DuplicateIdentity {
+                kind,
+            });
+        }
+        RealizationFailure::Command(kind, error)
     }
 
     fn outside_protocol_outcome(recorded: &str) -> RealizationFailure {
@@ -1025,8 +1056,12 @@ impl ToolIntentIngress {
                 .with_process_outcome_observer(outcome_observer),
             )
             .await
+            // Kept typed rather than flattened to prose: the durable-identity
+            // refusal travels as a `RuntimeErrorCode`, and `realization_failure`
+            // reads that code to produce the shared `DuplicateIdentity`
+            // vocabulary.
             .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
             })?;
         let lash_core::RuntimeEffectOutcome::Process { result } = outcome else {
             return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(

@@ -302,7 +302,7 @@ impl TriggerStore for PostgresTriggerStore {
                 &request,
                 &occurrence,
             ) {
-                return Err(PluginError::Session(format!(
+                return Err(lash_core::durable_identity_conflict(format!(
                     "trigger occurrence idempotency conflict for `{}`",
                     request.idempotency_key
                 )));

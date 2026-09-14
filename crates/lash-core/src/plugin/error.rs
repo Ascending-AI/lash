@@ -1,5 +1,41 @@
 use crate::ProcessId;
 use crate::SessionId;
+
+/// One refusal for a durable identity re-presented with different content.
+///
+/// The stores fence a re-submitted identity at the point it mutates: a process
+/// registration fingerprint, a process-event replay key, a trigger occurrence
+/// idempotency key. Matching content replays the first writer's result;
+/// differing content cannot, because the identity is already bound. Every such
+/// site returns this one error so the tool-intent front door can map all three
+/// to a single typed host-facing refusal instead of matching prose (FIG-1489).
+///
+/// It is spelled as a [`RuntimeError`](crate::RuntimeError) carrying
+/// [`RuntimeErrorCode::DurableIdentityConflict`](crate::RuntimeErrorCode::DurableIdentityConflict)
+/// rather than a new `PluginError` variant, because `PluginError` is journaled
+/// through `ProcessEffectOutcome::CancelRefused`: a new code string is data an
+/// existing variant already carries, while a new variant would be a shape an
+/// older build could not read.
+pub fn durable_identity_conflict(message: impl Into<String>) -> PluginError {
+    PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::DurableIdentityConflict,
+        message,
+    ))
+}
+
+/// Whether `error` is the durable-identity refusal minted by
+/// [`durable_identity_conflict`], however many conversions it has crossed.
+pub fn is_durable_identity_conflict(error: &PluginError) -> bool {
+    match error {
+        PluginError::Runtime(error) => {
+            error.code == crate::RuntimeErrorCode::DurableIdentityConflict
+        }
+        PluginError::RuntimeEffectController(error) => {
+            error.code == crate::RuntimeErrorCode::DurableIdentityConflict
+        }
+        _ => false,
+    }
+}
 #[derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 #[non_exhaustive]

@@ -367,7 +367,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(lash_core::ProcessRegistrationOutcome::existing(existing));
             }
-            return Err(PluginError::Session(format!(
+            return Err(lash_core::durable_identity_conflict(format!(
                 "process `{}` registration fingerprint conflict: existing {}, new {}",
                 registration.id, existing.registration_fingerprint, registration_fingerprint
             )));

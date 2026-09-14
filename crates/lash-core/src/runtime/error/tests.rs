@@ -163,6 +163,7 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::ProcessAlreadyTerminal
         | RuntimeErrorCode::ProcessParentEnded
         | RuntimeErrorCode::ProcessCancelConflict
+        | RuntimeErrorCode::DurableIdentityConflict
         | RuntimeErrorCode::ProcessNoLongerRetained
         | RuntimeErrorCode::ProcessIncarnationSuperseded
         | RuntimeErrorCode::ProcessRegistryUnavailable
@@ -336,6 +337,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         RuntimeErrorCode::ProcessAlreadyTerminal,
         RuntimeErrorCode::ProcessParentEnded,
         RuntimeErrorCode::ProcessCancelConflict,
+        RuntimeErrorCode::DurableIdentityConflict,
         RuntimeErrorCode::ProcessNoLongerRetained,
         RuntimeErrorCode::ProcessIncarnationSuperseded,
         RuntimeErrorCode::ProcessRegistryUnavailable,

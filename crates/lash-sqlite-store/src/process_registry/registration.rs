@@ -24,7 +24,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                         if existing.registration_fingerprint == registration_fingerprint {
                             return Ok(lash_core::ProcessRegistrationOutcome::existing(existing));
                         }
-                        return Err(lash_core::PluginError::Session(format!(
+                        return Err(lash_core::durable_identity_conflict(format!(
                             "process `{}` registration fingerprint conflict: existing {}, new {}",
                             registration.id,
                             existing.registration_fingerprint,

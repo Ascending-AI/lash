@@ -305,7 +305,7 @@ impl TriggerStore for InMemoryTriggerStore {
             });
             let occurrence = occurrence?;
             if !trigger_occurrence_request_matches_record(&request, &occurrence) {
-                return Err(PluginError::Session(format!(
+                return Err(crate::durable_identity_conflict(format!(
                     "trigger occurrence idempotency conflict for `{}`",
                     request.idempotency_key
                 )));
