@@ -9,8 +9,8 @@ homepage.workspace = true
 documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "RLM protocol (persistent Lashlang execution) for the lash agent runtime."
-keywords = ["lash", "agent", "rlm", "lashlang", "llm"]
+description = "RLM protocol (persistent TypeScript cell execution) for the lash agent runtime."
+keywords = ["lash", "agent", "rlm", "typescript", "llm"]
 categories = ["asynchronous", "api-bindings"]
 
 [lib]

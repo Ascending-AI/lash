@@ -3,7 +3,7 @@
 //! One [`Session`] is one RLM session: a sequence of cells, each compiled on
 //! its own against the session's surviving execution state, exactly as the
 //! protocol runs them. The harness owns the two things the scenarios must not
-//! re-derive — how a cell is executed for a dialect, and what "the session
+//! re-derive — how a cell is executed, and what "the session
 //! restarted" means — so a scenario reads as the cell sequence it is.
 
 use std::collections::BTreeMap;
@@ -13,27 +13,13 @@ use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
 use crate::executor::{
-    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig, RlmSourceContext,
-    SourceDialect, execute_code_with_dialect_and_bounds, execute_parked_cell_for_tests,
+    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig,
+    execute_code_with_channel_and_bounds, execute_parked_cell_for_tests,
 };
 use crate::projection::{ProjectionRegistry, RlmProjectedBindings, flow_to_json_value};
 
-/// The two source dialects an RLM session can be opened in.
-///
-/// The same value the executor runs a cell with, so the harness drives the
-/// production path for a dialect rather than choosing between two of them.
-pub(crate) type Dialect = SourceDialect;
-
-impl Dialect {
-    /// Every dialect the conformance suite covers, in a stable order.
-    pub(crate) const ALL: &'static [Dialect] = &[Dialect::Lashlang, Dialect::Typescript];
-}
-
-impl std::fmt::Display for Dialect {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.language_id())
-    }
-}
+/// The one language an RLM session runs (ADR 0096).
+pub(crate) const LANGUAGE_ID: &str = crate::dialect::typescript::LANGUAGE_ID;
 
 /// How much of the session survives between two cells.
 ///
@@ -81,7 +67,6 @@ impl CellOutcome {
 
 /// One RLM session under test.
 pub(crate) struct Session {
-    dialect: Dialect,
     mode: HarnessMode,
     state: RlmExecutionState,
     /// Cells run so far, so a failure names the sequence that produced it.
@@ -89,11 +74,10 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    pub(crate) fn open(dialect: Dialect, mode: HarnessMode) -> Self {
+    pub(crate) fn open(mode: HarnessMode) -> Self {
         Self {
-            dialect,
             mode,
-            state: RlmExecutionState::for_engine(dialect.language_id()),
+            state: RlmExecutionState::for_engine(LANGUAGE_ID),
             history: Vec::new(),
         }
     }
@@ -105,13 +89,12 @@ impl Session {
     /// failing cell without the harness deciding that is a test failure.
     pub(crate) fn run(&mut self, code: &str) -> CellOutcome {
         let request = ExecRequest {
-            language: self.dialect.language_id().to_string(),
+            language: LANGUAGE_ID.to_string(),
             code: code.to_string(),
         };
-        let dialect = self.dialect;
         let state = &mut self.state;
         let response = block_on(async move {
-            execute_code_with_dialect_and_bounds(
+            execute_code_with_channel_and_bounds(
                 state,
                 lash_core::testing::code_execution_context(),
                 request,
@@ -122,7 +105,7 @@ impl Session {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(dialect),
+                crate::plugin::RlmChannel::Cell,
             )
             .await
         });
@@ -141,8 +124,7 @@ impl Session {
         let outcome = self.run(code);
         assert!(
             outcome.succeeded(),
-            "cell `{code}` must succeed in {} after {:?}: {:?}",
-            self.dialect,
+            "cell `{code}` must succeed after {:?}: {:?}",
             self.history,
             outcome.error
         );
@@ -155,8 +137,7 @@ impl Session {
         let outcome = self.run(code);
         assert!(
             !outcome.succeeded(),
-            "cell `{code}` was expected to fail in {} but succeeded",
-            self.dialect
+            "cell `{code}` was expected to fail but succeeded"
         );
         outcome.failure().to_string()
     }
@@ -172,7 +153,7 @@ impl Session {
             .state
             .hydrated_execution_state()
             .expect("capture the RLM execution state");
-        let mut restored = RlmExecutionState::for_engine(self.dialect.language_id());
+        let mut restored = RlmExecutionState::for_engine(LANGUAGE_ID);
         restored
             .restore_execution_state(&hydrated)
             .expect("restore the RLM execution state");
@@ -237,23 +218,16 @@ impl Session {
     /// executor above, while this method supplies the missing continuation
     /// composition without adding a production suspension policy.
     pub(crate) fn run_parked(&mut self, code: &str) -> ParkedCellEvidence {
-        let mut state = std::mem::replace(
-            &mut self.state,
-            RlmExecutionState::for_engine(self.dialect.language_id()),
-        );
+        let mut state =
+            std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
         let evidence = block_on(execute_parked_cell_for_tests(
             &mut state,
             crate::executor::parked_cell_context_for_tests(),
-            self.dialect.language_id(),
+            LANGUAGE_ID,
             code,
             false,
         ))
-        .unwrap_or_else(|error| {
-            panic!(
-                "parked cell `{code}` must suspend and resume in {}: {error}",
-                self.dialect
-            )
-        });
+        .unwrap_or_else(|error| panic!("parked cell `{code}` must suspend and resume: {error}"));
         self.state = state;
         self.history.push(code.to_string());
         evidence
@@ -262,14 +236,12 @@ impl Session {
     /// Injects the retention defect used by the red-proof law. The broken
     /// continuation must fail before it can produce a terminal value.
     pub(crate) fn run_parked_broken(&mut self, code: &str) -> String {
-        let mut state = std::mem::replace(
-            &mut self.state,
-            RlmExecutionState::for_engine(self.dialect.language_id()),
-        );
+        let mut state =
+            std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
         let result = block_on(execute_parked_cell_for_tests(
             &mut state,
             crate::executor::parked_cell_context_for_tests(),
-            self.dialect.language_id(),
+            LANGUAGE_ID,
             code,
             true,
         ));

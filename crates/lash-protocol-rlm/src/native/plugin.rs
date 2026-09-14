@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::dialect::{RlmDialect, RlmDialectRegistry};
+use crate::dialect::TypescriptDialect;
 use crate::driver::SharedPromptUsage;
 use crate::plugin::RlmProtocolPluginConfig;
 use crate::plugin::budget_warning::BudgetUsageObserver;
@@ -13,18 +13,16 @@ use lash_core::plugin::{PluginError, PluginRegistrar};
 pub(super) fn register_native_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
-    dialect_registry: RlmDialectRegistry,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
     last_prompt_usage: SharedPromptUsage,
 ) -> Result<(), PluginError> {
-    // The catalog contribution carries the whole registry, not just the active
-    // dialect: model-facing tool prose is authored once and served to every
-    // dialect, so the neutrality guard has to know all of their words.
-    let catalog_dialects = dialect_registry.clone();
+    // The catalog contribution carries the dialect so the neutrality guard
+    // knows the words model-facing tool prose may not spell literally.
+    let catalog_dialect = Arc::clone(&dialect);
     let discovery = config.discovery.clone();
     let discovery_dialect = Arc::clone(&dialect);
     let runtime_state = Arc::new(
-        RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
+        RlmRuntimeState::new(Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
     );
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
@@ -53,7 +51,7 @@ pub(super) fn register_native_plugin(
             discovery.as_ref(),
             discovery_dialect.as_ref(),
         )?;
-        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialects)
+        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
     }));
     reg.tool_calls().before(Arc::new(|ctx| {
         Box::pin(async move { normalize_projected_tool_args(ctx) })
@@ -124,8 +122,7 @@ fn register_projected_bindings_prompt_contributor(
 /// Provider-native RLM protocol session, selected by the RLM factory config.
 pub struct RlmNativeToolPlugin {
     pub(crate) config: RlmProtocolPluginConfig,
-    pub(crate) dialect: Arc<dyn RlmDialect>,
-    pub(crate) dialect_registry: RlmDialectRegistry,
+    pub(crate) dialect: Arc<TypescriptDialect>,
     pub(crate) last_prompt_usage: SharedPromptUsage,
 }
 impl lash_core::plugin::SessionPlugin for RlmNativeToolPlugin {
@@ -136,7 +133,6 @@ impl lash_core::plugin::SessionPlugin for RlmNativeToolPlugin {
         register_native_plugin(
             reg,
             self.config.clone(),
-            self.dialect_registry.clone(),
             Arc::clone(&self.dialect),
             Arc::clone(&self.last_prompt_usage),
         )
@@ -150,7 +146,7 @@ impl lash_core::plugin::AssistantProseProjectorPlugin for NativeProseProjector {
 }
 struct NativeProtocolDriver {
     config: RlmProtocolPluginConfig,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
     last_prompt_usage: SharedPromptUsage,
     bound_variables_prompt: crate::rlm_support::SharedBoundVariablesPrompt,
 }

@@ -38,7 +38,7 @@ impl ToolProvider for RlmControlToolsProvider {
 
 /// Public API shape, unchanged: the default dialect's doc and example.
 pub fn continue_as_tool_definition() -> ToolDefinition {
-    continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY)
+    continue_as_tool_definition_for(crate::dialect::DialectPromptVocabulary::default())
 }
 
 pub(crate) fn continue_as_tool_definition_for(
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn continue_as_contract_documents_switch_result() {
         let definition =
-            continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY);
+            continue_as_tool_definition_for(crate::dialect::DialectPromptVocabulary::default());
 
         assert_eq!(
             definition.contract.output_schema.canonical["required"],
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn continue_as_tool_definition_preserves_projected_seed_refs_by_metadata() {
         assert_eq!(
-            continue_as_tool_definition_for(crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY)
+            continue_as_tool_definition_for(crate::dialect::DialectPromptVocabulary::default())
                 .manifest
                 .argument_projection,
             ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed")
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn rlm_control_definitions_include_continue_as_only() {
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
         let names = provider
             .tool_manifests()
@@ -520,7 +520,7 @@ mod tests {
             ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
 
         let args = json!({
@@ -579,7 +579,7 @@ mod tests {
     #[tokio::test]
     async fn continue_as_redrive_derives_the_same_frame_identity() {
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
         let args = json!({ "task": "continue deterministically" });
         let manager = Arc::new(BatonManager::default());
@@ -601,7 +601,7 @@ mod tests {
     #[tokio::test]
     async fn identical_continue_as_tasks_at_distinct_calls_derive_distinct_keys() {
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
         let args = json!({ "task": "same task" });
         let manager = Arc::new(BatonManager::default());
@@ -639,7 +639,7 @@ mod tests {
             ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
 
         let args = json!({
@@ -707,7 +707,7 @@ mod tests {
             ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
 
         let args = json!({
@@ -762,7 +762,7 @@ mod tests {
             ..BatonManager::default()
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            vocabulary: crate::dialect::DialectPromptVocabulary::default(),
         };
 
         let args = json!({

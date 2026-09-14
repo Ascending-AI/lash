@@ -83,7 +83,7 @@ pub fn format_budget_suffix(
         turn_index,
         usage,
         max_budget_tokens,
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        crate::dialect::DialectPromptVocabulary::default(),
         true,
     )
 }
@@ -903,7 +903,7 @@ mod bound_variable_tests {
         render_bound_variables(
             cache,
             &globals,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string()
     }
@@ -915,7 +915,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &g,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         );
         let s = &rendered;
         assert!(s.contains("- `inventory` = [\"lantern\",\"sword\"]"), "{s}");
@@ -957,7 +957,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &g,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         );
         let s = &rendered;
         assert!(s.contains("- `big`:"), "{s}");
@@ -977,7 +977,7 @@ mod bound_variable_tests {
         let s = render_bound_variables(
             &mut cache,
             &g,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();
         assert!(s.contains("`map`:"), "{s}"); // type still shown
@@ -995,7 +995,7 @@ mod bound_variable_tests {
         let s = render_bound_variables(
             &mut cache,
             &g,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();
         assert!(s.contains("len=40"), "{s}");
@@ -1098,7 +1098,7 @@ mod bound_variable_tests {
         let rendered = render_bound_variables(
             &mut cache,
             &[("payload".to_string(), value)],
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         );
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")

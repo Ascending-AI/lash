@@ -3,7 +3,6 @@ use lash_core::session_model::{ConversationRecord, MessageRole, Part};
 use lash_core::{MessageOrigin, SessionHistoryRecord};
 
 use super::{RlmHistoryRenderInput, render_history_messages, step_output_text};
-use crate::dialect::RlmDialect;
 use crate::projection::rlm_protocol_event;
 
 fn replay(item_id: &str, encrypted_content: &str) -> ProviderReasoningReplay {
@@ -79,7 +78,7 @@ fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
 }
 
 fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMessage> {
-    let dialect = crate::dialect::LashlangDialect::prompt_only(
+    let dialect = crate::dialect::TypescriptDialect::prompt_only(
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     render_history_messages(&RlmHistoryRenderInput {
@@ -100,7 +99,7 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
 
 #[test]
 fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
-    let dialect = crate::dialect::LashlangDialect::prompt_only(
+    let dialect = crate::dialect::TypescriptDialect::prompt_only(
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     let entry = lash_rlm_types::RlmTrajectoryEntry {
@@ -188,8 +187,8 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
             && cell.as_ref()
                 == crate::cell_scan::render_cell_text(
                     crate::dialect::CellTags {
-                        open: "<lashlang>",
-                        close: "</lashlang>",
+                        open: "<typescript>",
+                        close: "</typescript>",
                     },
                     "Working.",
                     "value = inspect()",
@@ -550,7 +549,7 @@ fn the_protocols_own_feedback_is_still_scrubbed() {
 
 #[test]
 fn history_teaching_follows_indexable_entries() {
-    let dialect = crate::dialect::lashlang_test_dialect();
+    let dialect = crate::dialect::typescript_test_dialect();
     for (events, structured) in [
         (vec![assistant_reasoning_event(&[], "current task")], false),
         (vec![step_event("print 1")], true),
@@ -571,7 +570,7 @@ fn history_teaching_follows_indexable_entries() {
         });
         let tail = observation_text(messages.last().unwrap());
         assert_eq!(tail.matches("=== FINALIZATION ===").count(), 1);
-        assert!(tail.contains("`history`: `list[HistoryItem]`, read-only, 1 entry"));
+        assert!(tail.contains("`history`: `HistoryItem[]`, read-only, 1 entry"));
         assert_eq!(tail.contains("type HistoryItem ="), structured);
         assert!(!tail.contains("truncated"));
         assert!(!tail.contains("Runtime notes"));
@@ -605,7 +604,7 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
             }),
         }),
     ];
-    let dialect = crate::dialect::lashlang_test_dialect();
+    let dialect = crate::dialect::typescript_test_dialect();
     let messages = render_history_messages(&RlmHistoryRenderInput {
         images: false,
         dialect: &dialect,

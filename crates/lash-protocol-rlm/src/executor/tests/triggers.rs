@@ -88,13 +88,8 @@ async fn execute_with_deferred_trigger(
     code: &str,
     resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver,
 ) -> (RlmExecutionState, ExecResponse) {
-    let dialect = if language == "typescript" {
-        SourceDialect::Typescript
-    } else {
-        SourceDialect::Lashlang
-    };
     let mut state = RlmExecutionState::for_engine(language);
-    let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
+    let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
             Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
@@ -125,32 +120,18 @@ async fn execute_with_deferred_trigger(
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(dialect),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     (state, response)
 }
 
 #[test]
-fn deferred_trigger_constructor_and_event_schema_link_for_both_frontends() {
+fn deferred_trigger_constructor_and_event_schema_link() {
     block_on(async {
-        let cases = [
-            (
-                "lashlang",
-                r#"
-                    process remember(change: calendar.Change) { finish true }
-                    source = calendar.Changed({})
-                    handle = await triggers.register({
-                      source: source,
-                      target: remember,
-                      inputs: { change: trigger.event }
-                    })?
-                    finish handle
-                "#,
-            ),
-            (
-                "typescript",
-                r#"
+        let cases = [(
+            "typescript",
+            r#"
                     const remember = defineProcess({
                       name: "remember", signals: {},
                       run: async (change: calendar.Change) => true
@@ -160,8 +141,7 @@ fn deferred_trigger_constructor_and_event_schema_link_for_both_frontends() {
                       source, target: remember, inputs: (event) => ({ change: event })
                     }));
                 "#,
-            ),
-        ];
+        )];
         for (language, code) in cases {
             let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
@@ -200,14 +180,16 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 calls,
             });
         let (mut state, response) = execute_with_deferred_trigger(
-            "lashlang",
+            "typescript",
             r#"
-                process remember(change: calendar.Change) { finish true }
-                source = calendar.Changed({})
-                finish await triggers.register({
-                  source: source, target: remember,
-                  inputs: { change: trigger.event }
-                })?
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (change: calendar.Change) => true
+                });
+                const source = calendar.Changed({});
+                finish(await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ change: event })
+                }));
             "#,
             resolver,
         )
@@ -219,7 +201,7 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 .snapshot_execution_state()
                 .expect("trigger-bearing state snapshots"),
         );
-        let mut restored = RlmExecutionState::for_engine("lashlang");
+        let mut restored = RlmExecutionState::for_engine("typescript");
         restored
             .restore_execution_state(&hydration)
             .expect("trigger-bearing state restores");
@@ -237,25 +219,9 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
 #[test]
 fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
     block_on(async {
-        let cases = [
-            (
-                "lashlang",
-                r#"
-                    process remember(change: calendar.Change) { finish true }
-                    process install() {
-                      source = calendar.Changed({})
-                      await triggers.register({
-                        source: source, target: remember,
-                        inputs: { change: trigger.event }
-                      })?
-                      finish true
-                    }
-                    finish true
-                "#,
-            ),
-            (
-                "typescript",
-                r#"
+        let cases = [(
+            "typescript",
+            r#"
                     const sourceInput = () => ({});
                     const remember = defineProcess({
                       name: "remember", signals: {},
@@ -266,8 +232,7 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
                       inputs: (event) => ({ change: event })
                     }));
                 "#,
-            ),
-        ];
+        )];
         for (language, code) in cases {
             let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver =
@@ -288,17 +253,20 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
 fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
     block_on(async {
         let code = r#"
-            process wrong(value: int) { finish true }
-            await triggers.register({
+            const wrong = defineProcess({
+              name: "wrong", signals: {},
+              run: async (value: number) => true
+            });
+            await registerTrigger({
               source: calendar.Changed({}), target: wrong,
-              inputs: { value: trigger.event }
-            })?
-            finish true
+              inputs: (event) => ({ value: event })
+            });
+            finish(true);
         "#;
         for (outcome, expected) in [
             (
                 lash_lashlang_runtime::TriggerResolution::NotAvailable,
-                "unknown name `calendar`",
+                "unknown module `calendar`",
             ),
             (
                 lash_lashlang_runtime::TriggerResolution::Ambiguous {
@@ -312,7 +280,7 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
                     outcome,
                     calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 });
-            let (_, response) = execute_with_deferred_trigger("lashlang", code, resolver).await;
+            let (_, response) = execute_with_deferred_trigger("typescript", code, resolver).await;
             let error = response
                 .error
                 .expect("link must reject unavailable definition");
@@ -329,8 +297,8 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
 #[test]
 fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
     block_on(async {
-        let mut state = RlmExecutionState::for_engine("lashlang");
-        let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
                 Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
@@ -344,19 +312,22 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
                 ),
             ),
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                    process remember(change: calendar.Change) { finish true }
-                    process unused() {
-                      source = calendar.Changed({})
-                      await web.fetch({})?
-                      await triggers.register({
-                        source: source, target: remember,
-                        inputs: { change: trigger.event }
-                      })?
-                      finish true
-                    }
-                    finish true
+                    const remember = defineProcess({
+                      name: "remember", signals: {},
+                      run: async (change: calendar.Change) => true
+                    });
+                    const unused = defineProcess({
+                      name: "unused", signals: {},
+                      run: async () => { await web.fetch({}); return true; }
+                    });
+                    const source = calendar.Changed({});
+                    await registerTrigger({
+                      source, target: remember,
+                      inputs: (event) => ({ change: event })
+                    });
+                    finish(true);
                 "#
                 .to_string(),
             },
@@ -374,7 +345,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            RlmSourceContext::cell(SourceDialect::Lashlang),
+            crate::plugin::RlmChannel::Cell,
         )
         .await;
 
@@ -529,7 +500,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         &mut state,
         ctx,
         ExecRequest {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             code: code.to_string(),
         },
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
@@ -543,7 +514,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
 }
 
 pub(super) async fn execute_with_trigger_environment(code: &str) -> ExecResponse {
-    execute_with_lashlang_host_environment(
+    execute_with_host_environment(
         code,
         lashlang::LashlangAbilities::default()
             .with_processes()
@@ -553,39 +524,10 @@ pub(super) async fn execute_with_trigger_environment(code: &str) -> ExecResponse
     .await
 }
 
-pub(super) async fn execute_typescript_with_trigger_environment(code: &str) -> ExecResponse {
-    let mut state = RlmExecutionState::for_engine("typescript");
-    execute_code_with_dialect_and_bounds(
-        &mut state,
-        lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
-            lash_core::facade_support::InMemoryTriggerStore::default(),
-        )),
-        ExecRequest {
-            language: "typescript".to_string(),
-            code: code.to_string(),
-        },
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
-        LashlangSurface::new(
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_triggers(),
-            lashlang::LashlangLanguageFeatures::default(),
-            timer_trigger_resources(),
-        ),
-        None,
-        RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
-        RlmLashlangExecutionTraceConfig::default(),
-        lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
-    )
-    .await
-}
-
 #[test]
 pub(super) fn typescript_register_trigger_executes_end_to_end() {
     block_on(async {
-        let response = execute_typescript_with_trigger_environment(
+        let response = execute_with_trigger_environment(
             r#"
                 const remember = defineProcess({
                   name: "remember", signals: {},
@@ -622,20 +564,20 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                process remember(tick: timer.Tick) {
-                  finish true
-                }
-
-                source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                handle = await triggers.register({
-                  source: source,
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => true
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const handle = await registerTrigger({
+                  source,
                   target: remember,
-                  inputs: { tick: trigger.event },
+                  inputs: (event) => ({ tick: event }),
                   name: "remembered"
-                })?
-                registrations = await triggers.list({ target: remember })?
+                });
+                const registrations = await triggers.list({ target: remember });
 
-                finish { answer: "foreground ran", handle: handle, registrations: registrations }
+                finish({ answer: "foreground ran", handle: handle, registrations: registrations });
                 "#,
         )
         .await;
@@ -704,16 +646,19 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                        process remember(tick: timer.Tick) { finish tick.fired_at }
-                        source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                        handle = await triggers.register({
-                          source: source,
+                        const remember = defineProcess({
+                          name: "remember", signals: {},
+                          run: async (tick: timer.Tick) => tick.fired_at
+                        });
+                        const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                        const handle = await registerTrigger({
+                          source,
                           target: remember,
-                          inputs: { tick: trigger.event }
-                        })?
-                        finish handle
+                          inputs: (event) => ({ tick: event })
+                        });
+                        finish(handle);
                     "#
                 .to_string(),
             },
@@ -801,12 +746,15 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
         // threshold once the turn config carries its budgets.
         let first = Box::pin(capture(
                 r#"
-                process remember(tick: timer.Tick) { finish tick.fired_at }
-                morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" })
-                await triggers.register({ source: morning, target: remember, inputs: { tick: trigger.event } })?
-                await triggers.register({ source: evening, target: remember, inputs: { tick: trigger.event } })?
-                finish true
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => tick.fired_at
+                });
+                const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
+                await registerTrigger({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
+                await registerTrigger({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
+                finish(true);
                 "#,
             ))
             .await;
@@ -814,12 +762,15 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
         // threshold once the turn config carries its budgets.
         let second = Box::pin(capture(
                 r#"
-                process remember(tick: timer.Tick) { finish tick.fired_at }
-                morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" })
-                await triggers.register({ source: evening, target: remember, inputs: { tick: trigger.event } })?
-                await triggers.register({ source: morning, target: remember, inputs: { tick: trigger.event } })?
-                finish true
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => tick.fired_at
+                });
+                const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
+                await registerTrigger({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
+                await registerTrigger({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
+                finish(true);
                 "#,
             ))
             .await;
@@ -855,17 +806,20 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                        process remember(tick: timer.Tick) { finish tick.fired_at }
-                        source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                        await triggers.register({
-                          source: source,
+                        const remember = defineProcess({
+                          name: "remember", signals: {},
+                          run: async (tick: timer.Tick) => tick.fired_at
+                        });
+                        const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                        await registerTrigger({
+                          source,
                           target: remember,
-                          inputs: { tick: trigger.event },
+                          inputs: (event) => ({ tick: event }),
                           subscription_key: "old-schedule"
-                        })?
-                        finish await triggers.list({})?
+                        });
+                        finish(await triggers.list({}));
                     "#
                 .to_string(),
             },
@@ -896,10 +850,10 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                        print "unrelated observation"
-                        finish 42
+                        console.log("unrelated observation");
+                        finish(42);
                     "#
                 .to_string(),
             },
@@ -975,8 +929,8 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             &mut state,
             context,
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "finish 42".to_string(),
+                language: "typescript".to_string(),
+                code: "finish(42);".to_string(),
             },
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             LashlangSurface::new(
@@ -1100,7 +1054,7 @@ async fn execute_trigger_process_with_originator(
     } else {
         RlmExecutionState::new()
     };
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         ctx,
         ExecRequest {
@@ -1114,11 +1068,7 @@ async fn execute_trigger_process_with_originator(
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(if language == "typescript" {
-            SourceDialect::Typescript
-        } else {
-            SourceDialect::Lashlang
-        }),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     assert!(response.error.is_none(), "{:?}", response.error);
@@ -1183,50 +1133,6 @@ async fn execute_trigger_process_with_originator(
 }
 
 #[test]
-pub(super) fn named_host_process_trigger_uses_host_owner_scope() {
-    block_on(async {
-        let owner_scope =
-            lash_core::TriggerOwnerScope::host("automation-a").expect("valid host owner");
-        let result = execute_trigger_process_with_originator(
-            "lashlang",
-            r#"
-                process remember(tick: timer.Tick) { finish true }
-                process registrar() {
-                  source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                  receipt = await triggers.register({
-                    source: source, target: remember, inputs: { tick: trigger.event },
-                    subscription_key: "named-host-process"
-                  })?
-                  finish receipt.owner_scope
-                }
-                handle = start registrar()
-                finish handle.id
-            "#,
-            Some(lash_core::ProcessOriginator::host_scoped("automation-a")),
-            Some(owner_scope.clone()),
-            true,
-        )
-        .await;
-
-        assert_eq!(result.subscriptions.len(), 1);
-        assert_eq!(result.subscriptions[0].owner_scope, owner_scope);
-        assert_eq!(
-            result.subscriptions[0].registrant,
-            lash_core::ProcessOriginator::host_scoped("automation-a")
-        );
-        assert!(result.subscriptions[0].wake_target.is_some());
-        assert_eq!(
-            result
-                .trigger_effects
-                .iter()
-                .map(|(_, operation)| *operation)
-                .collect::<Vec<_>>(),
-            ["register"]
-        );
-    });
-}
-
-#[test]
 pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
     block_on(async {
         let registration = lash_core::ProcessRegistration::new(
@@ -1251,11 +1157,14 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
         );
 
         let result = execute_trigger_process_with_originator(
-            "lashlang",
+            "typescript",
             r#"
-                process registrar() { finish await triggers.list({})? }
-                handle = start registrar()
-                finish handle.id
+                const registrar = defineProcess({
+                  name: "registrar", signals: {},
+                  run: async () => await triggers.list({})
+                });
+                const handle = start(registrar);
+                finish(handle.id);
             "#,
             Some(lash_core::ProcessOriginator::host()),
             None,
@@ -1270,86 +1179,6 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             "authority refusal must happen before trigger effect execution"
         );
         assert!(result.subscriptions.is_empty());
-    });
-}
-
-#[test]
-pub(super) fn lashlang_process_trigger_batch_uses_command_handler_in_source_order() {
-    block_on(async {
-        let result = execute_trigger_process(
-            "lashlang",
-            r#"
-                process remember(tick: timer.Tick) { finish true }
-                process registrar() {
-                  source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                  seed = await triggers.register({
-                    source: source, target: remember, inputs: { tick: trigger.event },
-                    subscription_key: "process-update"
-                  })?
-                  results = await {
-                    registered: triggers.register({
-                      source: source, target: remember, inputs: { tick: trigger.event },
-                      subscription_key: "process-register"
-                    })?,
-                    listed: triggers.list({ target: remember })?,
-                    updated: triggers.update({
-                      subscription_key: "process-update", expected_revision: seed.revision,
-                      source: source, target: remember, inputs: { tick: trigger.event },
-                      name: "updated-by-process"
-                    })?
-                  }
-                  finish { registered: results.registered, count: len(results.listed) }
-                }
-                handle = start registrar()
-                finish handle.id
-            "#,
-        )
-        .await;
-
-        let expected = lash_core::ProcessAwaitOutput::from_tool_output(
-            lash_core::ToolCallOutput::success(serde_json::json!({
-                "registered": result.subscriptions.iter().find(|record| {
-                    record.subscription_key == "process-register"
-                }).map(|record| serde_json::json!({
-                    "type": "trigger_handle",
-                    "id": record.subscription_key,
-                    "owner_scope": record.owner_scope,
-                    "subscription_key": record.subscription_key,
-                    "subscription_id": record.subscription_id,
-                    "incarnation": record.incarnation,
-                    "revision": record.revision,
-                    "definition_fingerprint": record.definition_fingerprint,
-                    "enabled": record.enabled,
-                    "disposition": "created",
-                    "record_snapshot": record,
-                })).expect("registered subscription"),
-                "count": 2,
-            })),
-        );
-        assert_eq!(result.terminal, expected);
-        assert!(result.subscriptions.iter().all(|record| {
-            record.owner_scope == lash_core::TriggerOwnerScope::session("test-session")
-                && record.registrant
-                    == lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                        "test-session",
-                    ))
-                && record.wake_target.is_some()
-        }));
-        assert_eq!(
-            result
-                .trigger_effects
-                .iter()
-                .map(|(_, operation)| *operation)
-                .collect::<Vec<_>>(),
-            ["register", "register", "list", "update"]
-        );
-        assert!(
-            result.trigger_effects[1..]
-                .iter()
-                .all(|(effect_id, _)| effect_id.contains(":child:")),
-            "batched process effects must retain child positions: {:?}",
-            result.trigger_effects
-        );
     });
 }
 
@@ -1434,33 +1263,36 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
         let scalar = CapturingTriggerEffectController::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
-                process remember(tick: timer.Tick) { finish true }
-                source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                registered = await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => true
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const registered = await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   name: "scalar", subscription_key: "scalar"
-                })?
-                listed = await triggers.list({ target: remember })?
-                updated = await triggers.update({
+                });
+                const listed = await triggers.list({ target: remember });
+                const updated = await triggers.update({
                   subscription_key: "scalar", expected_revision: registered.revision,
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   name: "scalar-updated"
-                })?
-                disabled = await triggers.disable({
+                });
+                const disabled = await triggers.disable({
                   subscription_key: "scalar", expected_revision: updated.revision
-                })?
-                enabled = await triggers.enable({
+                });
+                const enabled = await triggers.enable({
                   subscription_key: "scalar", expected_revision: disabled.revision
-                })?
-                deleted = await triggers.delete({
+                });
+                const deleted = await triggers.delete({
                   subscription_key: "scalar", expected_revision: enabled.revision
-                })?
-                await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                });
+                await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "prune-me"
-                })?
-                pruned = await triggers.prune({ subscription_keys: ["prune-me"] })?
-                finish len(listed)
+                });
+                const pruned = await triggers.prune({ subscription_keys: ["prune-me"] });
+                finish(listed.length);
                 "#,
             scalar.clone(),
         ))
@@ -1503,49 +1335,52 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
         let batched = CapturingTriggerEffectController::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
-                process remember(tick: timer.Tick) { finish true }
-                source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-                update_seed = await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => true
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                const update_seed = await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-update"
-                })?
-                enable_seed = await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                });
+                const registered_enable_seed = await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-enable"
-                })?
-                enable_seed = await triggers.disable({
-                  subscription_key: "batch-enable", expected_revision: enable_seed.revision
-                })?
-                disable_seed = await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                });
+                const enable_seed = await triggers.disable({
+                  subscription_key: "batch-enable", expected_revision: registered_enable_seed.revision
+                });
+                const disable_seed = await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-disable"
-                })?
-                delete_seed = await triggers.register({
-                  source: source, target: remember, inputs: { tick: trigger.event },
+                });
+                const delete_seed = await registerTrigger({
+                  source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-delete"
-                })?
-                results = await {
-                  registered: triggers.register({
-                    source: source, target: remember, inputs: { tick: trigger.event },
+                });
+                const results = await Promise.all([
+                  triggers.register({
+                    source, target: remember, inputs: (event) => ({ tick: event }),
                     subscription_key: "batch-register"
-                  })?,
-                  listed: triggers.list({})?,
-                  updated: triggers.update({
+                  }),
+                  triggers.list({}),
+                  triggers.update({
                     subscription_key: "batch-update", expected_revision: update_seed.revision,
-                    source: source, target: remember, inputs: { tick: trigger.event },
+                    source, target: remember, inputs: (event) => ({ tick: event }),
                     name: "batch-updated"
-                  })?,
-                  enabled: triggers.enable({
+                  }),
+                  triggers.enable({
                     subscription_key: "batch-enable", expected_revision: enable_seed.revision
-                  })?,
-                  disabled: triggers.disable({
+                  }),
+                  triggers.disable({
                     subscription_key: "batch-disable", expected_revision: disable_seed.revision
-                  })?,
-                  deleted: triggers.delete({
+                  }),
+                  triggers.delete({
                     subscription_key: "batch-delete", expected_revision: delete_seed.revision
-                  })?
-                }
-                finish len(results.listed)
+                  })
+                ]);
+                finish(results[1].length);
                 "#,
             batched.clone(),
         ))
@@ -1590,24 +1425,24 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                process remember(tick: timer.Tick) {
-                  finish true
-                }
-
-                source = timer.Schedule({ expr: "0 8 * * *" })
-                handle = await triggers.register({
-                  source: source,
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: timer.Tick) => true
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *" });
+                const handle = await registerTrigger({
+                  source,
                   target: remember,
-                  inputs: { tick: trigger.event },
+                  inputs: (event) => ({ tick: event }),
                   name: "remembered",
                   subscription_key: "remembered"
-                })?
-                disabled = await triggers.disable({
+                });
+                const disabled = await triggers.disable({
                   subscription_key: "remembered",
                   expected_revision: handle.revision
-                })?
-                registrations = await triggers.list({ target: remember })?
-                finish { disposition: disabled.disposition, enabled: registrations[0].enabled }
+                });
+                const registrations = await triggers.list({ target: remember });
+                finish({ disposition: disabled.disposition, enabled: registrations[0].enabled });
                 "#,
         )
         .await;
@@ -1621,44 +1456,12 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
 }
 
 #[test]
-pub(super) fn trigger_registration_failure_prevents_foreground_execution() {
-    block_on(async {
-        let response = execute_with_trigger_environment(
-            r#"
-                process remember(tick: str) {
-                  finish tick
-                }
-
-                source = timer.Schedule({ expr: "0 8 * * *" })
-                await triggers.register({
-                  source: source,
-                  target: remember,
-                  inputs: { tick: trigger.event }
-                })?
-
-                finish "should not run"
-                "#,
-        )
-        .await;
-
-        let error = response.error.as_ref().expect("event mismatch should fail");
-        assert!(
-            error.message.contains("trigger source emits"),
-            "{}",
-            error.message,
-        );
-        assert!(response.observations.is_empty());
-        assert!(response.terminal_finish.is_none());
-    });
-}
-
-#[test]
 pub(super) fn foreground_sleep_executes_through_runtime_context() {
     block_on(async {
-        let response = execute_with_lashlang_abilities(
+        let response = execute_with_abilities(
             r#"
-                sleep for "0ms"
-                finish "awake"
+                await sleep(0);
+                finish("awake");
                 "#,
             lashlang::LashlangAbilities::default().with_sleep(),
         )
@@ -1674,11 +1477,10 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
     block_on(async {
         let large = "x".repeat(60 * 1024);
         let code = format!(
-            "print {{ output: {}, status: \"failed\", error: \"boom\", exit_code: 2, stderr: \"short\" }}",
+            "console.log({{ output: {}, status: \"failed\", error: \"boom\", exit_code: 2, stderr: \"short\" }});",
             serde_json::to_string(&large).expect("string literal")
         );
-        let response =
-            execute_with_lashlang_abilities(&code, lashlang::LashlangAbilities::default()).await;
+        let response = execute_with_abilities(&code, lashlang::LashlangAbilities::default()).await;
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.observations.len(), 1);
@@ -1689,10 +1491,13 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
         let metadata = &response.observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
         assert_eq!(metadata.original_chars, 61_517);
-        assert_eq!(metadata.projected_chars, 330);
+        // `console.log` renders its argument to text before the observation is
+        // projected, so the record is truncated by the byte limit rather than
+        // summarised field-by-field the way a bare `print` of a record was.
+        assert_eq!(metadata.projected_chars, 51_216);
         assert_ne!(metadata.original_chars, metadata.projected_chars);
         assert_eq!(metadata.original_lines, 1);
-        assert_eq!(metadata.projected_lines, 1);
+        assert_eq!(metadata.projected_lines, 2);
         assert_eq!(
             metadata.limit,
             crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes
@@ -1701,86 +1506,6 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
             metadata.max_lines,
             crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_lines
         );
-    });
-}
-
-#[test]
-pub(super) fn executor_reports_rlm_bare_tool_call_diagnostic_at_link_time() {
-    let mut resources = lashlang::LashlangHostCatalog::new();
-    resources
-        .add_module_operation(
-            ["files"],
-            "Files",
-            "read",
-            "read_file",
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-
-    block_on(async {
-        let response = execute_with_lashlang_host_environment(
-            r#"finish read_file({ path: "Cargo.toml" })"#,
-            lashlang::LashlangAbilities::default(),
-            resources,
-        )
-        .await;
-        let error = response
-            .error
-            .as_ref()
-            .expect("bare tool call should fail at link time");
-
-        assert_eq!(
-            error.kind,
-            lash_core::CellFailureKind::Policy,
-            "a link refusal is a policy failure, not a runtime one: {}",
-            error.message,
-        );
-        assert!(
-            error.message.starts_with(RLM_BARE_TOOL_CALL_DIAGNOSTIC),
-            "{}",
-            error.message,
-        );
-        assert!(
-            error.message.contains("hint: use `files.read`"),
-            "{}",
-            error.message,
-        );
-        assert!(response.calls.is_empty());
-        assert!(response.terminal_finish.is_none());
-    });
-}
-
-#[test]
-pub(super) fn top_level_typo_on_line_40_fails_before_any_effect() {
-    block_on(async {
-        let mut lines = (1..40)
-            .map(|index| format!("print {index}"))
-            .collect::<Vec<_>>();
-        lines.push("finish misspelled_result".to_string());
-        let response = execute_with_lashlang_abilities(
-            &lines.join("\n"),
-            lashlang::LashlangAbilities::default(),
-        )
-        .await;
-
-        let error = response.error.expect("link should reject typo");
-        assert!(
-            error.message.contains("unknown name `misspelled_result`"),
-            "{}",
-            error.message,
-        );
-        assert!(
-            error.message.contains("--> line 40, column 8"),
-            "{}",
-            error.message,
-        );
-        assert!(
-            response.observations.is_empty(),
-            "no print effect may execute before a link failure"
-        );
-        assert!(response.calls.is_empty());
-        assert!(response.terminal_finish.is_none());
     });
 }
 
@@ -1797,35 +1522,35 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
     let cases = [
         DisabledCase {
             name: "process declaration",
-            code: "process worker() { finish null }",
+            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async () => null });",
             abilities: lashlang::LashlangAbilities::default(),
             resources: lashlang::LashlangHostCatalog::new,
             feature: "processes",
         },
         DisabledCase {
             name: "process start",
-            code: "start worker()",
+            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async () => null });\nstart(worker);",
             abilities: lashlang::LashlangAbilities::default(),
             resources: lashlang::LashlangHostCatalog::new,
             feature: "processes",
         },
         DisabledCase {
             name: "sleep",
-            code: r#"sleep for "1s""#,
+            code: "await sleep(1000);",
             abilities: lashlang::LashlangAbilities::default(),
             resources: lashlang::LashlangHostCatalog::new,
             feature: "sleep",
         },
         DisabledCase {
             name: "wait_signal",
-            code: "process worker() signals { ready: any } { payload = wait_signal(\"ready\") }",
+            code: "const worker = defineProcess({ name: \"worker\", signals: { ready: null }, run: async () => await waitSignal(\"ready\") });",
             abilities: lashlang::LashlangAbilities::default().with_processes(),
             resources: lashlang::LashlangHostCatalog::new,
             feature: "process signals",
         },
         DisabledCase {
             name: "signal_run",
-            code: "process worker(target: any) { signal_run(target, \"ready\", null) }",
+            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async (target: unknown) => wake(target, \"ready\", null) });",
             abilities: lashlang::LashlangAbilities::default().with_processes(),
             resources: lashlang::LashlangHostCatalog::new,
             feature: "process signals",
@@ -1833,13 +1558,16 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
         DisabledCase {
             name: "trigger",
             code: r#"
-                    process worker(tick: timer.Tick) { finish true }
-                    source = timer.Schedule({ expr: "0 8 * * *" })
-                    await triggers.register({
-                      source: source,
+                    const worker = defineProcess({
+                      name: "worker", signals: {},
+                      run: async (tick: timer.Tick) => true
+                    });
+                    const source = timer.Schedule({ expr: "0 8 * * *" });
+                    await registerTrigger({
+                      source,
                       target: worker,
-                      inputs: { tick: trigger.event }
-                    })?
+                      inputs: (event) => ({ tick: event })
+                    });
                 "#,
             abilities: lashlang::LashlangAbilities::default().with_processes(),
             resources: disabled_timer_trigger_resources,
@@ -1849,14 +1577,10 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 
     block_on(async {
         for case in cases {
-            lashlang::parse(case.code)
+            lash_typescript::parse(case.code)
                 .unwrap_or_else(|err| panic!("{} should parse: {err}", case.name));
-            let response = execute_with_lashlang_host_environment(
-                case.code,
-                case.abilities,
-                (case.resources)(),
-            )
-            .await;
+            let response =
+                execute_with_host_environment(case.code, case.abilities, (case.resources)()).await;
             let error = response
                 .error
                 .as_ref()
@@ -2016,7 +1740,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
     store: Arc<lashlang::InMemoryLashlangArtifactStore>,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::for_engine("typescript");
-    execute_code_with_dialect_and_bounds(
+    execute_code_with_channel_and_bounds(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_effect_controller(
             Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
@@ -2039,7 +1763,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await
 }

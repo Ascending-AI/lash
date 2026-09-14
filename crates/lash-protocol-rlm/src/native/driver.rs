@@ -1,3 +1,4 @@
+use crate::dialect::TypescriptDialect;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,7 +21,6 @@ use lash_rlm_types::{
 };
 use serde_json::Value;
 
-use crate::dialect::RlmDialect;
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
@@ -36,11 +36,11 @@ use crate::protocol::actions::{invalid_driver_state_actions, invalid_turn_option
 
 #[derive(Clone)]
 pub struct NativeDriver {
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 }
 
 impl NativeDriver {
-    pub(crate) fn with_dialect(dialect: Arc<dyn RlmDialect>) -> Self {
+    pub(crate) fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
         Self { dialect }
     }
 }

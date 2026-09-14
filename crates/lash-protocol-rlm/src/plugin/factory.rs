@@ -13,9 +13,7 @@ use lash_lashlang_runtime::{
 
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
-use crate::dialect::{
-    LashlangDialect, LashlangDialectServices, RlmDialect, RlmDialectRegistry, TypescriptDialect,
-};
+use crate::dialect::{RlmDialectServices, TypescriptDialect};
 use crate::driver::SharedPromptUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
@@ -340,7 +338,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         )
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
-        let services = LashlangDialectServices {
+        let services = RlmDialectServices {
             projection_resolver: Arc::clone(&self.projection_resolver),
             artifact_store: Arc::clone(&self.artifact_store),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
@@ -349,33 +347,22 @@ impl PluginFactory for RlmProtocolPluginFactory {
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
         };
-        let lashlang: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::new(
-            lashlang_surface.clone(),
-            services.clone(),
-        ));
-        let typescript: Arc<dyn RlmDialect> =
-            Arc::new(TypescriptDialect::new(lashlang_surface, services));
-        let dialect_registry =
-            RlmDialectRegistry::new([Arc::clone(&lashlang), Arc::clone(&typescript)]);
         // TypeScript is the only RLM language (ADR 0096), so there is nothing to
         // resolve from the session: the create contract and the durable record
         // carry no language pin, and a pre-cutover record that still does is
         // refused by `rlm_session_config` rather than read here.
-        let dialect = dialect_registry
-            .resolve(crate::dialect::typescript::LANGUAGE_ID)
-            .map_err(|error| PluginError::Session(error.to_string()))?;
+        let dialect: Arc<TypescriptDialect> =
+            Arc::new(TypescriptDialect::new(lashlang_surface, services));
         if config.channel == super::RlmChannel::NativeTool {
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
                 config,
                 dialect,
-                dialect_registry,
                 last_prompt_usage: Arc::new(RwLock::new(None)),
             }));
         }
         Ok(Arc::new(RlmProtocolPlugin {
             config,
             dialect,
-            dialect_registry,
             last_prompt_usage: Arc::new(RwLock::new(None)),
         }))
     }
@@ -432,8 +419,7 @@ pub type ModuleCompileOutput = lashlang::ModuleCompileOutput;
 
 struct RlmProtocolPlugin {
     config: RlmProtocolPluginConfig,
-    dialect: Arc<dyn RlmDialect>,
-    dialect_registry: RlmDialectRegistry,
+    dialect: Arc<TypescriptDialect>,
     last_prompt_usage: SharedPromptUsage,
 }
 
@@ -446,7 +432,6 @@ impl SessionPlugin for RlmProtocolPlugin {
         register_rlm_protocol_plugin(
             reg,
             self.config.clone(),
-            self.dialect_registry.clone(),
             Arc::clone(&self.dialect),
             Arc::clone(&self.last_prompt_usage),
         )
@@ -457,7 +442,6 @@ impl SessionPlugin for RlmProtocolPlugin {
 mod label_annotation_tests {
     use super::{rlm_lashlang_surface, rlm_protocol_config};
     use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig, WallClockBound};
-    use crate::protocol::{RlmPromptFeatures, rlm_execution_section_for_host_environment};
 
     fn base_config() -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig::builder()
@@ -469,19 +453,12 @@ mod label_annotation_tests {
     }
 
     /// Run a host config through the plugin's config transformation the way a
-    /// session build does, and render the prompt section it produces.
-    fn rendered_surface(
-        config: RlmProtocolPluginConfig,
-    ) -> (String, lashlang::LashlangHostEnvironment) {
+    /// session build does, and return the host environment it produces.
+    fn rendered_surface(config: RlmProtocolPluginConfig) -> lashlang::LashlangHostEnvironment {
         let config = rlm_protocol_config(config, false);
-        let host_environment = rlm_lashlang_surface(&config, false)
+        rlm_lashlang_surface(&config, false)
             .host_environment(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()))
-            .expect("host environment");
-        let section = rlm_execution_section_for_host_environment(
-            RlmPromptFeatures::default(),
-            &host_environment,
-        );
-        (section, host_environment)
+            .expect("host environment")
     }
 
     fn labelled_program() -> lashlang::Program {
@@ -495,15 +472,13 @@ mod label_annotation_tests {
     }
 
     #[test]
-    fn host_disabled_label_annotations_are_absent_from_prompt_and_language() {
+    fn host_disabled_label_annotations_are_absent_from_the_language() {
         // Toolbench's shape (examples/toolbench/src/runtime.rs): every optional
         // language feature spelled off.
         let mut config = base_config();
         config.lashlang_language_features.label_annotations = false;
-        let (section, host_environment) = rendered_surface(config);
+        let host_environment = rendered_surface(config);
 
-        assert!(!section.contains("@label"), "{section}");
-        assert!(!section.contains("Execution labels"), "{section}");
         assert!(!host_environment.language_features.label_annotations);
         let err = lashlang::LinkedModule::link(labelled_program(), &host_environment)
             .expect_err("label syntax must be rejected when the host disabled the feature");
@@ -521,9 +496,8 @@ mod label_annotation_tests {
 
     #[test]
     fn default_config_keeps_label_annotations_on() {
-        let (section, host_environment) = rendered_surface(base_config());
+        let host_environment = rendered_surface(base_config());
 
-        assert!(section.contains("@label"), "{section}");
         assert!(host_environment.language_features.label_annotations);
         lashlang::LinkedModule::link(labelled_program(), &host_environment)
             .expect("default surface links label annotations");

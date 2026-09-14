@@ -36,7 +36,7 @@ fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
     ]
 }
 fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
-    let dialect = crate::dialect::LashlangDialect::prompt_only(
+    let dialect = crate::dialect::TypescriptDialect::prompt_only(
         lash_lashlang_runtime::LashlangSurface::default(),
     );
     let turn_messages = lash_core::facade_support::MessageSequence::default();
@@ -122,14 +122,10 @@ fn reload_preserves_replay_and_observation_bytes() {
             .unwrap();
     let messages = render(&reloaded);
     assert_eq!(ids(&messages).0, ["reload"]);
-    let dialect = crate::dialect::LashlangDialect::prompt_only(
+    let dialect = crate::dialect::TypescriptDialect::prompt_only(
         lash_lashlang_runtime::LashlangSurface::default(),
     );
-    let expected = crate::driver::history::step_output_text(
-        crate::dialect::RlmDialect::prompt_vocabulary(&dialect),
-        0,
-        &entry,
-    );
+    let expected = crate::driver::history::step_output_text(dialect.prompt_vocabulary(), 0, &entry);
     let output = messages
         .iter()
         .flat_map(|message| message.blocks.iter())
@@ -207,7 +203,7 @@ fn corrupt_envelopes_degrade_individually_after_reload() {
 #[test]
 fn second_round_history_teaches_images_only_when_enabled() {
     for images in [false, true] {
-        let dialect = crate::dialect::lashlang_test_dialect();
+        let dialect = crate::dialect::typescript_test_dialect();
         let events = pair(step("previous", None, false));
         let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
             images,

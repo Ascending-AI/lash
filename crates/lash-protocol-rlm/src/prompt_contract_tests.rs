@@ -1,4 +1,5 @@
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
+
 use crate::native::prompt::execution_section;
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
 
@@ -12,7 +13,7 @@ fn catalog() -> lash_core::ToolCatalog {
         }).collect())
 }
 
-fn dialect(typescript: bool, enabled: bool) -> Box<dyn RlmDialect> {
+fn dialect(enabled: bool) -> TypescriptDialect {
     let surface = LashlangSurface {
         abilities: if enabled {
             lashlang::LashlangAbilities::all()
@@ -26,37 +27,23 @@ fn dialect(typescript: bool, enabled: bool) -> Box<dyn RlmDialect> {
         },
         ..LashlangSurface::default()
     };
-    if typescript {
-        Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
-            surface,
-        ))
-    } else {
-        Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
-            surface,
-        ))
-    }
+    crate::dialect::TypescriptDialect::prompt_only(surface)
 }
 
-fn system(dialect: &dyn RlmDialect, native: bool, enabled: bool) -> String {
+fn system(dialect: &TypescriptDialect, native: bool, enabled: bool) -> String {
     let catalog = catalog();
     let features = crate::protocol::RlmPromptFeatures {
         images: enabled,
         type_literals: enabled,
         decomposition: enabled,
     };
-    let mut execution = if native {
+    let execution = if native {
         execution_section(dialect, features, &catalog)
     } else {
         dialect
             .render_execution_section(features, &catalog)
             .unwrap()
     };
-    if !dialect.renders_tool_catalogue_inline() {
-        execution.push_str(&format!(
-            "\n\n### Tools\n\nCall the operations below with their declared argument records.\n\n{}",
-            crate::tool_catalog::rlm_prompt_tool_docs(&catalog, dialect, features)
-        ));
-    }
     let prompt = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
         execution_prompt: execution.into(),
         ..Default::default()
@@ -68,21 +55,18 @@ fn system(dialect: &dyn RlmDialect, native: bool, enabled: bool) -> String {
 
 #[test]
 fn prompt_diet_sizes_and_capability_gates() {
-    for typescript in [true, false] {
-        for native in [false, true] {
-            let off = system(dialect(typescript, false).as_ref(), native, false);
-            let on = system(dialect(typescript, true).as_ref(), native, true);
+    for native in [false, true] {
+        {
+            let off = system(&dialect(false), native, false);
+            let on = system(&dialect(true), native, true);
             let size = off.chars().count();
             println!(
-                "prompt diet typescript={typescript} native={native}: off={size} on={}",
+                "prompt diet native={native}: off={size} on={}",
                 on.chars().count()
             );
-            assert!(
-                size <= if typescript { 3100 } else { 6000 },
-                "{size}: {off}"
-            );
+            assert!(size <= 3100, "{size}: {off}");
             assert!(on.len() > off.len());
-            assert!(on.chars().count() <= if typescript { 7200 } else { 12200 });
+            assert!(on.chars().count() <= 7200);
             for forbidden in [
                 "defineProcess",
                 "waitSignal",
@@ -120,9 +104,9 @@ fn mode_independent_header_and_guidance_are_identical() {
         execution_prompt: "Use direct tool calls.".into(),
         ..Default::default()
     });
-    for typescript in [false, true] {
-        for native in [false, true] {
-            let prompt = system(dialect(typescript, false).as_ref(), native, false);
+    for native in [false, true] {
+        {
+            let prompt = system(&dialect(false), native, false);
             assert_eq!(prompt.lines().next(), standard.lines().next());
             assert_eq!(
                 prompt.split_once("## Guidance").unwrap().1,
@@ -133,13 +117,11 @@ fn mode_independent_header_and_guidance_are_identical() {
 }
 
 #[test]
-fn dialect_execution_headings_have_a_body_in_both_channels() {
-    for (typescript, heading) in [
-        (true, "## TypeScript execution"),
-        (false, "## Lashlang execution"),
-    ] {
+fn execution_heading_has_a_body_in_both_channels() {
+    {
+        let heading = "## TypeScript execution";
         for native in [false, true] {
-            let prompt = system(dialect(typescript, false).as_ref(), native, true);
+            let prompt = system(&dialect(false), native, true);
             assert_eq!(prompt.lines().filter(|line| *line == heading).count(), 1);
             assert!(!prompt.lines().any(|line| line == "## Execution"));
             let lines: Vec<_> = prompt.lines().filter(|line| !line.is_empty()).collect();
@@ -193,9 +175,9 @@ fn durable_primitives_gate_independently() {
 
 #[test]
 fn child_lifecycle_copy_is_present_once_on_every_process_channel() {
-    for typescript in [false, true] {
-        for native in [false, true] {
-            let prompt = system(dialect(typescript, true).as_ref(), native, true);
+    for native in [false, true] {
+        {
+            let prompt = system(&dialect(true), native, true);
             for fact in [
                 "A started handle outlives the turn",
                 "Stop cancels only the awaited handle",
@@ -204,58 +186,30 @@ fn child_lifecycle_copy_is_present_once_on_every_process_channel() {
                 assert_eq!(
                     prompt.matches(fact).count(),
                     1,
-                    "typescript={typescript}, native={native}, fact={fact}: {prompt}"
+                    "native={native}, fact={fact}: {prompt}"
                 );
             }
         }
     }
 
-    for typescript in [false, true] {
-        for native in [false, true] {
-            let prompt = system(dialect(typescript, false).as_ref(), native, false);
+    for native in [false, true] {
+        {
+            let prompt = system(&dialect(false), native, false);
             assert!(!prompt.contains("A started handle outlives the turn"));
         }
     }
 }
 
 #[test]
-fn labels_without_processes_render_a_complete_sentence() {
-    let surface = LashlangSurface {
-        language_features: lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
-        ..Default::default()
-    };
-    let dialect = crate::dialect::lashlang::LashlangDialect::prompt_only(surface);
-    let prompt = system(&dialect, false, true);
-    let labels = prompt
-        .lines()
-        .find(|line| line.starts_with("- `@label"))
-        .unwrap();
-    assert!(
-        labels.contains("setup, tool calls, submissions, branches, loops."),
-        "{labels}"
-    );
-    assert!(!labels.contains(",s"), "{labels}");
-    assert!(!labels.contains("process"), "{labels}");
-}
-
-#[test]
 fn toolbench_shaped_prompt_has_no_process_vocabulary() {
-    for typescript in [false, true] {
+    {
         let surface = LashlangSurface {
             language_features: lashlang::LashlangLanguageFeatures::default()
                 .with_label_annotations(),
             ..Default::default()
         };
-        let dialect: Box<dyn RlmDialect> = if typescript {
-            Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
-                surface,
-            ))
-        } else {
-            Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
-                surface,
-            ))
-        };
-        let prompt = system(dialect.as_ref(), false, true);
+        let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+        let prompt = system(&dialect, false, true);
         for forbidden in [",s.", "process", "defineProcess", "waitSignal"] {
             assert!(!prompt.contains(forbidden), "{forbidden}: {prompt}");
         }
@@ -277,7 +231,8 @@ fn toolbench_shaped_prompt_has_no_process_vocabulary() {
 
 #[test]
 fn continuation_docs_are_short_and_gated() {
-    for dialect in [dialect(false, false), dialect(true, false)] {
+    {
+        let dialect = dialect(false);
         let tool =
             crate::control_tools::continue_as_tool_definition_for(dialect.prompt_vocabulary());
         assert!(tool.manifest().description.chars().count() <= 350);
@@ -285,7 +240,7 @@ fn continuation_docs_are_short_and_gated() {
         assert!(
             crate::tool_catalog::rlm_prompt_tool_docs(
                 &catalog,
-                dialect.as_ref(),
+                &dialect,
                 crate::protocol::RlmPromptFeatures {
                     decomposition: false,
                     ..Default::default()
@@ -296,7 +251,7 @@ fn continuation_docs_are_short_and_gated() {
         assert!(
             crate::tool_catalog::rlm_prompt_tool_docs(
                 &catalog,
-                dialect.as_ref(),
+                &dialect,
                 crate::protocol::RlmPromptFeatures::default()
             )
             .contains("Terminal action")
@@ -331,10 +286,10 @@ fn removed_guardrails_still_have_repair_hints() {
 
 #[test]
 fn prompt_section_order_and_termination_have_one_owner() {
-    for typescript in [false, true] {
-        for native in [false, true] {
-            let dialect = dialect(typescript, false);
-            let prompt = system(dialect.as_ref(), native, false);
+    for native in [false, true] {
+        {
+            let dialect = dialect(false);
+            let prompt = system(&dialect, native, false);
             let headings = prompt
                 .lines()
                 .filter(|line| line.starts_with('#') && !line.starts_with("### `await "))
@@ -344,35 +299,19 @@ fn prompt_section_order_and_termination_have_one_owner() {
             } else {
                 "### Response shape"
             };
-            let expected = if typescript {
-                vec![
-                    "## TypeScript execution",
-                    transport,
-                    if native {
-                        "### Example execute_code call"
-                    } else {
-                        "### Example cell"
-                    },
-                    "### Host API",
-                    "### Tools",
-                    "## Guidance",
-                ]
-            } else {
-                vec![
-                    "## Lashlang execution",
-                    "### `print` vs `finish`",
-                    transport,
-                    "### Language",
-                    "### Builtins",
-                    "### Working with context",
-                    "### Tools",
-                    "## Guidance",
-                ]
-            };
-            assert_eq!(
-                headings, expected,
-                "typescript={typescript} native={native}"
-            );
+            let expected = vec![
+                "## TypeScript execution",
+                transport,
+                if native {
+                    "### Example execute_code call"
+                } else {
+                    "### Example cell"
+                },
+                "### Host API",
+                "### Tools",
+                "## Guidance",
+            ];
+            assert_eq!(headings, expected, "native={native}");
             assert_eq!(
                 prompt.matches("only those listed under **Tools**").count(),
                 1
@@ -392,11 +331,18 @@ fn prompt_section_order_and_termination_have_one_owner() {
 }
 
 #[test]
-fn each_lashlang_capability_gates_its_own_vocabulary() {
+fn each_host_capability_gates_its_own_vocabulary() {
+    // TypeScript is the only RLM surface, so what the execution section gates
+    // is the host ability set. Images, type literals and label annotations were
+    // syntax features of the retired surface with no TypeScript spelling: they
+    // contribute no vocabulary to gate any more (FIG-3021). Decomposition gates
+    // the continuation tool's own docs, which
+    // `continuation_docs_are_short_and_gated` covers against a catalogue that
+    // actually carries that tool.
     for native in [false, true] {
-        for capability in 0..8 {
+        for capability in 0..4 {
             for enabled in [false, true] {
-                let mut features = crate::protocol::RlmPromptFeatures {
+                let features = crate::protocol::RlmPromptFeatures {
                     images: false,
                     type_literals: false,
                     decomposition: false,
@@ -404,41 +350,32 @@ fn each_lashlang_capability_gates_its_own_vocabulary() {
                 let mut surface = LashlangSurface::default();
                 let needles: &[&str] = match capability {
                     0 => {
-                        features.images = enabled;
-                        &["Images:", "Image", "image.size"]
+                        surface.abilities.processes = enabled;
+                        &[
+                            "defineProcess(",
+                            "start(p:Process",
+                            "A started handle outlives the turn",
+                        ]
                     }
                     1 => {
-                        features.type_literals = enabled;
-                        &["### Type literals", "validate(value, Type", "email: str?"]
+                        surface.abilities.sleep = enabled;
+                        &["`await sleep(ms)` pauses the program."]
                     }
                     2 => {
-                        surface.language_features.label_annotations = enabled;
-                        &["@label", "never standalone or stacked"]
-                    }
-                    3 => {
-                        features.decomposition = enabled;
-                        &["continuation tool", "nothing is inherited"]
-                    }
-                    4 => {
-                        surface.abilities.processes = enabled;
-                        &["process name", "Inside a process:", "cancel h"]
-                    }
-                    5 => {
-                        surface.abilities.sleep = enabled;
-                        &["sleep for", "sleep until", "deadlines: RFC3339"]
-                    }
-                    6 => {
                         surface.abilities.processes = true;
                         surface.abilities.process_signals = enabled;
-                        &["signals {", "wait_signal", "signal_run"]
+                        &["waitSignal", "waitSignal is run-only"]
                     }
                     _ => {
                         surface.abilities.processes = true;
                         surface.abilities.triggers = enabled;
-                        &["Triggers:", "trigger.event", "triggers.register"]
+                        &[
+                            "registerTrigger(c: {source",
+                            "Literal target; inputs match params, arrow erased.",
+                        ]
                     }
                 };
-                let dialect = crate::dialect::lashlang::LashlangDialect::prompt_only(surface);
+                let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
                 let text = if native {
                     execution_section(&dialect, features, &catalog())
                 } else {
@@ -453,11 +390,6 @@ fn each_lashlang_capability_gates_its_own_vocabulary() {
                         "capability={capability} needle={needle}: {text}"
                     );
                 }
-                assert_eq!(
-                    text.contains(needles[0]),
-                    enabled,
-                    "capability={capability}: {text}"
-                );
             }
         }
     }
@@ -467,13 +399,10 @@ fn each_lashlang_capability_gates_its_own_vocabulary() {
 fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
     let catalog = lash_core::ToolCatalog::from_tool_definitions(["first", "second"].map(|operation| lash_core::ToolDefinition::raw(operation, operation, format!("Description for {operation}"), serde_json::json!({"type":"object","properties":{"required_id":{"type":"string"},"optional_limit":{"type":"integer"}},"required":["required_id"],"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false})).with_tool_binding(ToolBinding::new(["lookup"], operation))).to_vec());
-    for typescript in [false, true] {
-        let dialect = dialect(typescript, false);
-        let docs = crate::tool_catalog::rlm_prompt_tool_docs(
-            &catalog,
-            dialect.as_ref(),
-            Default::default(),
-        );
+    {
+        let dialect = dialect(false);
+        let docs =
+            crate::tool_catalog::rlm_prompt_tool_docs(&catalog, &dialect, Default::default());
         for operation in ["first", "second"] {
             assert!(docs.contains(&format!("Description for {operation}")));
             assert!(
@@ -486,16 +415,14 @@ fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
         }
         assert!(!docs.contains("Parameters:"));
         assert!(!docs.contains("Return fields:"));
-        if typescript {
-            assert!(!docs.contains("declare"), "{docs}");
-            assert_eq!(
-                docs.lines()
-                    .filter(|line| line.starts_with("`lookup."))
-                    .count(),
-                2
-            );
-            assert!(docs.contains("optional_limit?: number"));
-        }
+        assert!(!docs.contains("declare"), "{docs}");
+        assert_eq!(
+            docs.lines()
+                .filter(|line| line.starts_with("`lookup."))
+                .count(),
+            2
+        );
+        assert!(docs.contains("optional_limit?: number"));
     }
 }
 
@@ -509,11 +436,10 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
                 process_signals: mask & 4 != 0,
                 triggers: mask & 8 != 0,
             };
-            let dialect =
-                crate::dialect::typescript::TypescriptDialect::prompt_only(LashlangSurface {
-                    abilities,
-                    ..Default::default()
-                });
+            let dialect = crate::dialect::TypescriptDialect::prompt_only(LashlangSurface {
+                abilities,
+                ..Default::default()
+            });
             let prompt = system(&dialect, native, false);
             for (needle, enabled) in [
                 ("defineProcess", abilities.processes),
@@ -531,7 +457,7 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
                     "mask={mask}, native={native}, {needle}"
                 );
             }
-            // These Lashlang-only syntaxes must never enter TypeScript copy,
+            // These retired surface syntaxes must never enter TypeScript copy,
             // even when their host-side feature flags are enabled.
             for needle in [
                 "@label",
@@ -550,36 +476,31 @@ fn typescript_capabilities_gate_in_both_assembled_channels() {
 fn wrapup_nested_return_rows_and_plain_signatures() {
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![lash_core::ToolDefinition::raw("get", "get", "Read a nested record.", serde_json::json!({"type":"object","properties":{},"additionalProperties":false}), serde_json::json!({"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"string"}},"required":["inner"]}},"required":["outer"]})).with_tool_binding(ToolBinding::new(["kv"], "get"))]);
-    for typescript in [false, true] {
-        let dialect = dialect(typescript, false);
-        let docs = crate::tool_catalog::rlm_prompt_tool_docs(
-            &catalog,
-            dialect.as_ref(),
-            Default::default(),
-        );
+    {
+        let dialect = dialect(false);
+        let docs =
+            crate::tool_catalog::rlm_prompt_tool_docs(&catalog, &dialect, Default::default());
         assert!(docs.contains("Return fields:"), "{docs}");
         assert!(docs.contains("outer.inner"), "{docs}");
         assert_eq!(docs.matches("Read a nested record.").count(), 1);
-        if typescript {
-            assert!(docs.starts_with("`kv.get({}): Promise<"), "{docs}");
-            for forbidden in [
-                "declare",
-                "namespace",
-                "const ",
-                "function ",
-                "/**",
-                "await ",
-                " -> ",
-            ] {
-                assert!(!docs.contains(forbidden), "{forbidden}: {docs}");
-            }
+        assert!(docs.starts_with("`kv.get({}): Promise<"), "{docs}");
+        for forbidden in [
+            "declare",
+            "namespace",
+            "const ",
+            "function ",
+            "/**",
+            "await ",
+            " -> ",
+        ] {
+            assert!(!docs.contains(forbidden), "{forbidden}: {docs}");
         }
     }
 }
 
 #[test]
-fn opening_line_names_exactly_the_available_sections_in_both_dialects() {
-    for typescript in [false, true] {
+fn opening_line_names_exactly_the_available_sections() {
+    {
         for host_surface in [false, true] {
             let mut surface = LashlangSurface::default();
             if host_surface {
@@ -595,31 +516,14 @@ fn opening_line_names_exactly_the_available_sections_in_both_dialects() {
                     )
                     .unwrap();
             }
-            let dialect: Box<dyn RlmDialect> = if typescript {
-                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
-                    surface,
-                ))
-            } else {
-                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
-                    surface,
-                ))
-            };
+            let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
             let text = dialect
                 .render_execution_section(Default::default(), &catalog())
                 .unwrap();
-            let expected = match (typescript, host_surface) {
-                (true, false) => {
-                    "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**."
-                }
-                (true, true) => {
-                    "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools** or **Host Surface**."
-                }
-                (false, false) => {
-                    "Use prose for conversation; use a paired `<lashlang>` block for action or computation. Call tools as `await module.operation({ ... })?`, only those listed under **Tools**."
-                }
-                (false, true) => {
-                    "Use prose for conversation; use a paired `<lashlang>` block for action or computation. Call tools as `await module.operation({ ... })?`, only those listed under **Tools** or **Host Surface**."
-                }
+            let expected = if host_surface {
+                "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools** or **Host Surface**."
+            } else {
+                "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**."
             };
             assert_eq!(text.lines().next(), Some(expected));
             assert_eq!(text.contains("### Host Surface"), host_surface);
@@ -629,6 +533,12 @@ fn opening_line_names_exactly_the_available_sections_in_both_dialects() {
 
 #[test]
 fn print_finish_has_one_short_verification_cue() {
-    let text = system(dialect(false, false).as_ref(), false, false);
-    assert_eq!(text.matches("Inspect results before finishing.").count(), 1);
+    let text = system(&dialect(false), false, false);
+    // The retired surface carried the cue in its own `print` vs `finish`
+    // section; TypeScript states it once inside the host API paragraph.
+    assert_eq!(
+        text.matches("do not finish an unexamined whole tool result.")
+            .count(),
+        1
+    );
 }

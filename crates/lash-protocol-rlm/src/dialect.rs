@@ -1,98 +1,40 @@
-pub(crate) mod lashlang;
 pub(crate) mod typescript;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
+use lash_lashlang_runtime::{
+    LashlangArtifactStore, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+};
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-pub(crate) use lashlang::{LashlangDialect, LashlangDialectServices};
 pub(crate) use typescript::TypescriptDialect;
 
 use crate::executor::{
-    RlmExecutionState, execute_code_with_dialect_and_bounds_with_trigger_resolver,
+    RlmExecutionState, execute_code_with_channel_and_bounds_with_trigger_resolver,
 };
+use crate::projection::ProjectionResolver;
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
-/// The source dialect a cell is written in.
+/// Everything one execution session needs from the host that opened it.
 ///
-/// This is the one two-way choice the RLM protocol makes per session, and it
-/// is carried as a value rather than as a second copy of every body that would
-/// otherwise fork on it: the execution session, the prompt vocabulary and the
-/// bound-variable filter all read it off this type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SourceDialect {
-    Lashlang,
-    Typescript,
-}
-
-/// Where one program came from: the dialect it is written in, and the channel
-/// it arrived on.
-///
-/// The two facts travel together because a diagnostic needs both. The dialect
-/// decides how the source is parsed; the channel decides what syntax surrounded
-/// it when the model wrote it, and therefore which advice about that syntax is
-/// true. Cell-channel programs sit between `<lashlang>` delimiters that a
-/// standalone `</lashlang>` line can close early; native `execute_code` calls
-/// (ADR 0083) carry the program as a tool argument with no delimiters at all,
-/// so delimiter advice there names a construct the model never wrote.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RlmSourceContext {
-    pub(crate) dialect: SourceDialect,
+/// The RLM protocol serves one language (ADR 0096), so these are the session's
+/// services rather than a dialect's: what varies between two sessions is the
+/// artifact store, the resolvers, the trace configuration and the transport,
+/// never the language.
+#[derive(Clone)]
+pub(crate) struct RlmDialectServices {
+    pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
+    pub(crate) artifact_store: Arc<dyn LashlangArtifactStore>,
+    pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
+    pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
+    pub(crate) execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig,
+    pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
+    /// The session-pinned transport programs arrive on. Carried with the
+    /// services because the executor needs it to decide whether cell-delimiter
+    /// advice is true of the source the model actually wrote (FIG-2769).
     pub(crate) channel: crate::plugin::RlmChannel,
-}
-
-impl RlmSourceContext {
-    pub(crate) fn new(dialect: SourceDialect, channel: crate::plugin::RlmChannel) -> Self {
-        Self { dialect, channel }
-    }
-
-    /// Cell-channel context. Spelled out at every call site rather than
-    /// defaulted, so a new execution path has to say which channel it is.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn cell(dialect: SourceDialect) -> Self {
-        Self::new(dialect, crate::plugin::RlmChannel::Cell)
-    }
-}
-
-impl SourceDialect {
-    /// The language id an execution trace record carries.
-    ///
-    /// Every record said `lashlang` regardless, so a TypeScript session's
-    /// `lashlang-execution.jsonl` described its own executions as Lashlang —
-    /// the same "evidence that disagrees with its own label" defect the
-    /// transcript badge had. The substrate under both dialects is the Lashlang
-    /// VM, which is why the file name and the graph API keep their names; what
-    /// was wrong is the claim about the *source* that ran.
-    pub(crate) fn language_id(self) -> &'static str {
-        match self {
-            Self::Lashlang => crate::dialect::lashlang::LANGUAGE_ID,
-            Self::Typescript => crate::dialect::typescript::LANGUAGE_ID,
-        }
-    }
-
-    /// The words and call forms this dialect's prompt fragments are written in.
-    pub(crate) fn prompt_vocabulary(self) -> crate::dialect::DialectPromptVocabulary {
-        match self {
-            Self::Lashlang => crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
-            Self::Typescript => crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
-        }
-    }
-
-    /// The name prefix whose bindings never reach the model.
-    ///
-    /// A TypeScript block-scoped binding that shadows an outer name is lowered
-    /// to a generated slot. It is the author's value under a name the author
-    /// never wrote, and it is dead by the time any turn boundary renders, so it
-    /// is never a bound variable the model should see. Lashlang has no such
-    /// lowering and hides nothing.
-    pub(crate) fn hidden_binding_prefix(self) -> Option<&'static str> {
-        match self {
-            Self::Lashlang => None,
-            Self::Typescript => Some(lash_typescript::GENERATED_BINDING_PREFIX),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,7 +44,7 @@ pub(crate) struct CellTags {
 }
 
 /// Shared cell transport teaching; native transport replaces this whole section.
-pub(crate) fn cell_response_shape(tags: CellTags, _vocabulary: DialectPromptVocabulary) -> String {
+pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     format!(
         "### Response shape\n\nPut one program after any commentary, between standalone `{open}` and `{close}` lines. Markdown fences do not execute. A standalone `{close}` line ends the program even inside a multiline string; keep that line out of string contents.\n",
         open = tags.open,
@@ -126,107 +68,31 @@ impl BoundVariablesPromptRender {
     }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub(crate) enum DialectRegistryError {
-    #[error("RLM language `{language}` is not registered")]
-    Unregistered { language: String },
-    #[error("RLM language `{language}` is registered but session language `{active}` is pinned")]
-    Inactive { language: String, active: String },
-}
-
-#[async_trait::async_trait]
-pub(crate) trait RlmDialectSession: Send {
-    async fn execute(
-        &mut self,
-        ctx: RuntimeExecutionContext<'_>,
-        request: ExecRequest,
-        session_projected_bindings: crate::projection::RlmProjectedBindings,
-    ) -> Result<ExecResponse, SessionError>;
-
-    fn execution_state_dirty(&self) -> bool;
-
-    fn snapshot_execution_state(
-        &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError>;
-
-    fn probe_execution_state_capture(&mut self) -> Result<(), SessionError>;
-
-    fn hydrated_execution_state(
-        &self,
-    ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError>;
-
-    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError>;
-
-    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError>;
-
-    fn settle_code_execution(
-        &mut self,
-        disposition: lash_core::plugin::CodeExecutionDisposition,
-    ) -> Result<(), SessionError>;
-
-    fn restore_execution_state(
-        &mut self,
-        state: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<(), SessionError>;
-
-    fn prune_protected_globals(
-        &mut self,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError>;
-
-    fn patch_globals(
-        &mut self,
-        patch: &RlmGlobalsPatchPluginBody,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError>;
-
-    fn prepare_bound_variables_prompt(
-        &self,
-        exclude: &BTreeSet<String>,
-    ) -> Result<BoundVariablesPromptRender, SessionError>;
-}
-
-/// One RLM execution session, for whichever dialect opened it.
+/// One RLM execution session.
 ///
-/// Both shipped dialects run the same execution state through the same
-/// executor and answer every state question the same way; the only per-dialect
-/// facts are the source dialect the executor is handed, the vocabulary the
-/// bound-variable prompt is written in and the lowering prefix that prompt
-/// hides — all of which are data on [`SourceDialect`] rather than a second
-/// copy of this body. Which id the state is seeded from stays with the
-/// per-dialect `create_session`.
+/// The session runs the TypeScript surface over the Lashlang IR and VM: the
+/// engine id it seeds its state from, the vocabulary its bound-variable prompt
+/// is written in and the lowering prefix that prompt hides are all facts of
+/// that one language, so none of them is a parameter any more.
 pub(crate) struct DialectSession {
-    dialect: SourceDialect,
     state: RlmExecutionState,
     surface: lash_lashlang_runtime::LashlangSurface,
-    services: LashlangDialectServices,
+    services: RlmDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
 }
 
 impl DialectSession {
-    /// Opens a session whose execution state is seeded from `engine_id`.
+    /// Opens a session whose execution state is seeded from the language id.
     ///
-    /// The engine id is a separate parameter because it is a different kind of
-    /// identity from the dialect: `dialect` is source identity, read fresh on
-    /// every cell, while `engine_id` is durability identity, written into
-    /// persisted state that a later process reads back. Renaming a dialect
-    /// changes the first and must not change the second, so the id the state
-    /// is stamped with stays the caller's decision — `RlmDialect` exposes it
-    /// as `snapshot_engine_id` for exactly that reason.
-    ///
-    /// Both spellings agree today, which the assertion pins: a caller that
-    /// seeds a TypeScript session from the Lashlang id would persist state no
-    /// rehydrating worker could match to the dialect that wrote it.
+    /// The id is durability identity: it is written into persisted state that a
+    /// later process reads back, which is why it stays a named constant rather
+    /// than a spelling each call site repeats.
     pub(crate) fn new(
-        dialect: SourceDialect,
-        engine_id: &str,
         surface: lash_lashlang_runtime::LashlangSurface,
-        services: LashlangDialectServices,
+        services: RlmDialectServices,
     ) -> Self {
-        debug_assert_eq!(engine_id, dialect.language_id());
-        let state = RlmExecutionState::for_engine(engine_id);
+        let state = RlmExecutionState::for_engine(typescript::LANGUAGE_ID);
         Self {
-            dialect,
             state,
             surface,
             services,
@@ -235,11 +101,8 @@ impl DialectSession {
             )),
         }
     }
-}
 
-#[async_trait::async_trait]
-impl RlmDialectSession for DialectSession {
-    async fn execute(
+    pub(crate) async fn execute(
         &mut self,
         ctx: RuntimeExecutionContext<'_>,
         request: ExecRequest,
@@ -251,7 +114,7 @@ impl RlmDialectSession for DialectSession {
         self.state
             .prepare_runtime_code_execution()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let response = execute_code_with_dialect_and_bounds_with_trigger_resolver(
+        let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             &mut self.state,
             ctx,
             request,
@@ -263,44 +126,44 @@ impl RlmDialectSession for DialectSession {
             Arc::clone(&self.services.projection_resolver),
             self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
-            RlmSourceContext::new(self.dialect, self.services.channel),
+            self.services.channel,
         )
         .await;
         self.state.mark_code_execution_response_returned();
         Ok(response)
     }
 
-    fn execution_state_dirty(&self) -> bool {
+    pub(crate) fn execution_state_dirty(&self) -> bool {
         self.state.execution_state_dirty()
     }
 
-    fn snapshot_execution_state(
+    pub(crate) fn snapshot_execution_state(
         &mut self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         self.state.snapshot_execution_state()
     }
 
-    fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+    pub(crate) fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
         self.state.probe_execution_state_capture()
     }
 
-    fn hydrated_execution_state(
+    pub(crate) fn hydrated_execution_state(
         &self,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
         self.state.hydrated_execution_state()
     }
 
-    fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
+    pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
         self.state.acknowledge_execution_state_capture();
         Ok(())
     }
 
-    fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
+    pub(crate) fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
         self.state.abort_execution_state_capture();
         Ok(())
     }
 
-    fn settle_code_execution(
+    pub(crate) fn settle_code_execution(
         &mut self,
         disposition: lash_core::plugin::CodeExecutionDisposition,
     ) -> Result<(), SessionError> {
@@ -316,7 +179,7 @@ impl RlmDialectSession for DialectSession {
         Ok(())
     }
 
-    fn restore_execution_state(
+    pub(crate) fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
@@ -325,7 +188,7 @@ impl RlmDialectSession for DialectSession {
             .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 
-    fn prune_protected_globals(
+    pub(crate) fn prune_protected_globals(
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
@@ -333,7 +196,7 @@ impl RlmDialectSession for DialectSession {
         Ok(())
     }
 
-    fn patch_globals(
+    pub(crate) fn patch_globals(
         &mut self,
         patch: &RlmGlobalsPatchPluginBody,
         protected_names: &BTreeSet<String>,
@@ -341,52 +204,54 @@ impl RlmDialectSession for DialectSession {
         self.state.patch_globals(patch, protected_names)
     }
 
-    fn prepare_bound_variables_prompt(
+    /// The bound-variable prompt, minus the bindings the model never wrote.
+    ///
+    /// A TypeScript block-scoped binding that shadows an outer name is lowered
+    /// to a generated slot. It is the author's value under a name the author
+    /// never wrote, and it is dead by the time any turn boundary renders, so it
+    /// is never a bound variable the model should see.
+    pub(crate) fn prepare_bound_variables_prompt(
         &self,
         exclude: &BTreeSet<String>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         let mut globals = self.state.bound_variable_values(exclude);
-        if let Some(prefix) = self.dialect.hidden_binding_prefix() {
-            globals.retain(|(name, _)| !name.starts_with(prefix));
-        }
-        let vocabulary = self.dialect.prompt_vocabulary();
+        globals.retain(|(name, _)| !name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX));
         let cache = Arc::clone(&self.bound_variable_render_cache);
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals, vocabulary)
+            render_bound_variables(&mut cache, &globals, DialectPromptVocabulary::default())
         }))
     }
 }
 
-/// The dialect-specific words and call forms every shared prompt fragment
-/// needs.
+/// The words and call forms every shared prompt fragment needs.
 ///
-/// Prompt copy was dialect-aware only where it was obviously a *cell* — the
-/// execution section, the retry copy, the finalization copy. Everything else
-/// assembled around those (bound variables, read-only variables, tool docs,
-/// budget escalation, the final-answer instruction) was written when Lashlang
-/// was the only dialect and hardcoded its syntax. A TypeScript session was
-/// therefore told, in the same prompt, to write `<typescript>` cells and that
-/// its variables were "bound in lashlang ... in `<lashlang>` blocks". A model
-/// cannot follow both; the judged battery caught one spending reasoning tokens
-/// reconciling the contradiction.
+/// Prompt copy used to be language-aware only where it was obviously a *cell* —
+/// the execution section, the retry copy, the finalization copy. Everything
+/// else assembled around those (bound variables, read-only variables, tool
+/// docs, budget escalation, the final-answer instruction) hardcoded the retired
+/// surface's syntax, so a TypeScript session was told, in the same prompt, to
+/// write `<typescript>` cells and that its variables were "bound in lashlang".
+/// A model cannot follow both; the judged battery caught one spending reasoning
+/// tokens reconciling the contradiction.
 ///
-/// One struct rather than a dozen trait methods, so a new fragment has an
-/// obvious place to read its words from and `no_cross_dialect_text_in_the_
-/// assembled_prompt` has one source of truth to check against.
+/// One struct rather than a dozen scattered literals, so a new fragment has an
+/// obvious place to read its words from and
+/// `no_cross_dialect_text_in_the_assembled_prompt` has one source of truth to
+/// check against.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DialectPromptVocabulary {
     /// How the prompt names the language in prose.
     pub(crate) language_name: &'static str,
     /// The opening cell tag, quoted in prose that points at cells.
     pub(crate) cell_open_tag: &'static str,
-    /// What the prompt calls one unit of code: Lashlang says "block".
+    /// What the prompt calls one unit of code.
     pub(crate) cell_noun: &'static str,
     /// The call that prints a value for inspection.
     pub(crate) print_call: &'static str,
-    /// `print x` vs `console.log(x)`, ready to take a value expression.
+    /// `console.log(x)`, ready to take a value expression.
     pub(crate) print_statement_prefix: &'static str,
     pub(crate) print_statement_suffix: &'static str,
     /// The finish form as the prompt spells it in prose.
@@ -397,29 +262,15 @@ pub(crate) struct DialectPromptVocabulary {
     pub(crate) continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
     pub(crate) continue_as_example: &'static str,
-    /// How this dialect tells a model to describe a *nested* typed shape, as a
+    /// How the language tells a model to describe a *nested* typed shape, as a
     /// clause that continues a sentence about flat string descriptors — empty
-    /// when the dialect has no way to write one.
-    ///
-    /// Type literals are a Lashlang surface: `Type { ... }` compiles through
-    /// `Expr::TypeLiteral`, which the TypeScript lowerer never constructs, and
-    /// the type-literal prompt section is rendered only by the Lashlang
-    /// execution section. A host tool that accepts a typed shape (`agents.spawn`
-    /// does) therefore cannot describe the nested form in one dialect-neutral
-    /// sentence: for a TypeScript reader the clause is not merely
-    /// foreign-sounding, it is *false*.
+    /// when it has no way to write one.
     pub(crate) type_literal_hint: &'static str,
 }
 
 impl Default for DialectPromptVocabulary {
     /// TypeScript's words, because they are the only ones a session can be
     /// served (ADR 0096).
-    ///
-    /// This used to answer with the retired surface's vocabulary, which was
-    /// correct only while `RlmDialect::default()` named it. With the selector
-    /// gone, a defaulted vocabulary that still spoke the retired surface would
-    /// be the compatibility reader this cutover exists to remove. FIG-3021
-    /// deletes the lashlang vocabulary itself.
     fn default() -> Self {
         crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY
     }
@@ -429,17 +280,15 @@ impl Default for DialectPromptVocabulary {
 pub(crate) type ToolProseToken = (&'static str, fn(DialectPromptVocabulary) -> &'static str);
 
 /// The tokens a host or plugin may write in model-facing tool prose so the
-/// *session's* dialect spells the dialect-specific part.
+/// prompt's own vocabulary spells the language-specific part.
 ///
 /// Tool descriptions and JSON-Schema `description` strings are authored once,
-/// in the crate that owns the tool, and served to sessions of every registered
-/// dialect. A dialect word written literally there is a leak no dialect
-/// renderer can undo — which is how three `lashlang` strings reached
-/// TypeScript sessions through `agents.spawn` and `processes.list`. Anything a
-/// dialect owns is spelled by the dialect: prose that needs a dialect word
-/// writes the token, [`rlm_prompt_tool_docs`](crate::tool_catalog) resolves it
-/// against the active dialect's vocabulary, and
-/// [`crate::tool_catalog::validate_dialect_neutral_tool_prose`] refuses
+/// in the crate that owns the tool. A language word written literally there is
+/// a leak no renderer can undo — which is how three `lashlang` strings reached
+/// TypeScript sessions through `agents.spawn` and `processes.list`. Anything
+/// the language owns is spelled by the vocabulary: prose that needs such a word
+/// writes the token, [`rlm_prompt_tool_docs`](crate::tool_catalog) resolves it,
+/// and [`crate::tool_catalog::validate_dialect_neutral_tool_prose`] refuses
 /// registration for the literal spelling.
 ///
 /// One table, read by both the renderer and the guard, so a token can neither
@@ -461,7 +310,7 @@ impl DialectPromptVocabulary {
         text
     }
 
-    /// `print x` / `console.log(x)` for one expression.
+    /// `console.log(x)` for one expression.
     pub(crate) fn print_statement(&self, expression: &str) -> String {
         format!(
             "{}{expression}{}",
@@ -470,139 +319,14 @@ impl DialectPromptVocabulary {
     }
 }
 
-pub(crate) trait RlmDialect: Send + Sync {
-    fn language_id(&self) -> &'static str;
-
-    /// Whether execution prose embeds the canonical tool catalogue.
-    fn renders_tool_catalogue_inline(&self) -> bool {
-        false
-    }
-
-    /// The words shared prompt fragments use when they name this dialect's
-    /// syntax. See [`DialectPromptVocabulary`].
-    fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
-
-    /// The call path a model writes to invoke `tool` in this dialect.
-    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError>;
-
-    /// One authored tool example, in this dialect's syntax.
-    ///
-    /// Examples are authored once, as Lashlang source, next to the tool that
-    /// owns them (`await web.search({ query: "..." })?`). They are a second
-    /// model-facing surface on top of the call path, and the `?` try-operator
-    /// that six of seven examples in the resident catalog carry is a *syntax
-    /// error* in TypeScript: a judged row's saved prompt showed a TypeScript
-    /// session being shown seven examples it could not have run.
-    fn render_tool_example(&self, example: &str) -> String {
-        example.to_string()
-    }
-
-    fn snapshot_engine_id(&self) -> &'static str;
-
-    fn cell_tags(&self) -> CellTags;
-
-    fn create_session(&self) -> Result<Box<dyn RlmDialectSession>, SessionError>;
-
-    fn render_execution_section(
-        &self,
-        features: crate::protocol::RlmPromptFeatures,
-        tool_catalog: &lash_core::ToolCatalog,
-    ) -> Result<String, SessionError>;
-
-    fn render_history_cell(&self, prose: &str, code: &str) -> String {
-        crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
-    }
-
-    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String;
-
-    fn finish_required_finalization(&self, requires_schema: bool) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let mut text = format!(
-            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
-            open = self.cell_tags().open,
-            close = self.cell_tags().close,
-            finish = vocabulary.finish_statement,
-            finish_null = vocabulary.finish_null_statement,
-        );
-        if requires_schema {
-            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
-        }
-        text
-    }
-
-    fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String;
-
-    fn finish_required_copy(&self, requires_schema: bool) -> String;
-
-    fn finish_schema_mismatch_copy(&self) -> String;
-
-    fn invalid_cell_retry_copy(&self, error_text: &str) -> String;
-
-    /// What to tell a model that wrote a cell in a registered dialect this
-    /// session is not running.
-    ///
-    /// Written from the vocabulary, so the correction is in the reader's own
-    /// words: naming the tag it wrote and the one it must write is the whole
-    /// content, and both are facts the dialect already owns.
-    fn foreign_cell_retry_copy(&self, foreign_open_tag: &str) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = self.cell_tags();
-        format!(
-            "That reply put its code in a `{foreign_open_tag}` {noun}, which this session does not run. This session executes {language}: send the same work again inside one paired `{open}` … `{close}` {noun}.",
-            noun = vocabulary.cell_noun,
-            language = vocabulary.language_name,
-            open = tags.open,
-            close = tags.close,
-        )
-    }
-
-    /// What to tell a model that opened a line with this dialect's tag in a
-    /// position the cell grammar refuses.
-    ///
-    /// The rule itself is the whole content, because the failure this replaces
-    /// was a reply that got no rule at all: a misplaced fence was read as prose,
-    /// the driver answered "please finish", and the model — correctly seeing
-    /// nothing wrong with its own code — re-sent it until the turn's budget died
-    /// (FIG-1475). Written from the dialect's own tags and noun, so the
-    /// correction is in the reader's words.
-    ///
-    /// It names the *canonical* shape only, and deliberately says nothing about
-    /// the one-line shape the scanner also reads. Every prompt fragment teaches
-    /// standalone tag lines; a correction that advertised a second accepted
-    /// shape would contradict them, and this copy exists to remove a
-    /// contradiction rather than add one. A reply already in the one-line shape
-    /// never reaches this copy — it executes.
-    fn malformed_cell_fence_retry_copy(&self) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = self.cell_tags();
-        format!(
-            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
-            noun = vocabulary.cell_noun,
-            open = tags.open,
-            close = tags.close,
-        )
-    }
-
-    fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String;
-
-    fn code_stream_kind(&self) -> &'static str;
-
-    fn execution_diagnostic_name(&self) -> &'static str;
-
-    fn stream_cell_start_event_name(&self) -> &'static str;
-
-    fn stream_cell_end_event_name(&self) -> &'static str;
-}
-
-/// The words that identify one dialect wherever they appear, lowercased.
+/// The words that identify the RLM language wherever they appear, lowercased.
 ///
-/// Read from the dialect itself rather than listed, so registering a third
-/// dialect extends the tool-prose guard by construction. Deliberately narrow:
-/// the language's own name, its cell tags and its finish form are unmistakable,
-/// while `print_call` ("print") would fire on any tool that talks about
-/// printing. A word this list omits is a leak the guard cannot see, not a leak
-/// it permits.
-pub(crate) fn dialect_identity_markers(dialect: &dyn RlmDialect) -> Vec<String> {
+/// Read from the dialect itself rather than listed, so a rename extends the
+/// tool-prose guard by construction. Deliberately narrow: the language's own
+/// name, its cell tags and its finish form are unmistakable, while `print_call`
+/// ("console.log") would fire on any tool that talks about logging. A word this
+/// list omits is a leak the guard cannot see, not a leak it permits.
+pub(crate) fn dialect_identity_markers(dialect: &TypescriptDialect) -> Vec<String> {
     let vocabulary = dialect.prompt_vocabulary();
     let tags = dialect.cell_tags();
     let mut markers = vec![
@@ -615,55 +339,6 @@ pub(crate) fn dialect_identity_markers(dialect: &dyn RlmDialect) -> Vec<String> 
     markers.sort();
     markers.dedup();
     markers
-}
-
-#[derive(Clone)]
-pub(crate) struct RlmDialectRegistry {
-    dialects: Arc<BTreeMap<&'static str, Arc<dyn RlmDialect>>>,
-}
-
-impl RlmDialectRegistry {
-    pub(crate) fn new(dialects: impl IntoIterator<Item = Arc<dyn RlmDialect>>) -> Self {
-        let dialects = dialects
-            .into_iter()
-            .map(|dialect| (dialect.language_id(), dialect))
-            .collect();
-        Self {
-            dialects: Arc::new(dialects),
-        }
-    }
-
-    /// Every registered dialect, in language-id order.
-    pub(crate) fn dialects(&self) -> impl Iterator<Item = &Arc<dyn RlmDialect>> {
-        self.dialects.values()
-    }
-
-    pub(crate) fn resolve(
-        &self,
-        language: &str,
-    ) -> Result<Arc<dyn RlmDialect>, DialectRegistryError> {
-        self.dialects
-            .get(language)
-            .cloned()
-            .ok_or_else(|| DialectRegistryError::Unregistered {
-                language: language.to_string(),
-            })
-    }
-
-    pub(crate) fn resolve_active(
-        &self,
-        language: &str,
-        active: &str,
-    ) -> Result<Arc<dyn RlmDialect>, DialectRegistryError> {
-        let dialect = self.resolve(language)?;
-        if language != active {
-            return Err(DialectRegistryError::Inactive {
-                language: language.to_string(),
-                active: active.to_string(),
-            });
-        }
-        Ok(dialect)
-    }
 }
 
 #[cfg(test)]
@@ -679,18 +354,14 @@ mod tests {
         async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
             let mut services = test_dialect_services();
             services.channel = channel;
-            let mut session = DialectSession::new(
-                SourceDialect::Lashlang,
-                SourceDialect::Lashlang.language_id(),
-                lash_lashlang_runtime::LashlangSurface::default(),
-                services,
-            );
+            let mut session =
+                DialectSession::new(lash_lashlang_runtime::LashlangSurface::default(), services);
             let response = session
                 .execute(
                     lash_core::testing::code_execution_context(),
                     ExecRequest {
-                        language: "lashlang".to_string(),
-                        code: "payload = \"\"\"".to_string(),
+                        language: "typescript".to_string(),
+                        code: "const payload = `".to_string(),
                     },
                     crate::projection::RlmProjectedBindings::default(),
                 )
@@ -698,46 +369,21 @@ mod tests {
                 .expect("the cell runs and reports its own failure");
             response
                 .error
-                .expect("an unterminated multiline string fails to parse")
+                .expect("an unterminated template literal fails to parse")
                 .message
         }
 
         let native = parse_failure_feedback(crate::plugin::RlmChannel::NativeTool).await;
-        assert!(!native.contains("</lashlang>"), "{native}");
+        assert!(!native.contains("</typescript>"), "{native}");
 
         let cell = parse_failure_feedback(crate::plugin::RlmChannel::Cell).await;
-        assert!(cell.contains("standalone `</lashlang>` line"), "{cell}");
-    }
-
-    #[test]
-    fn registry_resolves_registered_typescript_language() {
-        let dialect: Arc<dyn RlmDialect> = Arc::new(TypescriptDialect::new(
-            lash_lashlang_runtime::LashlangSurface::default(),
-            LashlangDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        ));
-        let registry = RlmDialectRegistry::new([dialect]);
-
-        assert_eq!(
-            registry
-                .resolve("typescript")
-                .expect("typescript is registered")
-                .language_id(),
-            "typescript"
-        );
+        assert!(cell.contains("standalone `</typescript>` line"), "{cell}");
     }
 }
 
 #[cfg(test)]
-pub(crate) fn test_dialect_services() -> LashlangDialectServices {
-    LashlangDialectServices {
+pub(crate) fn test_dialect_services() -> RlmDialectServices {
+    RlmDialectServices {
         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
         artifact_store: ::lashlang::global_in_memory_lashlang_artifact_store(),
         deferred_tool_resolver: None,
@@ -746,14 +392,6 @@ pub(crate) fn test_dialect_services() -> LashlangDialectServices {
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         channel: crate::plugin::RlmChannel::Cell,
     }
-}
-
-#[cfg(test)]
-pub(crate) fn lashlang_test_dialect() -> LashlangDialect {
-    LashlangDialect::new(
-        lash_lashlang_runtime::LashlangSurface::default(),
-        test_dialect_services(),
-    )
 }
 
 #[cfg(test)]

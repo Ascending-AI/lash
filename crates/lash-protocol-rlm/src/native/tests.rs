@@ -106,7 +106,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
     assert!(
         crate::tool_catalog::rlm_prompt_tool_docs(
             &catalog,
-            &crate::dialect::lashlang_test_dialect(),
+            &crate::dialect::typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         )
         .is_empty()
@@ -130,12 +130,7 @@ fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
 }
 fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
     let mut config = config(false, termination);
-    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::for_language("typescript"));
-    config
-}
-fn lashlang_cell_config(termination: RlmTermination) -> TurnMachineConfig {
-    let mut config = config(false, termination);
-    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::for_language("lashlang"));
+    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new());
     config
 }
 fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
@@ -1006,35 +1001,6 @@ fn multipart_response_preserves_executable_cell() {
 }
 
 #[test]
-fn multipart_response_preserves_lashlang_executable_cell() {
-    let mut machine = TurnMachine::new(
-        lashlang_cell_config(RlmTermination::Natural),
-        Vec::new(),
-        Arc::new(Vec::new()),
-        0,
-    );
-    let initial = drain(&mut machine);
-
-    let effects = reply(
-        &mut machine,
-        &initial,
-        vec![
-            phased_text(
-                "commentary",
-                "Creating the artifact.\n<lashlang>\nfinish \"created\"\n</lashlang>",
-            ),
-            phased_text("final_answer", "The artifact is ready."),
-        ],
-    );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::ExecCode { language, code, .. }
-            if language == "lashlang" && code.trim() == "finish \"created\""
-    )));
-}
-
-#[test]
 fn commentary_only_cell_still_executes() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
@@ -1115,8 +1081,9 @@ fn no_cell_multipart_response_finishes_with_final_answer_prose() {
 #[test]
 fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
     for dialect in [
-        Arc::new(crate::dialect::typescript_test_dialect()) as Arc<dyn crate::dialect::RlmDialect>,
-        Arc::new(crate::dialect::lashlang_test_dialect()),
+        Arc::new(crate::dialect::typescript_test_dialect())
+            as Arc<crate::dialect::TypescriptDialect>,
+        Arc::new(crate::dialect::typescript_test_dialect()),
     ] {
         for schema in [None, Some(serde_json::json!({"type": "number"}))] {
             let mut config = config(

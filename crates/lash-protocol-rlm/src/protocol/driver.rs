@@ -25,7 +25,7 @@ use serde_json::Value;
 #[cfg(feature = "testing")]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 
-use crate::dialect::{LashlangDialect, RlmDialect};
+use crate::dialect::TypescriptDialect;
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
@@ -48,7 +48,7 @@ use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rl
 
 #[derive(Clone)]
 pub struct RlmDriver {
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 }
 
 impl RlmDriver {
@@ -66,32 +66,7 @@ impl RlmDriver {
         }
     }
 
-    /// A driver pinned to a registered dialect by language id.
-    ///
-    /// The plugin builds its driver from a live session, which owns the
-    /// dialect; this is the seam for anything that needs a driver *without* a
-    /// session — protocol-level assertions that must hold in a session which is
-    /// not the default one. Asserting only the Lashlang direction cannot tell a
-    /// dialect-generic implementation from one that happens to name Lashlang.
-    ///
-    /// Panics on an unregistered language id, which is a programming error:
-    /// the registry is the authority and it is closed.
-    pub fn for_language(language: &str) -> Self {
-        let dialect: Arc<dyn RlmDialect> = match language {
-            crate::dialect::typescript::LANGUAGE_ID => {
-                Arc::new(crate::dialect::TypescriptDialect::prompt_only(
-                    lash_lashlang_runtime::LashlangSurface::default(),
-                ))
-            }
-            crate::dialect::lashlang::LANGUAGE_ID => Arc::new(LashlangDialect::prompt_only(
-                lash_lashlang_runtime::LashlangSurface::default(),
-            )),
-            other => panic!("unregistered dialect `{other}`"),
-        };
-        Self::with_dialect(dialect)
-    }
-
-    pub(crate) fn with_dialect(dialect: Arc<dyn RlmDialect>) -> Self {
+    pub(crate) fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
         Self { dialect }
     }
 }
@@ -253,60 +228,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
         };
         let Some(cell) = extraction else {
-            // A cell of a registered-but-inactive dialect is recognized rather
-            // than read as prose. Falling through here is what turned a
-            // mis-dialected scripted reply into an unbounded re-prompt: the
-            // model was asked to finish, answered with the same cell, and
-            // nothing in the loop could ever name the mismatch.
-            if let Some((_foreign_language, foreign_tags)) =
-                super::cell::foreign_dialect_cell(&assistant_text, tags)
-            {
-                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                    LLM_EXTRACTION_PHASE,
-                    llm_extraction_payload(
-                        ctx.turn_id(),
-                        &fingerprint,
-                        self.dialect.language_id(),
-                        "retry_foreign_dialect_cell",
-                        &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
-                    ),
-                )]));
-                let mut retry_events = Vec::new();
-                if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(
-                        internal_assistant_prose_message_for_turn(
-                            ctx.turn_id(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "assistant_response",
-                            ),
-                            visible_prose,
-                            &reasoning,
-                        ),
-                    ));
-                }
-                retry_events.push(conversation_event(invalid_cell_message(
-                    self.dialect.as_ref(),
-                    rlm_message_id(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        "foreign_dialect_cell",
-                    ),
-                    &self.dialect.foreign_cell_retry_copy(foreign_tags.open),
-                )));
-                if let Err(err) = continue_or_stop_after_nonterminal(
-                    &ctx,
-                    &mut actions,
-                    Vec::new(),
-                    retry_events,
-                    AttemptProgress::Stalled,
-                ) {
-                    return invalid_turn_options_actions(err);
-                }
-                return actions;
-            }
             if terminal_reason == LlmTerminalReason::OutputLimit {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
@@ -363,7 +284,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             // with it (FIG-1475).
             //
             // Only where a cell is *required*. On a `Natural` turn prose is an
-            // answer, and prose about cells — "`<lashlang>` and `</lashlang>`
+            // answer, and prose about cells — "`<typescript>` and `</typescript>`
             // are the tags you asked about" — opens a line with the tag while
             // being exactly what the user wanted. Correcting a fence there would
             // bury the answer under a lecture and spend the turn's attempts on a
@@ -531,7 +452,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         state.reasoning = reasoning;
         state.prose = cell.prose.clone();
 
-        // Emit the raw lashlang source as a `Message` with kind
+        // Emit the raw cell source as a `Message` with kind
         // `lashlang_code` so the CLI can reveal it in the full-expand
         // view (Alt+O) above the tool activities it produced.
         actions.push(DriverAction::Emit(SessionStreamEvent::Message {
@@ -770,7 +691,7 @@ fn native_tool_call_failure_actions(
     tool_call: NativeToolCall,
 ) {
     let message = format!(
-        "RLM protocol received native provider tool call `{}`; RLM tools must flow through Lashlang, so native provider tool calls are not allowed",
+        "RLM protocol received native provider tool call `{}`; RLM tools must flow through the cell program, so native provider tool calls are not allowed",
         tool_call.tool_name
     );
     let mut envelope = make_error_envelope(
@@ -792,7 +713,7 @@ fn native_tool_call_failure_actions(
                 "tool_name": tool_call.tool_name,
                 "call_id": tool_call.call_id,
                 "protocol_iteration": protocol_iteration,
-                "constraint": "RLM tools must flow through Lashlang",
+                "constraint": "RLM tools must flow through the cell program",
                 "retryable": false,
             }),
         )]),
@@ -1452,7 +1373,7 @@ mod tests {
         let mut failure = ToolFailure::tool(
             ToolFailureClass::Execution,
             "failed",
-            "failure recovered by Lashlang",
+            "failure recovered by the cell program",
         );
         failure.raw = Some(ToolValue::Array(vec![
             ToolValue::String(oversized.clone()),
@@ -1501,7 +1422,7 @@ mod tests {
             ToolCallOutput::failure(ToolFailure::tool(
                 ToolFailureClass::Execution,
                 "recovered_failure",
-                "failure recovered by Lashlang",
+                "failure recovered by the cell program",
             )),
         );
         calls[MAX_EXEC_TOOL_CALL_RECORDS + 2] = call(
@@ -1564,7 +1485,7 @@ mod tests {
             ..RlmDriverState::default()
         };
 
-        let vocabulary = crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
+        let vocabulary = crate::dialect::DialectPromptVocabulary::default();
         let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
@@ -1572,7 +1493,7 @@ mod tests {
         assert_eq!(
             error,
             format!(
-                "{raw_error}\n\nNext: the host failed while handling this block. Retry it; if the failure persists, report the host problem."
+                "{raw_error}\n\nNext: the host failed while handling this cell. Retry it; if the failure persists, report the host problem."
             )
         );
     }

@@ -294,8 +294,8 @@ impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
 
 pub(super) fn deferred_matrix_request() -> ExecRequest {
     ExecRequest {
-        language: "lashlang".to_string(),
-        code: "await web.fetch({})?\nawait mystery.x({})?".to_string(),
+        language: "typescript".to_string(),
+        code: "await web.fetch({});\nawait mystery.x({});".to_string(),
     }
 }
 
@@ -473,10 +473,10 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             &mut state,
             ctx.clone(),
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                        result = await web.fetch({ url: "https://example.test" })?
-                        finish result
+                        const result = await web.fetch({ url: "https://example.test" });
+                        finish(result);
                     "#
                 .to_string(),
             },
@@ -563,8 +563,8 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "lashlang".into(),
-                code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+                language: "typescript".into(),
+                code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -616,8 +616,8 @@ async fn run_sqlite_deferred_fault_boundary(
         enumerations: Default::default(),
     });
     let request = ExecRequest {
-        language: "lashlang".into(),
-        code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+        language: "typescript".into(),
+        code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
     };
     let controller = lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
         .await
@@ -728,8 +728,8 @@ pub(super) fn sqlite_fault_before_registration_reinstalls_recorded_route_after_r
                 enumerations: Default::default(),
             });
         let request = ExecRequest {
-            language: "lashlang".into(),
-            code: r#"finish await web.fetch({ url: "https://example.test" })?"#.into(),
+            language: "typescript".into(),
+            code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
         };
         let first_controller =
             lash_sqlite_store::SqliteRuntimeEffectController::open(&path, scope.clone())
@@ -809,7 +809,7 @@ pub(super) fn sqlite_reopen_replays_ambient_failure_as_ambient() {
             "ambient failure",
             replay_key,
         );
-        let program = lashlang::parse(r#"await web.fetch({})?"#).expect("parse");
+        let program = lash_typescript::parse(r#"await web.fetch({});"#).expect("parse");
         let collision = lash_core::ToolCatalog::from_tool_definitions(vec![
             ambient_definition("tool:ambient_a", "ambient_a", "web", "fetch"),
             ambient_definition("tool:ambient_b", "ambient_b", "web", "fetch"),
@@ -918,12 +918,12 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
                 enumerations: Default::default(),
             });
         let request = ExecRequest {
-            language: "lashlang".into(),
+            language: "typescript".into(),
             code: r#"
-                if false {
-                    ignored = await web.fetch({ url: "https://example.test" })?
+                if (false) {
+                    const ignored = await web.fetch({ url: "https://example.test" });
                 }
-                finish "journaled-positive"
+                finish("journaled-positive");
             "#
             .into(),
         };
@@ -993,12 +993,12 @@ pub(super) fn sqlite_reopen_replays_positive_before_ambient_collision_without_re
             &mut RlmExecutionState::new(),
             unrelated_collision_ctx,
             ExecRequest {
-                language: "lashlang".into(),
+                language: "typescript".into(),
                 code: r#"
-                    if false {
-                        ignored = await web.fetch({ url: "https://example.test" })?
+                    if (false) {
+                        const ignored = await web.fetch({ url: "https://example.test" });
                     }
-                    finish "journaled-positive"
+                    finish("journaled-positive");
                 "#
                 .into(),
             },
@@ -1117,7 +1117,10 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
-        assert!(first.error.is_some(), "mystery.x is durably unavailable");
+        let first_error = first
+            .error
+            .clone()
+            .expect("mystery.x is durably unavailable");
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
 
         let replay_controller =
@@ -1154,7 +1157,11 @@ pub(super) fn sqlite_reopen_replays_negative_before_changed_ambient_without_reso
         let error = replay
             .error
             .expect("journaled negative must mask the newly live ambient tool");
-        assert!(error.message.contains("mystery.x"), "{error:?}");
+        // The journaled negative masks the now-live ambient `mystery.x`: the
+        // replay fails exactly as the original did, rather than resolving the
+        // tool that appeared between the two runs.
+        assert!(error.message.contains("mystery"), "{error:?}");
+        assert_eq!(error.message, first_error.message);
         assert!(
             !error
                 .message
@@ -1186,7 +1193,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
         let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
 
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_dialect_and_bounds(
+        let response = execute_code_with_channel_and_bounds(
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
@@ -1200,7 +1207,7 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(SourceDialect::Typescript),
+                crate::plugin::RlmChannel::Cell,
             )
             .await;
 
@@ -1267,11 +1274,11 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code: r#"
-                        print "printed before failure"
-                        _ = await web.fetch({ url: "https://example.test" })?
-                        finish to_int("invalid_int")
+                        console.log("printed before failure");
+                        await web.fetch({ url: "https://example.test" });
+                        finish(JSON.parse("invalid_int"));
                     "#
                 .to_string(),
             },
@@ -1290,7 +1297,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
         );
         let error = response.error.as_ref().unwrap();
         assert!(
-            error.message.contains("to_int") || error.message.contains("invalid_int"),
+            error.message.contains("JSON") || error.message.contains("invalid_int"),
             "expected runtime error diagnostic, got: {}",
             error.message,
         );
@@ -1346,8 +1353,13 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
-            language: "lashlang".to_string(),
-            code: "process later() { finish 1 }\nfinish 1".to_string(),
+            language: "typescript".to_string(),
+            code: r#"const later = defineProcess({
+              name: "later", signals: {},
+              run: async () => { return 1; }
+            });
+            finish(1);"#
+                .to_string(),
         };
         let resolver = || Arc::new(ProjectionRegistry::new());
         let context = || lash_core::testing::code_execution_context();
@@ -1399,7 +1411,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
     block_on(async {
         let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_dialect_and_bounds(
+        let response = execute_code_with_channel_and_bounds(
             &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
@@ -1424,7 +1436,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            RlmSourceContext::cell(SourceDialect::Typescript),
+            crate::plugin::RlmChannel::Cell,
         )
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
@@ -1865,7 +1877,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         ctx.clone(),
         ExecRequest {
@@ -1888,7 +1900,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     assert!(response.error.is_none(), "{:?}", response.error);
@@ -2020,7 +2032,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ),
     );
     let mut state = RlmExecutionState::for_engine("typescript");
-    let turn_n = execute_code_with_dialect_and_bounds(
+    let turn_n = execute_code_with_channel_and_bounds(
         &mut state,
         ctx.clone(),
         ExecRequest {
@@ -2042,7 +2054,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
@@ -2052,7 +2064,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         std::time::Duration::from_secs(5),
         async {
             tokio::join!(
-                execute_code_with_dialect_and_bounds(
+                execute_code_with_channel_and_bounds(
                     &mut state,
                     ctx,
                     ExecRequest {
@@ -2066,7 +2078,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    RlmSourceContext::cell(SourceDialect::Typescript),
+                    crate::plugin::RlmChannel::Cell,
                 ),
                 worker.drive_pending_processes()
             )
@@ -2167,7 +2179,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
             session_policy,
         ),
     );
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut RlmExecutionState::for_engine("typescript"),
         ctx,
         ExecRequest {
@@ -2191,7 +2203,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
 

@@ -53,7 +53,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             lash_core::ToolCatalog::from_tool_definitions(vec![definition]),
         );
         let mut state = RlmExecutionState::for_engine("typescript");
-        let response = execute_code_with_dialect_and_bounds(
+        let response = execute_code_with_channel_and_bounds(
             &mut state,
             context,
             ExecRequest {
@@ -91,7 +91,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
-            RlmSourceContext::cell(SourceDialect::Typescript),
+            crate::plugin::RlmChannel::Cell,
         )
         .await;
 
@@ -149,7 +149,7 @@ async fn execute_typescript_test_cell(
     mut state: RlmExecutionState,
     code: &str,
 ) -> (RlmExecutionState, ExecResponse) {
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         lash_core::testing::code_execution_context(),
         ExecRequest {
@@ -163,7 +163,7 @@ async fn execute_typescript_test_cell(
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     (state, response)

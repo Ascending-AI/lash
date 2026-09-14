@@ -1,6 +1,6 @@
 //! RLM protocol plugin: a trajectory-shaped driver that uses lashlang as the
 //! persistent REPL. Provider reasoning is stored as trajectory reasoning,
-//! paired `<lashlang>` blocks are executed, `print` yields observations, and
+//! paired `<typescript>` blocks are executed, `print` yields observations, and
 //! `finish` yields the final value.
 
 mod cell_scan;
@@ -49,10 +49,7 @@ pub use projection::{
 };
 #[cfg(feature = "testing")]
 pub use protocol::project_conformance_messages_through_rlm_history;
-pub use protocol::{
-    RlmDriver, RlmPromptFeatures, contains_lashlang_cell,
-    rlm_execution_section_for_host_environment,
-};
+pub use protocol::{RlmDriver, RlmPromptFeatures};
 pub use rlm_support::format_budget_suffix;
 
 #[cfg(test)]

@@ -28,7 +28,6 @@ use lashlang::{ExecutionOutcome, State as FlowState};
 use self::host_bridge::{
     CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
 };
-pub(crate) use crate::dialect::{RlmSourceContext, SourceDialect};
 use crate::projection::{
     ProjectionResolver, RlmProjectedBindings, flow_to_json_value, json_to_flow_value,
     projected_bindings, prune_projected_binding_names, rehydrate_projected_globals,
@@ -93,7 +92,7 @@ pub(crate) async fn execute_code_with_bounds(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
-    execute_code_with_dialect_and_bounds(
+    execute_code_with_channel_and_bounds(
         state,
         ctx,
         request,
@@ -104,13 +103,13 @@ pub(crate) async fn execute_code_with_bounds(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
-        RlmSourceContext::cell(SourceDialect::Lashlang),
+        crate::plugin::RlmChannel::Cell,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_dialect_and_bounds(
+pub(crate) async fn execute_code_with_channel_and_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -121,9 +120,9 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-    source: RlmSourceContext,
+    channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
-    execute_code_with_dialect_and_bounds_with_trigger_resolver(
+    execute_code_with_channel_and_bounds_with_trigger_resolver(
         state,
         ctx,
         request,
@@ -135,13 +134,13 @@ pub(crate) async fn execute_code_with_dialect_and_bounds(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
-        source,
+        channel,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_dialect_and_bounds_with_trigger_resolver(
+pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -153,7 +152,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds_with_trigger_resolver(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-    source: RlmSourceContext,
+    channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
     let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
@@ -170,7 +169,7 @@ pub(crate) async fn execute_code_with_dialect_and_bounds_with_trigger_resolver(
         projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
-        source,
+        channel,
     ))
     .await
 }
@@ -188,7 +187,7 @@ pub struct RlmCheckpointPerfFixture {
 #[cfg(feature = "testing")]
 impl RlmCheckpointPerfFixture {
     pub fn new(binding_count: usize, payload_bytes: usize) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::for_engine("lashlang");
+        let mut state = RlmExecutionState::for_engine("typescript");
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
@@ -220,15 +219,20 @@ impl RlmCheckpointPerfFixture {
 
     pub async fn assign_one(&mut self, index: usize, turn: usize) -> Result<(), SessionError> {
         let binding = index % self.binding_count.max(1);
+        // A seeded global is an ambient `const` to a TypeScript cell, so the
+        // per-turn edit is a re-declaration carrying an equivalent payload
+        // rather than an append. What the fixture measures is unchanged: one
+        // binding is dirtied per turn, at the same order of bytes.
         let code = format!(
-            "mid_{binding} = push(mid_{binding}, \"turn-{turn}-{}\")",
+            "let mid_{binding} = [\"binding-{binding}-{}\", \"turn-{turn}-{}\"];",
+            "x".repeat(self.payload_bytes),
             "y".repeat(self.payload_bytes / 8)
         );
         let response = execute_code_with_bounds(
             &mut self.state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
@@ -254,7 +258,7 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
-        let mut restored = RlmExecutionState::for_engine("lashlang");
+        let mut restored = RlmExecutionState::for_engine("typescript");
         restored
             .restore_execution_state(state)
             .map_err(|error| SessionError::Protocol(error.to_string()))
@@ -289,16 +293,13 @@ async fn execute_code_inner(
     projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
-    source: RlmSourceContext,
+    channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
     state.mark_execution_started();
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
-    let parsed_program = match source.dialect {
-        SourceDialect::Lashlang => lashlang::parse(code).ok(),
-        SourceDialect::Typescript => lash_typescript::parse(code).ok(),
-    };
+    let parsed_program = lash_typescript::parse(code).ok();
 
     // gather → journal → mask → fold: every parsed resource-bearing cell first
     // consults the deferred journal, even if no live resolver and no checkpoint
@@ -407,62 +408,46 @@ async fn execute_code_inner(
     // forbidden construct both fail here and need opposite advice.
     let compile_result: Result<_, (lash_core::CellFailureKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
-        match source.dialect {
-            SourceDialect::Lashlang => state
-                .linked_programs
-                .get_or_compile(code, &host_environment)
-                .map_err(|error| match error {
-                    lashlang::LinkedProgramCacheError::Parse(error) => (
-                        lashlang_parse_feedback_kind(&error),
-                        format_rlm_parse_diagnostic(code, &error, source.channel),
-                    ),
-                    lashlang::LinkedProgramCacheError::Link(error) => (
-                        lashlang_link_feedback_kind(&error),
-                        format_rlm_link_diagnostic(code, &error),
-                    ),
-                    // Future compiler failures still produce diagnostic feedback without a guessed repair.
-                    _ => (lash_core::CellFailureKind::Host, error.to_string()),
-                }),
-            // TypeScript is parsed here rather than by the cache, so the cache
-            // is asked first: otherwise every cell would pay a full parse even
-            // when its linked program is already cached.
-            SourceDialect::Typescript => match state
-                .linked_programs
-                .cached_linked_program(code, &host_environment)
-            {
-                Some(program) => Ok(program),
-                // Parsed with the session's live globals, so a cell can read
-                // what an earlier cell bound. Lashlang gets this for free by
-                // resolving at link; TypeScript resolves names at parse, so the
-                // names have to arrive here. `host_environment` already carries
-                // them — it is the same set the linker will check against.
-                // Rendered against the cell source, not `to_string()`: the
-                // diagnostic carries a span and the model needs the line it
-                // wrote. Lashlang's parse failures have always arrived this way.
-                None => lash_typescript::parse_with_globals_and_process_handles(
-                    code,
-                    &host_environment.globals,
-                    &host_environment.process_handles,
-                )
-                .map_err(|error| {
-                    let error = refine_typescript_method_diagnostic(code, &host_environment, error);
-                    (
-                        typescript_feedback_kind(&error),
+        // TypeScript is parsed here rather than by the cache, so the cache
+        // is asked first: otherwise every cell would pay a full parse even
+        // when its linked program is already cached.
+        match state
+            .linked_programs
+            .cached_linked_program(code, &host_environment)
+        {
+            Some(program) => Ok(program),
+            // Parsed with the session's live globals, so a cell can read
+            // what an earlier cell bound: TypeScript resolves names at parse,
+            // so the names have to arrive here. `host_environment` already
+            // carries them — it is the same set the linker will check against.
+            // Rendered against the cell source, not `to_string()`: the
+            // diagnostic carries a span and the model needs the line it wrote.
+            None => lash_typescript::parse_with_globals_and_process_handles(
+                code,
+                &host_environment.globals,
+                &host_environment.process_handles,
+            )
+            .map_err(|error| {
+                let error = refine_typescript_method_diagnostic(code, &host_environment, error);
+                (
+                    typescript_feedback_kind(&error),
+                    format_rlm_parse_diagnostic(
                         lash_typescript::format_diagnostic(code, &error),
-                    )
-                })
-                .and_then(|program| {
-                    state
-                        .linked_programs
-                        .get_or_compile_ast(code, program, &host_environment)
-                        .map_err(|error| {
-                            (
-                                lashlang_link_feedback_kind(&error),
-                                format_rlm_link_diagnostic(code, &error),
-                            )
-                        })
-                }),
-            },
+                        channel,
+                    ),
+                )
+            })
+            .and_then(|program| {
+                state
+                    .linked_programs
+                    .get_or_compile_ast(code, program, &host_environment)
+                    .map_err(|error| {
+                        (
+                            lashlang_link_feedback_kind(&error),
+                            format_rlm_link_diagnostic(code, &error),
+                        )
+                    })
+            }),
         }
     };
     emit_step_trace(
@@ -549,7 +534,7 @@ async fn execute_code_inner(
         &ctx,
         &linked_module.artifact,
         &lashlang_execution_trace_config,
-        source.dialect.language_id(),
+        crate::dialect::typescript::LANGUAGE_ID,
     );
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
@@ -761,23 +746,6 @@ fn refine_typescript_method_diagnostic(
     }
 }
 
-/// Whether a Lashlang parse failure is a refusal or a wrong program.
-///
-/// Almost all of them are the program: a lex failure, an unexpected token, a
-/// missing `finish` value. The refusals are the retired forms and the rules
-/// about where a construct may appear — no rewrite of the same approach is
-/// accepted, so the model must be told to write a different one.
-fn lashlang_parse_feedback_kind(error: &lashlang::ParseError) -> lash_core::CellFailureKind {
-    match error {
-        lashlang::ParseError::SubmitRemoved { .. }
-        | lashlang::ParseError::DeclarativeTriggerRemoved { .. }
-        | lashlang::ParseError::SessionProcessAdminOutsideBlock { .. }
-        | lashlang::ParseError::ForegroundControlInsideProcess { .. }
-        | lashlang::ParseError::NestingTooDeep { .. } => lash_core::CellFailureKind::Policy,
-        _ => lash_core::CellFailureKind::Program,
-    }
-}
-
 /// Whether a link failure is a refusal or a wrong program.
 ///
 /// An unknown name, an unknown operation, an arity or type mismatch: those are
@@ -800,26 +768,21 @@ fn lashlang_link_feedback_kind(error: &lashlang::LinkError) -> lash_core::CellFa
 /// Render a parse failure for the model, with the cell-delimiter warning only
 /// where a cell delimiter exists.
 ///
-/// The warning explains a truncation the model cannot see: a `</lashlang>` line
-/// inside a multiline string closes the cell early, so the executor receives a
-/// program that stops mid-literal. Native `execute_code` calls (ADR 0083) carry
-/// the program as a tool argument, where no delimiter can truncate anything —
-/// there the sentence names syntax the model never wrote and sends it looking
-/// for a cause that does not exist.
+/// The warning explains a truncation the model cannot see: a `</typescript>`
+/// line inside a template literal closes the cell early, so the executor
+/// receives a program that stops mid-literal. Native `execute_code` calls (ADR
+/// 0083) carry the program as a tool argument, where no delimiter can truncate
+/// anything — there the sentence names syntax the model never wrote and sends
+/// it looking for a cause that does not exist.
 ///
-/// Gated on the channel alone, not on the source containing `</lashlang>`:
+/// Gated on the channel alone, not on the source containing `</typescript>`:
 /// by the time the executor sees the code, cell extraction has already consumed
 /// the delimiter that truncated it, so an implicated delimiter is exactly the
 /// case where the source cannot mention one.
-fn format_rlm_parse_diagnostic(
-    code: &str,
-    error: &lashlang::ParseError,
-    channel: crate::plugin::RlmChannel,
-) -> String {
-    let diagnostic = lashlang::format_parse_diagnostic(code, error);
+fn format_rlm_parse_diagnostic(diagnostic: String, channel: crate::plugin::RlmChannel) -> String {
     match channel {
         crate::plugin::RlmChannel::Cell => format!(
-            "{diagnostic}\n\nA standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
+            "{diagnostic}\n\nA standalone `</typescript>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
         ),
         crate::plugin::RlmChannel::NativeTool => diagnostic,
     }

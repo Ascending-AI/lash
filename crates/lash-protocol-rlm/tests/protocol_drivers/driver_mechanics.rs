@@ -750,18 +750,18 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
 }
 
 #[test]
-fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects_live_and_replay() {
-    for dialect in ["lashlang", "typescript"] {
+fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay() {
+    {
         for restore_pending_exec in [false, true] {
             for response_error in [
-                Some("lashlang execution was cancelled by the host"),
+                Some("cell execution was cancelled by the host"),
                 Some("compilation lost a race with cancellation"),
                 None,
             ] {
                 let case = format!(
-                    "dialect={dialect}, restored_pending_exec={restore_pending_exec}, response_error={response_error:?}"
+                    "restored_pending_exec={restore_pending_exec}, response_error={response_error:?}"
                 );
-                let config = test_config_with_dialect(dialect);
+                let config = test_config();
                 let mut machine = TurnMachine::new(
                     config,
                     vec![user_message("run until I stop")],
@@ -771,7 +771,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
 
                 let effects = drain_effects(&mut machine);
                 let llm_id = *find_llm_call(&effects).expect("initial model call");
-                let source = format!("<{dialect}>\nvalue = 1\n</{dialect}>");
+                let source = "<typescript>\nconst value = 1;\n</typescript>".to_string();
                 machine.handle_response(Response::LlmComplete {
                     id: llm_id,
                     text_streamed: false,
@@ -781,11 +781,8 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
                 let mut effects = drain_effects(&mut machine);
                 if restore_pending_exec {
                     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-                    machine = TurnMachine::restore_from_checkpoint(
-                        test_config_with_dialect(dialect),
-                        checkpoint,
-                    )
-                    .expect("supported checkpoint");
+                    machine = TurnMachine::restore_from_checkpoint(test_config(), checkpoint)
+                        .expect("supported checkpoint");
                     effects = drain_effects(&mut machine);
                 }
                 let exec_id = effects
@@ -796,7 +793,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects
                     })
                     .unwrap_or_else(|| panic!("{case}: pending cell execution"));
                 let cancellation_evidence = lash_sansio::TurnCancellationEvidence {
-                    request_id: format!("stop-{dialect}-{restore_pending_exec}"),
+                    request_id: format!("stop-{restore_pending_exec}"),
                     origin: Some("test-host".to_string()),
                     reason: Some("user pressed Stop".to_string()),
                     undelivered: lash_sansio::TurnCancelDisposition::Defer,
@@ -1152,102 +1149,6 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }
 
-/// A cell tagged with a registered-but-inactive dialect must be *named*, not
-/// silently read as prose.
-///
-/// This is the mechanism behind the hang the battery found. Extraction only
-/// knows the active dialect's tags, so a `<typescript>` cell in a Lashlang
-/// session (or the reverse) matched nothing: the dialect-specific cell count stayed 0,
-/// the whole reply counted as prose, and a `FinishRequired` turn asked the
-/// model to finish — forever, because the model kept answering with the cell it
-/// had been told to write. The execution fence never fires because extraction
-/// never yields a cell to fence.
-#[test]
-fn a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration() {
-    let mut machine = TurnMachine::new(
-        test_config_with_dialect("lashlang"),
-        vec![user_message("respond")],
-        Arc::new(Vec::new()),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Here is the answer.\n<typescript>\nfinish(\"ok\");\n</typescript>";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    // Nothing executes: the cell is not this session's.
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    // And the model is told exactly what is wrong, in its own dialect's words,
-    // on this first iteration rather than after an unbounded number of them.
-    let told = machine.messages().iter().any(|message| {
-        message.parts.iter().any(|part| {
-            part.content.contains("<typescript>")
-                && part.content.contains("<lashlang>")
-                && part.content.contains("does not run")
-        })
-    });
-    assert!(told, "messages: {:#?}", machine.messages());
-}
-
-/// The same, in the other direction.
-///
-/// The driver code is dialect-generic, but "both directions asserted" is this
-/// round's own standard everywhere else, and a one-directional fixture cannot
-/// tell a generic implementation from one that happens to name Lashlang.
-#[test]
-fn a_lashlang_cell_in_a_typescript_session_is_named_the_same_way() {
-    let mut machine = TurnMachine::new(
-        test_config_with_dialect("typescript"),
-        vec![user_message("respond")],
-        Arc::new(Vec::new()),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Here is the answer.\n<lashlang>\nfinish \"ok\"\n</lashlang>";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    let payload = single_llm_extraction_payload(&machine);
-    assert_eq!(payload["counts"]["typescript_cell_count"], 0);
-    assert!(payload["counts"].get("lashlang_cell_count").is_none());
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    let told = machine.messages().iter().any(|message| {
-        message.parts.iter().any(|part| {
-            part.content.contains("<lashlang>")
-                && part.content.contains("<typescript>")
-                && part.content.contains("does not run")
-                // The correction is written in the reader's own words: a
-                // TypeScript session is told about cells, not blocks.
-                && part.content.contains("cell")
-        })
-    });
-    assert!(told, "messages: {:#?}", machine.messages());
-}
-
 // === FIG-1407: the no-progress budget ===
 //
 // A turn whose attempts never commit an error-free execution used to re-call
@@ -1353,7 +1254,7 @@ fn a_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
         0,
     );
 
-    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish \"ok\"", None, 32);
+    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish(\"ok\");", None, 32);
 
     assert_eq!(
         stalled.llm_calls, 4,
@@ -1370,32 +1271,6 @@ fn a_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
         stalled.stop_message().is_some(),
         "the transcript says why the turn stopped: {:#?}",
         stalled.messages
-    );
-}
-
-/// The same bound, in the other dialect.
-#[test]
-fn a_typescript_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
-    let mut config = test_config_with_dialect("typescript");
-    config.no_progress_budget = lash_core::NoProgressBudget::bounded(3);
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
-        0,
-    );
-
-    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish(\"ok\");", None, 32);
-
-    assert_eq!(
-        stalled.llm_calls, 3,
-        "the bound is the number of provider calls"
-    );
-    assert_eq!(
-        stalled.outcome,
-        Some(lash_core::facade_support::TurnOutcome::Stopped(
-            lash_core::facade_support::TurnStop::MaxTurns
-        )),
     );
 }
 
@@ -1722,21 +1597,14 @@ fn finish_required_options() -> lash_core::ProtocolTurnOptions {
 /// Red before the fix: `first_cell_span` required the open tag to be alone on
 /// its line, so this reply yielded no cell and nothing ran.
 #[test]
-fn a_one_line_cell_executes_in_both_dialects() {
-    for (dialect, reply, code) in [
-        (
-            "lashlang",
-            "<lashlang>finish \"ok\"</lashlang>",
-            "finish \"ok\"",
-        ),
-        (
-            "typescript",
+fn a_one_line_cell_executes() {
+    {
+        let (reply, code) = (
             "<typescript>finish(\"ok\");</typescript>",
             "finish(\"ok\");",
-        ),
-    ] {
+        );
         let mut machine = TurnMachine::new(
-            test_config_with_dialect(dialect),
+            test_config(),
             vec![user_message("respond")],
             Arc::new(Vec::new()),
             0,
@@ -1757,7 +1625,7 @@ fn a_one_line_cell_executes_in_both_dialects() {
         assert_eq!(
             executed.as_deref(),
             Some(code),
-            "{dialect}: a one-line cell must execute its source"
+            "a one-line cell must execute its source"
         );
     }
 }
@@ -1849,21 +1717,13 @@ fn a_natural_turn_answering_about_the_tags_is_not_corrected() {
 /// learn what to change, which is what made the loop repeat.
 #[test]
 fn a_malformed_fence_is_answered_by_naming_the_rule() {
-    for (dialect, reply, open, close) in [
-        (
-            "lashlang",
-            "<lashlang>finish \"ok\"\n</lashlang>",
-            "<lashlang>",
-            "</lashlang>",
-        ),
-        (
-            "typescript",
+    {
+        let (reply, open, close) = (
             "<typescript >\nfinish(\"ok\");\n</typescript>",
             "<typescript>",
             "</typescript>",
-        ),
-    ] {
-        let mut config = test_config_with_dialect(dialect);
+        );
+        let mut config = test_config();
         config.termination = finish_required_options();
         let mut machine = TurnMachine::new(
             config,
@@ -1884,7 +1744,7 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
             !effects
                 .iter()
                 .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-            "{dialect}: a refused fence executes nothing"
+            "a refused fence executes nothing"
         );
         let told = machine.messages().iter().any(|message| {
             message.parts.iter().any(|part| {
@@ -1897,7 +1757,7 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
         });
         assert!(
             told,
-            "{dialect}: the retry must name the fence rule: {:#?}",
+            "the retry must name the fence rule: {:#?}",
             machine.messages()
         );
         let decision = machine
@@ -1920,7 +1780,7 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
         assert_eq!(
             decision.as_deref(),
             Some("retry_malformed_cell_fence"),
-            "{dialect}: the diagnostic names the fence, not a finish request"
+            "the diagnostic names the fence, not a finish request"
         );
     }
 }

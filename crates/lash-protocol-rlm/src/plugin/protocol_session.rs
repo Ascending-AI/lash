@@ -526,8 +526,7 @@ mod tests {
     }
 
     fn test_session(config: RlmProtocolPluginConfig) -> RlmProtocolSession {
-        let runtime_state =
-            Arc::new(RlmRuntimeState::new_lashlang_for_tests().expect("runtime state"));
+        let runtime_state = Arc::new(RlmRuntimeState::new_for_tests().expect("runtime state"));
         RlmProtocolSession::new(config, runtime_state)
     }
 

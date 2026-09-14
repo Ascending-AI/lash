@@ -6,29 +6,17 @@
 //! worker snapshots. The continuation is encoded and decoded before the same
 //! compiled cell resumes.
 
-use super::harness::{Dialect, HarnessMode, Session};
+use super::harness::{HarnessMode, Session};
 
-fn parked_source(dialect: Dialect) -> &'static str {
-    match dialect {
-        Dialect::Lashlang => {
-            "fn add(left: float, right: float) -> float { left + right }\nfinish add(1, await cell.park({ \"value\": 41 })?)"
-        }
-        Dialect::Typescript => {
-            "const add = (left: number, right: number) => left + right;\nfinish(add(1, await cell.park({ value: 41 })));"
-        }
-    }
-}
+const PARKED_SOURCE: &str = "const add = (left: number, right: number) => left + right;\nfinish(add(1, await cell.park({ value: 41 })));";
 
-fn parked_cell_with_live_closure_survives_snapshot_restore(dialect: Dialect) {
-    let mut session = Session::open(dialect, HarnessMode::Resident);
-    let base_cell = match dialect {
-        Dialect::Lashlang => "base = [1, 2]",
-        Dialect::Typescript => "const base = [1, 2];",
-    };
-    session.run_ok(base_cell);
+#[test]
+fn parked_cell_with_live_closure_survives_snapshot_restore() {
+    let mut session = Session::open(HarnessMode::Resident);
+    session.run_ok("const base = [1, 2];");
     let before = session.user_bindings();
 
-    let evidence = session.run_parked(parked_source(dialect));
+    let evidence = session.run_parked(PARKED_SOURCE);
     assert_eq!(evidence.finish, serde_json::json!(42));
     assert!(
         evidence.closure_root,
@@ -49,17 +37,15 @@ fn parked_cell_with_live_closure_survives_snapshot_restore(dialect: Dialect) {
             .any(|window| window == b"add"),
         "the completed cell must not persist its closure name"
     );
-    let outcome = session.run_ok(match dialect {
-        Dialect::Lashlang => "finish base",
-        Dialect::Typescript => "finish(base);",
-    });
+    let outcome = session.run_ok("finish(base);");
     assert_eq!(outcome.finish, Some(serde_json::json!([1, 2])));
 }
 
-fn broken_retention_law_is_non_vacuous(dialect: Dialect) {
-    let mut session = Session::open(dialect, HarnessMode::Resident);
-    let error = session.run_parked_broken(parked_source(dialect));
-    eprintln!("red-proof {dialect}: {error}");
+#[test]
+fn broken_retention_law_is_non_vacuous() {
+    let mut session = Session::open(HarnessMode::Resident);
+    let error = session.run_parked_broken(PARKED_SOURCE);
+    eprintln!("red-proof: {error}");
     assert!(
         error.contains("closure")
             || error.contains("function")
@@ -69,36 +55,4 @@ fn broken_retention_law_is_non_vacuous(dialect: Dialect) {
             || error.contains("serializable"),
         "broken continuation should fail because the retained closure was removed: {error}"
     );
-}
-
-mod lashlang {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Lashlang;
-
-    #[test]
-    fn parked_cell_with_live_closure_survives_snapshot_restore() {
-        super::parked_cell_with_live_closure_survives_snapshot_restore(DIALECT);
-    }
-
-    #[test]
-    fn broken_retention_law_is_non_vacuous() {
-        super::broken_retention_law_is_non_vacuous(DIALECT);
-    }
-}
-
-mod typescript {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Typescript;
-
-    #[test]
-    fn parked_cell_with_live_closure_survives_snapshot_restore() {
-        super::parked_cell_with_live_closure_survives_snapshot_restore(DIALECT);
-    }
-
-    #[test]
-    fn broken_retention_law_is_non_vacuous() {
-        super::broken_retention_law_is_non_vacuous(DIALECT);
-    }
 }

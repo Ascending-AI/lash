@@ -44,7 +44,7 @@ mod tests {
     #[test]
     fn disabled_decomposition_finishes_at_budget_thresholds() {
         for vocabulary in [
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
             crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
         ] {
             for used in [60, 90, 100, 110] {
@@ -84,7 +84,7 @@ mod tests {
                 0,
                 Some(&prompt_usage(threshold)),
                 Some(threshold),
-                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                crate::dialect::DialectPromptVocabulary::default(),
                 true,
             )
             .expect("budget suffix should render");
@@ -99,7 +99,7 @@ mod tests {
             0,
             Some(&usage),
             Some(200_000),
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
             true,
         )
         .expect("budget suffix should render");
@@ -118,7 +118,7 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
             true,
         )
         .expect("budget suffix should render");
@@ -136,7 +136,7 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
             true,
         )
         .expect("budget suffix should render");
@@ -155,14 +155,14 @@ mod tests {
             0,
             Some(&usage),
             Some(100_000),
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
             true,
         )
         .expect("budget suffix should render");
 
         assert!(content.contains("Tokens: 120292 · frame switch threshold: 100000 (120%)"));
         assert!(content.contains("Past the frame switch threshold"));
-        assert!(content.contains("End this block with `control.continue_as(...)` now"));
+        assert!(content.contains("End this cell with `control.continue_as(...)` now"));
         assert!(content.contains("do not call `finish`"));
         assert!(content.contains("`task` + `seed`"));
     }
@@ -176,7 +176,7 @@ mod tests {
                 0,
                 Some(&usage),
                 None,
-                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                crate::dialect::DialectPromptVocabulary::default(),
                 true,
             )
             .is_none()
@@ -192,7 +192,7 @@ mod tests {
                 0,
                 Some(&usage),
                 Some(200_000),
-                crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                crate::dialect::DialectPromptVocabulary::default(),
                 true,
             )
             .is_none()

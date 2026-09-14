@@ -3,19 +3,19 @@
 //! Two shapes are executable cells, and nothing else is.
 //!
 //! The *block* shape: visible assistant prose, then a line whose trimmed
-//! content is exactly `<lashlang>`, then Lashlang source, then a later line
-//! whose trimmed content is exactly `</lashlang>`.
+//! content is exactly `<typescript>`, then TypeScript source, then a later line
+//! whose trimmed content is exactly `</typescript>`.
 //!
 //! The *inline* shape: one **complete** line — terminated, or ended by the
-//! response itself — whose trimmed content starts with `<lashlang>` and ends
-//! with `</lashlang>`, with the source between them. A model that answers a
+//! response itself — whose trimmed content starts with `<typescript>` and ends
+//! with `</typescript>`, with the source between them. A model that answers a
 //! one-statement turn on one line has written something the grammar can read
 //! unambiguously — refusing it cost a judged frontier row twelve billed calls
 //! for a semantically fine reply (FIG-1475) — so it is read rather than
 //! refused.
 //!
 //! The line must be complete because a streamed prefix of a longer line looks
-//! exactly like a finished inline cell: `<lashlang>print 1</lashlang> ok` is
+//! exactly like a finished inline cell: `<typescript>print 1</typescript> ok` is
 //! prose, and reading it as a cell the instant the closing tag arrives would
 //! let the provider's chunk boundaries decide what executed. Streaming passes
 //! `allow_eof: false` until the response ends, mirroring the block shape's own
@@ -25,17 +25,17 @@
 //!
 //! * The close is **greedy** — the cell ends at the *last* closing tag on the
 //!   line, since that tag is what makes the line an inline cell at all. So
-//!   `<lashlang>print "</lashlang>"</lashlang>` reads the string correctly,
+//!   `<typescript>print "</typescript>"</typescript>` reads the string correctly,
 //!   while two inline cells written on one line concatenate into a single
 //!   program rather than one cell plus prose. Both halves still run, in order,
 //!   which is what the reply asked for; a non-greedy close would instead
 //!   truncate the string case, and truncating source is the worse failure.
 //! * A line that *begins* with the open tag and *ends* with the closing tag is
-//!   a cell even if a human would read it as a sentence — `<lashlang> is like
-//!   </lashlang>` executes. Prose that merely names the tags mid-sentence, or
+//!   a cell even if a human would read it as a sentence — `<typescript> is like
+//!   </typescript>` executes. Prose that merely names the tags mid-sentence, or
 //!   trails anything after the closing tag, stays prose.
 //!
-//! Markdown code blocks, inline tag mentions, and retired `%%lashlang` markers
+//! Markdown code blocks, inline tag mentions, and retired `%%typescript` markers
 //! are plain text.
 
 use crate::dialect::CellTags;
@@ -104,7 +104,7 @@ pub(crate) fn first_cell_span(text: &str, tags: CellTags) -> Option<CellSpan> {
     None
 }
 
-/// Render one canonical paired lashlang block. `prose` is trimmed at the
+/// Render one canonical paired cell block. `prose` is trimmed at the
 /// end, and `code` is emitted as the exact executable source between the
 /// tags.
 pub(crate) fn render_cell_text(tags: CellTags, prose: &str, code: &str) -> String {
@@ -148,7 +148,7 @@ pub(crate) fn possible_start_tag_suffix_len(text: &str, tags: CellTags) -> usize
 }
 
 /// Locate a start tag only after its line has completed. Streaming uses
-/// this to avoid suppressing an incomplete line like `<lashlang> here`
+/// this to avoid suppressing an incomplete line like `<typescript> here`
 /// before the model has emitted the rest of the line.
 pub(crate) fn complete_start_tag_span(text: &str, tags: CellTags) -> Option<StartTagSpan> {
     let mut pos = 0;
@@ -220,7 +220,7 @@ pub(crate) fn complete_cell_start(
 /// Whether some line writes a fence for `tags` in a position the grammar
 /// refuses.
 ///
-/// Whitespace-insensitive so a dirtied tag (`<lashlang >`) is recognized as an
+/// Whitespace-insensitive so a dirtied tag (`<typescript >`) is recognized as an
 /// attempted fence rather than read as prose. Deliberately anchored at the line
 /// start: a tag *mentioned* mid-sentence is prose, and a reply that opens a
 /// line with the tag was trying to write a cell. Callers use this only after
@@ -363,70 +363,79 @@ mod tests {
 
     fn tags() -> CellTags {
         CellTags {
-            open: "<lashlang>",
-            close: "</lashlang>",
+            open: "<typescript>",
+            close: "</typescript>",
         }
     }
 
-    fn first_lashlang_cell_span(text: &str) -> Option<CellSpan> {
+    fn first_cell_span_for_tests(text: &str) -> Option<CellSpan> {
         first_cell_span(text, tags())
     }
 
-    fn render_lashlang_cell_text(prose: &str, code: &str) -> String {
+    fn render_cell_text_for_tests(prose: &str, code: &str) -> String {
         render_cell_text(tags(), prose, code)
     }
 
+    /// The grammar is parameterized by the tag pair it is handed, not wired to
+    /// one spelling: a cell rendered with one pair is invisible to another.
     #[test]
-    fn scanner_and_renderer_use_the_supplied_dialect_tags() {
-        let tags = CellTags {
-            open: "<typescript>",
-            close: "</typescript>",
+    fn scanner_and_renderer_use_the_supplied_tags() {
+        let other = CellTags {
+            open: "<other>",
+            close: "</other>",
         };
-        let rendered = render_cell_text(tags, "Checking.", "finish(1)");
+        let rendered = render_cell_text(self::tags(), "Checking.", "finish(1)");
         assert_eq!(
             rendered,
             "Checking.\n<typescript>\nfinish(1)\n</typescript>"
         );
-        let span = first_cell_span(&rendered, tags).expect("custom dialect cell");
+        let span = first_cell_span(&rendered, self::tags()).expect("cell");
         assert_eq!(&rendered[span.body_start..span.body_end], "finish(1)");
-        assert!(first_cell_span(&rendered, self::tags()).is_none());
+        assert!(first_cell_span(&rendered, other).is_none());
+
+        let other_rendered = render_cell_text(other, "Checking.", "finish(1)");
+        assert_eq!(other_rendered, "Checking.\n<other>\nfinish(1)\n</other>");
+        assert!(first_cell_span(&other_rendered, self::tags()).is_none());
     }
 
     fn code(text: &str) -> Option<&str> {
-        let span = first_lashlang_cell_span(text)?;
+        let span = first_cell_span_for_tests(text)?;
         Some(&text[span.body_start..span.body_end])
     }
 
     #[test]
     fn prose_only_has_no_cell() {
-        assert!(first_lashlang_cell_span("plain prose").is_none());
+        assert!(first_cell_span_for_tests("plain prose").is_none());
     }
 
     #[test]
     fn inline_tag_mentions_are_prose() {
-        assert!(first_lashlang_cell_span("Use <lashlang> here.").is_none());
-        assert!(first_lashlang_cell_span("Use </lashlang> here.").is_none());
+        assert!(first_cell_span_for_tests("Use <typescript> here.").is_none());
+        assert!(first_cell_span_for_tests("Use </typescript> here.").is_none());
     }
 
     /// The FIG-1475 shape: a whole cell on one line.
     #[test]
     fn one_line_cell_extracts_its_source() {
-        assert_eq!(code("<lashlang>finish 1</lashlang>"), Some("finish 1"));
-        assert_eq!(code("  <lashlang>finish 1</lashlang>  "), Some("finish 1"));
+        assert_eq!(code("<typescript>finish 1</typescript>"), Some("finish 1"));
         assert_eq!(
-            code("Checking.\n<lashlang>finish 1</lashlang>"),
+            code("  <typescript>finish 1</typescript>  "),
             Some("finish 1")
         );
-        assert_eq!(code("<lashlang></lashlang>"), Some(""));
+        assert_eq!(
+            code("Checking.\n<typescript>finish 1</typescript>"),
+            Some("finish 1")
+        );
+        assert_eq!(code("<typescript></typescript>"), Some(""));
     }
 
     #[test]
     fn one_line_cell_span_addresses_prose_and_tags() {
-        let text = "Before\n<lashlang>finish 1</lashlang>\nAfter";
-        let span = first_lashlang_cell_span(text).expect("inline cell");
+        let text = "Before\n<typescript>finish 1</typescript>\nAfter";
+        let span = first_cell_span_for_tests(text).expect("inline cell");
         assert_eq!(&text[..span.start_tag_start].trim_end(), &"Before");
         assert_eq!(&text[span.body_start..span.body_end], "finish 1");
-        assert_eq!(&text[span.end_tag_start..], "</lashlang>\nAfter");
+        assert_eq!(&text[span.end_tag_start..], "</typescript>\nAfter");
         assert_eq!(&text[span.end_tag_end..], "After");
     }
 
@@ -435,7 +444,7 @@ mod tests {
     #[test]
     fn block_shape_takes_precedence_over_a_later_one_line_cell() {
         assert_eq!(
-            code("<lashlang>\nfinish 1\n</lashlang>\n<lashlang>finish 2</lashlang>"),
+            code("<typescript>\nfinish 1\n</typescript>\n<typescript>finish 2</typescript>"),
             Some("finish 1")
         );
     }
@@ -444,9 +453,11 @@ mod tests {
     /// has to start with the open tag and end with the close tag.
     #[test]
     fn one_line_tag_mentions_are_still_prose() {
-        assert!(first_lashlang_cell_span("Use <lashlang> and </lashlang> tags.").is_none());
-        assert!(first_lashlang_cell_span("<lashlang> and </lashlang> are the tags.").is_none());
-        assert!(first_lashlang_cell_span("<lashlang>finish 1</lashlang> — done.").is_none());
+        assert!(first_cell_span_for_tests("Use <typescript> and </typescript> tags.").is_none());
+        assert!(
+            first_cell_span_for_tests("<typescript> and </typescript> are the tags.").is_none()
+        );
+        assert!(first_cell_span_for_tests("<typescript>finish 1</typescript> — done.").is_none());
     }
 
     /// The inline close is greedy, and both documented residues follow from it.
@@ -454,13 +465,13 @@ mod tests {
     fn one_line_cell_closes_at_the_last_closing_tag() {
         // A closing tag inside a string survives, which non-greedy would truncate.
         assert_eq!(
-            code("<lashlang>print \"</lashlang>\"</lashlang>"),
-            Some("print \"</lashlang>\"")
+            code("<typescript>print \"</typescript>\"</typescript>"),
+            Some("print \"</typescript>\"")
         );
         // Two cells written on one line concatenate into one program, in order.
         assert_eq!(
-            code("<lashlang>print 1</lashlang><lashlang>print 2</lashlang>"),
-            Some("print 1</lashlang><lashlang>print 2")
+            code("<typescript>print 1</typescript><typescript>print 2</typescript>"),
+            Some("print 1</typescript><typescript>print 2")
         );
     }
 
@@ -468,17 +479,20 @@ mod tests {
     /// apart, and the shape is what the grammar promises to read.
     #[test]
     fn a_sentence_shaped_like_a_one_line_cell_is_a_cell() {
-        assert_eq!(code("<lashlang> is like </lashlang>"), Some(" is like "));
+        assert_eq!(
+            code("<typescript> is like </typescript>"),
+            Some(" is like ")
+        );
     }
 
     #[test]
     fn malformed_fences_are_recognized_as_attempted_cells() {
         for text in [
-            "<lashlang>finish 1",
-            "<lashlang>finish 1\n</lashlang>",
-            "<lashlang >\nfinish 1\n</lashlang>",
-            "</lashlang>\nfinish 1",
-            "<lashlang>",
+            "<typescript>finish 1",
+            "<typescript>finish 1\n</typescript>",
+            "<typescript >\nfinish 1\n</typescript>",
+            "</typescript>\nfinish 1",
+            "<typescript>",
         ] {
             assert!(
                 malformed_cell_fence(text, tags()),
@@ -490,10 +504,10 @@ mod tests {
     #[test]
     fn ordinary_prose_carries_no_malformed_fence() {
         for text in [
-            "Use <lashlang> here.",
+            "Use <typescript> here.",
             "plain prose",
-            "%%lashlang\nfinish 1",
-            "```lashlang\nfinish 1\n```",
+            "%%typescript\nfinish 1",
+            "```typescript\nfinish 1\n```",
         ] {
             assert!(
                 !malformed_cell_fence(text, tags()),
@@ -505,33 +519,33 @@ mod tests {
     #[test]
     fn streamed_cell_start_reports_the_first_shape_positionally() {
         assert!(matches!(
-            complete_cell_start("Plan.\n<lashlang>\nfinish 1", false, tags()),
+            complete_cell_start("Plan.\n<typescript>\nfinish 1", false, tags()),
             Some(StreamedCellStart::Block(span)) if span.start_tag_start == 6
         ));
         assert!(matches!(
-            complete_cell_start("Plan.\n<lashlang>finish 1</lashlang>\n", false, tags()),
+            complete_cell_start("Plan.\n<typescript>finish 1</typescript>\n", false, tags()),
             Some(StreamedCellStart::Inline(span)) if span.start_tag_start == 6
         ));
         assert!(matches!(
             complete_cell_start(
-                "<lashlang>\nprint 1\n<lashlang>finish 2</lashlang>\n",
+                "<typescript>\nprint 1\n<typescript>finish 2</typescript>\n",
                 false,
                 tags()
             ),
             Some(StreamedCellStart::Block(_)),
         ));
         assert_eq!(
-            complete_cell_start("Use <lashlang> here.\n", false, tags()),
+            complete_cell_start("Use <typescript> here.\n", false, tags()),
             None
         );
     }
 
     /// Streaming may not read an inline cell out of a line that has not ended:
-    /// `<lashlang>print 1</lashlang> ok` is prose, and every prefix of it that
+    /// `<typescript>print 1</typescript> ok` is prose, and every prefix of it that
     /// stops after the closing tag looks like a finished cell.
     #[test]
     fn an_unterminated_line_is_only_an_inline_cell_at_response_eof() {
-        let prefix = "<lashlang>print 1</lashlang>";
+        let prefix = "<typescript>print 1</typescript>";
         assert_eq!(complete_cell_start(prefix, false, tags()), None);
         assert!(matches!(
             complete_cell_start(prefix, true, tags()),
@@ -539,10 +553,10 @@ mod tests {
         ));
         // The whole line, once it ends, is prose in both readings — which is what
         // the streamed answer has to agree with.
-        let whole = "<lashlang>print 1</lashlang> ok";
+        let whole = "<typescript>print 1</typescript> ok";
         assert_eq!(complete_cell_start(whole, true, tags()), None);
         assert_eq!(complete_cell_start(whole, false, tags()), None);
-        assert!(first_lashlang_cell_span(whole).is_none());
+        assert!(first_cell_span_for_tests(whole).is_none());
     }
 
     /// A line that has opened with the tag is held until it ends, so an inline
@@ -550,43 +564,43 @@ mod tests {
     #[test]
     fn an_opened_line_is_held_until_it_ends() {
         assert_eq!(
-            possible_start_tag_suffix_len("Plan.\n<lashlang>fin", tags()),
-            "<lashlang>fin".len()
+            possible_start_tag_suffix_len("Plan.\n<typescript>fin", tags()),
+            "<typescript>fin".len()
         );
         assert_eq!(
-            possible_start_tag_suffix_len("Plan.\n<lashlang> here\n", tags()),
+            possible_start_tag_suffix_len("Plan.\n<typescript> here\n", tags()),
             0
         );
     }
 
     #[test]
     fn start_only_incomplete_block_has_no_cell() {
-        assert!(first_lashlang_cell_span("<lashlang>\nfinish 1").is_none());
+        assert!(first_cell_span_for_tests("<typescript>\nfinish 1").is_none());
     }
 
     #[test]
     fn end_without_start_has_no_cell() {
-        assert!(first_lashlang_cell_span("</lashlang>\nfinish 1").is_none());
+        assert!(first_cell_span_for_tests("</typescript>\nfinish 1").is_none());
     }
 
     #[test]
     fn empty_block_extracts_empty_source() {
-        assert_eq!(code("<lashlang>\n</lashlang>"), Some(""));
+        assert_eq!(code("<typescript>\n</typescript>"), Some(""));
     }
 
     #[test]
     fn prose_plus_complete_block_extracts_code_and_prose_offsets() {
-        let text = "Before\n\n<lashlang>\nprint 1\nfinish 2\n</lashlang>";
-        let span = first_lashlang_cell_span(text).expect("complete block");
+        let text = "Before\n\n<typescript>\nprint 1\nfinish 2\n</typescript>";
+        let span = first_cell_span_for_tests(text).expect("complete block");
         assert_eq!(&text[..span.start_tag_start].trim_end(), &"Before");
         assert_eq!(&text[span.body_start..span.body_end], "print 1\nfinish 2");
-        assert_eq!(&text[span.end_tag_start..span.end_tag_end], "</lashlang>");
+        assert_eq!(&text[span.end_tag_start..span.end_tag_end], "</typescript>");
     }
 
     #[test]
     fn indented_tag_lines_parse() {
         assert_eq!(
-            code("Before\n  <lashlang>  \nfinish 1\n  </lashlang>  \nAfter"),
+            code("Before\n  <typescript>  \nfinish 1\n  </typescript>  \nAfter"),
             Some("finish 1")
         );
     }
@@ -595,7 +609,7 @@ mod tests {
     fn markdown_fences_inside_block_are_source() {
         assert_eq!(
             code(
-                "<lashlang>\npayload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload\n</lashlang>"
+                "<typescript>\npayload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload\n</typescript>"
             ),
             Some("payload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload")
         );
@@ -604,34 +618,36 @@ mod tests {
     #[test]
     fn raw_triple_strings_containing_backticks_are_source() {
         assert_eq!(
-            code("<lashlang>\npayload = r\"\"\"```\nvalue\n```\"\"\"\nfinish payload\n</lashlang>"),
+            code(
+                "<typescript>\npayload = r\"\"\"```\nvalue\n```\"\"\"\nfinish payload\n</typescript>"
+            ),
             Some("payload = r\"\"\"```\nvalue\n```\"\"\"\nfinish payload")
         );
     }
 
     #[test]
     fn suffix_text_after_end_tag_is_ignored_by_span() {
-        let text = "<lashlang>\nfinish 1\n</lashlang>\nTrailing prose.";
-        let span = first_lashlang_cell_span(text).expect("complete block");
+        let text = "<typescript>\nfinish 1\n</typescript>\nTrailing prose.";
+        let span = first_cell_span_for_tests(text).expect("complete block");
         assert_eq!(&text[span.body_start..span.body_end], "finish 1");
         assert_eq!(&text[span.end_tag_end..], "Trailing prose.");
     }
 
     #[test]
     fn second_block_is_ignored_after_first_close() {
-        let text = "<lashlang>\nfinish 1\n</lashlang>\n<lashlang>\nfinish 2\n</lashlang>";
+        let text = "<typescript>\nfinish 1\n</typescript>\n<typescript>\nfinish 2\n</typescript>";
         assert_eq!(code(text), Some("finish 1"));
     }
 
     #[test]
     fn retired_percent_marker_is_plain_prose() {
-        assert!(first_lashlang_cell_span("%%lashlang\nfinish 1").is_none());
+        assert!(first_cell_span_for_tests("%%typescript\nfinish 1").is_none());
     }
 
     #[test]
     fn canonical_renderer_round_trips_empty_code() {
-        let rendered = render_lashlang_cell_text("", "");
-        let span = first_lashlang_cell_span(&rendered).expect("complete block");
+        let rendered = render_cell_text_for_tests("", "");
+        let span = first_cell_span_for_tests(&rendered).expect("complete block");
         assert_eq!(&rendered[span.body_start..span.body_end], "");
     }
 }

@@ -5,24 +5,20 @@ use lash_core::plugin::{CodeExecutorPlugin, ProtocolSessionContext};
 use lash_core::{SessionError, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
-use crate::dialect::{RlmDialect, RlmDialectRegistry, RlmDialectSession};
+use crate::dialect::{DialectSession, TypescriptDialect};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
 use crate::rlm_support::SharedBoundVariablesPrompt;
 
 pub(crate) struct RlmRuntimeState {
-    dialect_registry: RlmDialectRegistry,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
-    execution: tokio::sync::Mutex<Box<dyn RlmDialectSession>>,
+    execution: tokio::sync::Mutex<DialectSession>,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 
 impl RlmRuntimeState {
-    pub(crate) fn new(
-        dialect_registry: RlmDialectRegistry,
-        dialect: Arc<dyn RlmDialect>,
-    ) -> Result<Self, SessionError> {
-        let execution = dialect.create_session()?;
+    pub(crate) fn new(dialect: Arc<TypescriptDialect>) -> Result<Self, SessionError> {
+        let execution = dialect.create_session();
         let bound_variables_prompt = Arc::new(std::sync::RwLock::new(
             execution
                 .prepare_bound_variables_prompt(&BTreeSet::new())?
@@ -30,7 +26,6 @@ impl RlmRuntimeState {
         ));
         Ok(Self {
             execution: tokio::sync::Mutex::new(execution),
-            dialect_registry,
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
             bound_variables_prompt,
@@ -38,13 +33,8 @@ impl RlmRuntimeState {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_lashlang_for_tests() -> Result<Self, SessionError> {
-        Self::new_for_tests("lashlang")
-    }
-
-    #[cfg(test)]
-    fn new_for_tests(active_language: &str) -> Result<Self, SessionError> {
-        Self::new_for_tests_with_resolver(active_language, None)
+    pub(crate) fn new_for_tests() -> Result<Self, SessionError> {
+        Self::new_for_tests_with_resolver(None)
     }
 
     /// A test session whose deferred-tool resolver can park a cell mid-flight.
@@ -55,10 +45,9 @@ impl RlmRuntimeState {
     /// arriving after the first was cancelled — actually sees.
     #[cfg(test)]
     fn new_for_tests_with_resolver(
-        active_language: &str,
         deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
-        let services = crate::dialect::LashlangDialectServices {
+        let services = crate::dialect::RlmDialectServices {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
             deferred_tool_resolver,
@@ -67,20 +56,10 @@ impl RlmRuntimeState {
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
             channel: crate::plugin::RlmChannel::Cell,
         };
-        let dialect: Arc<dyn RlmDialect> = Arc::new(crate::dialect::LashlangDialect::new(
-            lash_lashlang_runtime::LashlangSurface::default(),
-            services.clone(),
-        ));
-        let typescript: Arc<dyn RlmDialect> = Arc::new(crate::dialect::TypescriptDialect::new(
+        Self::new(Arc::new(crate::dialect::TypescriptDialect::new(
             lash_lashlang_runtime::LashlangSurface::default(),
             services,
-        ));
-        let active = match active_language {
-            "lashlang" => Arc::clone(&dialect),
-            "typescript" => Arc::clone(&typescript),
-            other => panic!("unknown test dialect `{other}`"),
-        };
-        Self::new(RlmDialectRegistry::new([dialect, typescript]), active)
+        )))
     }
 
     pub(crate) async fn projected_binding_prompt_contributions(
@@ -192,7 +171,7 @@ impl RlmRuntimeState {
             context: "failed to hydrate RLM execution-state components".to_string(),
             source: error,
         })?;
-        *execution = self.dialect.create_session()?;
+        *execution = self.dialect.create_session();
         *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = snapshot {
@@ -203,7 +182,7 @@ impl RlmRuntimeState {
             if let SessionHistoryRecord::Protocol(event) = event
                 && let Some(event) = decode_rlm_protocol_event(event)
             {
-                self.apply_seed_or_globals_event(execution.as_mut(), event, &protected_names)
+                self.apply_seed_or_globals_event(execution, event, &protected_names)
                     .await?;
             }
         }
@@ -224,7 +203,7 @@ impl RlmRuntimeState {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event)
             {
-                self.apply_seed_or_globals_event(execution.as_mut(), event, &protected_names)
+                self.apply_seed_or_globals_event(execution, event, &protected_names)
                     .await?;
             }
         }
@@ -238,16 +217,18 @@ impl RlmRuntimeState {
         ctx: lash_core::RuntimeExecutionContext<'_>,
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
-        self.dialect_registry
-            .resolve_active(&request.language, self.dialect.language_id())
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        if request.language != self.dialect.language_id() {
+            return Err(SessionError::Protocol(format!(
+                "RLM language `{}` is not registered",
+                request.language
+            )));
+        }
         let session_projected_bindings = self.session_projected_bindings.lock().await.clone();
         // The guard is held across the whole cell: a second caller waits for
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
         let result = guard
-            .as_mut()
             .execute(ctx, request, session_projected_bindings)
             .await;
         drop(guard);
@@ -324,7 +305,7 @@ impl RlmRuntimeState {
 
     async fn apply_seed_or_globals_event(
         &self,
-        execution: &mut dyn RlmDialectSession,
+        execution: &mut DialectSession,
         event: RlmProtocolEvent,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
@@ -472,7 +453,7 @@ mod tests {
 
     /// A cell that references an unresolved module call-path, so the deferred
     /// resolver is consulted before anything is linked or run.
-    const PARKING_CELL: &str = "await web.fetch({})?";
+    const PARKING_CELL: &str = "await web.fetch({});";
 
     /// A deferred-tool resolver that parks a cell inside `resolve` until it is
     /// released.
@@ -530,17 +511,16 @@ mod tests {
 
     fn parked_session() -> (Arc<ParkingResolver>, RlmRuntimeState) {
         let resolver = Arc::new(ParkingResolver::default());
-        let state = RlmRuntimeState::new_for_tests_with_resolver(
-            "lashlang",
-            Some(Arc::clone(&resolver) as lash_lashlang_runtime::SharedDeferredToolResolver),
-        )
+        let state = RlmRuntimeState::new_for_tests_with_resolver(Some(
+            Arc::clone(&resolver) as lash_lashlang_runtime::SharedDeferredToolResolver
+        ))
         .expect("runtime state");
         (resolver, state)
     }
 
     fn cell(code: &str) -> lash_core::ExecRequest {
         lash_core::ExecRequest {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             code: code.to_string(),
         }
     }
@@ -612,7 +592,7 @@ mod tests {
                 let next = state
                     .execute_code(
                         admitted_context("survivor"),
-                        cell("survivor = 1\nfinish survivor"),
+                        cell("let survivor = 1;\nfinish(survivor);"),
                     )
                     .await
                     .expect("the session survives a cell cancelled mid-flight");
@@ -640,9 +620,11 @@ mod tests {
                 // makes no progress whatsoever: it is queued behind the running
                 // cell rather than answered — with a result or with an error.
                 {
-                    let mut waiting = Box::pin(
-                        state.execute_code(admitted_context("waiting"), cell("second_cell = 2")),
-                    );
+                    let mut waiting =
+                        Box::pin(state.execute_code(
+                            admitted_context("waiting"),
+                            cell("let second_cell = 2;"),
+                        ));
                     for _ in 0..16 {
                         assert!(
                             waiting.as_mut().poll(&mut cx).is_pending(),
@@ -670,7 +652,7 @@ mod tests {
 
                 // The waiting cell, re-driven, now runs — on that same state.
                 let second = state
-                    .execute_code(admitted_context("waiting"), cell("second_cell = 2"))
+                    .execute_code(admitted_context("waiting"), cell("let second_cell = 2;"))
                     .await
                     .expect("the cell that waited now runs");
                 assert_eq!(second.error, None);
@@ -680,7 +662,7 @@ mod tests {
                     .expect("settle the second returned cell");
 
                 let total = state
-                    .execute_code(admitted_context("total"), cell("finish second_cell"))
+                    .execute_code(admitted_context("total"), cell("finish(second_cell);"))
                     .await
                     .expect("execute code");
                 assert_eq!(total.error, None);
@@ -695,11 +677,11 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("first = 1"),
+                        cell("let first = 1;"),
                     )
                     .await
                     .expect("first cell");
@@ -707,7 +689,7 @@ mod tests {
                 let overlapping = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("second = 2"),
+                        cell("let second = 2;"),
                     )
                     .await
                     .expect_err("an unsettled response fences the next cell");
@@ -724,7 +706,7 @@ mod tests {
                 state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("second = 2"),
+                        cell("let second = 2;"),
                     )
                     .await
                     .expect("settlement releases the next cell");
@@ -738,7 +720,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let prompt = state.shared_bound_variables_prompt();
                 assert!(!prompt.read().expect("prompt read").contains("scratch_note"));
 
@@ -746,8 +728,8 @@ mod tests {
                     .execute_code(
                         lash_core::testing::code_execution_context(),
                         lash_core::ExecRequest {
-                            language: "lashlang".to_string(),
-                            code: "scratch_note = \"after execution\"".to_string(),
+                            language: "typescript".to_string(),
+                            code: "let scratch_note = \"after execution\";".to_string(),
                         },
                     )
                     .await
@@ -769,13 +751,13 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let prompt = state.shared_bound_variables_prompt();
 
                 state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("survives = 7"),
+                        cell("let survives = 7;"),
                     )
                     .await
                     .expect("execute accepted cell");
@@ -786,7 +768,7 @@ mod tests {
                 state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("cancelled_tail = 1"),
+                        cell("let cancelled_tail = 1;"),
                     )
                     .await
                     .expect("execute cell before late cancellation");
@@ -814,7 +796,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_for_tests("typescript").expect("runtime state");
+                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let response = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
@@ -845,14 +827,13 @@ mod tests {
                         if message == "RLM language `python` is not registered"
                 ));
 
-                // The registered-but-inactive case is the one that matters for
-                // dialect integrity: `lashlang` is a real, registered dialect,
-                // and this session is pinned to `typescript`. Without this
-                // fence a TypeScript session would execute a `<lashlang>` cell
-                // — the cross-dialect violation `runbooks/RULES.md` treats as
-                // an abort-and-RCA event. An earlier revision of this test
-                // covered only the unregistered language, and deleting the
-                // fence left the whole package green.
+                // The retired surface is the one unregistered language that
+                // matters: a session that executed a `<lashlang>` cell would be
+                // running the surface FIG-3021 deleted. TypeScript is now the
+                // only registered language, so the refusal arrives through the
+                // same unregistered-language path as `python` — the cell is
+                // still refused, which is what `runbooks/RULES.md` treats as
+                // mandatory.
                 let inactive = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
@@ -862,15 +843,13 @@ mod tests {
                         },
                     )
                     .await
-                    .expect_err("a registered but inactive dialect must be rejected");
+                    .expect_err("the retired surface must be rejected");
 
                 assert!(
                     matches!(
                         &inactive,
                         SessionError::Protocol(message)
-                            if message
-                                == "RLM language `lashlang` is registered but session \
-                                    language `typescript` is pinned"
+                            if message == "RLM language `lashlang` is not registered"
                     ),
                     "{inactive:?}"
                 );
@@ -937,7 +916,7 @@ mod tests {
         let response = state
             .execute_code(
                 lash_core::testing::code_execution_context(),
-                cell("finish baton"),
+                cell("finish(baton);"),
             )
             .await
             .expect("the baton cell runs");
@@ -983,7 +962,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
                     .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
@@ -1019,7 +998,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
                     .restore_runtime_session_state(seed_restore_view("frame-1", &["seed"]))
                     .await
@@ -1061,7 +1040,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
                     .restore_runtime_session_state(restore_view(
                         "frame-1",
@@ -1075,7 +1054,7 @@ mod tests {
                 let mutated = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("baton = \"uncommitted\"\nfinish baton"),
+                        cell("let baton = \"uncommitted\";\nfinish(baton);"),
                     )
                     .await
                     .expect("the mutating cell runs");
@@ -1116,7 +1095,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(async {
-                let state = RlmRuntimeState::new_lashlang_for_tests().expect("state");
+                let state = RlmRuntimeState::new_for_tests().expect("state");
                 state
                     .restore_runtime_session_state(restore_view(
                         "frame-1",
@@ -1134,7 +1113,7 @@ mod tests {
                 let mutated = state
                     .execute_code(
                         lash_core::testing::code_execution_context(),
-                        cell("baton = \"uncommitted\"\nfinish baton"),
+                        cell("let baton = \"uncommitted\";\nfinish(baton);"),
                     )
                     .await
                     .expect("the mutating cell runs");

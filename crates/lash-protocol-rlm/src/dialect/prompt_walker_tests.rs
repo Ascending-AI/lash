@@ -12,8 +12,12 @@
 //! battery caught a model spending reasoning tokens trying to reconcile the
 //! two.
 //!
-//! This walks every fragment the crate contributes to an assembled prompt, for
-//! both dialects, and fails on any word that belongs to the other one.
+//! TypeScript is now the only contract (ADR 0096), so this walks every fragment
+//! the crate contributes to an assembled prompt and fails on any word of the
+//! retired surface. The markers are not vestigial: the host-surface inventory
+//! is declared in Lashlang `TypeExpr`s and the tool examples are authored in
+//! the retired spelling, so both are still rendered through a translator that
+//! can regress.
 //!
 //! It cannot reach the *other* half of the prompt's tool docs. A tool's
 //! description and schema prose are authored in the crate that owns the tool and
@@ -24,7 +28,6 @@
 //! whatever a session registers at registration time instead of a fixture here.
 
 use super::*;
-use crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY;
 use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
@@ -54,57 +57,38 @@ fn authored_tool_examples() -> Vec<&'static str> {
     ]
 }
 
-/// Text that names the *other* dialect, with the reason each token is a defect.
-fn foreign_markers(language_id: &str) -> Vec<&'static str> {
-    match language_id {
-        // A TypeScript session must never see Lashlang's cell tag, its
-        // language name in prose, or its statement syntax.
-        "typescript" => vec![
-            "<lashlang>",
-            "</lashlang>",
-            "lashlang block",
-            "lashlang blocks",
-            "bound in lashlang",
-            "`print ",
-            "re-print",
-            "finish <value>",
-            // Lashlang's *type* syntax, which the host-surface inventory is
-            // declared in and both dialects have to render. The bound-variable
-            // block renders a whole type line in it, not one token: pinning
-            // only `list[` described the leak as narrower than it is.
-            "list[",
-            // Written with the trailing punctuation so they cannot match
-            // TypeScript's own `: string` / `: number`.
-            ": str,",
-            ": int,",
-            "?: any |",
-            "-> str",
-            // The Lashlang try-operator, in an authored tool example.
-            ")?",
-            "-> float",
-            "trigger.register",
-        ],
-        // And the reverse: a Lashlang session must not be handed TypeScript.
-        // The last two are the *substrate* direction: internal identifiers the
-        // TypeScript lowerer needs are bound into every Lashlang host, and the
-        // host-environment section advertised them to a Lashlang reader.
-        "lashlang" => vec![
-            "<typescript>",
-            "</typescript>",
-            "typescript cell",
-            "typescript cells",
-            "console.log(",
-            "finish(value)",
-            "per cell",
-            "__typescript_runtime",
-            "typescript.runtime",
-        ],
-        other => panic!("unknown dialect `{other}`"),
-    }
-}
+/// Text that names the retired surface, with the reason each token is a defect.
+///
+/// A TypeScript session must never see the retired cell tag, its language name
+/// in prose, or its statement syntax.
+const RETIRED_SURFACE_MARKERS: &[&str] = &[
+    "<lashlang>",
+    "</lashlang>",
+    "lashlang block",
+    "lashlang blocks",
+    "bound in lashlang",
+    "`print ",
+    "re-print",
+    "finish <value>",
+    // The retired surface's *type* syntax, which the host-surface inventory is
+    // declared in and the prompt has to render. The bound-variable block
+    // renders a whole type line in it, not one token: pinning only `list[`
+    // described the leak as narrower than it is.
+    "list[",
+    // Written with the trailing punctuation so they cannot match TypeScript's
+    // own `: string` / `: number`.
+    ": str,",
+    ": int,",
+    "?: any |",
+    "-> str",
+    // The retired try-operator, in an authored tool example.
+    ")?",
+    "-> float",
+    "trigger.register",
+];
 
-/// Substrate identifiers that may appear in a prompt written in the other
-/// dialect's spelling. ADR 0063 holds the rule and the whole list; this is the
+/// Substrate identifiers that may appear in a prompt in the retired surface's
+/// spelling. ADR 0063 holds the rule and the whole list; this is the
 /// executable half of it.
 ///
 /// Exactly one qualifies, and it is a payload discriminant rather than prose:
@@ -145,12 +129,12 @@ fn strip_carve_outs(text: &str) -> String {
     text
 }
 
-fn assembled_prompt_fragments(dialect: &dyn RlmDialect) -> Vec<(&'static str, String)> {
+fn assembled_prompt_fragments(dialect: &TypescriptDialect) -> Vec<(&'static str, String)> {
     assembled_prompt_fragments_with_projection(dialect, serde_json::json!("src/lib.rs"))
 }
 
 fn assembled_prompt_fragments_with_projection(
-    dialect: &dyn RlmDialect,
+    dialect: &TypescriptDialect,
     projected_value: serde_json::Value,
 ) -> Vec<(&'static str, String)> {
     let vocabulary = dialect.prompt_vocabulary();
@@ -260,9 +244,7 @@ fn assembled_prompt_fragments_with_projection(
     // first version of this walker did exactly that and stayed green when the
     // TypeScript session was pointed back at Lashlang copy — the very bug it
     // exists to catch.
-    let mut session = dialect
-        .create_session()
-        .expect("dialect session for the bound-variables path");
+    let mut session = dialect.create_session();
     session
         .patch_globals(
             &lash_rlm_types::RlmGlobalsPatchPluginBody {
@@ -370,24 +352,14 @@ fn assembled_prompt_fragments_with_projection(
 }
 
 #[test]
-fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
-    let dialects: Vec<std::sync::Arc<dyn RlmDialect>> = vec![
-        std::sync::Arc::new(crate::dialect::lashlang_test_dialect()),
-        std::sync::Arc::new(crate::dialect::typescript_test_dialect()),
-    ];
-
+fn no_assembled_prompt_fragment_carries_the_retired_surfaces_words() {
+    let dialect = crate::dialect::typescript_test_dialect();
     let mut violations = Vec::new();
-    for dialect in &dialects {
-        let language_id = dialect.language_id();
-        let markers = foreign_markers(language_id);
-        for (name, fragment) in assembled_prompt_fragments(dialect.as_ref()) {
-            let haystack = strip_carve_outs(&fragment).to_lowercase();
-            for marker in &markers {
-                if haystack.contains(&marker.to_lowercase()) {
-                    violations.push(format!(
-                        "{language_id} prompt fragment `{name}` contains `{marker}`"
-                    ));
-                }
+    for (name, fragment) in assembled_prompt_fragments(&dialect) {
+        let haystack = strip_carve_outs(&fragment).to_lowercase();
+        for marker in RETIRED_SURFACE_MARKERS {
+            if haystack.contains(&marker.to_lowercase()) {
+                violations.push(format!("prompt fragment `{name}` contains `{marker}`"));
             }
         }
     }
@@ -398,7 +370,7 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
         .collect::<Vec<_>>();
     assert_eq!(
         violations, residuals,
-        "the assembled prompt mixes dialects, or a known residual changed. \
+        "the assembled prompt carries retired-surface words, or a known residual changed. \
          Fixing one means deleting its row from KNOWN_TYPE_SYNTAX_RESIDUALS."
     );
 }
@@ -408,25 +380,12 @@ fn no_assembled_prompt_fragment_carries_the_other_dialects_words() {
 // schema vocabulary; this simple-global fixture must have no dialect leaks.
 const KNOWN_TYPE_SYNTAX_RESIDUALS: &[&str] = &[];
 
-/// The walker only measures if its marker list can fire. Both vocabularies are
-/// asserted to be genuinely different so a future refactor cannot make the
-/// check vacuous by collapsing them.
+/// The walker only measures if its marker list can fire, and only proves
+/// anything if a rendered example is *parseable* TypeScript.
 #[test]
-fn the_two_vocabularies_are_actually_different() {
-    assert_ne!(
-        LASHLANG_PROMPT_VOCABULARY.cell_open_tag,
-        TYPESCRIPT_PROMPT_VOCABULARY.cell_open_tag
-    );
-    assert_ne!(
-        LASHLANG_PROMPT_VOCABULARY.print_call,
-        TYPESCRIPT_PROMPT_VOCABULARY.print_call
-    );
-    assert_ne!(
-        LASHLANG_PROMPT_VOCABULARY.finish_statement,
-        TYPESCRIPT_PROMPT_VOCABULARY.finish_statement
-    );
+fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     // RV-3: a rendered example must be *parseable* TypeScript, not merely free
-    // of foreign markers. The marker walk cannot tell "reads like TypeScript"
+    // of retired markers. The marker walk cannot tell "reads like TypeScript"
     // from "is a syntax error", and a syntax error in an example is exactly the
     // defect the examples fix exists to close. Parsed rather than linked: an
     // example names host modules and free identifiers that no isolated
@@ -450,21 +409,15 @@ fn the_two_vocabularies_are_actually_different() {
     );
 
     // Non-vacuity for the example surface: the *authored* corpus really does
-    // carry the try-operator, so the marker has something to catch. Reading it
-    // from the Lashlang rendering proves the fixture, not the assertion.
-    let example_fixture = assembled_prompt_fragments(&crate::dialect::lashlang_test_dialect())
-        .into_iter()
-        .find(|(name, _)| *name == "tool docs")
-        .expect("tool docs fragment");
+    // carry the try-operator, so the marker has something to catch.
     assert!(
-        example_fixture.1.contains(")?"),
-        "the fixture's authored examples must carry the try-operator: {}",
-        example_fixture.1
+        authored_tool_examples()
+            .iter()
+            .any(|example| example.contains(")?")),
+        "the authored corpus must carry the try-operator"
     );
 
-    // The example surface specifically: a TypeScript reader must be shown the
-    // examples rewritten, and the Lashlang reader must still get the original.
-    let typescript = crate::dialect::typescript_test_dialect();
+    // The rewriter itself: a reader must be shown the examples rewritten.
     assert_eq!(
         typescript.render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#),
         r#"await web.fetch({ url: "https://example.test/" });"#
@@ -473,17 +426,15 @@ fn the_two_vocabularies_are_actually_different() {
         typescript.render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page"),
         "const page = await web.fetch({ url: \"u\" });\nfinish(page);"
     );
-    let lashlang = crate::dialect::lashlang_test_dialect();
-    assert_eq!(
-        lashlang.render_tool_example("finish page"),
-        "finish page",
-        "the authored form is Lashlang's own and must pass through untouched"
-    );
 
-    // And the markers themselves must be present in the opposite dialect's
-    // real copy, or the walker is looking for strings nothing ever emits.
-    assert!(foreign_markers("typescript").contains(&"<lashlang>"));
-    assert!(foreign_markers("lashlang").contains(&"<typescript>"));
+    // And the markers themselves must be present in the retired surface's real
+    // copy, or the walker is looking for strings nothing ever emitted.
+    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lashlang>"));
+    assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
+    assert_ne!(
+        TYPESCRIPT_PROMPT_VOCABULARY.cell_open_tag, "<lashlang>",
+        "the sole vocabulary must not be the retired one"
+    );
 }
 
 /// Every construct family the dialect accepts is mentioned somewhere in the

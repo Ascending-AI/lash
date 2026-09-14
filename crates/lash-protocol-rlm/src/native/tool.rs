@@ -1,11 +1,11 @@
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
 use lash_core::llm::types::LlmToolSpec;
 use lash_core::{LlmOutputPart, Part, PartKind};
 
 /// The sole provider-native RLM tool. Termination remains inside its program.
 pub const NATIVE_EXECUTE_TOOL_NAME: &str = "execute_code";
 
-pub(super) fn tool_spec(dialect: &dyn RlmDialect) -> LlmToolSpec {
+pub(super) fn tool_spec(dialect: &TypescriptDialect) -> LlmToolSpec {
     let definition = lash_core::ToolDefinition::raw(
         "rlm:execute_code",
         NATIVE_EXECUTE_TOOL_NAME,
