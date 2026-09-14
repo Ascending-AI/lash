@@ -578,6 +578,30 @@ impl Printer {
                 ))
             }
             Expr::Function(function) => self.arrow(function),
+            // An inline process body prints back as the authored async arrow
+            // in its argument position, which re-parses to the same literal.
+            Expr::ProcessLiteral(literal) => {
+                let body = crate::lower::wrapped_run_body(&literal.body).ok_or(
+                    TypeScriptSourceError::Unrepresentable {
+                        kind: "a process body that is not the lowerer's wrapper",
+                    },
+                )?;
+                let params = literal
+                    .params
+                    .iter()
+                    .map(|param| self.identifier("process parameter", param.name.as_str()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut bound = literal
+                    .params
+                    .iter()
+                    .map(|param| param.name.to_string())
+                    .collect();
+                Ok(format!(
+                    "async ({}) => {}",
+                    params.join(", "),
+                    self.block(body, 0, &mut bound)?
+                ))
+            }
             Expr::Field { target, field } => Ok(format!(
                 "{}.{}",
                 self.member_target(target)?,

@@ -467,6 +467,11 @@ pub enum Expr {
     /// A user-defined function value. This node is AST-only; the parser never
     /// produces it. Captures are copied when the closure is created.
     Function(Box<FunctionExpr>),
+    /// An inline process body written where a `Process`-typed slot is
+    /// expected. This node is AST-only and never survives the link: the
+    /// linker's expected-type hook lifts it to a hoisted [`ProcessDecl`], and a
+    /// literal whose slot is not a process is a type error.
+    ProcessLiteral(Box<ProcessLiteralExpr>),
     /// Calls a user-defined function value.
     Call {
         function: Box<Expr>,
@@ -542,6 +547,43 @@ pub struct FunctionExpr {
     pub params: Vec<AstString>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<AstString>,
+    pub body: Box<Expr>,
+}
+
+/// The prefix on every declaration name the linker derives from a lifted
+/// process literal. A dialect that authors process names from source text can
+/// never collide with one, because the linker invents these and no authored
+/// name can start with it by accident.
+pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
+
+/// The name a body at a given AST path lifts to.
+///
+/// A digest over the canonical body plus the path, so it is a function of what
+/// the body *is* and where it sits — never of link order, span tables, or
+/// anything else a re-derivation could reorder. The linker's lift and the
+/// workflow lens's literal projection must agree on this spelling.
+pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
+    let preimage = serde_json::json!({
+        "body": body,
+        "path": path,
+    });
+    let digest = lash_sansio::core_support::blake3_domain_hash_hex(
+        "lash-lifted-process-name/v1",
+        preimage.to_string(),
+    );
+    format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
+}
+
+/// The authored shape of an inline process body, as a dialect lowers it.
+///
+/// `params` carries the parameter names and their declared types, so a
+/// TypeScript arrow's annotations reach the lifted declaration's signature
+/// instead of widening to `Any`. `body` is the same wrapper a `defineProcess`
+/// run lowers to: the authored statements inside the process-failure wrapper,
+/// with the params passed through by name.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessLiteralExpr {
+    pub params: Vec<ProcessParam>,
     pub body: Box<Expr>,
 }
 
@@ -661,6 +703,7 @@ impl Expr {
                 buffer.extend(args.iter())
             }
             Expr::Function(function) => buffer.push(&function.body),
+            Expr::ProcessLiteral(literal) => buffer.push(&literal.body),
             Expr::Call { function, args } => {
                 buffer.push(function);
                 buffer.extend(args.iter());
@@ -871,6 +914,10 @@ where
             params: function.params,
             captures: function.captures,
             body: Box::new(folder.fold_expr(*function.body)),
+        })),
+        Expr::ProcessLiteral(literal) => Expr::ProcessLiteral(Box::new(ProcessLiteralExpr {
+            params: literal.params,
+            body: Box::new(folder.fold_expr(*literal.body)),
         })),
         Expr::Call { function, args } => Expr::Call {
             function: Box::new(folder.fold_expr(*function)),

@@ -30,12 +30,17 @@ pub(super) fn is_trigger_registration_operation(operation: &str) -> bool {
 /// The rewrite every trigger-input diagnostic points at.
 const INPUTS_ARROW_REWRITE: &str = "pass the fired event as the `inputs` arrow's parameter: `inputs: (event) => ({ tick: event })`, where `tick` is the target's parameter name; omit `inputs` entirely when the target takes exactly one parameter";
 
-/// The unresolved path the linker recognises as "the whole fired event".
+/// The record the linker reads as "the whole fired event".
+///
+/// The lowerer emits the marker form directly: the linker no longer rewrites a
+/// `trigger.event` path into it, because trigger registrations lower through
+/// the operation contract like any other call (FIG-2997). The bytes are the
+/// ones the linker used to produce, so linked artifacts do not move.
 fn trigger_event_marker() -> LashExpr {
-    LashExpr::ResourceRef(ResourceRefExpr::unresolved(vec![
-        "trigger".into(),
-        "event".into(),
-    ]))
+    LashExpr::Record(vec![(
+        lashlang::LASH_TRIGGER_EVENT_KEY.into(),
+        LashExpr::Bool(true),
+    )])
 }
 
 fn mentions_identifier(expr: &Expr, name: &str) -> bool {
@@ -111,21 +116,32 @@ impl Lowerer {
 
     /// Lowers a registration target to the process it names.
     ///
-    /// `require_literal_process_target` has already established that the target
-    /// is a top-level `defineProcess` binding, and such a binding holds exactly
-    /// this reference — so naming the process directly is the same value the
-    /// variable read would have produced. It is not the same *program*: a
-    /// variable read is a capture, and `defineProcess.run` refuses captures, so
-    /// reading the binding made a process registering a trigger against
-    /// another process unwritable (FIG-3059). A reference has nothing to
-    /// capture.
+    /// Two shapes name a process: a top-level `defineProcess` binding, and an
+    /// inline async arrow — the arrow is a process literal, and the linker
+    /// lifts it where the `target` slot's expected type is `Process` (the same
+    /// rule every other process slot uses; FIG-2997).
     ///
-    /// Only a registration written *inside* a process body takes this route.
-    /// At the top level the binding is in scope with nothing to capture, and
-    /// the variable read is the form every stored artifact was built from; the
-    /// canonical IR there is durable, so it does not move for a rewrite that
-    /// buys nothing.
+    /// A binding read is not the same *program* as a reference: a variable
+    /// read is a capture, and `defineProcess.run` refuses captures, so reading
+    /// the binding made a process registering a trigger against another
+    /// process unwritable (FIG-3059). A reference has nothing to capture.
+    ///
+    /// Only a registration written *inside* a process body takes the binding
+    /// route. At the top level the binding is in scope with nothing to
+    /// capture, and the variable read is the form every stored artifact was
+    /// built from; the canonical IR there is durable, so it does not move for
+    /// a rewrite that buys nothing.
     fn lower_process_target(&mut self, target: &Expr) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Function(function) = target {
+            if !function.is_async {
+                return Err(Diagnostic::new(
+                    DiagnosticCode::ProcessTargetStaticRequired,
+                    "a trigger target written inline must be an async arrow; a plain arrow is not a process body",
+                    None,
+                ));
+            }
+            return self.lower_process_literal_arrow(function);
+        }
         if self.process_depth > 0
             && let Expr::Ident(name, _) = target
             && let Ok(BindingRole::ProcessDefinition(process)) =
@@ -138,7 +154,8 @@ impl Lowerer {
         self.lower_expr(target)
     }
 
-    /// The registration target names a top-level `defineProcess` binding.
+    /// The registration target names a top-level `defineProcess` binding, or
+    /// is an inline async arrow the linker will lift.
     ///
     /// `start` has always required that (`ProcessTargetStaticRequired`); the
     /// registration path did not, so `const t = p` followed by
@@ -147,6 +164,16 @@ impl Lowerer {
     /// The prompt has said "Literal target" the whole time; this is the rule
     /// that makes it true, on all four registration spellings.
     fn require_literal_process_target(&self, target: &Expr) -> Result<(), Diagnostic> {
+        if let Expr::Function(function) = target {
+            if function.is_async {
+                return Ok(());
+            }
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessTargetStaticRequired,
+                "a trigger target written inline must be an async arrow; a plain arrow is not a process body",
+                None,
+            ));
+        }
         if let Expr::Ident(name, _) = target
             && matches!(
                 self.binding(name).map(|binding| &binding.role),
@@ -157,7 +184,7 @@ impl Lowerer {
         }
         Err(Diagnostic::new(
             DiagnosticCode::ProcessTargetStaticRequired,
-            "a trigger target is the name of a top-level defineProcess binding, never an alias or an expression",
+            "a trigger target is the name of a top-level defineProcess binding or an inline async arrow, never an alias or an expression",
             None,
         ))
     }

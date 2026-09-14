@@ -1,64 +1,6 @@
 use super::*;
 
 impl<'module> Linker<'module> {
-    pub(super) fn derive_default_trigger_key(
-        &self,
-        receiver: &Expr,
-        operation: &AstString,
-        args: &[Expr],
-        scope: &Scope,
-    ) -> Result<Option<String>, LinkError> {
-        if !self.collect_trigger_keys.get()
-            || operation.as_str() != crate::TriggerHostOperation::Register.receiver_method()
-            || !matches!(
-                receiver,
-                Expr::ResourceRef(resource)
-                    if crate::is_trigger_resource_type(resource.resource_type.as_str())
-            )
-        {
-            return Ok(None);
-        }
-        let Ok(call) = crate::register_call_args(args) else {
-            return Ok(None);
-        };
-        if call.subscription_key.is_some() {
-            return Ok(None);
-        }
-        let Some((source_type, source_key)) =
-            static_trigger_source(call.source, &scope.static_trigger_bindings)
-        else {
-            return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: scope.span });
-        };
-        let Some(process) = static_trigger_target(call.target, &scope.static_trigger_bindings)
-        else {
-            return Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { span: scope.span });
-        };
-        if !self.derived_trigger_registrations.borrow_mut().insert((
-            process.clone(),
-            source_type.clone(),
-            source_key.clone(),
-        )) {
-            return Err(LinkError::DuplicateDerivedTriggerSubscriptionKey {
-                process,
-                source_type,
-                span: scope.span,
-            });
-        }
-        Ok(Some(semantic_trigger_subscription_key(
-            &process,
-            &source_type,
-            &source_key,
-        )))
-    }
-
-    pub(super) fn static_trigger_binding_for(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-    ) -> Option<StaticTriggerBinding> {
-        static_trigger_binding(expr, &scope.static_trigger_bindings)
-    }
-
     pub(super) fn validate_process_arg_binding(
         &self,
         process: &str,
@@ -176,7 +118,8 @@ impl<'module> Linker<'module> {
                 source_ty: format_type_expr(&source_ty),
                 span: scope.span,
             })?;
-        let (target, target_binding) = self.lower_expr(call.target, scope)?;
+        let (target, target_binding) =
+            self.lower_expr_expected(call.target, scope, Some(&process_unknown_type()))?;
         let target_ty = binding_type(&target_binding);
         let params = self.trigger_target_params(&target_ty, scope.span)?;
         let process = trigger_target_process_label(call.target);
@@ -299,7 +242,7 @@ impl<'module> Linker<'module> {
             if is_trigger_event_projection_expr(value) {
                 return Err(LinkError::TriggerEventProjection { span: scope.span });
             }
-            if is_trigger_event_expr(value) {
+            if is_trigger_event_expr(value) || is_trigger_event_placeholder_expr(value) {
                 saw_event = true;
                 if !self.is_type_assignable(event_ty, &param.ty) {
                     return Err(LinkError::TriggerEventMismatch {
@@ -309,6 +252,9 @@ impl<'module> Linker<'module> {
                         span: scope.span,
                     });
                 }
+                // The dialect emits the marker record directly now; an older
+                // `trigger.event` path is rewritten to the same bytes so both
+                // spellings produce one canonical IR.
                 lowered.push((name.clone(), crate::trigger_event_placeholder_expr()));
                 continue;
             }
@@ -470,114 +416,4 @@ fn validate_trigger_subscription_key_literal(
         return Err(LinkError::InvalidTriggerSubscriptionKey { span });
     }
     Ok(())
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum StaticTriggerBinding {
-    Source {
-        source_type: String,
-        source_key: String,
-    },
-    Target(String),
-    Json(serde_json::Value),
-}
-
-fn static_trigger_binding(
-    expr: &Expr,
-    bindings: &BTreeMap<String, StaticTriggerBinding>,
-) -> Option<StaticTriggerBinding> {
-    if let Some((source_type, source_key)) = static_trigger_source(expr, bindings) {
-        return Some(StaticTriggerBinding::Source {
-            source_type,
-            source_key,
-        });
-    }
-    if let Some(process) = static_trigger_target(expr, bindings) {
-        return Some(StaticTriggerBinding::Target(process));
-    }
-    static_trigger_json(expr, bindings).map(StaticTriggerBinding::Json)
-}
-
-fn static_trigger_source(
-    expr: &Expr,
-    bindings: &BTreeMap<String, StaticTriggerBinding>,
-) -> Option<(String, String)> {
-    match expr {
-        Expr::Variable(name) => match bindings.get(name.as_str())? {
-            StaticTriggerBinding::Source {
-                source_type,
-                source_key,
-            } => Some((source_type.clone(), source_key.clone())),
-            StaticTriggerBinding::Target(_) | StaticTriggerBinding::Json(_) => None,
-        },
-        Expr::HostDescriptorConstructor { type_name, input } => {
-            let source = static_trigger_json(input, bindings).or_else(|| {
-                serde_json::to_value(input)
-                    .ok()
-                    .map(|input| serde_json::json!({ "dynamic_expression": input }))
-            })?;
-            Some((
-                type_name.to_string(),
-                semantic_trigger_source_key(type_name.as_str(), &source),
-            ))
-        }
-        _ => None,
-    }
-}
-
-pub(super) fn semantic_trigger_source_key(source_type: &str, source: &serde_json::Value) -> String {
-    lash_core::facade_support::default_trigger_source_key(source_type, source)
-}
-
-pub(super) fn semantic_trigger_subscription_key(
-    process_name: &str,
-    source_type: &str,
-    source_key: &str,
-) -> String {
-    lash_core::facade_support::derived_trigger_subscription_key(
-        process_name,
-        source_type,
-        source_key,
-    )
-}
-
-fn static_trigger_target(
-    expr: &Expr,
-    bindings: &BTreeMap<String, StaticTriggerBinding>,
-) -> Option<String> {
-    match expr {
-        Expr::Variable(name) => match bindings.get(name.as_str())? {
-            StaticTriggerBinding::Target(process) => Some(process.clone()),
-            StaticTriggerBinding::Source { .. } | StaticTriggerBinding::Json(_) => None,
-        },
-        Expr::ProcessRef { process } => Some(process.to_string()),
-        _ => None,
-    }
-}
-
-fn static_trigger_json(
-    expr: &Expr,
-    bindings: &BTreeMap<String, StaticTriggerBinding>,
-) -> Option<serde_json::Value> {
-    match expr {
-        Expr::Null => Some(serde_json::Value::Null),
-        Expr::Bool(value) => Some((*value).into()),
-        Expr::Number(value) => serde_json::Number::from_f64(*value).map(Into::into),
-        Expr::String(value) => Some(value.to_string().into()),
-        Expr::Variable(name) => match bindings.get(name.as_str())? {
-            StaticTriggerBinding::Json(value) => Some(value.clone()),
-            StaticTriggerBinding::Source { .. } | StaticTriggerBinding::Target(_) => None,
-        },
-        Expr::Tuple(items) | Expr::List(items) => items
-            .iter()
-            .map(|item| static_trigger_json(item, bindings))
-            .collect::<Option<Vec<_>>>()
-            .map(Into::into),
-        Expr::Record(entries) => entries
-            .iter()
-            .map(|(name, value)| Some((name.to_string(), static_trigger_json(value, bindings)?)))
-            .collect::<Option<serde_json::Map<_, _>>>()
-            .map(Into::into),
-        _ => None,
-    }
 }

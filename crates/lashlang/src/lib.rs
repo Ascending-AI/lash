@@ -31,11 +31,12 @@ pub use artifact::{
 pub use ast::{
     AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, ExprFolder,
     ExprVisitor, ExpressionSourceSpan, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata,
-    ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessSignature, ProcessSignatureError, ProcessStartExpr, ProcessType,
-    Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    check_ast_nesting_depth, fold_expr_children, format_type_expr, validate_ast, walk_expr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
+    LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
+    ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
+    ProcessStartExpr, ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
+    TypeField, UnaryOp, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, validate_ast, walk_expr,
 };
 
 /// Names of every source Lashlang builtin, in registry order.

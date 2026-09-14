@@ -59,9 +59,18 @@ pub(crate) fn process_run_wrapper(closure: Expr, call_args: Vec<Expr>) -> Expr {
 /// `None` for any process body this module did not build: a lashlang-authored
 /// process has no wrapper and no inner body to unwrap.
 pub(crate) fn process_run_body_path(process: &ProcessDecl) -> Option<(Vec<u32>, &Expr)> {
+    let (path, body) = _wrapped_run_body_path(&process.body)?;
+    Some((path, body))
+}
+
+/// The authored body inside a wrapper-shaped process body, ignoring the path.
+pub(crate) fn wrapped_run_body(body: &Expr) -> Option<&Expr> {
+    _wrapped_run_body_path(body).map(|(_, body)| body)
+}
+
+fn _wrapped_run_body_path(wrapper: &Expr) -> Option<(Vec<u32>, &Expr)> {
     let mut path = Vec::new();
 
-    let wrapper = &process.body;
     let Expr::Try(try_expr) = wrapper else {
         return None;
     };
@@ -119,4 +128,10 @@ fn child_index(parent: &Expr, child: &Expr) -> Option<u32> {
         std::ptr::eq(std::ptr::from_ref(candidate), std::ptr::from_ref(child))
     })?;
     u32::try_from(index).ok()
+}
+
+/// The authored body and its wrapper AST path of any wrapper-shaped process
+/// body, not just a declaration's.
+pub(crate) fn process_run_body_path_of(body: &Expr) -> Option<(Vec<u32>, &Expr)> {
+    _wrapped_run_body_path(body)
 }

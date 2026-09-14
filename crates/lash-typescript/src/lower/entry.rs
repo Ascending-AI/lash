@@ -105,6 +105,7 @@ fn lower_with_ambient_kind(
         root_scope_depth: 2,
         root_assigned_identifiers: assigned_identifiers_in_statements(&program.statements),
         module_authority_roots: module_authority_roots.clone(),
+        called_bindings: super::binding::called_binding_names(&program.statements),
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();

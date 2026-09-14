@@ -478,6 +478,23 @@ impl Lowerer {
                 .collect::<Result<_, _>>()?,
         })
     }
+
+    /// Lowers one tool-call argument, discovering an inline process body.
+    ///
+    /// An async arrow in a tool call's argument position is a process literal
+    /// (FIG-2997): the linker decides from the slot's expected type whether it
+    /// lifts to a hoisted declaration or is a type error naming the slot. A
+    /// non-async arrow is an ordinary closure value and lowers as one; a
+    /// dynamic call keeps that shape too, since its slots carry no contract to
+    /// decide with.
+    fn lower_call_argument(&mut self, arg: &Expr) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Function(function) = arg
+            && function.is_async
+        {
+            return self.lower_process_literal_arrow(function);
+        }
+        self.lower_expr(arg)
+    }
     fn lower_member_call(
         &mut self,
         callee: &Expr,
@@ -1066,7 +1083,7 @@ impl Lowerer {
             vec![self.lower_trigger_config(config)?]
         } else {
             args.iter()
-                .map(|arg| self.lower_expr(arg))
+                .map(|arg| self.lower_call_argument(arg))
                 .collect::<Result<_, _>>()?
         };
         let call = LashExpr::ReceiverCall {

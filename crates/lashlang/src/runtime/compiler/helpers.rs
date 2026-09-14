@@ -173,6 +173,9 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. } => true,
+        // A literal lowers away before compilation, so it never carries a
+        // label; the hoisted declaration it becomes does.
+        Expr::ProcessLiteral(_) => false,
         Expr::Block(_)
         | Expr::Null
         | Expr::Undefined
@@ -241,6 +244,7 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::Variable(_)
         | Expr::ProcessRef { .. }
         | Expr::ResourceRef(_) => true,
+        Expr::ProcessLiteral(literal) => is_pure_expr(&literal.body),
         Expr::Tuple(items) => items.iter().all(is_pure_expr),
         Expr::List(items) => items.iter().all(is_pure_expr),
         Expr::Record(entries) => entries.iter().all(|(_, value)| is_pure_expr(value)),

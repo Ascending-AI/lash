@@ -39,7 +39,9 @@ pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_work
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
 use param_types::process_param_type;
-pub(crate) use process_wrapper::process_run_body_path;
+pub(crate) use process_wrapper::{
+    process_run_body_path, process_run_body_path_of, wrapped_run_body,
+};
 use triggers::{
     is_trigger_registration_operation, names_the_retired_trigger_event,
     retired_trigger_event_diagnostic,
@@ -114,6 +116,10 @@ struct Lowerer {
     intrinsic_global_slots: BTreeSet<String>,
     module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
+    /// The source-level names this program calls, computed once before
+    /// lowering. A `const`-bound async arrow outside this set is a
+    /// process-literal candidate (FIG-2997).
+    called_bindings: BTreeSet<String>,
 }
 
 impl Lowerer {
@@ -401,6 +407,7 @@ impl Lowerer {
                     if let (Some(name), Some(Expr::Function(function))) =
                         (process_name, declaration.init.as_ref())
                         && function.is_async
+                        && !self.called_bindings.contains(name)
                     {
                         self.set_role(name, BindingRole::AsyncHelper)?;
                     }
@@ -462,6 +469,16 @@ impl Lowerer {
                             ));
                         };
                         self.lower_process_definition(process_name, init)?
+                    } else if let (Some(name), Some(Expr::Function(function))) =
+                        (process_name, declaration.init.as_ref())
+                        && *kind == VarKind::Const
+                        && function.is_async
+                        && !self.called_bindings.contains(name)
+                    {
+                        // A `const`-bound arrow the program never calls is an
+                        // inline process body (FIG-2997): the linker lifts it
+                        // where a `Process` slot asks for it.
+                        self.lower_process_literal_arrow(function)?
                     } else {
                         declaration
                             .init
@@ -1206,6 +1223,64 @@ impl Lowerer {
         Ok(LashExpr::ProcessRef {
             process: process_name.as_str().into(),
         })
+    }
+
+    /// Lowers an inline async arrow as a process literal (FIG-2997).
+    ///
+    /// The arrow is discovered syntactically — in argument position, or bound
+    /// to a `const` that never calls it — and lowered exactly like a
+    /// `defineProcess.run`: one runtime parameter per source parameter, the
+    /// declared annotation kept as the parameter's type, the authored body
+    /// wrapped so an uncaught error fails the process. Acceptance is the
+    /// linker's decision, made from the slot's expected type.
+    fn lower_process_literal_arrow(&mut self, function: &Function) -> Result<LashExpr, Diagnostic> {
+        debug_assert!(function.is_async, "caller checked the arrow is async");
+        let closure = self.with_process(|lowerer| lowerer.lower_function(function, None))?;
+        let run = match &closure {
+            LashExpr::Function(function) => function.as_ref(),
+            LashExpr::BuiltinCall { args, .. } => {
+                let [LashExpr::Function(function), ..] = args.as_slice() else {
+                    unreachable!("closure intrinsic contains a function")
+                };
+                function
+            }
+            _ => unreachable!("run lowering returns a function"),
+        };
+        if !run.captures.is_empty() {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ProcessCaptureUnsupported,
+                "a process body must receive durable inputs as parameters",
+                None,
+            ));
+        }
+        let params = run
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                let ty = match function.params.get(index) {
+                    Some(Pattern::Ident(source_name, Some(annotation))) => {
+                        process_param_type("process", source_name, annotation)?
+                    }
+                    _ => TypeExpr::Any,
+                };
+                Ok(ProcessParam {
+                    name: slot.clone(),
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let call_args = run
+            .params
+            .iter()
+            .map(|name| LashExpr::Variable(name.clone()))
+            .collect();
+        Ok(LashExpr::ProcessLiteral(Box::new(
+            lashlang::ProcessLiteralExpr {
+                params,
+                body: Box::new(process_wrapper::process_run_wrapper(closure, call_args)),
+            },
+        )))
     }
 
     fn lower_assign_target(&mut self, target: &TsAssignTarget) -> Result<AssignTarget, Diagnostic> {

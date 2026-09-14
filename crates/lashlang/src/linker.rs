@@ -30,25 +30,25 @@ mod pass_setup;
 use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
 mod pass_validation;
-use pass_validation::{
-    StaticTriggerBinding, semantic_trigger_source_key, validate_trigger_operation_subscription_key,
-};
+mod process_literal;
+use pass_validation::validate_trigger_operation_subscription_key;
 mod type_helpers;
 use type_helpers::{
     Completion, Scope, any_binding, binary_op_source, binary_operands_compatible,
     binary_return_type, binding_type, call_input_type, direct_call_input_field,
     expected_call_arg_type, expr_has_label_annotation, field_type, index_type,
-    is_trigger_event_expr, is_trigger_event_projection_expr, iterable_item_type,
-    label_annotation_path, literal_type, membership_key_type, module_path_for_expr,
-    process_input_record_type, process_input_type, process_type_for_decl,
-    shaping_builtin_return_type, shaping_comparable_type, shaping_list_item, shaping_number_type,
-    shaping_record_type, shaping_text_type, strip_label_annotation, trigger_target_process_label,
-    union_type,
+    is_trigger_event_expr, is_trigger_event_placeholder_expr, is_trigger_event_projection_expr,
+    iterable_item_type, label_annotation_path, literal_type, membership_key_type,
+    module_path_for_expr, process_input_record_type, process_input_type, process_type_for_decl,
+    process_unknown_type, shaping_builtin_return_type, shaping_comparable_type, shaping_list_item,
+    shaping_number_type, shaping_record_type, shaping_text_type, strip_label_annotation,
+    trigger_target_process_label, union_type,
 };
 mod facets;
 pub use facets::analyze_workflow_program;
 use facets::{
-    expression_spans_by_pointer, recover_workflow_binding, workflow_diagnostic_owner_key,
+    expression_paths_by_pointer, expression_spans_by_pointer, recover_workflow_binding,
+    workflow_diagnostic_owner_key,
 };
 #[cfg(test)]
 mod tests;
@@ -81,6 +81,3 @@ pub(crate) struct WorkflowLinkExpectedArgument {
 struct ExpectedTypeFacts {
     by_expression: BTreeMap<usize, TypeExpr>,
 }
-
-#[cfg(test)]
-use pass_validation::semantic_trigger_subscription_key;

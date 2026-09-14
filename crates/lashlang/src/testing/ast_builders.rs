@@ -122,6 +122,17 @@ pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration
     })
 }
 
+/// An inline process body where a `Process` slot expects one (FIG-2997).
+///
+/// `body` is the authored run body, exactly as a dialect hands it to the
+/// lift: parameters named by `params`, output read off its `finish` values.
+pub fn process_literal(params: Vec<ProcessParam>, body: Expr) -> Expr {
+    Expr::ProcessLiteral(Box::new(crate::ProcessLiteralExpr {
+        params,
+        body: Box::new(body),
+    }))
+}
+
 /// `process <name>(<params>) -> <return_ty> { <body> }`.
 pub fn process_returning(
     name: &str,

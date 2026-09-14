@@ -506,12 +506,17 @@ fn linked_module_accepts_explicit_trigger_input_mappings() {
 }
 
 #[test]
-fn linked_module_rejects_colliding_default_trigger_keys() {
+fn linked_module_leaves_identical_registrations_to_the_host_idempotent_register() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // first = timer.Schedule({ expr: "0 8 * * *" })
     // second = timer.Schedule({ expr: "0 8 * * *" })
     // await triggers.register({ source: first, target: scan, inputs: { tick: trigger.event } })?
     // await triggers.register({ source: second, target: scan, inputs: { tick: trigger.event } })?
+    //
+    // Subscriptions are runtime identity (FIG-2997): the host materializes a
+    // derived key from the descriptor value and target, and an identical
+    // definition re-registers idempotently while a changed one conflicts.
+    // The linker has no derived-key ledger left to collide on.
     let program = builders::module(
         vec![tick_process_returning_fired_at("scan", "tick")],
         vec![
@@ -522,21 +527,8 @@ fn linked_module_rejects_colliding_default_trigger_keys() {
         ],
     );
 
-    let error = LinkedModule::link(program, full_host_environment())
-        .expect_err("duplicate derived keys must fail linking");
-    assert!(matches!(
-        &error,
-        LinkError::DuplicateDerivedTriggerSubscriptionKey {
-            process,
-            source_type,
-            ..
-        } if process == "scan" && source_type == "timer.Schedule"
-    ));
-    assert!(
-        error
-            .to_string()
-            .contains("explicit literal subscription_key")
-    );
+    LinkedModule::link(program, full_host_environment())
+        .expect("identical registrations hand their identity to the host");
 }
 
 #[test]
@@ -580,10 +572,7 @@ fn linked_module_allows_explicit_keys_for_default_key_collision_shape() {
 }
 
 #[test]
-fn linked_artifact_materializes_explicit_and_generated_keys_into_register_calls() {
-    let source = serde_json::json!({ "expr": "0 8 * * *" });
-    let source_key = semantic_trigger_source_key("timer.Schedule", &source);
-    let derived_key = semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key);
+fn linked_artifact_keeps_explicit_keys_and_leaves_derivation_to_the_runtime() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // morning = timer.Schedule({ expr: "0 8 * * *" })
     // evening = timer.Schedule({ expr: "0 18 * * *" })
@@ -614,13 +603,12 @@ fn linked_artifact_materializes_explicit_and_generated_keys_into_register_calls(
     let linked =
         LinkedModule::link(program, full_host_environment()).expect("link manifest module");
 
-    // The key the linker derived and the key the program stated both reach the
-    // artifact as literals on the register call, which is what a replaying host
-    // matches a registration on. The IR is read directly: the crate no longer
-    // renders source to read it back out of (ADR 0096).
+    // The key the program stated reaches the artifact as a literal; a
+    // registration without one names no key at all. The host derives the
+    // identity from the descriptor value and the target it actually carries,
+    // so the linker has nothing left to attribute.
     let keys = subscription_keys(&linked.artifact.canonical_ir);
-    assert!(keys.contains(&derived_key), "{keys:?}");
-    assert!(keys.contains(&"evening-scan".to_string()), "{keys:?}");
+    assert_eq!(keys, vec!["evening-scan".to_string()], "{keys:?}");
 }
 
 /// Every `subscription_key:` string literal in `program`, in walk order.

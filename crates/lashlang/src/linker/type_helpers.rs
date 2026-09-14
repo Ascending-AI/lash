@@ -3,7 +3,6 @@ use super::*;
 #[derive(Clone)]
 pub(super) struct Scope {
     pub(super) bindings: BTreeMap<String, Binding>,
-    pub(super) static_trigger_bindings: BTreeMap<String, StaticTriggerBinding>,
     pub(super) process_body: bool,
     pub(super) expected_return: Option<TypeExpr>,
     pub(super) span: Option<Span>,
@@ -13,7 +12,6 @@ impl Scope {
     pub(super) fn new(process_body: bool, span: Option<Span>) -> Self {
         Self {
             bindings: BTreeMap::new(),
-            static_trigger_bindings: BTreeMap::new(),
             process_body,
             expected_return: None,
             span,
@@ -23,7 +21,6 @@ impl Scope {
     pub(super) fn bind(&mut self, name: &str, binding: Binding) -> PreviousBinding {
         PreviousBinding {
             binding: self.bindings.insert(name.to_string(), binding),
-            static_trigger: self.static_trigger_bindings.remove(name),
         }
     }
 
@@ -34,31 +31,6 @@ impl Scope {
             }
             None => {
                 self.bindings.remove(name);
-            }
-        }
-        match previous.static_trigger {
-            Some(binding) => {
-                self.static_trigger_bindings
-                    .insert(name.to_string(), binding);
-            }
-            None => {
-                self.static_trigger_bindings.remove(name);
-            }
-        }
-    }
-
-    pub(super) fn set_static_trigger_binding(
-        &mut self,
-        name: &str,
-        binding: Option<StaticTriggerBinding>,
-    ) {
-        match binding {
-            Some(binding) => {
-                self.static_trigger_bindings
-                    .insert(name.to_string(), binding);
-            }
-            None => {
-                self.static_trigger_bindings.remove(name);
             }
         }
     }
@@ -83,22 +55,6 @@ impl Scope {
                 join_optional_bindings(left.bindings.get(&name), right.bindings.get(&name));
             self.bindings.insert(name, binding);
         }
-        let static_names = left
-            .static_trigger_bindings
-            .keys()
-            .chain(right.static_trigger_bindings.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        self.static_trigger_bindings.clear();
-        for name in static_names {
-            if let (Some(left), Some(right)) = (
-                left.static_trigger_bindings.get(&name),
-                right.static_trigger_bindings.get(&name),
-            ) && left == right
-            {
-                self.static_trigger_bindings.insert(name, left.clone());
-            }
-        }
     }
 
     pub(super) fn widen_loop(&mut self, before: Scope, after_one_pass: Scope) {
@@ -122,14 +78,12 @@ impl Scope {
         };
         let updated = update_binding_path(binding, &target.steps, value_ty, self.span)?;
         self.bind(target.root.as_str(), updated);
-        self.static_trigger_bindings.remove(target.root.as_str());
         Ok(())
     }
 }
 
 pub(super) struct PreviousBinding {
     binding: Option<Binding>,
-    static_trigger: Option<StaticTriggerBinding>,
 }
 
 #[derive(Clone, Debug)]
@@ -768,4 +722,21 @@ pub(super) fn label_annotation_path(expr: &Expr) -> Option<Vec<u32>> {
             path
         })
     })
+}
+
+/// The contract type of a slot that accepts any process.
+pub(super) fn process_unknown_type() -> TypeExpr {
+    TypeExpr::Process(crate::ProcessType::unknown())
+}
+
+/// Whether an expression is already the canonical whole-fired-event marker
+/// record — `{"$lash.trigger.event": true}` — that a dialect lowerer emits
+/// from the `inputs` arrow template (FIG-2997).
+pub(super) fn is_trigger_event_placeholder_expr(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Record(entries) if entries.len() == 1
+            && entries[0].0.as_str() == crate::LASH_TRIGGER_EVENT_KEY
+            && entries[0].1 == Expr::Bool(true)
+    )
 }

@@ -124,6 +124,25 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "workflow_graph__test",
+    crate_features = [],
+    crate_name = "workflow_graph",
+    crate_root = "tests/workflow_graph.rs",
+    declared_features = [],
+    extra_compile_data = [],
+    library = ":workflow-graph-roundtrip",
+    library_crate_name = "workflow_graph_roundtrip",
+    manifest_dir = "examples/workflow-graph-roundtrip",
+    package_name = "workflow-graph-roundtrip",
+    rustc_env = {},
+    tags = [
+        "cargo-frontend-assets",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

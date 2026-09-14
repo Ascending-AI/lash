@@ -1078,6 +1078,15 @@ fn write_expr<'program>(
             write_label_metadata(writer, label);
             write_expr(writer, expr, normalizer);
         }
+        Expr::ProcessLiteral(literal) => {
+            writer.atom("process-literal");
+            for param in &literal.params {
+                writer.atom("param");
+                writer.atom(param.name.as_str());
+                write_type(writer, &param.ty);
+            }
+            write_expr(writer, &literal.body, normalizer);
+        }
         Expr::Null => writer.atom("null"),
         Expr::Undefined => writer.atom("javascript:undefined"),
         Expr::Bool(value) => {

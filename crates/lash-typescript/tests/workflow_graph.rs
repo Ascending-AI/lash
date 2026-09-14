@@ -1220,3 +1220,29 @@ fn a_label_with_no_spelling_is_refused_by_the_renderer() {
         ))
     ));
 }
+
+/// An inline process body is a process container of the module (FIG-2997):
+/// it projects its own declaration, named exactly what the linker lifts the
+/// literal to, and the lens laws hold over a call that carries one in
+/// argument position.
+#[test]
+fn an_inline_process_body_projects_as_a_process_container() {
+    let source = "await registerTrigger({\n  source: { expr: \"0 8 * * *\" },\n  target: async (event) => {\n    print(event);\n  },\n})\nfinish(null);\n";
+    let canonical = canonical(source);
+    let graph = workflow_graph_from_source(&canonical).expect("canonical source projects");
+    let literal = graph
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            WorkflowDeclaration::Process(process) if process.name.starts_with("__process_") => {
+                Some(process)
+            }
+            _ => None,
+        })
+        .expect("the literal projects as a process container");
+    assert!(
+        literal.body.nodes.iter().any(|node| node.name == "print"),
+        "the authored body is the container's subgraph: {literal:?}"
+    );
+    assert_lens_laws(source);
+}

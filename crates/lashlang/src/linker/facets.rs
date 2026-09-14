@@ -71,12 +71,7 @@ impl LinkError {
             Self::FunctionShadowsBuiltin { .. } => "function_shadows_builtin",
             Self::InvalidTriggerRegistration { .. } => "invalid_trigger_registration",
             Self::InvalidTriggerSubscriptionKey { .. } => "invalid_trigger_subscription_key",
-            Self::DuplicateDerivedTriggerSubscriptionKey { .. } => {
-                "duplicate_derived_trigger_subscription_key"
-            }
-            Self::UnresolvedDerivedTriggerSubscriptionKey { .. } => {
-                "unresolved_derived_trigger_subscription_key"
-            }
+            Self::ProcessLiteralOutsideProcessSlot { .. } => "process_literal_outside_process_slot",
             Self::InvalidTriggerInputs { .. } => "invalid_trigger_inputs",
             Self::DuplicateTriggerInput { .. } => "duplicate_trigger_input",
             Self::MissingTriggerInput { .. } => "missing_trigger_input",
@@ -360,6 +355,44 @@ fn collect_expression_spans_by_pointer(
     for (index, child) in expr.children().enumerate() {
         path.push(index.try_into().expect("AST child index fits u32"));
         collect_expression_spans_by_pointer(child, path, spans_by_path, spans);
+        path.pop();
+    }
+}
+
+/// The AST path of every expression in the program, keyed by node pointer.
+///
+/// `main`-rooted paths are the `children()` index chain, matching the
+/// `expression_source_spans` vocabulary. A declaration body's path is prefixed
+/// with `u32::MAX` and the declaration index: no real child index is that
+/// large, so a process literal inside a process body can never collide with a
+/// `main` path when a lifted declaration's name is derived.
+pub(super) fn expression_paths_by_pointer(program: &Program) -> BTreeMap<usize, Vec<u32>> {
+    let mut paths = BTreeMap::new();
+    collect_expression_paths(&program.main, &mut Vec::new(), &mut paths);
+    for (index, declaration) in program.declarations.iter().enumerate() {
+        let body = match declaration {
+            Declaration::Process(process) => &process.body,
+            Declaration::Function(function) => &function.body,
+            Declaration::Type(_) => continue,
+        };
+        let mut prefix = vec![
+            u32::MAX,
+            index.try_into().expect("declaration index fits u32"),
+        ];
+        collect_expression_paths(body, &mut prefix, &mut paths);
+    }
+    paths
+}
+
+fn collect_expression_paths(
+    expr: &Expr,
+    path: &mut Vec<u32>,
+    paths: &mut BTreeMap<usize, Vec<u32>>,
+) {
+    paths.insert(expr as *const Expr as usize, path.clone());
+    for (index, child) in expr.children().enumerate() {
+        path.push(index.try_into().expect("AST child index fits u32"));
+        collect_expression_paths(child, path, paths);
         path.pop();
     }
 }

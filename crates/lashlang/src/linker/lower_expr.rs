@@ -71,6 +71,9 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_trigger_event_special_form(expr, scope.span)?;
         self.validate_expected_literals(expr, expected, scope.span)?;
+        if let Expr::ProcessLiteral(literal) = expr {
+            return self.lower_process_literal(literal, expr, scope, expected);
+        }
         if matches!(expr, Expr::Variable(_) | Expr::Field { .. })
             && let Some(resource) = self.resolve_module_expr(expr, scope)
         {
@@ -147,6 +150,11 @@ impl<'module> Linker<'module> {
                 self.lower_function_call(function, args, scope)
             }
             Expr::Function(function) => self.lower_function(function, scope),
+            // Handled by the expected-type hook at the top of this method;
+            // reaching the dispatcher means the hook was bypassed.
+            Expr::ProcessLiteral(_) => {
+                unreachable!("a process literal is lowered by the expected-type hook")
+            }
             Expr::Call { function, args } => self.lower_call(function, args, scope),
             Expr::Map { items, function } => self.lower_map(items, function, scope),
             Expr::Try(exception) => self.lower_try_expr(exception, scope),
@@ -428,11 +436,20 @@ impl<'module> Linker<'module> {
             steps: lowered_steps,
         };
         let target_expected = self.assignment_target_type(&lowered_target, scope)?;
+        // A process literal bound straight to a name lifts: the binding is the
+        // slot, and a binding that names one immutable process value is a
+        // process slot the same way a `Process`-typed argument is. Re-binding
+        // through a path step is not a slot, so only the plain-root form
+        // counts.
+        let target_expected = match (&target_expected, expr) {
+            (None, Expr::ProcessLiteral(_)) if lowered_target.steps.is_empty() => {
+                Some(process_unknown_type())
+            }
+            (expected, _) => expected.clone(),
+        };
         let (lowered, binding) = self.lower_expr_expected(expr, scope, target_expected.as_ref())?;
-        let static_trigger_binding = self.static_trigger_binding_for(&lowered, scope);
         if lowered_target.steps.is_empty() {
             scope.bind(target.root.as_str(), binding.clone());
-            scope.set_static_trigger_binding(target.root.as_str(), static_trigger_binding);
         } else {
             let value_ty = binding_type(&binding);
             scope.update_path(&lowered_target, &value_ty)?;
@@ -851,20 +868,8 @@ impl<'module> Linker<'module> {
             )
         });
         if let Some(trigger_operation) = trigger_operation {
-            let trigger_scope = scope.clone();
-            let (mut lowered_args, output_ty) =
+            let (lowered_args, output_ty) =
                 self.lower_trigger_operation_args(trigger_operation, args, scope)?;
-            if let Some(key) = self.derive_default_trigger_key(
-                &lowered_receiver,
-                operation,
-                &lowered_args,
-                &trigger_scope,
-            )? {
-                let [Expr::Record(entries)] = lowered_args.as_mut_slice() else {
-                    return Err(LinkError::InvalidTriggerRegistration { span: scope.span });
-                };
-                entries.push(("subscription_key".into(), Expr::String(key.into())));
-            }
             return Ok((
                 Expr::ReceiverCall {
                     receiver: Box::new(lowered_receiver),
