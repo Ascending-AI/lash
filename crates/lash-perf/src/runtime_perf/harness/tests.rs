@@ -1,5 +1,6 @@
 use super::super::prompt::benchmark_prompt;
 use super::*;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
