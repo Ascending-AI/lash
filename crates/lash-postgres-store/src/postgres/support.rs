@@ -336,7 +336,39 @@ where
     })
 }
 
+/// Run an async storage future from a synchronous `AttachmentManifest` method.
+///
+/// The obvious bridge — spawn a thread, build a throwaway current-thread
+/// runtime, `block_on`, `join` — wedges the caller's runtime (FIG-3073) in two
+/// ways at once. The `join` blocks a Tokio worker thread without telling Tokio,
+/// so that worker stops servicing the rest of the process; and every pooled
+/// connection the throwaway runtime opens is registered with a reactor that
+/// dies when the runtime is dropped, so the next task to acquire that
+/// connection from the shared pool waits on readiness that can never arrive.
+///
+/// `block_in_place` fixes the first: it hands this worker's remaining tasks to
+/// another worker before blocking, so the runtime keeps driving timers, I/O and
+/// the session-lease renewal. Driving the future on the *caller's* runtime
+/// handle fixes the second: every socket it opens belongs to the reactor that
+/// outlives the call.
+///
+/// `block_in_place` is only available on a multi-thread runtime, so a
+/// current-thread caller (and a caller with no runtime at all) still gets the
+/// detached-thread bridge. Those callers are tests and synchronous tooling: the
+/// detached runtime is the only option there, and nothing else is depending on
+/// the calling thread to make progress.
 pub(crate) fn block_on_detached<T: Send + 'static>(
+    future: impl std::future::Future<Output = T> + Send + 'static,
+) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(move || handle.block_on(future))
+        }
+        _ => block_on_detached_runtime(future),
+    }
+}
+
+fn block_on_detached_runtime<T: Send + 'static>(
     future: impl std::future::Future<Output = T> + Send + 'static,
 ) -> T {
     std::thread::spawn(move || {
@@ -983,5 +1015,72 @@ mod contention_tests {
                 ref message,
             } if message.contains("broken wire frame")
         ));
+    }
+}
+
+#[cfg(test)]
+mod block_on_detached_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// FIG-3073: bridging a synchronous manifest method onto async storage must
+    /// not stop the caller's runtime.
+    ///
+    /// The worker that wedged in the Restate workers E2E had one attachment
+    /// write in flight and nothing else could run — not the session-lease
+    /// renewal, not the h2 accept loop, not an unrelated `/health` listener on
+    /// its own port. This reproduces that shape without Postgres or Docker: a
+    /// single-worker multi-thread runtime, one heartbeat task, and a bridged
+    /// call long enough for the heartbeat to be seen. A bridge that blocks the
+    /// worker leaves the heartbeat at zero.
+    #[test]
+    fn bridged_call_leaves_the_caller_runtime_running() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("build single-worker runtime");
+
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let heartbeat = Arc::clone(&ticks);
+        let observed = Arc::clone(&ticks);
+
+        let (value, before, after) = runtime.block_on(async move {
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    heartbeat.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+            // Let the heartbeat reach its first await point before blocking.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let before = observed.load(Ordering::SeqCst);
+            // The bridge has to be exercised from a worker thread, which is
+            // where every real manifest call runs. Blocking the `block_on`
+            // thread instead would leave the worker free and prove nothing.
+            let worker = tokio::spawn(async move {
+                let value = super::block_on_detached(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    7_u32
+                });
+                (value, observed.load(Ordering::SeqCst))
+            });
+            let (value, after) = worker.await.expect("bridged task");
+            (value, before, after)
+        });
+
+        assert_eq!(value, 7, "the bridged future must still produce its value");
+        assert!(
+            after > before + 1,
+            "the caller's runtime stopped while a manifest write was bridged: \
+             heartbeat went {before} -> {after} across a 300ms call"
+        );
+    }
+
+    /// The bridge must also work with no ambient runtime, which is how
+    /// synchronous tooling and the current-thread test runtimes reach it.
+    #[test]
+    fn bridged_call_works_without_an_ambient_runtime() {
+        assert_eq!(super::block_on_detached(async { 11_u32 }), 11);
     }
 }

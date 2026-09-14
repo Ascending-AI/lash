@@ -1167,14 +1167,14 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
-    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError, durable_identity_conflict,
-    is_durable_identity_conflict,
+    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
     SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
     SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, durable_identity_conflict,
+    is_durable_identity_conflict,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,
