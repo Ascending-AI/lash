@@ -1194,6 +1194,7 @@
           "cargo": "lash_sim",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
+          "shard_count": 8,
           "tags": []
         },
         {
