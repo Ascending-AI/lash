@@ -10,14 +10,6 @@
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
 //! provide the driver implementation.
 
-// `clippy::unwrap_used` is in force over this whole crate; `expect_used` is
-// settled everywhere except `src/runtime/`, which the next PR in the FIG-2784
-// chain finishes. Removing this line is that PR's first edit.
-#![expect(
-    clippy::expect_used,
-    reason = "FIG-2784 pass 1: src/runtime/ is settled by the next PR in the chain"
-)]
-
 /// Re-exported so `impl_noop_attachment_manifest!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.

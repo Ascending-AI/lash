@@ -93,6 +93,10 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the turn driver loan is present for the loan's lifetime"
+    )]
     fn reclaim(mut self) -> TurnDriverRemainder {
         let RuntimeTurnDriver {
             session,
@@ -119,12 +123,20 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
 impl<'slot, 'run> std::ops::Deref for TurnDriverSessionLoan<'slot, 'run> {
     type Target = RuntimeTurnDriver<'run>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the turn driver loan is present for the loan's lifetime"
+    )]
     fn deref(&self) -> &Self::Target {
         self.driver.as_deref().expect("turn driver loan is present")
     }
 }
 
 impl std::ops::DerefMut for TurnDriverSessionLoan<'_, '_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the turn driver loan is present for the loan's lifetime"
+    )]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.driver
             .as_deref_mut()
@@ -512,6 +524,10 @@ impl LashRuntime {
             .await
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the runtime session is installed for the whole turn"
+    )]
     pub(super) async fn stream_prepared_turn_inner_with_graph_appends(
         &mut self,
         context: PreparedTurnExecuteContext<'_, '_>,

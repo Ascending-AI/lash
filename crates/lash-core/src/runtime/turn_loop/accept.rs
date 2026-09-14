@@ -14,6 +14,10 @@ impl LashRuntime {
     ///
     /// Identical to [`stream_turn_with_agent_frames`](Self::stream_turn_with_agent_frames)
     /// except that it returns only the run's terminal physical turn.
+    #[expect(
+        clippy::expect_used,
+        reason = "a logical turn always ends in a physical turn"
+    )]
     pub async fn stream_turn(
         &mut self,
         input: TurnInput,
@@ -272,6 +276,10 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a store-backed turn holds its execution lease here"
+    )]
     async fn stream_turn_with_agent_frames_holding_lease(
         &mut self,
         mut input: TurnInput,
@@ -657,6 +665,10 @@ impl LashRuntime {
         reason = "this is the published `LashRuntime::stream_prepared_turn` signature; \
                   folding these into a context struct would be a \
                   public API change, which this ticket forbids"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "the lease is held here and a logical turn ends in a physical turn"
     )]
     pub async fn stream_prepared_turn(
         &mut self,

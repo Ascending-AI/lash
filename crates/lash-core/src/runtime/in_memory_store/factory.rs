@@ -599,6 +599,10 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(points.into_values().collect())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a graph node selected as a frame is non-empty"
+    )]
     async fn fork_at(
         &self,
         request: &crate::ForkSessionRequest,
@@ -1097,6 +1101,10 @@ pub(crate) mod lineage_conformance_support {
                 .unwrap_or_default()
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the path walks ids taken from these same facts"
+        )]
         async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
             let facts = self.all_graph_facts().await;
             let by_id = facts
@@ -1123,6 +1131,10 @@ pub(crate) mod lineage_conformance_support {
             path
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the lookups are built from this same fact set"
+        )]
         async fn all_graph_facts(&self) -> Vec<GraphFactObservation> {
             let graph = self.factory.global_session_graph.lock_recover();
             let owners = self.factory.global_node_owners.lock_recover();

@@ -359,6 +359,10 @@ impl ProcessExecutionScheduler {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this execution was counted active under the same lock"
+    )]
     fn complete_execution(&self, process_id: &ProcessId) {
         let mut state = self.state.lock_recover();
         state.active = state
@@ -502,6 +506,10 @@ impl DurableProcessWorker {
         &self.config
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the substrate config was validated when the worker was built"
+    )]
     fn process_wiring(&self) -> crate::ProcessWorkWiring {
         let wiring = match &self.config.process_work {
             WorkerProcessWork::SelfNative(watched) => {

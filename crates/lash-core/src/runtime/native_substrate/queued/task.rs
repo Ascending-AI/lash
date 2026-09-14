@@ -271,6 +271,10 @@ impl QueuedWorkTaskDriver {
         Some((demand, permit))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a retrying disposition carries its delay"
+    )]
     pub(super) async fn run_demand(&self, mut demand: QueuedWorkDemand) {
         let work_cadence = self.inner.work_cadence.clone();
         let mut retry_state = RetryState::Progress { pass: 1 };

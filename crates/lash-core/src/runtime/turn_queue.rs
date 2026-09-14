@@ -269,6 +269,10 @@ impl QueuedWorkBatchingConfig {
     /// # Panics
     ///
     /// Panics when `action_token_reserve` is zero.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default queued-work row bound is a non-zero literal"
+    )]
     pub const fn new(action_token_reserve: usize) -> Self {
         let Some(action_token_reserve) = std::num::NonZeroUsize::new(action_token_reserve) else {
             panic!("queued-work action token reserve must be non-zero");

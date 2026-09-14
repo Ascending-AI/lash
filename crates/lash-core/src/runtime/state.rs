@@ -177,6 +177,10 @@ impl RuntimeCheckpointComponents {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the decode above reported this component present"
+    )]
     fn from_hydrated(
         checkpoint: &crate::store::HydratedSessionCheckpoint,
     ) -> Result<Self, crate::StoreError> {
@@ -1125,6 +1129,10 @@ impl RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string"
+    )]
     pub(crate) fn refresh_current_frame_projection(&mut self) {
         self.current_frame_node_id = self
             .session_graph
@@ -1168,6 +1176,10 @@ impl RuntimeSessionState {
 
     /// Ensures agent frame initialized with clock exists for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
+    #[expect(
+        clippy::expect_used,
+        reason = "a frame node identity and the initial frame material are non-empty"
+    )]
     pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
         if let Some(frame_node_id) = self
             .session_graph
@@ -1204,6 +1216,10 @@ impl RuntimeSessionState {
 
     /// Resets initial agent frame with clock for protocol and process-engine implementors while
     /// materializing or restoring protocol session state.
+    #[expect(
+        clippy::expect_used,
+        reason = "the initial frame material is a non-empty literal"
+    )]
     pub fn reset_initial_agent_frame_with_clock(
         &mut self,
         assignment: crate::AgentFrameAssignment,
@@ -1501,6 +1517,10 @@ pub(crate) fn derive_graph_commit_node_ids(
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "derived graph node identities are non-empty"
+)]
 pub(crate) fn apply_graph_commit_node_id_mapping(
     state: &mut RuntimeSessionState,
     mapping: &[(crate::NodeId, crate::NodeId)],

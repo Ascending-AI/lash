@@ -44,6 +44,10 @@ pub(super) fn agent_frame_switch_materializes(
         )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a finalized runtime state resolves its frame scope"
+)]
 pub(super) fn committed_attachment_ids(
     state: &RuntimeSessionState,
     tool_calls: &[ToolCallRecord],
@@ -87,6 +91,10 @@ pub(super) fn committed_attachment_ids(
 /// Appends the runtime's terminal reply node unless the reply is already
 /// materialized: either the protocol appended it (identified through
 /// `protocol_output`) or this node already exists (identified by `message_id`).
+#[expect(
+    clippy::expect_used,
+    reason = "a finalized runtime state resolves its frame scope"
+)]
 pub(super) fn materialize_terminal_output(
     state: &mut RuntimeSessionState,
     outcome: &TurnOutcome,

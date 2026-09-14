@@ -21,6 +21,10 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
 }
 
 impl LashRuntime {
+    #[expect(
+        clippy::expect_used,
+        reason = "the trace turn id is bound before validation"
+    )]
     pub(super) async fn stream_turn_inner(
         &mut self,
         context: TurnPrepareContext<'_, '_>,

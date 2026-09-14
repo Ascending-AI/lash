@@ -406,6 +406,10 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
     ///
     /// A missing promise accepts the terminal so a signal that arrives before
     /// its waiter is buffered rather than lost.
+    #[expect(
+        clippy::expect_used,
+        reason = "a resolve transition always carries a public outcome"
+    )]
     pub async fn resolve(
         &self,
         key: &AwaitEventKey,

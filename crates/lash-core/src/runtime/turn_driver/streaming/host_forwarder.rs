@@ -161,6 +161,7 @@ impl<'a> ProviderHostForwarder<'a> {
         }
     }
 
+    #[expect(clippy::expect_used, reason = "the pending delta is still queued here")]
     async fn flush(&mut self) {
         while let Some(pending) = self.pending.front() {
             if !pending.session_forwarded {

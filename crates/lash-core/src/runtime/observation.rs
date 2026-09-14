@@ -225,6 +225,10 @@ impl RuntimeObservation {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "resident state is normalized before publication"
+)]
 fn export_observation_state(
     runtime: &LashRuntime,
 ) -> (
@@ -860,6 +864,10 @@ impl RuntimeHandle {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "crate-owned state encodes into an in-memory buffer"
+)]
 fn authority_fingerprint(state: &super::RuntimeSessionState) -> Vec<u8> {
     let mut persisted_node_ids = state.persisted_node_ids.iter().collect::<Vec<_>>();
     persisted_node_ids.sort_unstable();

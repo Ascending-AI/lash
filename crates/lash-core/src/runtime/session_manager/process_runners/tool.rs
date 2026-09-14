@@ -64,6 +64,10 @@ impl RuntimeSessionServices {
             scoped_effect_controller,
             cancellation,
         } = run;
+        #[expect(
+            clippy::expect_used,
+            reason = "process tool execution runs only under installed process wiring"
+        )]
         let process_work = self
             .current
             .host
@@ -149,6 +153,10 @@ impl RuntimeSessionServices {
             crate::tool_dispatch::ToolCallLaunch::Done(outcome) => outcome.record.output,
             crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
                 let fallback;
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the dispatch controller carries an admitted execution scope"
+                )]
                 let parent = if let Some(parent) = await_parent_invocation.as_ref() {
                     parent
                 } else {
