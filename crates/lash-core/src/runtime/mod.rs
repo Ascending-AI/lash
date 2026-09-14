@@ -9,7 +9,7 @@ mod builder;
 pub mod causal;
 #[cfg(not(feature = "testing"))]
 pub(crate) mod causal;
-mod clock;
+pub(crate) use lash_core_ids::clock;
 #[cfg(feature = "testing")]
 pub mod commit_admission;
 #[cfg(not(feature = "testing"))]

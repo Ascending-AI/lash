@@ -1,5 +1,5 @@
 [package]
-name = "lash-internal-core-ids"
+name = "lash-internal-core-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,33 +9,41 @@ homepage.workspace = true
 documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Durable identity framing and leaf utilities for the lash runtime kernel."
+description = "Provider handle, model resolution and LLM call vocabulary for the lash runtime kernel."
 keywords = ["lash", "agent", "runtime", "async", "ai"]
 categories = ["asynchronous", "api-bindings"]
 
 [lib]
-name = "lash_core_ids"
+name = "lash_core_llm"
 doctest = false
 
 [features]
 default = []
-otel-trace = ["lash-trace/otel"]
+otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = []
+perf-witness = ["lash-core-ids/perf-witness"]
 # Test-only observation hooks shared with lash-core's unit suites.
-testing = []
+testing = ["lash-core-ids/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
-chrono = { workspace = true }
+lash-core-ids = { workspace = true }
+lash-http-transport = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
 tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+lash-core-ids = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

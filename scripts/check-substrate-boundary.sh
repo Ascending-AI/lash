@@ -101,12 +101,13 @@ clock_exemption_is_allowlisted() {
   esac
 }
 
-capture_search "clock discipline" "$clock_forbidden" "$tmp_dir/rule1.raw" crates/lash-core/src
+capture_search "clock discipline" "$clock_forbidden" "$tmp_dir/rule1.raw" \
+  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src
 : >"$tmp_dir/rule1.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
   case "$file" in
-    crates/lash-core/src/runtime/native_substrate/* | crates/lash-core/src/runtime/clock.rs)
+    crates/lash-core/src/runtime/native_substrate/* | crates/lash-core-ids/src/clock.rs)
       continue
       ;;
   esac
@@ -129,7 +130,7 @@ if [[ -s "$tmp_dir/rule1.hits" ]]; then
 fi
 
 capture_search "module containment" "$containment_forbidden" "$tmp_dir/rule2.raw" \
-  crates/lash-core/src crates/lash/src crates/lash-restate/src
+  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src crates/lash-restate/src
 : >"$tmp_dir/rule2.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
@@ -168,7 +169,7 @@ if [[ -s "$tmp_dir/rule2.hits" ]]; then
 fi
 
 capture_search "fallback shape" "$fallback_forbidden" "$tmp_dir/rule3.hits" \
-  crates/lash-core/src crates/lash/src crates/lash-restate/src
+  crates/lash-core/src crates/lash-core-ids/src crates/lash-core-llm/src crates/lash/src crates/lash-restate/src
 if [[ -s "$tmp_dir/rule3.hits" ]]; then
   cat "$tmp_dir/rule3.hits" >&2
   echo "substrate boundary rule 3 failed: removed polling or optional-port fallback shape found" >&2

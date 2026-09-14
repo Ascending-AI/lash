@@ -622,7 +622,7 @@ symbols = ["PluginOptions"]
 # capability vocabulary, and the prompt layer.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/model.rs"]
+paths = ["crates/lash-core-llm/src/model.rs"]
 symbols = ["ModelSpec", "ModelLimits"]
 
 [[surface.guard]]

@@ -20,20 +20,20 @@ doctest = false
 [features]
 # Keep core portable by default.
 default = []
-otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace"]
+otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = ["lash-core-ids/perf-witness"]
+perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness"]
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = ["dep:tracing-subscriber", "lash-core-ids/testing"]
+testing = ["dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
 lash-core-ids = { workspace = true }
-lash-http-transport = { workspace = true }
+lash-core-llm = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }

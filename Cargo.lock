@@ -2086,7 +2086,7 @@ dependencies = [
  "insta",
  "lash-internal-core",
  "lash-internal-core-ids",
- "lash-internal-http-transport",
+ "lash-internal-core-llm",
  "lash-internal-sansio",
  "lash-internal-trace",
  "proptest",
@@ -2110,6 +2110,8 @@ dependencies = [
 name = "lash-internal-core-ids"
 version = "0.0.0-dev"
 dependencies = [
+ "async-trait",
+ "chrono",
  "lash-internal-sansio",
  "lash-internal-trace",
  "serde",
@@ -2117,6 +2119,25 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "lash-internal-core-llm"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lash-internal-core-ids",
+ "lash-internal-http-transport",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

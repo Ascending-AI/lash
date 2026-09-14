@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use crate::ModelGenerationClamp;
+
 use lash_trace::{
     TraceError, TraceEvent, TraceProviderRequestEvent, TraceProviderStreamEvent,
     TraceRuntimeStreamEvent,

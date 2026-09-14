@@ -97,7 +97,8 @@ if [ "$area" = "all" ]; then
 else
   case "$area" in
     store) selected_packages=(lash-internal-sqlite-store lash-internal-postgres-store) ;;
-    process|trigger|effect-host|provider) selected_packages=(lash-internal-core) ;;
+    process|trigger|effect-host) selected_packages=(lash-internal-core) ;;
+    provider) selected_packages=(lash-internal-core lash-internal-core-llm) ;;
     protocol) selected_packages=(lash-internal-lashlang lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
@@ -132,9 +133,9 @@ else
     provider)
       area_mutation_file_args=(
         --file 'crates/lash-core/src/direct.rs'
-        --file 'crates/lash-core/src/model.rs'
-        --file 'crates/lash-core/src/llm/*.rs'
-        --file 'crates/lash-core/src/provider/*.rs'
+        --file 'crates/lash-core-llm/src/model.rs'
+        --file 'crates/lash-core-llm/src/llm/*.rs'
+        --file 'crates/lash-core-llm/src/provider/*.rs'
       )
       ;;
   esac
@@ -2195,8 +2196,8 @@ run_lash_core_direct_model_mutation_evidence() {
     -- --locked direct
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
-    -p lash-internal-core \
-    --file crates/lash-core/src/model.rs \
+    -p lash-internal-core-llm \
+    --file crates/lash-core-llm/src/model.rs \
     --re 'ModelSpec::with_limits|ModelSpec::with_variant|ModelSpec::from_token_limits|ModelLimits::from_token_limits|ModelSpec::context_window_tokens|nonzero_token_limit|optional_nonzero_token_limit' \
     --baseline skip \
     --jobs "$mutation_jobs" \

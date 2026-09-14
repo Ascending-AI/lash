@@ -1,3 +1,4 @@
+use crate::ModelGenerationClamp;
 use crate::ProcessId;
 use crate::SessionId;
 pub(crate) use completion_support::AttemptCompletionSupport;

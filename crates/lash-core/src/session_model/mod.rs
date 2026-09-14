@@ -25,33 +25,7 @@ pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord
 
 pub const PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID: &str = "lash.plugin_runtime";
 
-/// Host appetite for retrying after a provider may already have billed a
-/// generation that Lash cannot resume or replay idempotently.
-///
-/// # Integrator class
-///
-/// Host applications choose this policy when constructing or reopening a
-/// session. Provider adapters continue to report retry guarantees as facts.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum ChargeSafetyPolicy {
-    /// Require an idempotency or resume guarantee before buying another
-    /// generation after output or ambiguous response evidence was observed.
-    #[default]
-    RequireGuarantee,
-    /// Permit bounded duplicate billing when no provider guarantee exists.
-    AcceptDuplicateBilling {
-        /// Maximum unsafe retries per logical LLM call. Lash hard-clamps this
-        /// value to five.
-        max_unsafe_retries: u8,
-        /// Skip the unsafe retry when provider-reported tokens already billed
-        /// for the abandoned generation exceed this bound. When the provider
-        /// reports no partial usage, Lash treats the tokens at stake as zero,
-        /// so this cost bound does not bind; the hard clamp of at most five
-        /// unsafe retries still applies.
-        max_duplicate_cost_tokens: Option<u64>,
-    },
-}
+pub use lash_core_llm::session_model::ChargeSafetyPolicy;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PersistedPluginRuntimeEvent {

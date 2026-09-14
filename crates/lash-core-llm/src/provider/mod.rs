@@ -11,7 +11,7 @@
 
 #[cfg(test)]
 mod charge_safety_tests;
-mod handle;
+pub(crate) mod handle;
 mod options;
 mod rate_limit;
 mod resolver;
@@ -20,7 +20,6 @@ mod support;
 mod tests;
 mod traits;
 
-pub(crate) use handle::synthetic_terminal_call_record;
 pub use handle::{
     ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
     UnconfiguredProvider,
