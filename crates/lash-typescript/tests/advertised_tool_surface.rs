@@ -43,7 +43,7 @@ impl ExecutionHost for ToolCallRecordingHost {
 fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, String)> {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             modules
                 .iter()
                 .map(|module| module.to_string())
@@ -51,11 +51,7 @@ fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, 
             "ToolModule",
             operation,
             format!("tool:test/{}", modules.join("_")),
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("operation binding");
     let environment =

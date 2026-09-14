@@ -254,20 +254,6 @@
                 "input_ty": {
                   "Object": [
                     {
-                      "name": "source",
-                      "optional": false,
-                      "ty": "Dict"
-                    },
-                    {
-                      "name": "target",
-                      "optional": false,
-                      "ty": {
-                        "Process": {
-                          "kind": "unknown"
-                        }
-                      }
-                    },
-                    {
                       "name": "inputs",
                       "optional": false,
                       "ty": "Dict"
@@ -278,9 +264,23 @@
                       "ty": "Str"
                     },
                     {
+                      "name": "source",
+                      "optional": false,
+                      "ty": "Dict"
+                    },
+                    {
                       "name": "subscription_key",
                       "optional": true,
                       "ty": "Str"
+                    },
+                    {
+                      "name": "target",
+                      "optional": false,
+                      "ty": {
+                        "Process": {
+                          "kind": "unknown"
+                        }
+                      }
                     }
                   ]
                 },
@@ -335,8 +335,8 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
-    "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2"
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
+    "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
@@ -347,11 +347,11 @@
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
-  "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
+  "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
-    "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
+    "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
     "process_name": "remember",
     "process_ref": {
       "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
@@ -420,8 +420,8 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
-        "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
+        "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
         "process_name": "remember",
         "process_ref": {
           "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
@@ -433,8 +433,8 @@
     "target_identity": {
       "definition": {
         "$lash_process": true,
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
-        "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37409e804c007c00611a653a2304a2b70d6f8a02459f2cec41c531c887efc1c9",
+        "module_ref": "lashlang:v2:blake3:cba1fe43e6197840de662e43bf78e8d42fc19486d2a452087081c4a01159b067",
         "process_name": "remember",
         "process_ref": {
           "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",

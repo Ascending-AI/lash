@@ -1718,6 +1718,14 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 /// `LASHLANG_SEMANTIC_HASH_VERSION` moved to `v10` to announce that identity
 /// computation changed. Both moves are visible here — the parameter types in
 /// the canonical IR, and every hash derived from the artifact.
+///
+/// They were re-pinned once on top of that when the trigger operations stopped
+/// being hand-written types and started being declared as JSON Schema like
+/// every other host operation (FIG-2993). A schema's properties are an
+/// unordered map, so the imported field list for `triggers.register` is in
+/// name order rather than the order the old Rust literal happened to write;
+/// the fields, their types and their optionality are identical, and the hashes
+/// moved because that ordering is inside the hashed host requirements.
 #[test]
 fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(

@@ -53,14 +53,17 @@ pub use introspection::{
     ResourceTypeIntrospection, TriggerSourceIntrospection, TypeView, ValueConstructorIntrospection,
     referenced_module_call_paths, referenced_receiver_call_paths,
 };
-pub use json_schema::json_schema_to_type_expr;
+pub use json_schema::{
+    JsonSchemaError, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
+    json_schema_to_type_expr, type_expr_to_json_schema,
+};
 pub use lash_sansio::MediaType;
 pub use lexer::{LexError, Span, Token, TokenKind, lex};
 pub use linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkError, LinkedModule, NamedDataType, NamedDataTypeError,
-    OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
-    TriggerSourceBinding, ValueConstructorBinding,
+    OperationContract, OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding,
+    ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
 };
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
 pub use runtime::{

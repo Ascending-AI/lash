@@ -424,13 +424,15 @@ pub(super) async fn sleeping_then_tool_process_registration(
     let contract = SnapshotRecoveryTool::definition().contract();
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
-        .add_module_operation(
+        .add_module_operation_contract(
             ["tools"],
             "Tools",
             "snapshot_echo",
             "tool:snapshot_echo",
-            lashlang::json_schema_to_type_expr(contract.input_schema.canonical()),
-            lashlang::json_schema_to_type_expr(contract.output_schema.canonical()),
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
         )
         .expect("link post-wake tool operation");
     let linked = lashlang::LinkedModule::link(

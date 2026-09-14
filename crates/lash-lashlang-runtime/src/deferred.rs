@@ -20,7 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_contract_types,
+    LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_operation_contract,
     required_tool_lashlang_executable,
 };
 
@@ -280,13 +280,13 @@ fn fold_grant(
     grant: &ToolGrant,
 ) -> Result<(), ToolBindingError> {
     let binding = required_tool_lashlang_executable(&grant.definition.manifest)?;
-    let operation_binding = lashlang_tool_contract_types(&grant.definition.contract);
-    host_environment.resources.add_module_operation_binding(
+    let contract = lashlang_tool_operation_contract(&grant.definition.contract);
+    host_environment.resources.add_module_operation_contract(
         binding.module_path.iter().map(String::as_str),
         binding.authority_type.clone(),
         binding.operation.clone(),
         grant.definition.manifest.id.to_string(),
-        operation_binding,
+        &contract,
     )?;
     Ok(())
 }

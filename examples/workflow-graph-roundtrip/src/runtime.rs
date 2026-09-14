@@ -7,9 +7,9 @@ use anyhow::{Context, Result, anyhow};
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
-    LashlangLanguageFeatures, LinkedModule, OutputFromInputBinding, ResourceOperation,
-    ResourceOperationBatchResult, ResourceOperationBinding, ResourceOperationResult, Sleep, State,
-    Value, WorkflowGraph, compile_linked_process, from_json, node_id_for_execution_site,
+    LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
+    ResourceOperationBatchResult, ResourceOperationResult, Sleep, State, Value, WorkflowGraph,
+    compile_linked_process, from_json, node_id_for_execution_site,
 };
 use tokio::sync::mpsc;
 
@@ -97,47 +97,40 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
             .iter()
             .map(|field| field.name)
             .collect::<Vec<_>>();
-        let input_ty = lashlang::json_schema_to_type_expr(&serde_json::json!({
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": false
-        }));
-        let output_ty = lashlang::json_schema_to_type_expr(&serde_json::json!({ "type": "null" }));
         catalog
-            .add_module_operation(
+            .add_module_operation_contract(
                 ["display"],
                 "ToyDisplay",
                 operation.operation,
                 operation.operation,
-                input_ty,
-                output_ty,
+                &OperationContract::new(
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                        "additionalProperties": false
+                    }),
+                    serde_json::json!({ "type": "null" }),
+                ),
             )
             .expect("host catalog operation must not conflict");
     }
     for operation in crate::mock_tools::OPERATIONS {
-        let input_ty = lashlang::json_schema_to_type_expr(&operation.input_schema());
-        let output_ty = lashlang::json_schema_to_type_expr(&operation.output_schema());
-        let output_from_input =
-            operation
-                .output_from_input()
-                .map(|(input_field, default_schema)| OutputFromInputBinding {
-                    input_field: input_field.to_string(),
-                    default_schema: default_schema
-                        .as_ref()
-                        .map(lashlang::json_schema_to_type_expr),
-                });
+        let contract = match operation.output_from_input() {
+            Some((input_field, default_schema)) => OperationContract::from_input_field(
+                operation.input_schema(),
+                input_field,
+                default_schema,
+            ),
+            None => OperationContract::new(operation.input_schema(), operation.output_schema()),
+        };
         catalog
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 [operation.module],
                 operation.resource_type,
                 operation.operation,
                 operation.host_operation,
-                ResourceOperationBinding {
-                    input_ty,
-                    output_ty,
-                    output_from_input,
-                },
+                &contract,
             )
             .expect("host catalog operation must not conflict");
     }

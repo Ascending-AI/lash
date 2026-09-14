@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::artifact::ModuleArtifact;
 use crate::ast::{AstString, Expr, TypeExpr, TypeField, format_type_expr};
 use crate::identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
-use crate::linker::{LashlangHostCatalog, LashlangHostCatalogError, NamedDataType};
+use crate::json_schema::{X_LASH_KEYWORD, json_schema_to_type_expr};
+use crate::linker::{
+    LashlangHostCatalog, LashlangHostCatalogError, NamedDataType, OperationContract,
+};
 use crate::runtime::{LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY};
 
 const TRIGGERS_RESOURCE_TYPE: &str = "Triggers";
@@ -65,51 +69,95 @@ impl TriggerHostOperation {
             .find(|candidate| candidate.receiver_method() == operation)
     }
 
-    pub fn input_ty(self) -> TypeExpr {
+    /// The operation's input contract, in the JSON Schema a tool contract uses.
+    ///
+    /// The trigger operations are host operations, not catalog tools, but they
+    /// are declared the same way: there is one vocabulary for what a host
+    /// operation accepts, and `x-lash` is what lets it name a process.
+    pub fn input_schema(self) -> Value {
         match self {
-            Self::Register => TypeExpr::Object(vec![
-                required_field("source", TypeExpr::Dict),
-                required_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
-                required_field("inputs", TypeExpr::Dict),
-                optional_field("name", TypeExpr::Str),
-                optional_field("subscription_key", TypeExpr::Str),
-            ]),
-            Self::List => TypeExpr::Object(vec![
-                optional_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
-                optional_field("name", TypeExpr::Str),
-                optional_field("source_type", TypeExpr::Str),
-                optional_field("enabled", TypeExpr::Bool),
-            ]),
-            Self::Update | Self::Revive => TypeExpr::Object(vec![
-                required_field("subscription_key", TypeExpr::Str),
-                required_field("expected_revision", TypeExpr::Int),
-                required_field("source", TypeExpr::Dict),
-                required_field("target", TypeExpr::Process(crate::ProcessType::unknown())),
-                required_field("inputs", TypeExpr::Dict),
-                optional_field("name", TypeExpr::Str),
-            ]),
-            Self::Enable | Self::Disable | Self::Delete => TypeExpr::Object(vec![
-                required_field("subscription_key", TypeExpr::Str),
-                required_field("expected_revision", TypeExpr::Int),
-            ]),
-            Self::Prune => TypeExpr::Object(vec![required_field(
-                "subscription_keys",
-                TypeExpr::List(Box::new(TypeExpr::Str)),
-            )]),
+            Self::Register => json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "source": dict_schema(),
+                    "target": { X_LASH_KEYWORD: { "kind": "process_unknown" } },
+                    "inputs": dict_schema(),
+                    "name": { "type": "string" },
+                    "subscription_key": { "type": "string" }
+                },
+                "required": ["source", "target", "inputs"]
+            }),
+            Self::List => json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "target": { X_LASH_KEYWORD: { "kind": "process_unknown" } },
+                    "name": { "type": "string" },
+                    "source_type": { "type": "string" },
+                    "enabled": { "type": "boolean" }
+                }
+            }),
+            Self::Update | Self::Revive => json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "subscription_key": { "type": "string" },
+                    "expected_revision": { "type": "integer" },
+                    "source": dict_schema(),
+                    "target": { X_LASH_KEYWORD: { "kind": "process_unknown" } },
+                    "inputs": dict_schema(),
+                    "name": { "type": "string" }
+                },
+                "required": [
+                    "subscription_key",
+                    "expected_revision",
+                    "source",
+                    "target",
+                    "inputs"
+                ]
+            }),
+            Self::Enable | Self::Disable | Self::Delete => json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "subscription_key": { "type": "string" },
+                    "expected_revision": { "type": "integer" }
+                },
+                "required": ["subscription_key", "expected_revision"]
+            }),
+            Self::Prune => json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "subscription_keys": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["subscription_keys"]
+            }),
         }
     }
 
-    pub fn output_ty(self) -> TypeExpr {
+    /// The operation's output contract, in the same vocabulary as the input.
+    pub fn output_schema(self) -> Value {
         match self {
-            Self::Register => TypeExpr::TriggerHandle(Box::new(TypeExpr::Any)),
-            Self::List => TypeExpr::List(Box::new(TypeExpr::Ref(TRIGGER_REGISTRATION_TYPE.into()))),
-            Self::Update | Self::Enable | Self::Disable | Self::Delete | Self::Revive => {
-                TypeExpr::TriggerHandle(Box::new(TypeExpr::Any))
-            }
-            Self::Prune => {
-                TypeExpr::List(Box::new(TypeExpr::TriggerHandle(Box::new(TypeExpr::Any))))
-            }
+            Self::Register
+            | Self::Update
+            | Self::Enable
+            | Self::Disable
+            | Self::Delete
+            | Self::Revive => handle_schema(),
+            Self::List => json!({
+                "type": "array",
+                "items": { "$ref": TRIGGER_REGISTRATION_TYPE }
+            }),
+            Self::Prune => json!({ "type": "array", "items": handle_schema() }),
         }
+    }
+
+    /// The operation's output type, read back out of its declared contract.
+    pub fn output_ty(self) -> TypeExpr {
+        json_schema_to_type_expr(&self.output_schema())
+            .expect("trigger output contracts are valid lash schemas")
     }
 
     pub const ALL: [Self; 8] = [
@@ -124,8 +172,50 @@ impl TriggerHostOperation {
     ];
 }
 
+/// An open record: every JSON object, with no property the contract names.
+fn dict_schema() -> Value {
+    json!({ "type": "object" })
+}
+
+/// A trigger handle over the payload the trigger delivers, which the host
+/// declines to describe.
+fn handle_schema() -> Value {
+    json!({ X_LASH_KEYWORD: { "kind": "handle", "payload": {} } })
+}
+
 pub fn is_trigger_resource_type(resource_type: &str) -> bool {
     resource_type == TRIGGERS_RESOURCE_TYPE
+}
+
+/// The rows `triggers.list` hands back.
+fn trigger_registration_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "subscription_key": { "type": "string" },
+            "incarnation": { "type": "string" },
+            "revision": { "type": "integer" },
+            "registrant": { "type": "object" },
+            "source_key": { "type": "string" },
+            "name": { "type": "string" },
+            "source_type": { "type": "string" },
+            "source": { "type": "object" },
+            "target": { "type": "object" },
+            "enabled": { "type": "boolean" }
+        },
+        "required": [
+            "subscription_key",
+            "incarnation",
+            "revision",
+            "registrant",
+            "source_key",
+            "source_type",
+            "source",
+            "target",
+            "enabled"
+        ]
+    })
 }
 
 pub fn add_trigger_resource_operations(
@@ -133,51 +223,20 @@ pub fn add_trigger_resource_operations(
 ) -> Result<(), LashlangHostCatalogError> {
     let mut extended = catalog.clone();
     extended.add_named_data_type(
-        NamedDataType::object(
-            TRIGGER_REGISTRATION_TYPE,
-            vec![
-                required_field("subscription_key", TypeExpr::Str),
-                required_field("incarnation", TypeExpr::Str),
-                required_field("revision", TypeExpr::Int),
-                required_field("registrant", TypeExpr::Dict),
-                required_field("source_key", TypeExpr::Str),
-                optional_field("name", TypeExpr::Str),
-                required_field("source_type", TypeExpr::Str),
-                required_field("source", TypeExpr::Dict),
-                required_field("target", TypeExpr::Dict),
-                required_field("enabled", TypeExpr::Bool),
-            ],
-        )
-        .expect("trigger registration is a valid named data type"),
+        NamedDataType::from_schema(TRIGGER_REGISTRATION_TYPE, &trigger_registration_schema())
+            .expect("trigger registration is a valid named data type"),
     )?;
     for operation in TriggerHostOperation::ALL {
-        extended.add_module_operation(
+        extended.add_module_operation_contract(
             [TRIGGERS_ALIAS],
             TRIGGERS_RESOURCE_TYPE,
             operation.receiver_method(),
             operation.host_operation(),
-            operation.input_ty(),
-            operation.output_ty(),
+            &OperationContract::new(operation.input_schema(), operation.output_schema()),
         )?;
     }
     *catalog = extended;
     Ok(())
-}
-
-fn required_field(name: &'static str, ty: TypeExpr) -> TypeField {
-    TypeField {
-        name: name.into(),
-        ty,
-        optional: false,
-    }
-}
-
-fn optional_field(name: &'static str, ty: TypeExpr) -> TypeField {
-    TypeField {
-        name: name.into(),
-        ty,
-        optional: true,
-    }
 }
 
 pub struct TriggerRegistrationCall<'expr> {

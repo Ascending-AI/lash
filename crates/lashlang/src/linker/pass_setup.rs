@@ -309,7 +309,7 @@ impl<'module> Linker<'module> {
                 let schema =
                     crate::parse_output_schema(Some(&serde_json::Value::Object(shorthand)))
                         .ok()??;
-                crate::json_schema_to_type_expr(&schema)
+                crate::json_schema_to_type_expr(&schema).ok()?
             }
             _ => return None,
         };

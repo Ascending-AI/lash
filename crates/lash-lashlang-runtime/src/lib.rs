@@ -444,16 +444,15 @@ pub fn lashlang_host_environment_from_tool_catalog(
         ("now", "typescript.runtime.now"),
         ("random", "typescript.runtime.random"),
     ] {
-        resources.add_module_operation_binding(
+        resources.add_module_operation_contract(
             ["__typescript_runtime"],
             "typescript.Runtime",
             operation,
             host_operation,
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Float,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(
+                serde_json::json!({}),
+                serde_json::json!({ "type": "number" }),
+            ),
         )?;
     }
     if abilities.triggers {
@@ -476,44 +475,40 @@ pub fn lashlang_resources_from_tool_catalog(
             continue;
         }
         let lashlang_binding = required_tool_lashlang_executable(&entry.manifest)?;
-        let operation_binding = lashlang_tool_contract_types(&entry.contract);
-        host_catalog.add_module_operation_binding(
+        let contract = lashlang_tool_operation_contract(&entry.contract);
+        host_catalog.add_module_operation_contract(
             lashlang_binding.module_path.iter().map(String::as_str),
             lashlang_binding.authority_type.clone(),
             lashlang_binding.operation.clone(),
             entry.manifest.id.to_string(),
-            operation_binding,
+            &contract,
         )?;
     }
     Ok(host_catalog)
 }
 
-fn lashlang_tool_contract_types(
+/// Restates a tool contract as the host-operation contract the catalog reads.
+///
+/// This is a pure re-shaping: the schemas the tool declares travel unchanged
+/// into the catalog, which is what keeps a tool and a lash-owned host
+/// operation subject to the same importer, `x-lash` included.
+fn lashlang_tool_operation_contract(
     contract: &lash_core::ToolContract,
-) -> lashlang::ResourceOperationBinding {
-    let input_ty = lashlang::json_schema_to_type_expr(contract.input_schema.canonical());
-    let (output_ty, output_from_input) = match &contract.output_contract {
-        lash_core::ToolOutputContract::Static => (
-            lashlang::json_schema_to_type_expr(contract.output_schema.canonical()),
-            None,
+) -> lashlang::OperationContract {
+    let input_schema = contract.input_schema.canonical().clone();
+    match &contract.output_contract {
+        lash_core::ToolOutputContract::Static => lashlang::OperationContract::new(
+            input_schema,
+            contract.output_schema.canonical().clone(),
         ),
         lash_core::ToolOutputContract::FromInputSchema {
             input_field,
             default_schema,
-        } => (
-            lashlang::TypeExpr::Any,
-            Some(lashlang::OutputFromInputBinding {
-                input_field: input_field.clone(),
-                default_schema: default_schema
-                    .as_ref()
-                    .map(lashlang::json_schema_to_type_expr),
-            }),
+        } => lashlang::OperationContract::from_input_field(
+            input_schema,
+            input_field.clone(),
+            default_schema.clone(),
         ),
-    };
-    lashlang::ResourceOperationBinding {
-        input_ty,
-        output_ty,
-        output_from_input,
     }
 }
 

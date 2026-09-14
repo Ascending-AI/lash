@@ -968,16 +968,12 @@ impl ExecutionHost for ProtoToolHost {
 fn a_prototype_chain_key_refuses_when_a_tool_result_carries_it() {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("web binding");
     let environment =

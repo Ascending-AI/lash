@@ -457,16 +457,15 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
     "#;
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["inspection"],
             "InspectionModule",
             "status",
             "tool:inspection/status",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Str,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(
+                serde_json::json!({}),
+                serde_json::json!({ "type": "string" }),
+            ),
         )
         .expect("operation binding");
     let environment = lashlang::LashlangHostEnvironment::new(
@@ -604,16 +603,12 @@ fn tool_operations_colliding_with_instance_stdlib_names_lower_and_dispatch() {
         // Also verify linked dispatch through host catalog
         let mut catalog = lashlang::LashlangHostCatalog::new();
         catalog
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 expected_path.clone(),
                 "ToolModule",
                 expected_op,
                 format!("tool:{}", expected_path.join("/")),
-                lashlang::ResourceOperationBinding {
-                    input_ty: lashlang::TypeExpr::Any,
-                    output_ty: lashlang::TypeExpr::Any,
-                    output_from_input: None,
-                },
+                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("operation binding");
         let environment =
@@ -959,16 +954,12 @@ fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
 fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
     let environment =
@@ -997,16 +988,12 @@ fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
 fn promise_all_settled_preserves_javascript_result_shape() {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
     let environment =
@@ -1349,16 +1336,12 @@ fn suspend_and_resume_process(source: &str, globals: serde_json::Value) -> Execu
     futures::executor::block_on(async {
         let mut catalog = lashlang::LashlangHostCatalog::new();
         catalog
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 ["web"],
                 "Web",
                 "fetch",
                 "tool:web/fetch",
-                lashlang::ResourceOperationBinding {
-                    input_ty: lashlang::TypeExpr::Any,
-                    output_ty: lashlang::TypeExpr::Any,
-                    output_from_input: None,
-                },
+                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("test host binding");
         let environment =
@@ -1565,16 +1548,12 @@ impl ExecutionHost for FirstSettledRejectionHost {
 fn two_leaf_web_environment() -> lashlang::LashlangHostEnvironment {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())

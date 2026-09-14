@@ -313,6 +313,74 @@ fn named_host_data_type_validation_rejects_invalid_shapes() {
     ));
 }
 
+/// A named data type names a *value* shape.
+///
+/// A process and a trigger handle are host-held callables, not values the host
+/// can hand back inside a record, so they stay refused — including now that a
+/// named data type can be declared from a schema and a schema can spell them.
+#[test]
+fn named_host_data_types_refuse_processes_and_handles() {
+    let process_field = NamedDataType::object(
+        "lash.Registration",
+        vec![TypeField {
+            name: "target".into(),
+            ty: TypeExpr::Process(crate::ProcessType::unknown()),
+            optional: false,
+        }],
+    )
+    .expect_err("a process is not a named data shape");
+    assert!(matches!(
+        process_field,
+        NamedDataTypeError::UnsupportedType { ty: "process" }
+    ));
+
+    let handle_field = NamedDataType::object(
+        "lash.Registration",
+        vec![TypeField {
+            name: "handle".into(),
+            ty: TypeExpr::TriggerHandle(Box::new(TypeExpr::Any)),
+            optional: false,
+        }],
+    )
+    .expect_err("a trigger handle is not a named data shape");
+    assert!(matches!(
+        handle_field,
+        NamedDataTypeError::UnsupportedType {
+            ty: "trigger handle"
+        }
+    ));
+
+    let from_schema = NamedDataType::from_schema(
+        "lash.Registration",
+        &serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "target": { "x-lash": { "kind": "process_unknown" } } },
+            "required": ["target"]
+        }),
+    )
+    .expect_err("a schema-declared process is refused just the same");
+    assert!(matches!(
+        from_schema,
+        NamedDataTypeError::UnsupportedType { ty: "process" }
+    ));
+
+    let malformed = NamedDataType::from_schema(
+        "lash.Registration",
+        &serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "target": { "x-lash": { "kind": "nonsense" } } },
+            "required": ["target"]
+        }),
+    )
+    .expect_err("a malformed lash type is refused before the shape check");
+    assert!(matches!(
+        malformed,
+        NamedDataTypeError::UnreadableSchema { .. }
+    ));
+}
+
 #[test]
 fn resource_catalog_rejects_conflicting_named_host_data_type_definitions() {
     let mut catalog = LashlangHostCatalog::new();
