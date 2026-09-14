@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Unit tests for ci_plan.py."""
 
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -103,14 +108,68 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("unknown change statuses", plan["reason"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_rust_change_runs_core_families_not_workbench(self) -> None:
-        plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")])
+    def test_rust_change_in_the_workbench_closure_runs_the_cargo_partition(self) -> None:
+        """A crate the workbench binary links selects the job that tests it.
+
+        FIG-3049: a session change in lash-core landed with the Cargo
+        partition skipped, and the workbench approvals tests it broke only
+        surfaced on later, unrelated pull requests.
+        """
+        plan = ci_plan.classify([("M", "crates/lash-core/src/session/mod.rs")])
         self.assertEqual("true", plan["rust_code"])
         self.assertEqual("true", plan["rust"])
         self.assertEqual("true", plan["stores"])
-        self.assertEqual("false", plan["workbench"])
+        self.assertEqual("true", plan["workbench"])
         self.assertEqual("false", plan["regress"])
         self.assertEqual("false", plan["schema"])
+
+    def test_rust_change_outside_the_workbench_closure_skips_the_cargo_partition(self) -> None:
+        for path in (
+            "crates/lash-s3-store/src/lib.rs",
+            "crates/lash-perf/src/lib.rs",
+            "examples/toolbench/src/main.rs",
+        ):
+            with self.subTest(path=path):
+                plan = ci_plan.classify([("M", path)])
+                self.assertEqual("true", plan["rust"])
+                self.assertEqual("false", plan["workbench"])
+
+    def test_the_workbench_closure_is_the_first_party_dependency_graph(self) -> None:
+        closure = ci_plan.workbench_dependency_dirs()
+        self.assertIn(ci_plan.WORKBENCH_MANIFEST_DIR, closure)
+        self.assertIn("crates/lash-core", closure)
+        self.assertNotIn("crates/lash-s3-store", closure)
+
+    def test_a_trunk_push_always_runs_the_cargo_partition(self) -> None:
+        for changes in (
+            [("M", "docs/adr/0079-x.md")],
+            [("M", "crates/lash-s3-store/src/lib.rs")],
+            [("M", "crates/lash-core/src/session/mod.rs")],
+        ):
+            with self.subTest(changes=changes):
+                self.assertEqual(
+                    "true", ci_plan.classify(changes, "push")["workbench"]
+                )
+
+    def test_a_docs_only_pull_request_still_skips_every_expensive_family(self) -> None:
+        for event in ("pull_request", "merge_group"):
+            with self.subTest(event=event):
+                plan = ci_plan.classify([("M", "docs/adr/0079-x.md")], event)
+                self.assertEqual("true", plan["docs_only"])
+                self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_an_underivable_closure_fails_open(self) -> None:
+        plan = ci_plan.classify(
+            [("M", "crates/lash-s3-store/src/lib.rs")], "", frozenset()
+        )
+        self.assertEqual("false", plan["workbench"])
+        with mock.patch.object(
+            ci_plan, "workbench_dependency_dirs", side_effect=OSError("no manifest")
+        ):
+            plan = ci_plan.classify([("M", "crates/lash-s3-store/src/lib.rs")])
+        self.assertEqual("true", plan["fail_open"])
+        self.assertIn("workbench dependency closure is underivable", plan["reason"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_workbench_only_skips_core_and_postgres(self) -> None:
         plan = ci_plan.classify([("M", "examples/agent-workbench/src/main.rs")])
@@ -268,6 +327,21 @@ class ConclusionTests(unittest.TestCase):
             any("workspace-tests" in problem for problem in ci_plan.evaluate_conclusion(needs))
         )
 
+    def test_a_trunk_push_requires_the_cargo_workspace_run(self) -> None:
+        """Main's own tree keeps a workbench witness (FIG-3049)."""
+        self.assertNotIn("workspace-tests", ci_plan.PUSH_SKIP_CORE_JOBS)
+        needs = successful_needs()
+        apply_event_deferrals(needs, "push")
+        self.assertEqual(
+            [],
+            ci_plan.evaluate_conclusion(needs, event_name="push", ref="refs/heads/main"),
+        )
+        needs["workspace-tests"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(
+            needs, event_name="push", ref="refs/heads/main"
+        )
+        self.assertTrue(any("workspace-tests" in problem for problem in problems))
+
     def test_an_untrusted_rust_event_still_requires_the_cargo_workspace_run(self) -> None:
         needs = successful_needs()
         needs["plan"]["outputs"]["workbench"] = "false"
@@ -351,9 +425,11 @@ class ProducerConclusionTests(unittest.TestCase):
 
     def test_skipped_consumer_cascade_rejected(self):
         for event in ("push", "workflow_dispatch", "pull_request"):
-            consumers = ["restate-postgres-workers", "restate-postgres-workers-summary"]
-            if event != "push":
-                consumers = ["workspace-tests", *consumers]
+            consumers = [
+                "workspace-tests",
+                "restate-postgres-workers",
+                "restate-postgres-workers-summary",
+            ]
             for consumer in consumers:
                 with self.subTest(event=event, consumer=consumer):
                     needs = self.event_needs(event)
@@ -629,6 +705,56 @@ class FuzzSmokeTests(unittest.TestCase):
             self.assertTrue(any("empty seed files" in problem for problem in problems))
 
 
+class WorkbenchClosureContractTests(unittest.TestCase):
+    """The plan's dependency closure must agree with Cargo's own resolution.
+
+    scripts/ci_plan.py reads the workspace manifests directly (the plan job has
+    no Rust toolchain), so this is the gate that keeps the pure-Python walk and
+    Cargo from drifting: a new dependency kind, a renamed package or a path
+    dependency Cargo resolves differently fails here.
+    """
+
+    def cargo_workbench_closure(self) -> set[str]:
+        metadata = json.loads(
+            subprocess.run(
+                ["cargo", "metadata", "--format-version", "1", "--locked", "--no-deps"],
+                cwd=ROOT, text=True, capture_output=True, check=True,
+            ).stdout
+        )
+        workspace_root = Path(metadata["workspace_root"])
+
+        def relative(path: str) -> str:
+            return Path(path).relative_to(workspace_root).as_posix()
+
+        packages = {
+            relative(str(Path(package["manifest_path"]).parent)): package
+            for package in metadata["packages"]
+        }
+        closure: set[str] = set()
+        pending = [(ci_plan.WORKBENCH_MANIFEST_DIR, True)]
+        while pending:
+            directory, include_dev = pending.pop()
+            if directory in closure:
+                continue
+            closure.add(directory)
+            for dependency in packages[directory]["dependencies"]:
+                if not dependency.get("path"):
+                    continue
+                if dependency["kind"] == "dev" and not include_dev:
+                    continue
+                pending.append((relative(dependency["path"]), False))
+        return closure
+
+    def test_the_plan_closure_matches_cargo_metadata(self) -> None:
+        if shutil.which("cargo") is None:
+            if os.environ.get("CI") == "true":
+                self.fail("CI must run this contract with a Rust toolchain on PATH")
+            self.skipTest("cargo is not on PATH")
+        self.assertEqual(
+            self.cargo_workbench_closure(), set(ci_plan.workbench_dependency_dirs())
+        )
+
+
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
@@ -648,6 +774,17 @@ class WorkflowRegistrationTests(unittest.TestCase):
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
         self.assertTrue(any(step.get("name") == "Download worker binaries" for step in consumer["steps"]))
+
+    def test_the_cargo_partition_is_gated_on_the_plan_and_runs_on_trunk(self) -> None:
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+        job = workflow["jobs"]["workspace-tests"]
+        self.assertNotIn("github.event_name != 'push'", job["if"])
+        self.assertIn("needs.plan.outputs.workbench == 'true'", job["if"])
+        classify = next(
+            step for step in workflow["jobs"]["plan"]["steps"]
+            if step.get("id") == "classify"
+        )
+        self.assertIn('--event "${GITHUB_EVENT_NAME}"', classify["run"])
 
     def test_rogue_job_is_caught(self) -> None:
         workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()

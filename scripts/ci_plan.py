@@ -4,11 +4,19 @@
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 import os
 from pathlib import Path, PurePosixPath
 import sys
+import tomllib
 from typing import Mapping
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The one binary the Cargo workspace partition still owns on a trusted event.
+WORKBENCH_MANIFEST_DIR = "examples/agent-workbench"
 
 
 FAMILIES = (
@@ -21,6 +29,80 @@ FAMILIES = (
     "schema",
 )
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
+
+
+def _dependency_tables(manifest: Mapping, include_dev: bool) -> list[Mapping]:
+    """Every dependency table whose entries are compiled for this package."""
+
+    kinds = ["dependencies", "build-dependencies"]
+    if include_dev:
+        kinds.append("dev-dependencies")
+    tables = [manifest.get(kind, {}) for kind in kinds]
+    for target in manifest.get("target", {}).values():
+        tables.extend(target.get(kind, {}) for kind in kinds)
+    return [table for table in tables if isinstance(table, Mapping)]
+
+
+def _first_party_dependency_dir(
+    name: str,
+    spec: object,
+    manifest_dir: str,
+    workspace_dependencies: Mapping,
+) -> str | None:
+    """Resolve one dependency entry to its in-repo manifest directory, or None."""
+
+    if not isinstance(spec, Mapping):
+        return None
+    if spec.get("workspace") is True:
+        spec = workspace_dependencies.get(name, {})
+        if not isinstance(spec, Mapping) or "path" not in spec:
+            return None
+        return PurePosixPath(spec["path"]).as_posix()
+    path = spec.get("path")
+    if not isinstance(path, str):
+        return None
+    return PurePosixPath(os.path.normpath(f"{manifest_dir}/{path}")).as_posix()
+
+
+@lru_cache(maxsize=None)
+def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
+    """The first-party manifest directories the workbench partition compiles.
+
+    The Cargo workspace partition builds `agent-workbench` and runs its tests,
+    so a change to any workspace crate in that binary's transitive dependency
+    closure — plus the workbench's own dev-dependencies — changes what the job
+    would execute. The closure is read out of the workspace manifests rather
+    than kept as a hand list: `scripts/test_ci_plan.py` cross-checks it against
+    `cargo metadata` so the two can never drift apart.
+    """
+
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+
+    def manifest(directory: str) -> Mapping:
+        with (root / directory / "Cargo.toml").open("rb") as handle:
+            return tomllib.load(handle)
+
+    with (root / "Cargo.toml").open("rb") as handle:
+        workspace_manifest = tomllib.load(handle)
+    workspace_dependencies = workspace_manifest.get("workspace", {}).get("dependencies", {})
+
+    closure: set[str] = set()
+    # The workbench's own dev-dependencies compile for its tests; a transitive
+    # dependency's dev-dependencies do not, exactly as `cargo test -p` resolves.
+    pending = [(WORKBENCH_MANIFEST_DIR, True)]
+    while pending:
+        directory, include_dev = pending.pop()
+        if directory in closure:
+            continue
+        closure.add(directory)
+        for table in _dependency_tables(manifest(directory), include_dev):
+            for name, spec in table.items():
+                dependency = _first_party_dependency_dir(
+                    name, spec, directory, workspace_dependencies
+                )
+                if dependency is not None and dependency not in closure:
+                    pending.append((dependency, False))
+    return frozenset(closure)
 
 GATED_JOBS = {
     "lashlang-git-consumer": "rust",
@@ -71,7 +153,9 @@ TRUNK_ONLY_JOBS = {
 
 # The merge queue already validated these on the SHA that lands on main.
 # Breadth jobs (heavy, S3, E2E, fuzz, stack-budget, unicode) keep running on
-# push; this set does not.
+# push; this set does not. `workspace-tests` is deliberately absent: the Cargo
+# partition is the workbench binary's only witness, and it runs on every trunk
+# push so a break is attributed to the merge that caused it.
 PUSH_SKIP_CORE_JOBS = {
     "facade-only-examples",
     "test-doc",
@@ -80,7 +164,6 @@ PUSH_SKIP_CORE_JOBS = {
     "lashlang-git-consumer",
     "package-feature-checks",
     "runtime-feature-boundary",
-    "workspace-tests",
     "bazel-tests",
     "lint",
     "postgres-store",
@@ -196,7 +279,11 @@ def _is_global_invalidator(path: str) -> bool:
 
 
 def _is_workbench_path(path: str) -> bool:
-    return path.startswith("examples/agent-workbench/")
+    return path.startswith(f"{WORKBENCH_MANIFEST_DIR}/")
+
+
+def _is_workbench_dependency_path(path: str, workbench_dirs: frozenset[str]) -> bool:
+    return any(path.startswith(f"{directory}/") for directory in workbench_dirs)
 
 
 def _is_regress_path(path: str) -> bool:
@@ -251,9 +338,23 @@ def fail_open(reason: str) -> dict[str, str]:
     return outputs
 
 
-def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
+def classify(
+    changes: list[tuple[str, str]],
+    event_name: str = "",
+    workbench_dirs: frozenset[str] | None = None,
+) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
+    if workbench_dirs is None:
+        try:
+            workbench_dirs = workbench_dependency_dirs()
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
+            return fail_open(f"workbench dependency closure is underivable: {error}")
+    # Push is trunk: CI's `on:` restricts it to `main`, and the push run is the
+    # only run that witnesses main's own tree. It always carries the workbench
+    # partition, so a break that a queue run somehow missed still surfaces on
+    # the branch it broke rather than on the next unrelated pull request.
+    trunk_push = event_name == "push"
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
     if unknown_statuses:
         statuses = ", ".join(repr(status) for status in unknown_statuses)
@@ -269,7 +370,10 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     ambiguous = sorted(path for path in paths if not _is_known_path(path))
     docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
     non_docs = [path for path in paths if not _is_docs_path(path)]
-    workbench_hit = any(_is_workbench_path(path) for path in paths)
+    workbench_hit = trunk_push or any(
+        _is_workbench_path(path) or _is_workbench_dependency_path(path, workbench_dirs)
+        for path in paths
+    )
     only_workbench = bool(non_docs) and all(_is_workbench_path(path) for path in non_docs)
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
@@ -297,6 +401,7 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     }
     if docs_only:
         outputs.update({family: "false" for family in FAMILIES})
+        outputs["workbench"] = str(trunk_push).lower()
         return outputs
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
@@ -357,6 +462,9 @@ def evaluate_conclusion(
                 )
     elif docs_only == "true":
         for family in FAMILIES:
+            # A trunk push carries the workbench partition whatever it changed.
+            if family == "workbench" and event_name == "push":
+                continue
             expectation = plan_outputs.get(family)
             if expectation not in {"true", "false"}:
                 continue
@@ -422,10 +530,14 @@ def evaluate_conclusion(
             # On a trusted event the Bazel partition owns every deterministic
             # Rust binary, so the Cargo job runs only for the workbench
             # binary. An untrusted event has no Bazel partition and keeps the
-            # full Cargo workspace run.
-            required = plan_outputs.get("workbench") == "true" or (
-                not bazel_is_trusted and plan_outputs.get("rust") == "true"
-            )
+            # full Cargo workspace run. A trunk push always runs it: main is
+            # the tree the workbench binary has to stay green on.
+            if event_name == "push":
+                required = ref == "refs/heads/main"
+            else:
+                required = plan_outputs.get("workbench") == "true" or (
+                    not bazel_is_trusted and plan_outputs.get("rust") == "true"
+                )
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
@@ -492,6 +604,7 @@ def main() -> int:
 
     classify_parser = subparsers.add_parser("classify")
     classify_parser.add_argument("--paths-file", type=Path, required=True)
+    classify_parser.add_argument("--event", default="")
 
     fail_parser = subparsers.add_parser("fail-open")
     fail_parser.add_argument("--reason", required=True)
@@ -509,7 +622,7 @@ def main() -> int:
 
     if args.command == "classify":
         try:
-            outputs = classify(_read_nul_changes(args.paths_file))
+            outputs = classify(_read_nul_changes(args.paths_file), args.event)
         except (OSError, UnicodeError, PlanError) as error:
             outputs = fail_open(f"classification error: {error}")
         _write_outputs(outputs)

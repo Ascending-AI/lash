@@ -202,6 +202,7 @@ jobs:
             fail_open "exact diff ${base_sha}..${GITHUB_SHA} could not be computed"
           fi
           python3 scripts/ci_plan.py classify \
+            --event "${GITHUB_EVENT_NAME}" \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
       # PG16 is the sole primary lane on rust pull requests and merge groups.
@@ -805,17 +806,19 @@ jobs:
   # workspace on a trusted event. Untrusted pull requests receive no cache
   # credentials and therefore no Bazel partition, so they keep running the full
   # Cargo workspace suite exactly as they do today.
+  #
+  # `plan.workbench` is the workbench binary's compiled dependency closure, read
+  # out of the workspace manifests by scripts/ci_plan.py, not a path prefix: a
+  # change to any crate the binary links selects this job. A trunk push always
+  # selects it, so main keeps a witness of its own tree.
   workspace-tests:
     name: Test Cargo workspace partition
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
     if: >-
-      github.event_name != 'push'
-      && (
-        needs.plan.outputs.workbench == 'true'
-        || (needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true')
-      )
+      needs.plan.outputs.workbench == 'true'
+      || (needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true')
     steps:
       - name: Check out repository
         env:
