@@ -579,8 +579,11 @@ finish result
     drop(core);
     let reopened = approval_test_core(
         directory.path(),
+        // The reopen must present the recorded provider pin: a different
+        // provider id is refused as `ProviderMismatch` (ADR 0066). The
+        // panicking completer still proves the read never reaches it.
         lash::testing::TestProvider::builder()
-            .kind("history-only")
+            .kind("async-completion-redrive")
             .complete(|_| async { panic!("reading history must not invoke the provider") })
             .build()
             .into_handle(),
