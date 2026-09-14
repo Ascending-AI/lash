@@ -50,6 +50,16 @@ harness() {
 }
 
 "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+
+# Pull every image this run starts through the retry wrapper so a transient
+# registry error is ridden out instead of failing the gate. The compose image is
+# the same postgres:16-alpine the readiness probe and the psql queries below run,
+# so one pass covers the whole run; the wrapper still exits non-zero (and says
+# so) once a genuinely unavailable tag has exhausted its attempts.
+for image in $("${compose[@]}" config --images); do
+  bash "$repo/scripts/docker-pull-with-retry.sh" "$image"
+done
+
 "${compose[@]}" up -d postgres
 
 deadline=$((SECONDS + 90))
