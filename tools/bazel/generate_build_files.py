@@ -96,6 +96,21 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     return env, deps
 
 
+# The agent-workbench cases that shell out to `node --test` to drive
+# `examples/agent-workbench/tests/browser_projection.mjs`. The Bazel action has
+# no Node.js toolchain and no Cargo-relative asset tree, so the partition label
+# skips them by name (`args`, below) and the `Test Cargo workspace partition`
+# job selects exactly them out of the same binary
+# (`tools/bazel/workbench_nextest_filter.txt`). Every other workbench case is
+# partition-owned and runs on the pool. Keep the two derived from this one list
+# so a new Node-gated case can never be skipped by Bazel without also being
+# picked up by Cargo, or the reverse.
+NODE_GATED_WORKBENCH_TESTS = (
+    "tests::recoverable_chat_tests::"
+    "workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
+)
+
+
 def cargo_test_policy(
     package_name: str, kind: str, target_name: str
 ) -> tuple[list[str], str | None]:
@@ -123,9 +138,6 @@ def cargo_test_policy(
     if package_name == "workflow-graph-roundtrip" and kind == "test":
         tags.extend(["manual", "cargo-frontend-assets"])
         reasons.append("uses the Cargo-owned generated frontend asset workflow")
-    if package_name == "agent-workbench" and kind in ("bin-unit-test", "unit-test"):
-        tags.extend(["manual", "cargo-frontend-assets"])
-        reasons.append("shares a unit-test binary with a Node.js browser projection gate")
     if package_name == "lash-sim" and target_name.startswith("cross_backend"):
         tags.extend(["manual", "cargo-service-gate"])
         reasons.append(
@@ -500,9 +512,22 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             bin_unit_tags, bin_unit_cargo_reason = cargo_test_policy(
                 package["name"], "bin-unit-test", target["name"]
             )
+            bin_unit_skips = (
+                list(NODE_GATED_WORKBENCH_TESTS)
+                if package["name"] == "agent-workbench"
+                else []
+            )
             unit_args = [
                 "lash_rust_unit_test(\n",
                 f"    name = {quote(name + '__unit_test')},\n",
+            ]
+            if bin_unit_skips:
+                unit_args.append(
+                    "    args = "
+                    + string_list([f"--skip={test}" for test in bin_unit_skips])
+                    + ",\n"
+                )
+            unit_args += [
                 f"    crate_features = {string_list(target_features)},\n",
                 f"    crate_name = {quote(crate_name)},\n",
                 f"    crate_root = {quote(crate_root)},\n",
@@ -528,6 +553,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 "label": f"//{package_dir}:{name}__unit_test",
                 "tags": bin_unit_tags,
             }
+            if bin_unit_skips:
+                bin_unit_inventory["bazel_skipped"] = sorted(bin_unit_skips)
             if bin_unit_cargo_reason:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
@@ -692,14 +719,18 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     outputs[ROOT / "tools/bazel/cargo_owned_nextest_filter.txt"] = (
         " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
     )
+    # The workbench partition is now exactly the Node-gated cases the Bazel
+    # label skipped, selected by name out of the same binary. Derived from the
+    # same `bazel_skipped` records the label's `--skip` args come from, so the
+    # two halves of the split cannot drift into a gap or an overlap.
     workbench_terms = sorted(
-        nextest_filter_term(package["package"], target)
+        f"({nextest_filter_term(package['package'], target)} & test(={test}))"
         for package in inventory
         if package["package"] == "agent-workbench"
         for target in package["targets"]
         if target.get("label") is not None
         and target["kind"] in ("bin-unit-test", "test", "unit-test")
-        and "manual" in target["tags"]
+        for test in target.get("bazel_skipped", ())
     )
     outputs[ROOT / "tools/bazel/workbench_nextest_filter.txt"] = (
         " + ".join(workbench_terms) + "\n" if workbench_terms else "none()\n"

@@ -48,8 +48,9 @@ kiln build
 # Run the generated cacheable test suite (PR Bazel partition).
 kiln test
 
-# Path-plan like CI. Docs-only skips compile; workbench-only does not
-# compile lash-core or Postgres. Never starts Postgres, S3, or E2E.
+# Path-plan like CI. Docs-only skips compile; workbench-only still runs the
+# Bazel partition (it owns the workbench unit suite) but skips the store,
+# functional-E2E and worker-E2E breadth. Never starts Postgres, S3, or E2E.
 scripts/dev-test.sh
 
 # Lint the `--workspace --all-targets` shape (170 clippy actions).
@@ -152,11 +153,12 @@ with a Cargo-owned live-service suite is not by itself a Bazel blocker.
 The four binaries that `tools/bazel/cargo_owned_nextest_filter.txt` once
 selected are in the partition as of 2026-09-14, which retires the
 `Test Cargo workspace partition` Rust run on trusted events entirely — the job
-now runs only for the agent-workbench binary, and only when the diff touches
-that binary's first-party dependency closure, which `scripts/ci_plan.py`
-derives from the workspace manifests (or on a push to main, which always runs
-it). Each blocker was fixed as a test defect
-rather than exempted:
+now runs only the agent-workbench cases that shell out to `node --test`, and
+only when the diff touches the workbench binary's first-party dependency
+closure, which `scripts/ci_plan.py` derives from the workspace manifests (or on
+a push to main, which always runs it). The rest of the workbench unit binary is
+partition-owned and runs on the pool; see "The workbench split" below. Each
+blocker was fixed as a test defect rather than exempted:
 
 - `//crates/lash-core:integration_boundary__test` shelled out to `cargo
   metadata` at the workspace root to prove that core declares no dependency on
@@ -230,11 +232,10 @@ which is neither a Bazel test action's runfiles root nor nextest's per-crate
 working directory. That rules out feeding pool-built binaries to nextest
 through `--binaries-metadata`.
 
-The 16 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
+The 15 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
 binary, the two `lash-sim` cross-backend binaries, the `lash-runtime` trybuild
-binary, the agent-workbench unit binary that includes a Node.js browser
-projection gate, and three workflow-graph frontend binaries. Use the existing Cargo recipes for these correctness
-contracts:
+binary, and three workflow-graph frontend binaries. Use the existing Cargo
+recipes for these correctness contracts:
 
 - `scripts/check_feature_coverage.py` and the explicit no-default-feature
   commands own feature-combination coverage. Cargo-required targets omitted
@@ -431,11 +432,34 @@ with the authenticated shared cache. `main` pushes skip that core board (the
 queue already witnessed the SHA) and keep breadth jobs. A rust PR runs no Cargo
 workspace job at all on a trusted event: `tools/bazel/cargo_owned_nextest_filter.txt`
 is `none()`, and the job's trusted branch refuses to run without a workbench
-diff rather than launder an empty selection into a green. Workbench unit tests
-run only when `examples/agent-workbench/**` changed, selected by
-`tools/bazel/workbench_nextest_filter.txt`. An untrusted (fork or Dependabot)
-pull request receives no cache credentials and therefore no Bazel partition, so
-it keeps the full Cargo workspace run unchanged.
+diff rather than launder an empty selection into a green. What it does run is
+the workbench's Node-gated cases, selected by
+`tools/bazel/workbench_nextest_filter.txt`, and its build is scoped to
+`--package agent-workbench --tests` rather than `--workspace`: compiling and
+linking every workspace crate on a two-core runner to execute one test made
+this job the CI tail (836 s against the Bazel partition's 145 s on queue run
+34804868851). An untrusted (fork or Dependabot) pull request receives no cache
+credentials and therefore no Bazel partition, so it keeps the full Cargo
+workspace run — the `sqlite-await-event-helper` example included, which the
+store conformance tests spawn.
+
+### The workbench split
+
+`examples/agent-workbench`'s unit binary is partition-owned apart from the
+cases that shell out to `node --test` to drive
+`examples/agent-workbench/tests/browser_projection.mjs`, which need a Node
+toolchain the Bazel action does not install and a Cargo-relative asset path a
+runfiles tree does not reproduce. Rather than fork the binary, the split is by
+name out of one binary, exactly as `lash-internal-core`'s fault-matrix chunks
+are split: `tools/bazel/generate_build_files.py` holds the case names in
+`NODE_GATED_WORKBENCH_TESTS` and derives both halves from that one list — the
+Bazel label's `args = ["--skip=…"]`, so the label is honest about what it
+executed, and `tools/bazel/workbench_nextest_filter.txt`'s `test(=…)` terms, so
+the Cargo job selects exactly the skipped set. The generated inventory records
+the same names under `bazel_skipped`, and
+`scripts/test_bazel_test_contract.py` refuses a hand edit that leaves a gap or
+an overlap between the two halves. Adding a Node-dependent workbench case means
+adding its name to that one tuple and regenerating.
 The `Lint` job builds
 `//:workspace_clippy` in place of the workspace `cargo clippy`, and the
 `Check workspace` job builds `//:workspace_compile` in place of

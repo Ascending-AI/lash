@@ -171,11 +171,23 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("workbench dependency closure is underivable", plan["reason"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_workbench_only_skips_core_and_postgres(self) -> None:
+    def test_workbench_only_skips_breadth_but_keeps_the_bazel_partition(self) -> None:
+        """The pool owns the workbench unit suite, so `rust` cannot be false.
+
+        `rust` gates `Test Bazel partition`, which runs every agent-workbench
+        unit case except the Node-gated browser-projection ones. Skipping it on
+        a workbench-only diff would leave the workbench's own tests unrun on
+        the diff that changed them, with a green Cargo job that executed one
+        test standing in for the suite. The store, functional-E2E and
+        worker-E2E breadth families stay off: the workbench is an example
+        host, not a store or a worker.
+        """
         plan = ci_plan.classify([("M", "examples/agent-workbench/src/main.rs")])
         self.assertEqual("workbench-only diff", plan["reason"])
-        self.assertEqual("false", plan["rust"])
+        self.assertEqual("true", plan["rust"])
         self.assertEqual("false", plan["stores"])
+        self.assertEqual("false", plan["functional_e2e"])
+        self.assertEqual("false", plan["workers_e2e"])
         self.assertEqual("true", plan["workbench"])
 
     def test_readme_prefixed_rust_file_runs_core_families(self) -> None:

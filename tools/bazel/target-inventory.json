@@ -1835,14 +1835,13 @@
           "tags": []
         },
         {
+          "bazel_skipped": [
+            "tests::recoverable_chat_tests::workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors"
+          ],
           "cargo": "agent-workbench",
-          "cargo_only": "shares a unit-test binary with a Node.js browser projection gate",
           "kind": "bin-unit-test",
           "label": "//examples/agent-workbench:agent-workbench__unit_test",
-          "tags": [
-            "cargo-frontend-assets",
-            "manual"
-          ]
+          "tags": []
         }
       ]
     },
