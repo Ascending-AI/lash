@@ -1274,27 +1274,55 @@ mod tests {
         .await;
     }
 
+    // One case per fixture: each of these runs one generate/drive/minimize cycle,
+    // and a single case that looped over all six was the slowest test in the
+    // crate. The bodies are the same assertion the loop ran, fixture by fixture.
     #[tokio::test]
-    async fn minimizer_preserves_provider_worker_backend_fixture_reasons() {
-        for fixture_body in [
-            include_str!("../failure-fixtures/provider-mutation-runtime-completion-missing.json"),
-            include_str!("../failure-fixtures/worker-failover-stale-rejection-missing.json"),
-            include_str!("../failure-fixtures/backend-retry-runtime-completion-missing.json"),
-            include_str!("../failure-fixtures/queued-input-operational-missing.json"),
-            include_str!("../failure-fixtures/trigger-wakeup-operational-missing.json"),
-            include_str!("../failure-fixtures/process-wake-operational-missing.json"),
-        ] {
-            let fixture: FailingTraceFixture = serde_json::from_str(fixture_body).expect("fixture");
-            let workload =
-                generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)
-                    .expect("workload");
-            let mut trace = run_generated_workload_for_fixture(workload, "bundle")
-                .await
-                .expect("trace");
-            apply_fixture_mutation(&mut trace, &fixture.mutation).expect("mutation");
-            select_fixture_target_oracle(&mut trace, &fixture).expect("target oracle");
-            assert_minimized_fixture_preserves_failure(&fixture, trace);
-        }
+    async fn minimizer_preserves_provider_mutation_runtime_completion_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/provider-mutation-runtime-completion-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_worker_failover_stale_rejection_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/worker-failover-stale-rejection-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_backend_retry_runtime_completion_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/backend-retry-runtime-completion-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_queued_input_operational_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/queued-input-operational-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_trigger_wakeup_operational_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/trigger-wakeup-operational-missing.json"
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    async fn minimizer_preserves_process_wake_operational_fixture_reason() {
+        assert_named_contract_fixture(include_str!(
+            "../failure-fixtures/process-wake-operational-missing.json"
+        ))
+        .await;
     }
 
     fn assert_minimized_fixture_preserves_failure(
