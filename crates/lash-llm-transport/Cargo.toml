@@ -36,6 +36,7 @@ async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
 bytes = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 proptest = { version = "1", optional = true }
 
 [dev-dependencies]
