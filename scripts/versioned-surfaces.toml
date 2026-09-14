@@ -907,6 +907,14 @@ kind = "rust_serde_shapes"
 paths = ["crates/lashlang/src/workflow_graph.rs"]
 must_cover = ["WorkflowGraph"]
 
+# The document's value types stay in lashlang; the projector that mints its
+# node identity and the printer that produces its text live in lash-typescript,
+# so the guard has to watch both or a projection change ships unversioned.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-typescript/src/workflow_graph/mod.rs"]
+symbols = ["GraphProjector"]
+
 [[surface]]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
