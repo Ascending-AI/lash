@@ -1056,7 +1056,6 @@ pub type TriggerEffectResult = Result<TriggerCommandOutcome, TriggerOperationErr
 /// Store implementors use this encoder to persist a mutation result with its
 /// owner namespace in private receipt JSON. Normal [`TriggerEffectResult`]
 /// decoding ignores the field; retention uses it for receipts without records.
-#[doc(hidden)]
 pub fn encode_trigger_effect_result_receipt(
     owner_scope: &TriggerOwnerScope,
     result: &TriggerEffectResult,
@@ -1095,7 +1094,6 @@ pub fn next_trigger_revision(
     Ok(record.revision + 1)
 }
 
-#[doc(hidden)]
 pub fn next_trigger_store_revision(record: &TriggerSubscriptionRecord) -> Result<u64, PluginError> {
     if record.revision >= i64::MAX as u64 {
         return Err(PluginError::MonotonicCounterOverflow {

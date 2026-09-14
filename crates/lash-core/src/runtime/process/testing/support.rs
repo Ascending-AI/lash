@@ -60,7 +60,6 @@ impl Default for TestLocalProcessRegistry {
 }
 
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
     pub async fn fail_next_external_ref_write_for_testing(&self, error: PluginError) {
         *self.external_ref_write_error.lock().await = Some(error);
     }
@@ -70,13 +69,11 @@ impl TestLocalProcessRegistry {
     /// Exercises the compensation path of a failed start: the caller's
     /// StartFailed request cannot be recorded, so the row stays nonterminal and
     /// the recovery sweep owns it.
-    #[doc(hidden)]
     pub async fn fail_next_cancel_request_for_testing(&self, error: PluginError) {
         *self.cancel_request_write_error.lock().await = Some(error);
     }
 
     /// Inject a structurally valid wake row for delivery-driver boundary tests.
-    #[doc(hidden)]
     pub async fn insert_wake_delivery_for_testing(
         &self,
         wake: crate::ProcessWakeDelivery,
@@ -85,7 +82,6 @@ impl TestLocalProcessRegistry {
     }
 
     /// Inject worklist page-read errors after the given successful reads.
-    #[doc(hidden)]
     pub async fn set_worklist_page_errors_for_testing(
         &self,
         successful_reads: usize,
@@ -95,7 +91,6 @@ impl TestLocalProcessRegistry {
     }
 
     /// Pause the next worklist read before its injected result is returned.
-    #[doc(hidden)]
     pub fn pause_next_worklist_page_for_testing(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.worklist_page_pause.lock_recover() = Some(pause.clone());
@@ -118,7 +113,6 @@ impl TestLocalProcessRegistry {
     }
 
     /// Injects an error into the next process event-history read.
-    #[doc(hidden)]
     pub async fn set_process_events_read_error_for_testing(&self, error: PluginError) {
         *self.process_events_read_error.lock().await = Some(error);
     }
@@ -191,47 +185,40 @@ impl TestLocalProcessRegistry {
         delivery.disposition = super::super::WakeDeliveryDisposition::DiscardedUnattributed;
     }
 
-    #[doc(hidden)]
     pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.execution_write_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
-    #[doc(hidden)]
     pub fn pause_next_wake_mark(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.wake_mark_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
-    #[doc(hidden)]
     pub fn pause_next_append_after_outbox(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.append_outbox_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
-    #[doc(hidden)]
     pub fn pause_next_append_after_target_snapshot(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.append_target_snapshot_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
-    #[doc(hidden)]
     pub fn pause_next_prune_after_managed_removal(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
         *self.prune_managed_removal_pause.lock_recover() = Some(pause.clone());
         pause.handle()
     }
 
-    #[doc(hidden)]
     pub fn transaction_is_locked_for_testing(&self) -> bool {
         self.transaction.try_lock().is_err()
     }
 
-    #[doc(hidden)]
     pub async fn replace_process_projection_for_testing(&self, record: ProcessRecord) {
         let _transaction = self.transaction.lock().await;
         let process_id = record.id.clone();
@@ -367,7 +354,6 @@ pub(super) fn validate_in_memory_execution_authority(
 /// API requires an execution authority. Each write claims and releases a real
 /// process lease through the registry under test.
 #[async_trait::async_trait]
-#[doc(hidden)]
 pub trait TestProcessRegistryWriteExt: ProcessRegistry {
     async fn record_first_started(
         &self,

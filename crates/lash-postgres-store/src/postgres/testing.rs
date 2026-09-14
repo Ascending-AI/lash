@@ -22,7 +22,6 @@ pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilt
         .to_string()
 }
 
-#[doc(hidden)]
 pub use crate::runtime_persistence::TestTurnCancelReadPause as TurnCancelReadPause;
 
 /// Deterministic PostgreSQL substrate fault injection, the twin of

@@ -116,7 +116,6 @@ pub(crate) use json::*;
 #[allow(unused_imports)]
 pub(crate) use ops::*;
 pub use state::LASHLANG_SNAPSHOT_VERSION;
-#[doc(hidden)]
 pub use state::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
     validate_canonical_messagepack_structure,

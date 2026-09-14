@@ -58,7 +58,6 @@ mod process_prune_reclaim;
 mod process_references;
 mod process_registry;
 mod process_trigger_retention;
-#[doc(hidden)]
 pub mod registration_macro_support;
 mod retention;
 mod runtime_persistence;

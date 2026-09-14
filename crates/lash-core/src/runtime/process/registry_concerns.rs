@@ -171,7 +171,6 @@ pub trait ProcessQuery: Send + Sync {
     /// This is the low-level implementation seam for the facade's deployment
     /// drain read. Durable backends should override it with an indexed count
     /// over their authoritative status rows rather than hydrating records.
-    #[doc(hidden)]
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError>;
 }
 

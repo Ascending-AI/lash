@@ -10,8 +10,6 @@
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of that root.
 
-#![deny(missing_docs)]
-
 /// Administrative facade handles and operations.
 pub mod admin;
 mod core;

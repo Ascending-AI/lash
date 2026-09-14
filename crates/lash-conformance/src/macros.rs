@@ -1,7 +1,6 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
 /// Expansion machinery for the runtime-persistence registration macros.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __runtime_persistence_register {
     (plain $fixture:block;
@@ -276,7 +275,6 @@ macro_rules! runtime_persistence_reopenable_tests {
 }
 
 /// Expansion machinery for the process-registry registration macros.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __process_registry_register {
     (plain $fixture:block;
@@ -553,7 +551,6 @@ macro_rules! store_maintenance_fault_tests {
 }
 
 /// Expansion machinery for effect-group host registration.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __effect_group_host_register {
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, wired) => {
@@ -637,7 +634,6 @@ macro_rules! effect_group_host_tests {
 }
 
 /// Register the durable cancelled-child terminal law.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __effect_group_cancelled_child_terminal_register {
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {
@@ -1079,7 +1075,6 @@ macro_rules! trigger_store_reopenable_tests {
 }
 
 /// Expansion machinery for trigger-retention fault laws.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __trigger_retention_fault_register {
     ($fixture:block; $law:ident, $label:literal, legacy) => {
@@ -1263,7 +1258,6 @@ macro_rules! effect_host_retirement_tests {
 }
 
 /// Expansion machinery for process-prune reclamation registration.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __process_prune_reclaim_register {
     ($fixture:block; $law:ident, $label:literal, registry) => {
@@ -1543,7 +1537,6 @@ macro_rules! fresh_session_admission_tests {
 }
 
 /// Expansion machinery for session read-view registration.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __session_read_view_register {
     ($fixture:block; $law:ident, $label:literal, failure) => {
@@ -1601,7 +1594,6 @@ macro_rules! process_prune_session_store_tests {
 }
 
 /// Expansion machinery for live-replay registration.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __live_replay_register {
     ($fixture:block; $law:ident, $label:literal, plain) => {
@@ -1738,7 +1730,6 @@ macro_rules! turn_work_driver_tests {
 }
 
 /// Register the level-one turn crash matrix.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __turn_crash_matrix_register {
     ($fixture:block; $law:ident, $label:literal, trace) => {
@@ -2244,7 +2235,6 @@ macro_rules! durable_queued_drain_wait_resolver_tests {
 }
 
 /// Expansion machinery for await-event witness registration.
-#[doc(hidden)]
 #[macro_export]
 macro_rules! __effect_host_await_event_witness_register {
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {

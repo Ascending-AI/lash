@@ -394,7 +394,6 @@ pub fn process_commit_admission_queue_depth(session_id: &SessionId) -> usize {
 /// head load and intent build cannot execute while queued. `Ok` means the head
 /// advanced and wakes exactly the next node; `Err` releases the lane without
 /// claiming an advance. Cross-process publication remains store-CAS governed.
-#[doc(hidden)]
 pub async fn run_head_advancing_commit_attempt<T, E, F, Fut>(
     session_id: impl Into<SessionId>,
     work_identity: impl Into<String>,

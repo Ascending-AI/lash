@@ -13,7 +13,6 @@ use super::*;
 /// requested IDs. Refusal means at least one still-present row could not be
 /// executed under the requested atomic composition, or the execution lane was
 /// unavailable; no selected turn was started.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkDrainRefusalCause {
     UnclaimableTogether {
@@ -39,7 +38,6 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
 /// inspect afterwards: this reason is the whole account of the empty drain.
 /// Reading one variant as another is how queued work gets abandoned — a drain
 /// that never reached its input is retryable, while an exhausted queue is not.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EmptyQueuedDrainReason {
     /// Another execution holds the session execution lane, so this drain never
@@ -52,7 +50,6 @@ pub enum EmptyQueuedDrainReason {
 }
 
 /// One automatic queued-turn drain: the turn it ran, or why it ran none.
-#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub enum QueuedTurnDrain<T> {
     /// The drain claimed queued work and ran a turn.
@@ -113,7 +110,6 @@ impl QueuedWorkDrainResult {
 }
 
 /// How one distinct requested batch ID satisfied a successful selected drain.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelectedQueuedWorkBatchSatisfaction {
     /// This invocation claimed and executed the durable row.
@@ -127,7 +123,6 @@ pub enum SelectedQueuedWorkBatchSatisfaction {
 /// Each distinct requested ID is either executed now or already absent from
 /// durable storage. A present ID that cannot join the exact claim produces a
 /// refusal instead of this type, before any selected turn executes.
-#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct SelectedQueuedWorkDrainOutcome<T> {
     /// Executed turn, absent only for a fully satisfied drain that produced no
@@ -173,7 +168,6 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
 /// [`Self::Refused`] is a pre-execution atomicity result: absent rows count as
 /// idempotently satisfied, while present rows that cannot form the requested
 /// composition leave the selection unexecuted.
-#[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SelectedQueuedWorkDrainError {

@@ -4,7 +4,6 @@ use super::*;
 ///
 /// This is public only so the RLM persistence envelope can use the same raw
 /// parser as Lashlang snapshots; it is not a general serialization API.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanonicalMapOrder {
     /// Require only canonical key encodings and unique string keys.
@@ -19,7 +18,6 @@ pub enum CanonicalMapOrder {
 }
 
 /// A structural step from the root of a canonical MessagePack value.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalPathSegment {
     /// The value of a map entry, independent of how its key is displayed.
@@ -44,7 +42,6 @@ impl CanonicalPathSegment {
 /// `map_order` classifies maps after their marker is seen. `map_required`
 /// identifies serde struct/map locations where sequence-form input must be
 /// rejected before deserialization.
-#[doc(hidden)]
 pub fn validate_canonical_messagepack_structure(
     bytes: &[u8],
     root_location: &str,

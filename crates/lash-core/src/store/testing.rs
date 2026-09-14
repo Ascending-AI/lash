@@ -38,7 +38,6 @@ pub trait StoreTestSupport: Send + Sync {
 }
 
 /// Build an identity-bearing append commit with a caller-owned clock.
-#[doc(hidden)]
 pub fn append_request_commit_with_clock_for_testing(
     state: &mut crate::RuntimeSessionState,
     operation_id: &str,

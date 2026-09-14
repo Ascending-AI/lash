@@ -240,7 +240,6 @@ impl<'run> SessionTurnRequest<'run> {
     /// Keeping those identities separate prevents a borrowed or shared
     /// controller from presenting an address that disagrees with its host
     /// fence. A session-deletion scope cannot authorize turn execution.
-    #[doc(hidden)]
     pub fn new_runtime_internal_compaction(
         session_id: impl Into<SessionId>,
         turn_id: impl Into<TurnId>,
@@ -299,7 +298,6 @@ impl<'run> SessionTurnRequest<'run> {
     ///
     /// The turn remains registered for collision checks and observability, but
     /// it does not consume or compete for the host's managed-turn admission cap.
-    #[doc(hidden)]
     pub fn with_runtime_internal_compaction_admission(mut self) -> Self {
         self.admission_class = ManagedTurnAdmissionClass::RuntimeInternalCompaction;
         self

@@ -578,7 +578,6 @@ where
     }
 }
 
-#[doc(hidden)]
 pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn sleep_send<'run>(
         &'run self,

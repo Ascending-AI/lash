@@ -419,7 +419,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    #[doc(hidden)]
     /// This is a replay-shape switch, not a live policy toggle. A Restate
     /// invocation must reconstruct the same value on every attempt.
     pub fn with_turn_cancel_observation(mut self, observe_turn_cancel: bool) -> Self {
@@ -446,7 +445,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    #[doc(hidden)]
     pub fn with_process_turn_cancellation(
         mut self,
         turn_cancellation: ProcessTurnCancellation,
@@ -602,7 +600,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     ///
     /// This is deliberately hidden from the published default documentation;
     /// it is not an integrator seam for fabricating runtime effect outcomes.
-    #[doc(hidden)]
     pub fn testing<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,

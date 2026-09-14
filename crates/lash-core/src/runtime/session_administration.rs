@@ -26,7 +26,6 @@ impl SessionAdministration {
     ///
     /// This is a trusted host integration boundary. The host must compose all
     /// supplied services from the same physical persistence deployment.
-    #[doc(hidden)]
     pub fn new(
         store_factory: Arc<dyn SessionStoreFactory>,
         effect_host: Arc<dyn EffectHost>,
@@ -48,38 +47,31 @@ impl SessionAdministration {
     /// Replace the execution host while retaining this administration owner.
     ///
     /// Backend adapters use this only while installing their own executor.
-    #[doc(hidden)]
     pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
         self.effect_host = effect_host;
         self
     }
 
-    #[doc(hidden)]
     pub fn store_factory(&self) -> &Arc<dyn SessionStoreFactory> {
         &self.store_factory
     }
 
-    #[doc(hidden)]
     pub fn effect_host(&self) -> &Arc<dyn EffectHost> {
         &self.effect_host
     }
 
-    #[doc(hidden)]
     pub fn process(&self) -> Option<&ProcessWorkWiring> {
         self.process.as_ref()
     }
 
-    #[doc(hidden)]
     pub fn trigger_store(&self) -> Option<&Arc<dyn crate::TriggerStore>> {
         self.trigger_store.as_ref()
     }
 
-    #[doc(hidden)]
     pub fn process_env_store(&self) -> &Arc<dyn crate::ProcessExecutionEnvStore> {
         &self.process_env_store
     }
 
-    #[doc(hidden)]
     pub fn process_engines(&self) -> &crate::ProcessEngineRegistry {
         &self.process_engines
     }
@@ -154,12 +146,10 @@ impl<'a> SessionDeleteContext<'a> {
         &self.session_id
     }
 
-    #[doc(hidden)]
     pub fn administration(&self) -> &SessionAdministration {
         &self.administration
     }
 
-    #[doc(hidden)]
     pub fn controller(&self) -> &ScopedEffectController<'a> {
         &self.controller
     }

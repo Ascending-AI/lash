@@ -69,14 +69,12 @@ pub struct RuntimeEnvironment {
 }
 
 impl RuntimeEnvironment {
-    #[doc(hidden)]
     pub fn process_work(&self) -> Option<Arc<dyn super::ProcessWorkSubstrate>> {
         self.work
             .process_wiring()
             .map(|wiring| Arc::clone(wiring.port()))
     }
 
-    #[doc(hidden)]
     pub fn queued_work(&self) -> Arc<dyn QueuedWorkSubstrate> {
         Arc::clone(self.work.queued_arc())
     }
@@ -298,7 +296,6 @@ impl RuntimeEnvironmentBuilder {
 }
 
 impl RuntimeEnvironment {
-    #[doc(hidden)]
     pub fn with_work_ports(
         mut self,
         process: Option<ProcessWorkWiring>,

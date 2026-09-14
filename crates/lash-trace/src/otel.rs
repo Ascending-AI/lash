@@ -18,7 +18,6 @@ use serde_json::Value;
 use crate::{TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, TraceTokenUsage};
 
 mod metrics;
-#[doc(hidden)]
 pub use metrics::{RuntimeTuningMetrics, ToolIntentMetrics, WorkerCapacityMetrics};
 
 const INSTRUMENTATION_NAME: &str = "lash-trace";

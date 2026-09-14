@@ -9,7 +9,6 @@ use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 /// `{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}`. Callers must supply a
 /// `(now_epoch_ms, nonce)` pair unique per `(session_id, source_key)` across
 /// every process writing the store; existing persisted IDs are never rewritten.
-#[doc(hidden)]
 #[must_use]
 pub fn derive_pending_turn_input_id(
     session_id: &SessionId,

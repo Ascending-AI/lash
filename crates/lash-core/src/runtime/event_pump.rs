@@ -11,7 +11,6 @@ use tokio::sync::mpsc;
 /// their own handler wrapper consuming that state on the next poll.
 /// Servicing another ready branch and re-polling `future` inside the same
 /// task poll re-enters an already-completed combinator and aborts the process.
-#[doc(hidden)]
 pub async fn drive_with_event_pump<F, T, S, H>(
     mut future: Pin<&mut F>,
     event_rx: &mut mpsc::Receiver<T>,

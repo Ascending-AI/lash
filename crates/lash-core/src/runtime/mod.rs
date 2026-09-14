@@ -14,7 +14,6 @@ mod clock;
 pub mod commit_admission;
 #[cfg(not(feature = "testing"))]
 mod commit_admission;
-#[doc(hidden)]
 pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
 pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
@@ -22,9 +21,7 @@ pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
 pub mod effect;
 #[cfg(not(feature = "testing"))]
 pub(crate) mod effect;
-#[doc(hidden)]
 pub use effect::await_event_coordinator;
-#[doc(hidden)]
 pub use effect::effect_replay_driver;
 pub use effect::promise_semantics;
 mod claim_settlement;
@@ -51,10 +48,8 @@ mod observation;
 mod process;
 mod process_worker;
 pub(crate) use process_worker::ensure_process_execution_permit;
-#[doc(hidden)]
 pub use process_worker::release_process_execution_permit_while;
 mod queued_drain_policy;
-#[doc(hidden)]
 pub use native_substrate::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
 mod session_administration;
@@ -227,7 +222,6 @@ pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuild
 pub(crate) use error::runtime_error_from_store_commit;
 use error::session_commit_error;
 pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
-#[doc(hidden)]
 pub use event_pump::drive_with_event_pump;
 /// Embedded-host configuration and its public configuration sections.
 pub use host::{
@@ -381,7 +375,6 @@ pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 macro_rules! define_runtime_turn_phases {
     ($($phase:ident),+ $(,)?) => {
-        #[doc(hidden)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum RuntimeTurnPhase {
             $($phase),+
@@ -389,7 +382,6 @@ macro_rules! define_runtime_turn_phases {
 
         #[cfg(any(test, feature = "testing"))]
         impl RuntimeTurnPhase {
-            #[doc(hidden)]
             pub const ALL: &'static [Self] = &[$(Self::$phase),+];
         }
     };
@@ -405,7 +397,6 @@ define_runtime_turn_phases!(
     PostCommitDelivery,
 );
 
-#[doc(hidden)]
 pub trait RuntimeTurnPhaseProbe: Send + Sync {
     fn begin(&self, phase: RuntimeTurnPhase);
     fn end(&self, phase: RuntimeTurnPhase);
@@ -413,7 +404,6 @@ pub trait RuntimeTurnPhaseProbe: Send + Sync {
     fn end_named(&self, _phase: &str) {}
 }
 
-#[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct RuntimeTurnPhaseProbeSlot {
     probes: Arc<StdMutex<HashMap<crate::SessionScopeId, Arc<dyn RuntimeTurnPhaseProbe>>>>,
@@ -449,7 +439,6 @@ impl RuntimeTurnPhaseProbeSlot {
     }
 }
 
-#[doc(hidden)]
 pub struct RuntimeNamedPhase {
     probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     phase: &'static str,
@@ -659,7 +648,6 @@ impl TurnContext {
         self.provider.as_ref()
     }
 
-    #[doc(hidden)]
     pub fn set_local_cancel_origin_hint(&mut self, hint: TurnCancelOriginHint) {
         self.local_cancel_origin = hint;
     }
@@ -1324,7 +1312,6 @@ impl<'a> TurnOptions<'a> {
         self
     }
 
-    #[doc(hidden)]
     pub fn with_local_cancel_origin_hint(mut self, hint: TurnCancelOriginHint) -> Self {
         self.local_cancel_origin = Some(hint);
         self

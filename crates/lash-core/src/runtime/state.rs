@@ -720,7 +720,6 @@ pub struct RuntimeSessionState {
     #[serde(flatten)]
     pub authority: Box<RuntimeSessionAuthority>,
     #[serde(skip, default)]
-    #[doc(hidden)]
     pub checkpoint_components: RuntimeCheckpointComponents,
     /// Cost-accounting ledger. Every LLM call (parent turns, subagent
     /// children, compaction, observers, background helpers) contributes an
@@ -739,7 +738,6 @@ pub struct RuntimeSessionState {
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
-    #[doc(hidden)]
     pub persisted_node_ids: std::collections::HashSet<crate::NodeId>,
 }
 

@@ -145,7 +145,6 @@ impl AttachmentOwner {
 /// incarnation is a retired pre-cutover shape and must never be reinterpreted
 /// as the current incarnation with the same name. Every column combination the
 /// [`AttachmentOwner`] variants cannot express is corrupt stored data.
-#[doc(hidden)]
 pub fn decode_attachment_owner(
     owner_kind: Option<&str>,
     owner_id: Option<String>,
@@ -341,7 +340,6 @@ pub enum AttachmentCondemnationProvenance {
 
 /// Decode the persisted phase and token/session presence used by durable store
 /// implementations without exposing the token itself.
-#[doc(hidden)]
 pub fn decode_attachment_condemnation_record(
     digest: crate::AttachmentId,
     phase: &str,

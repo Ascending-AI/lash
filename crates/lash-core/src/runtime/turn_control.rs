@@ -133,7 +133,6 @@ impl TurnAddress {
 /// inner option is the opaque host origin, which may intentionally be absent.
 /// It is not a durable cancellation request and must not be used as
 /// authorization.
-#[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct TurnCancelOriginHint {
     state: Arc<Mutex<TurnCancelOriginState>>,
@@ -186,7 +185,6 @@ impl TurnCancelOriginHint {
 
     /// Record a process-local token and the origin to use if that token fires
     /// independently of a routed cancellation request.
-    #[doc(hidden)]
     pub fn configure_local_token(&self, origin: Option<String>) {
         let mut state = self.state.lock_recover();
         state.configured_origin = Some(origin);
@@ -292,7 +290,6 @@ impl TurnCancelClosureSettlement {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn settled_for_test(
         authorization: TurnCancelClosureAuthorization,
         base_cancellation: Option<TurnCancellationEvidence>,
@@ -719,7 +716,6 @@ impl TurnWorkDriver {
 
     /// Override terminal attachment in test builds.
     #[cfg(any(test, feature = "testing"))]
-    #[doc(hidden)]
     pub fn with_test_attach(mut self, attach: Arc<dyn TurnAttach>) -> Self {
         self.test_attach = Some(attach);
         self

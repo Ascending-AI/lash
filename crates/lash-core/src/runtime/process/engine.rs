@@ -445,12 +445,10 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.handover.take()
     }
 
-    #[doc(hidden)]
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
         crate::runtime::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), phase)
     }
 
-    #[doc(hidden)]
     pub fn turn_phase_probe(&self) -> Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>> {
         self.turn_phase_probe.clone()
     }

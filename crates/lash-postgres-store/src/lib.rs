@@ -433,7 +433,6 @@ impl PostgresTriggerStore {
     }
 
     /// Pin otherwise-random trigger incarnation identity for durable fixture generation.
-    #[doc(hidden)]
     pub fn with_incarnation_for_testing(mut self, incarnation: impl Into<String>) -> Self {
         self.fixed_incarnation = Some(incarnation.into());
         self
@@ -592,7 +591,6 @@ impl PostgresStorage {
     /// the unconditional component-version boundary and the signing-secret data
     /// precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
-    #[doc(hidden)]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
         let found_version: Option<i32> =
             sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")

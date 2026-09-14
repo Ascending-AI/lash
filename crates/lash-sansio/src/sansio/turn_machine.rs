@@ -443,7 +443,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Fallible host seam for delivering a response whose usage must remain
     /// suitable for durable accumulation.
-    #[doc(hidden)]
     pub fn try_handle_response(&mut self, response: Response) -> Result<(), TokenUsageOverflow> {
         match response {
             Response::ExecutionEnvironmentSynced { id, result } => {

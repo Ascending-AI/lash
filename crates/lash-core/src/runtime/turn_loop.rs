@@ -345,12 +345,10 @@ impl LashRuntime {
         self.state.effective_policy().context_window_tokens()
     }
 
-    #[doc(hidden)]
     pub fn set_turn_phase_probe(&mut self, probe: Arc<dyn RuntimeTurnPhaseProbe>) {
         self.turn_phase_probe = Some(probe);
     }
 
-    #[doc(hidden)]
     pub fn set_turn_phase_probe_if_changed(
         &mut self,
         probe: Arc<dyn RuntimeTurnPhaseProbe>,

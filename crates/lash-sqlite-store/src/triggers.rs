@@ -51,7 +51,6 @@ impl SqliteTriggerStore {
     }
 
     /// Pin otherwise-random trigger incarnation identity for durable fixture generation.
-    #[doc(hidden)]
     pub fn with_incarnation_for_testing(mut self, incarnation: impl Into<String>) -> Self {
         self.fixed_incarnation = Some(incarnation.into());
         self

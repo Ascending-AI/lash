@@ -54,7 +54,6 @@ impl crate::ToolProvider for SignalIntentProvider {
 
 /// Runs a literal parked-signal law through a real provider, coordinator, and
 /// runtime turn over the supplied durable effect host and process registry.
-#[doc(hidden)]
 pub async fn public_signal_intent_wakes_parked_process(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,

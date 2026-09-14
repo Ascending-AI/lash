@@ -161,7 +161,6 @@ impl S3AttachmentStore {
 
     /// Read concrete object keys and bytes without using the
     /// `AttachmentStore` facade that wrote them.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub async fn raw_blobs_for_testing(
         &self,

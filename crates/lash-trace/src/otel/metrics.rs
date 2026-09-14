@@ -14,7 +14,6 @@ const POSTGRES_POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str = "lash.postgres.pool.acquir
 const RUNTIME_COMMIT_BUDGET_OUTCOME_ATTRIBUTE: &str = "lash.runtime_commit.budget.outcome";
 
 /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
-#[doc(hidden)]
 #[derive(Clone)]
 pub struct RuntimeTuningMetrics {
     provider_retries: Counter<u64>,
@@ -135,7 +134,6 @@ fn duration_millis(duration: std::time::Duration) -> u64 {
 }
 
 /// Runtime-facing OpenTelemetry counters for tool-intent realization.
-#[doc(hidden)]
 #[derive(Clone)]
 pub struct ToolIntentMetrics {
     executed: Counter<u64>,
@@ -177,7 +175,6 @@ impl ToolIntentMetrics {
 }
 
 /// Runtime-facing OpenTelemetry instruments for native worker saturation.
-#[doc(hidden)]
 #[derive(Clone)]
 pub struct WorkerCapacityMetrics {
     slots_in_use: Gauge<u64>,

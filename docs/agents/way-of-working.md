@@ -19,7 +19,7 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 | A decision with lasting architectural weight | An ADR in `docs/adr/` (see ADR norms) |
 | A validation procedure for new or changed live behavior | `runbooks/<scenario>/runbook.md` (see Runbook norms) |
 | A new or sharpened domain term | Root `CONTEXT.md` glossary (honor its `_Avoid_` lines). One glossary, no per-crate shadow glossaries |
-| Reference documentation for people using Lash | **Nowhere, for now.** The operator doc site was removed by FIG-2364 along with `docs/STYLEGUIDE.md`, `docs/docs.js`, and `scripts/lint_docs.py`. There is no page to author and no gate to keep green until the freeze lifts. Keep writing doc comments on public items: the `lash` facade is `#![deny(missing_docs)]`, so on that crate they are still compiler-enforced |
+| Reference documentation for people using Lash | **Nowhere, for now.** The operator doc site was removed by FIG-2364 along with `docs/STYLEGUIDE.md`, `docs/docs.js`, and `scripts/lint_docs.py`. There is no page to author and no gate to keep green until the freeze lifts. Keep writing doc comments on public items anyway: they are what a reader or editor sees at the call site |
 | Housekeeping / teardown / process chores | **Nowhere durable.** Linear is code-facing only; track chores in the session that owns them |
 
 `docs/` is not a published website and not a scratch directory. Since FIG-2364 it holds

@@ -23,7 +23,6 @@ pub fn evaluate_trigger_mutation(
 }
 
 /// Testing seam for fixture generators that must pin otherwise-random trigger identity.
-#[doc(hidden)]
 pub fn evaluate_trigger_mutation_with_incarnation(
     current: Option<TriggerSubscriptionRecord>,
     command: TriggerCommand,

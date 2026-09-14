@@ -87,7 +87,6 @@ impl PluginExtensions {
 #[derive(Clone, Default)]
 pub struct PluginSpec {
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
-    #[doc(hidden)]
     pub orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub triggers: Vec<crate::TriggerEvent>,
     pub prompt_contributors: Vec<PromptContributor>,

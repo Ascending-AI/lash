@@ -268,7 +268,6 @@ pub struct RestateDurableWaitAwaitRequest {
 /// The predecessor is decoded only so the handler can return the same typed,
 /// actionable incompatibility as an unsupported stamped deadline. It is never
 /// executed or translated into the current absolute-deadline request.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum RestateDurableWaitAwaitInput {
@@ -484,7 +483,6 @@ pub(crate) fn restate_durable_wait_request(
 /// await-event, a process terminal wait — reports through this one type, so a
 /// caller reads the same three answers whatever it was waiting on. `T` is
 /// whatever the wait produces when it wins its own race.
-#[doc(hidden)]
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub enum RestateTurnCancelRaceOutcome<T> {
     /// The wait completed on its own terms.

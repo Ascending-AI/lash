@@ -140,11 +140,8 @@ pub use session_administration::{RestateSessionAdministration, RestateSessionDel
 pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 
 // Adapter-internal wire and seam types. They are `pub` so the Restate SDK's
-// generated handlers can name them, and `doc(hidden)` because they are not a
-// host contract.
-#[doc(hidden)]
+// generated handlers can name them; they are not a host contract.
 pub use controller::RestateControllerContext;
-#[doc(hidden)]
 pub use durable_wait::RestateTurnCancelRaceOutcome;
 
 #[cfg(test)]

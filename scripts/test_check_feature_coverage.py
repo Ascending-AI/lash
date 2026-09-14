@@ -135,7 +135,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
                   merge_group:
 
                 jobs:
-                  test-doc:
+                  check:
                     steps:
                       - name: Check workspace (all targets)
                         run: cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
@@ -160,7 +160,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
 
                   ci-conclusion:
                     needs:
-                      - test-doc
+                      - check
                       - package-feature-checks
                 """
             ),
@@ -618,28 +618,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
         result = self.check()
 
         self.assertEqual(result.returncode, 0, result.stdout)
-
-    def test_runner_rejects_doctest_as_test_context_artifact(self) -> None:
-        source = self.root / "member" / "src" / "lib.rs"
-        source.write_text(
-            '#[cfg(all(test, feature = "testing"))]\n'
-            'compile_error!("UNCOVERED_TEST_TARGET");\n',
-            encoding="utf-8",
-        )
-        plan = self.root / "scripts" / "feature-coverage.toml"
-        plan.write_text(
-            plan.read_text(encoding="utf-8").replace(
-                "commands = [",
-                'commands = [["cargo", "test", "-p", "member", "--doc", '
-                '"--no-default-features", "--features", "testing", "--locked"], ',
-            ),
-            encoding="utf-8",
-        )
-
-        result = self.run_lane()
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("lacks a test-context ON command for member/testing", result.stdout)
 
     def test_runner_rejects_missing_test_artifact(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"

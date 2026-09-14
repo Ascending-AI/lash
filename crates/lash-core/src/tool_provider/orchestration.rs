@@ -15,7 +15,6 @@ use std::sync::Arc;
 /// constructs it only for a typed orchestrating registration and passes it
 /// directly to that registration's implementation.
 #[derive(Clone)]
-#[doc(hidden)]
 pub struct OrchestrationContext<'run> {
     context: ToolContext<'run>,
 }
@@ -150,7 +149,6 @@ impl<'run> OrchestrationContext<'run> {
 /// expose only the completed definition. Hosts can enable such a definition,
 /// but leaf providers cannot be upgraded into this lane.
 #[async_trait::async_trait]
-#[doc(hidden)]
 pub trait OrchestratingToolImplementation: Send + Sync + 'static {
     fn manifest(&self) -> ToolManifest;
 
@@ -175,7 +173,6 @@ pub trait OrchestratingToolImplementation: Send + Sync + 'static {
 /// The registry accepts this completed definition as a distinct registration
 /// kind. It never recognizes or upgrades a leaf provider by id or source name.
 #[derive(Clone)]
-#[doc(hidden)]
 pub struct OrchestratingToolDef {
     implementation: Arc<dyn OrchestratingToolImplementation>,
 }
@@ -195,7 +192,6 @@ impl OrchestratingToolDef {
         unsafe_code,
         reason = "this fn is the unsafe capability boundary itself: only the crate that owns a tool contract may mint an orchestrating registration"
     )]
-    #[doc(hidden)]
     pub unsafe fn from_first_party(
         implementation: Arc<dyn OrchestratingToolImplementation>,
     ) -> Self {

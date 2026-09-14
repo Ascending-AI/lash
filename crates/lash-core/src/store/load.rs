@@ -20,14 +20,12 @@ fn persisted_session_state_from_read(
 
 /// Presence-aware durable session load used by the facade's reopen authority
 /// reconciliation.
-#[doc(hidden)]
 pub struct LoadedPersistedSession {
     pub state: crate::RuntimeSessionState,
     pub config: crate::PersistedSessionConfig,
     pub turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
 }
 
-#[doc(hidden)]
 async fn load_persisted_session_with_relation(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<(LoadedPersistedSession, crate::SessionRelation)>, StoreError> {
@@ -54,7 +52,6 @@ async fn load_persisted_session_with_relation(
     )))
 }
 
-#[doc(hidden)]
 pub async fn load_persisted_session(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<LoadedPersistedSession>, StoreError> {
@@ -64,7 +61,6 @@ pub async fn load_persisted_session(
 }
 
 /// Load the canonical read-only view together with its durable session relation.
-#[doc(hidden)]
 pub async fn load_persisted_session_read_view(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<crate::SessionReadView>, StoreError> {
@@ -84,7 +80,6 @@ pub async fn load_persisted_session_read_view(
 }
 
 /// Recover a session only after completing lease-fenced state admission.
-#[doc(hidden)]
 pub async fn load_persisted_session_admitted(
     store: &(dyn RuntimePersistence + '_),
     session_id: &SessionId,

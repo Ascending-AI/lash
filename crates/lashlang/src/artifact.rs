@@ -503,7 +503,6 @@ pub trait LashlangArtifactStore: Send + Sync {
     /// publication serialization point. Production callers never use this
     /// diagnostic seam; stores that participate in ownership conformance
     /// return a handle and pause their next publish until it is resumed.
-    #[doc(hidden)]
     fn pause_next_publication_for_testing(&self) -> Option<ArtifactPublicationPause> {
         None
     }
@@ -556,7 +555,6 @@ pub trait LashlangArtifactStore: Send + Sync {
 }
 
 #[derive(Clone, Default)]
-#[doc(hidden)]
 pub struct ArtifactPublicationPause {
     state: Arc<Mutex<ArtifactPublicationPauseState>>,
 }
@@ -581,7 +579,6 @@ impl ArtifactPublicationPause {
         }
     }
 
-    #[doc(hidden)]
     pub async fn pause(&self) {
         std::future::poll_fn(|context| {
             let mut state = self.state.lock_recover();

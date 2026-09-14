@@ -12,7 +12,6 @@ mod registration;
 pub use registration::{
     registration_and_observers_are_atomic, registration_reports_created_then_existing,
 };
-#[doc(hidden)]
 pub mod status_filters;
 
 use super::process_change_horizon::changes_after_full_relist_if_required;
@@ -787,7 +786,6 @@ pub async fn settled_parent_end_plans_are_reclaimed_by_retention(
 }
 
 /// Prove bounded keyset pagination and its page-boundary completion contract.
-#[doc(hidden)]
 pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     let process_ids = (0..7)
         .map(|index| format!("000-paged-worklist-{index:02}"))
@@ -880,7 +878,6 @@ async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> 
 }
 
 /// A row that terminalizes before its not-yet-read page is no longer recovery work.
-#[doc(hidden)]
 pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -923,7 +920,6 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
 }
 
 /// An in-range insert behind the keyset cursor is guaranteed on the next scan.
-#[doc(hidden)]
 pub async fn worklist_next_scan_recovers_insert_behind_cursor(registry: Arc<dyn ProcessRegistry>) {
     let first_id = "!!worklist-behind-cursor-a";
     let bound_id = "!!worklist-behind-cursor-z";
@@ -959,7 +955,6 @@ pub async fn worklist_next_scan_recovers_insert_behind_cursor(registry: Arc<dyn 
 }
 
 /// An insert beyond the captured upper bound waits for the next scan.
-#[doc(hidden)]
 pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     registry: Arc<dyn ProcessRegistry>,
 ) {

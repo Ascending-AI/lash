@@ -339,7 +339,6 @@ impl RequiredConstraintReport {
 }
 
 /// One live named `CHECK` read by a store adapter.
-#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InspectedConstraint {
     pub table: String,
@@ -350,7 +349,6 @@ pub struct InspectedConstraint {
 }
 
 /// Compare live checks with the single published registry.
-#[doc(hidden)]
 pub fn compare_required_constraints(
     backend: &'static str,
     expected: &[ExpectedConstraint],
@@ -425,7 +423,6 @@ pub fn compare_required_constraints(
 }
 
 /// Extract named `CHECK` bodies from one SQLite `CREATE TABLE` statement.
-#[doc(hidden)]
 pub fn extract_named_check_expressions(source: &str) -> Result<BTreeMap<String, String>, String> {
     let tokens = lex_sqlite_ddl(source)?;
     let mut checks = BTreeMap::new();

@@ -1,6 +1,6 @@
 name: Seal cache
 
-# `Seal-test the API surface` (ci.yml's `test-doc` seal lane) took 748 s on
+# `Seal-test the API surface` (ci.yml's `check` seal lane) took 748 s on
 # PR #1417 and was the CI tail. A fully warm `target-seal` runs the same
 # command in 28.6 s, so the whole cost is a cold cache, not compute: trybuild
 # recompiles the entire dependency graph a second time under
@@ -9,7 +9,7 @@ name: Seal cache
 # build's `CARGO_TARGET_DIR` with no override. The duplication is therefore
 # permanent; paying it once and caching the result is the only lever.
 #
-# `test-doc` is `if: github.event_name != 'push'`, so it never writes a cache
+# `check` is `if: github.event_name != 'push'`, so it never writes a cache
 # into the default-branch scope, and a pull request can only restore caches
 # from its own branch or from `main`. Every PR started this job from scratch.
 # This workflow is the sole main-scoped writer of `linux-seal`; ci.yml's seal

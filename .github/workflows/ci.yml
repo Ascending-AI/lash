@@ -255,8 +255,8 @@ jobs:
         run: python3 scripts/check_facade_only_examples.py
 
   # Separate matrix jobs run the workspace check and API seal in parallel. The
-  # matrix result remains the same required test-doc context.
-  test-doc:
+  # matrix result keeps the same required status contexts.
+  check:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -394,7 +394,7 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # Python-only repository gates. These were serial steps of test-doc, where
+  # Python-only repository gates. These were serial steps of `check`, where
   # they sat behind twelve minutes of compilation for no reason: nothing here
   # depends on the workspace check.
   repo-gates:
@@ -577,7 +577,7 @@ jobs:
   # Feature-set coverage the workspace check cannot reach. The executable
   # registry owns every declared workspace feature, resolves ON/OFF graphs in
   # normal dependency context, and runs the exact package checks for this lane.
-  # Split out of test-doc: these resolve their own feature graphs, so they
+  # Split out of `check`: these resolve their own feature graphs, so they
   # neither reuse nor warm anything the workspace check produces.
   package-feature-checks:
     name: Package feature check (${{ matrix.lane }})
@@ -937,7 +937,7 @@ jobs:
       # `sqlite-await-event-helper` example included, which the store
       # conformance tests spawn) and retain full-workspace coverage. In either
       # mode profile.ci excludes the nested-Cargo fault-matrix chunks run by
-      # heavy-tests below and the trybuild ui binary run by test-doc's seal
+      # heavy-tests below and the trybuild ui binary run by `check`'s seal
       # step.
       - name: Test workspace
         env:
@@ -1175,7 +1175,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          # The test-doc job is the sole writer of the shared linux-debug cache;
+          # The `check` job is the sole writer of the shared linux-debug cache;
           # the lint job only reads it so clippy reuses the checked dependency
           # graph.
           shared-key: linux-debug
@@ -1191,7 +1191,7 @@ jobs:
 
       # `cargo fmt --all --check` and the same `--all-targets` clippy the local
       # push gate runs, plus the two boundary guards that otherwise gate nothing.
-      # The clippy feature set mirrors the test-doc workspace check so the
+      # The clippy feature set mirrors the `check` workspace lane so the
       # dependency graph resolves identically.
       - name: Check formatting
         run: |
@@ -2678,7 +2678,7 @@ jobs:
     needs:
       - plan
       - facade-only-examples
-      - test-doc
+      - check
       - repo-gates
       - unused-deps
       - lashlang-git-consumer

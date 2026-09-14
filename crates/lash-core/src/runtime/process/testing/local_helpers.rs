@@ -1,7 +1,6 @@
 use super::*;
 
 impl TestLocalProcessRegistry {
-    #[doc(hidden)]
     pub async fn worklist_page_reads_for_testing(
         &self,
     ) -> Vec<(usize, Option<super::super::ProcessWorklistCursor>)> {

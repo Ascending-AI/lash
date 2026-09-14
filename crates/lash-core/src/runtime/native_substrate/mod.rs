@@ -148,7 +148,6 @@ impl ProcessWorkWiring {
         self.port.admit_pending_processes(reason).await
     }
 
-    #[doc(hidden)]
     pub fn registry(&self) -> &Arc<dyn ProcessRegistry> {
         self.watched.registry()
     }
@@ -157,7 +156,6 @@ impl ProcessWorkWiring {
         &self.watched
     }
 
-    #[doc(hidden)]
     pub fn port(&self) -> &Arc<dyn ProcessWorkSubstrate> {
         &self.port
     }

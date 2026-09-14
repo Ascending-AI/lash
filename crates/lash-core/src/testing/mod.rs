@@ -13,10 +13,10 @@ use crate::{
 };
 use lash_sansio::sync::MutexExt;
 // Each submodule documents itself in its own file. Adding an outer doc comment
-// here as well would merge two fragments written in different scopes, and
-// rustdoc then resolves the whole merged doc — including the submodule's own
-// intra-doc links — against *this* module's scope, where none of the linked
-// items exist.
+// here as well would merge two fragments written in different scopes, and a
+// reader or editor following the merged doc comment — including the
+// submodule's own intra-doc links — would resolve it against *this* module's
+// scope, where none of the linked items exist.
 pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
@@ -42,7 +42,6 @@ use std::sync::{Arc, Mutex};
 
 /// Construct opaque queued-lane holder evidence for cross-crate seam tests.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::QueuedLaneHolder {
     crate::QueuedLaneHolder::new(crate::store::SessionExecutionLease {
         session_id: SessionId::from("queued-lane-test"),
@@ -58,7 +57,6 @@ pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::Queued
 
 /// Marks resident state stale for downstream reload-race tests.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn invalidate_resident_session_state_for_testing(runtime: &mut crate::LashRuntime) {
     runtime.invalidate_resident_session_state();
 }
@@ -76,7 +74,6 @@ pub fn process_work_wiring_for_registry(
 
 /// Construct a real, identity-checked in-memory process environment fixture.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn process_execution_env_fixture() -> (
     Arc<dyn crate::ProcessExecutionEnvStore>,
     crate::ProcessExecutionEnvRef,
@@ -96,7 +93,6 @@ pub fn process_execution_env_fixture() -> (
 /// Engine fixture for trigger-delivery tests that need to exercise the real
 /// engine-only start contract without publishing unrelated language artifacts.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub struct FixtureProcessEngine;
 
 #[cfg(any(test, feature = "testing"))]
@@ -122,7 +118,6 @@ impl crate::ProcessEngine for FixtureProcessEngine {
 
 /// Construct the engine registry paired with [`process_execution_env_fixture`].
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn process_engine_fixture() -> crate::ProcessEngineRegistry {
     crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(FixtureProcessEngine)),
@@ -171,7 +166,6 @@ impl crate::PluginFactory for FixtureProcessEngineFactory {
 
 /// Plugin factory that contributes [`FixtureProcessEngine`] to a facade host.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn process_engine_plugin_fixture() -> Arc<dyn crate::PluginFactory> {
     Arc::new(FixtureProcessEngineFactory)
 }
@@ -591,7 +585,6 @@ pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
 impl<'run> crate::AttemptContext<'run> {
     /// Test-only projection of a mock tool context, with no reserved
     /// completion key: a test harness is not the attempt coordinator.
-    #[doc(hidden)]
     pub fn __for_testing(
         context: &crate::ToolContext<'run>,
         execution_scope_id: impl Into<String>,
@@ -770,7 +763,6 @@ pub fn with_engine_child_max_attempts(
 
 /// Build an empty code-execution context for a specific durable process.
 #[cfg(any(test, feature = "testing"))]
-#[doc(hidden)]
 pub fn code_execution_context_for_process(
     registration: &crate::ProcessRegistration,
 ) -> crate::RuntimeExecutionContext<'static> {
@@ -817,7 +809,6 @@ pub fn code_execution_context_with_invocation(
 
 /// Build an empty code-execution context with a caller-supplied effect
 /// controller and stable parent invocation.
-#[doc(hidden)]
 pub fn code_execution_context_with_effect_controller_and_invocation(
     effect_controller: Arc<dyn crate::RuntimeEffectController>,
     invocation: crate::RuntimeInvocation,
@@ -846,7 +837,6 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
 
 /// Build a concrete code-execution context with caller-supplied tool and
 /// effect hosts plus the stable parent invocation.
-#[doc(hidden)]
 pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
@@ -866,7 +856,6 @@ pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_i
 /// scope. Durable-controller tests use this instead of the shared-controller
 /// shortcut, whose intentionally synthetic runtime-operation scope is suitable
 /// only for scope-agnostic fakes.
-#[doc(hidden)]
 pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
@@ -1092,7 +1081,6 @@ pub async fn execute_tool_intents_with_services(
 ///
 /// Durable-adapter tests use this narrow seam to prove replay refusal before
 /// trigger-store ingestion.
-#[doc(hidden)]
 pub async fn execute_tool_intents_with_services_and_trigger_router(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
@@ -1115,7 +1103,6 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
 
 /// Execute a recorded tool-intent drain through the production process-command
 /// route and notify a test hook after a child Start has committed.
-#[doc(hidden)]
 pub async fn execute_tool_intents_with_services_and_hook(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
@@ -1174,7 +1161,6 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
 
 /// Build the real engine run context used by validation-path tests that are
 /// expected to settle before constructing a nested runtime context.
-#[doc(hidden)]
 pub fn process_engine_run_context_for_validation(
     registration: crate::ProcessRegistration,
     tool_catalog: Arc<crate::ToolCatalog>,
