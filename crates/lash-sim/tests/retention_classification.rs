@@ -3,7 +3,6 @@
 //! Like schema_congruence.rs, this ordinary integration test is discovered by
 //! the workspace nextest CI shards. Every new durable table needs a declaration.
 
-#![expect(clippy::unwrap_used, reason = "FIG-2784 pass 2")]
 use std::collections::BTreeSet;
 
 const SQLITE_SCHEMA: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
@@ -328,6 +327,10 @@ const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[(
     },
 )];
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn declared_tables(source: &str) -> BTreeSet<String> {
     // Exclude SQLite's cfg(test) migration fixtures. All four production schema
     // constants precede that module. Token scanning accepts multiline DDL and

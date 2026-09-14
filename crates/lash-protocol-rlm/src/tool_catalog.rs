@@ -29,6 +29,10 @@ pub(crate) fn rlm_tool_catalog(
 /// declarations in its execution section said one thing and the doc block said
 /// another. Registration already requires both bindings on every non-internal
 /// tool, so the dialect's path is always available.
+#[expect(
+    clippy::expect_used,
+    reason = "catalog registration validates dialect tool bindings for both dialects, so tool_call_path only errs on an unregistered manifest"
+)]
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
     dialect: &crate::dialect::TypescriptDialect,

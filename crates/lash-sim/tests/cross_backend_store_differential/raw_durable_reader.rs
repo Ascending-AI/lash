@@ -27,6 +27,10 @@ impl RawDurableReader {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(super) async fn observe(&self) -> RawDurableState {
         match self {
             Self::InMemory { store, factory } => {
@@ -467,6 +471,10 @@ impl RawDurableReader {
 /// Decode the full SQLite durable surface into the normalized, cross-backend
 /// comparable `RawDurableState`. Lives here rather than in the harness root so
 /// the root stays inside the repository's test-file line budget.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn read_sqlite_durable_state(
     path: &Path,
     session_id: &SessionId,

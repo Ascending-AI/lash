@@ -31,6 +31,10 @@ pub(super) struct RlmDriverState {
     pub(super) terminal_finish: Option<Value>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the driver state is a crate-owned struct, so serde_json encoding cannot fail"
+)]
 pub(super) fn rlm_driver_state(state: RlmDriverState) -> lash_core::ProtocolDriverState {
     lash_core::ProtocolDriverState::new(
         crate::plugin::RLM_PROTOCOL_PLUGIN_ID,

@@ -12,8 +12,6 @@
 //! - The `batch` tool that composes parallel native tool calls (only
 //!   exposed when this protocol stack is installed).
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
@@ -516,6 +514,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         }]
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the typed refusal is a crate-owned ToolCallOutput tree whose serde_json encoding cannot fail"
+    )]
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,

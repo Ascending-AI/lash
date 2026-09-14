@@ -79,6 +79,10 @@ pub(super) fn rewind_case() -> GeneratedCase {
 }
 
 impl BackendRunner {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(super) async fn reclaim_terminal_evidence(
         &self,
     ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
@@ -109,6 +113,10 @@ impl BackendRunner {
         Ok(None)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(super) async fn apply_fork_operation(
         &mut self,
         operation: &StoreOperation,
@@ -235,6 +243,10 @@ impl BackendRunner {
 
 /// PG reuses its catalog across cases and runs; remove earlier terminal evidence
 /// before this case commits so the literal count oracle covers this case alone.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prepare_retention_case(case: CaseName, runners: &[BackendRunner]) {
     if case == CaseName::AttachmentAdoption {
         for runner in runners {

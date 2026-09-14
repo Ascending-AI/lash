@@ -290,6 +290,11 @@ impl ProviderHandle {
         sideband
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the Backoff verdict selects the delay in the same match arm that schedules the retry, \
+                  so it is always Some exactly when this code runs"
+    )]
     pub async fn complete_prepared(
         &mut self,
         request: LlmRequest,

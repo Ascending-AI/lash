@@ -753,6 +753,10 @@ pub(super) fn require_rlm_tool_call_event(result: &Value, contract: &str) -> Res
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn require_rlm_agent_frame_switch(
     result: &Value,
     frame_key_material: &str,

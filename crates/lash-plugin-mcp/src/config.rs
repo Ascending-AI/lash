@@ -609,6 +609,10 @@ impl McpServerConfig {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "configured MCP timeouts are minutes at most; as_millis() far below u64::MAX by construction"
+)]
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis())
         .expect("MCP timeout exceeds the supported millisecond range")

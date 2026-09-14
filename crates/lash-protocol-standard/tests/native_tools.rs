@@ -1,9 +1,11 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::sync::Arc;
 
 use lash_core::facade_support::PluginHost;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the session fixture always admits a tool catalog view for the root session"
+)]
 fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String> {
     session
         .resolved_tool_catalog(&lash_core::SessionId::from("root"))
@@ -13,6 +15,10 @@ fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String>
         .clone()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture host build always succeeds for these session fixtures"
+)]
 fn standard_session_with_access(
     session_id: &str,
     tool_access: lash_core::SessionToolAccess,

@@ -14,6 +14,10 @@ pub struct SerializedPromptRequest {
 /// Runs consecutive protocol requests through a provider serializer and
 /// verifies that every prefix which was cacheable on call K is byte-identical
 /// on call K+1.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the stable prefix Value is built here from provider-neutral strings, so it always serializes; a failure would be a broken fixture this assertion must name"
+)]
 pub fn assert_prefix_stability<F>(case_name: &str, iterations: &[LlmRequest], mut serialize: F)
 where
     F: FnMut(&LlmRequest, usize) -> SerializedPromptRequest,

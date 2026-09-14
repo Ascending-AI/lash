@@ -40,6 +40,10 @@ pub(super) struct CheckpointObservation {
     pub(super) components: BTreeMap<String, (lash_core::CheckpointComponentDescriptor, Vec<u8>)>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn checkpoint_observation(
     checkpoint_ref: Option<BlobRef>,
     checkpoint: HydratedSessionCheckpoint,
@@ -74,6 +78,10 @@ pub(super) fn checkpoint_observation(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn read_sqlite_checkpoint_observation(
     path: &Path,
     raw_checkpoint_ref: Option<BlobRef>,
@@ -86,6 +94,10 @@ pub(super) fn read_sqlite_checkpoint_observation(
     Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn read_postgres_checkpoint_observation(
     pool: &PgPool,
     raw_checkpoint_ref: Option<BlobRef>,
@@ -298,6 +310,10 @@ pub(super) struct QueuedWorkObservation {
     claim_session_lease_generation: Option<u64>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn queued_work_observation(
     ordinal: usize,
     batch: QueuedWorkBatch,
@@ -332,6 +348,10 @@ pub(super) fn queued_work_observation(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn queued_work_observations_from_sql_rows(
     batches: Vec<QueuedWorkBatchRow>,
     items: Vec<QueuedWorkItemRow>,

@@ -281,6 +281,10 @@ impl From<lash_core::TriggerSubscriptionFilter> for RemoteTriggerSubscriptionFil
 }
 
 impl From<lash_core::facade_support::TriggerRegistration> for RemoteTriggerRegistration {
+    #[expect(
+        clippy::expect_used,
+        reason = "RemoteProcessInput::try_from only errs when serde_json cannot serialize a crate-owned value; trigger process inputs serialize by construction"
+    )]
     fn from(value: lash_core::facade_support::TriggerRegistration) -> Self {
         let lash_core::facade_support::TriggerRegistration {
             subscription_key,
@@ -553,9 +557,7 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
             source,
             payload_schema: payload_schema.schema,
             source_capture: source_capture.into(),
-            target: target
-                .try_into()
-                .expect("core process input serializes remotely"),
+            target: target.try_into()?,
             target_identity: target_identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
             input_template: input_template.into(),
@@ -611,9 +613,7 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerSubscription
             source,
             payload_schema: payload_schema.schema,
             source_capture: source_capture.into(),
-            target: target
-                .try_into()
-                .expect("core process input serializes remotely"),
+            target: target.try_into()?,
             target_identity: target_identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
             input_template: input_template.into(),

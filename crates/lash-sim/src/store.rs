@@ -199,6 +199,10 @@ impl ModelStore {
     /// Admission occurs at provider start, before its completion is delivered.
     /// Only queued next-turn inputs are eligible; cancellation remains a local
     /// lifecycle transition whose outcome is independently projected.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(crate) fn apply_provider_admissions(&mut self, admissions: &[Value]) {
         for admission in admissions {
             let session = admission["session"].as_str().expect("admission session");
@@ -230,6 +234,10 @@ impl ModelStore {
         observed
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub fn apply_observed_boundary(&mut self, event: &BoundaryEvent, observed: &Value) {
         self.total_events += 1;
         // Suspend sessions are a generated-runtime mechanism (a real turn parked
@@ -521,6 +529,10 @@ impl ModelStore {
         self.summarize_with_checkpoint_writes(&projected)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub fn project_boundary_observation(&mut self, event: &BoundaryEvent) -> Value {
         if let Some(observed) = project_suspend_boundary(event) {
             return observed;
@@ -1188,6 +1200,10 @@ impl ModelStore {
     /// `execution_count` is not evidence for the `durable_effect_exactly_once`
     /// runtime oracle. That oracle consumes the real replay controller's local
     /// execution count from `runtime_boundaries`.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn project_durable_effect(
         &mut self,
         event: &BoundaryEvent,

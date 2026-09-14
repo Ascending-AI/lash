@@ -235,6 +235,10 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         panic!("the cross-backend intent provider must use AttemptContext")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn execute_attempt(
         &self,
         call: lash_core::ToolCall<'_>,
@@ -327,6 +331,10 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
         self.inner.controller().supports_concurrent_effects()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -385,6 +393,10 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
 }
 
 impl SurfaceRunner {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn apply(&mut self, operation: &SurfaceOperation) -> Result<(), String> {
         match operation {
             SurfaceOperation::StoreContract(operation) => self.scenario.apply(operation).await,
@@ -817,6 +829,10 @@ impl SurfaceReader {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> ProcessRows {
     let raw = registry.raw_state_for_testing().await;
     ProcessRows {
@@ -869,6 +885,10 @@ async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> Proces
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn normalized_memory_wake_delivery(delivery: lash_core::WakeDelivery) -> serde_json::Value {
     let state = delivery.state();
     let claim_token = match &delivery.disposition {
@@ -895,6 +915,10 @@ fn normalized_memory_wake_delivery(delivery: lash_core::WakeDelivery) -> serde_j
     normalized_json(value)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {
     let raw = store.raw_state_for_testing();
     let mut incarnations = BTreeMap::new();
@@ -985,6 +1009,10 @@ fn normalized_trigger_receipt_json(
     normalized_trigger_json(value, incarnations)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn normalized_trigger_delivery_json(
     mut value: serde_json::Value,
     incarnations: &mut BTreeMap<String, String>,
@@ -1088,6 +1116,11 @@ fn normalize_json_fields(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn read_sqlite_surface(
     runtime_path: &Path,
     process_path: &Path,
@@ -1297,6 +1330,10 @@ fn read_sqlite_surface(
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn sqlite_simple_json_rows<F>(
     connection: &rusqlite::Connection,
     query: &str,
@@ -1312,6 +1349,10 @@ where
         .unwrap()
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     let mut incarnations = BTreeMap::new();
     let subscriptions = sqlite_simple_json_rows(
@@ -1345,6 +1386,11 @@ fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn read_sqlite_await(
     connection: &rusqlite::Connection,
     process_registry: &rusqlite::Connection,
@@ -1396,6 +1442,11 @@ fn read_sqlite_await(
     rows
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     let record_rows: Vec<(String, i64)> =
         sqlx::query_as("SELECT record_json, change_seq FROM lash_processes ORDER BY process_id")
@@ -1548,6 +1599,10 @@ async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     let mut incarnations = BTreeMap::new();
     let subscriptions: Vec<String> = sqlx::query_scalar(
@@ -1579,6 +1634,10 @@ async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn read_postgres_effects(pool: &PgPool) -> Vec<serde_json::Value> {
     type Row = (
         String,
@@ -1598,6 +1657,10 @@ async fn read_postgres_effects(pool: &PgPool) -> Vec<serde_json::Value> {
     rows.into_iter().map(|(scope_id, session_id, replay_key, envelope_hash, envelope, status, outcome, error, owner, token, lease_expires, due)| normalized_json(serde_json::json!({"scope_id": scope_id, "session_id": session_id, "replay_key": replay_key, "envelope_hash": envelope_hash, "envelope": serde_json::from_str::<serde_json::Value>(&envelope).unwrap(), "status": status, "outcome": outcome.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "error": error.map(|v| serde_json::from_str::<serde_json::Value>(&v).unwrap()), "lease_owner_id": owner, "lease_token": token, "lease_expires_at_ms": lease_expires, "due_at_ms": due}))).collect()
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn read_postgres_await(pool: &PgPool) -> Vec<serde_json::Value> {
     type Row = (
         String,
@@ -1632,6 +1695,10 @@ async fn read_postgres_await(pool: &PgPool) -> Vec<serde_json::Value> {
     rows
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn reset_postgres_surface(storage: &PostgresStorage) {
     let tables: Vec<String> = sqlx::query_scalar("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'lash\\_%' AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta') ORDER BY tablename").fetch_all(storage.pool()).await.unwrap();
     sqlx::query(&format!(
@@ -1644,6 +1711,10 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn surface_runners(
     root: &Path,
     storage: &PostgresStorage,
@@ -1737,6 +1808,10 @@ async fn surface_runners(
     ]
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
     let common = observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes
@@ -1799,6 +1874,10 @@ fn counterexample_path(seed: u64) -> PathBuf {
         .join(format!("seed-{seed}.json"))
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn persist_counterexample(
     seed: u64,
     operations: &[SurfaceOperation],
@@ -1822,6 +1901,10 @@ fn persist_counterexample(
     path
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn first_divergence(
     storage: &PostgresStorage,
     operations: &[SurfaceOperation],
@@ -2093,6 +2176,11 @@ async fn attachment_blob_store_differential_agrees() {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn raw_file_blobs(root: &Path) -> Vec<(lash_core::AttachmentId, Vec<u8>)> {
     let mut rows = Vec::new();
     let content_root = root.join("blake3");

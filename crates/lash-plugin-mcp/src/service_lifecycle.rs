@@ -503,6 +503,10 @@ mod tests {
     use super::*;
     use std::process::{Command, Stdio};
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the fixture must be able to spawn its witness `sh` child; failure here is a broken test environment"
+    )]
     fn observed_child(
         script: &str,
     ) -> (

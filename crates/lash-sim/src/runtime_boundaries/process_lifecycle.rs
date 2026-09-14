@@ -61,6 +61,10 @@ impl RecordingWorkerFaultSink {
 /// Recovery worker with a real producer engine for the Rerunnable row. This
 /// keeps a successful producer outcome distinct from infrastructure failure,
 /// which intentionally writes no terminal.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn lifecycle_worker(
     registry: Arc<dyn ProcessRegistry>,
     owner: LeaseOwnerIdentity,
@@ -162,6 +166,10 @@ pub(super) async fn record_lifecycle_started(
 /// authorization are observed INDEPENDENTLY of the abandon writer (a real
 /// lease and registry reads), so the evidence oracle cross-checks the writer
 /// against ground truth rather than trusting it.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
     awaiter: &lash_core::NativeProcessWork,

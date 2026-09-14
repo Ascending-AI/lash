@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
@@ -66,6 +64,10 @@ impl PauseAfterFirstCommittedTurn {
 impl RuntimeTurnPhaseProbe for PauseAfterFirstCommittedTurn {
     fn begin(&self, _phase: RuntimeTurnPhase) {}
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn end(&self, phase: RuntimeTurnPhase) {
         if phase != RuntimeTurnPhase::CommittedTurn || self.used.swap(true, Ordering::SeqCst) {
             return;
@@ -111,6 +113,10 @@ impl ToolProvider for SeedSwitchTool {
         (name == "switch_frame").then(|| Arc::new(switch_tool_definition().contract()))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         assert_eq!(call.name, "switch_frame");
         ToolOutcome::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
@@ -156,6 +162,10 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn model() -> lash_core::ModelSpec {
     lash_core::ModelSpec::builder("logical-turn-sim")
         .context_window_tokens(200_000)
@@ -176,6 +186,10 @@ fn standard_core(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn standard_core_with_attachment_policy(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
@@ -607,6 +621,10 @@ impl ToolProvider for BoundedSwitchTools {
         (index < self.switch_count).then(|| Arc::new(Self::definition(index).contract()))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let index = call
             .name

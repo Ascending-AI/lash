@@ -427,6 +427,10 @@ impl CaptureScrubber {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn redact_json_or_sse(input: &str) -> String {
     if let Ok(value) = serde_json::from_str::<Value>(input) {
         return serde_json::to_string(&redact_sensitive_json_fields(value))

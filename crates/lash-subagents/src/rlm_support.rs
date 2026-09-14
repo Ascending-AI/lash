@@ -130,6 +130,10 @@ pub(crate) fn turn_input_for_task(text: String) -> TurnInput {
     TurnInput::text(text)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "both matches index the same locally built `quoted` vec whose length is checked by the same match, so the Option is always Some"
+)]
 pub(crate) fn capability_list_for_description(capability_names: &[String]) -> String {
     if capability_names.is_empty() {
         return "(no capabilities registered)".to_string();

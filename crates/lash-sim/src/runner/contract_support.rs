@@ -66,6 +66,10 @@ async fn contract_execution_boundaries(
     Ok(proof_events)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn standard_protocol_execution_boundary(
     events: &[crate::scheduler::DeliveredBoundary],
     at: u64,

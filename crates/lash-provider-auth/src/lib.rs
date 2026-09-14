@@ -4,8 +4,6 @@
 //! Provider-specific endpoints, device-code flows, PKCE helpers, and
 //! refresh logic live in each provider crate under `oauth.rs`.
 
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 use base64::Engine;
 use sha2::{Digest, Sha256};
 
@@ -142,6 +140,10 @@ pub fn generate_pkce() -> (String, String) {
     (verifier, challenge)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "SystemTime::now() is after UNIX_EPOCH on any supported platform; duration_since cannot underflow"
+)]
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

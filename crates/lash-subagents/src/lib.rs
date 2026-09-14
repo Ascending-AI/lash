@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 mod capability;
 mod rlm;
 mod rlm_support;

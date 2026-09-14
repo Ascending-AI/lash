@@ -75,6 +75,10 @@ struct SessionMetaLayoutCase {
     fork_inheritance_processes: Vec<RawProcessRow>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
     use lash_core::{CausalRef, ObserverInheritance};
 
@@ -490,6 +494,10 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayoutCase]) {
     let connection = rusqlite::Connection::open(path).expect("open SQLite metadata layout reader");
     for case in cases {
@@ -564,6 +572,10 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[SessionMetaLayoutCase]) {
     for case in cases {
         let row = sqlx::query(&format!(
@@ -633,6 +645,10 @@ async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[Session
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLayoutCase]) {
     let mut connection = rusqlite::Connection::open(path).expect("open SQLite metadata raw writer");
     connection
@@ -723,6 +739,10 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
         .expect("commit literal SQLite metadata rows");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn delete_postgres_session_meta_rows(pool: &PgPool, cases: &[SessionMetaLayoutCase]) {
     for case in cases {
         sqlx::query("DELETE FROM lash_session_meta WHERE session_id = $1")
@@ -733,6 +753,10 @@ async fn delete_postgres_session_meta_rows(pool: &PgPool, cases: &[SessionMetaLa
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn replace_postgres_session_meta_with_raw_rows(
     pool: &PgPool,
     cases: &[SessionMetaLayoutCase],
@@ -824,6 +848,10 @@ async fn replace_postgres_session_meta_with_raw_rows(
         .expect("commit literal PostgreSQL metadata rows");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn verify_independent_session_meta_layout(
     sqlite_root: &Path,
     postgres: &PostgresStorage,

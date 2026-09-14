@@ -189,6 +189,10 @@ impl RuntimeBoundaryHarness {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub async fn complete_durable_effect(
         &mut self,
         event: &BoundaryEvent,
@@ -329,6 +333,10 @@ impl RuntimeBoundaryHarness {
         }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub async fn complete_tool(
         &mut self,
         event: &BoundaryEvent,
@@ -428,6 +436,10 @@ impl RuntimeBoundaryHarness {
         }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub async fn execute_code(
         &mut self,
         event: &BoundaryEvent,

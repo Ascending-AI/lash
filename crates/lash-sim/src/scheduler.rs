@@ -265,6 +265,10 @@ impl RuntimeCompletionQueue {
         pending
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub fn register_pending_event(
         &mut self,
         mut event: BoundaryEvent,

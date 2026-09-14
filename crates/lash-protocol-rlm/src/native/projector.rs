@@ -70,6 +70,10 @@ struct NativeContextProjector {
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
+    #[expect(
+        clippy::expect_used,
+        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
+    )]
     fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");

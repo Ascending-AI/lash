@@ -293,6 +293,10 @@ impl LashlangExecutionTrace {
 }
 
 impl HostBridge<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the is_typescript_runtime_receiver check above guarantees the receiver arm, so the journaled call always resolves"
+    )]
     async fn resource_operation(
         &self,
         operation: String,
@@ -408,6 +412,10 @@ impl HostBridge<'_> {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "runtime receivers are filtered by the same check per operation, and every results slot is filled exactly once by the enumeration of batch.operations above"
+    )]
     async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,

@@ -16,6 +16,10 @@ use lashlang::{
 use super::bindings::{ProjectionResolver, RlmProjectedBindings};
 use super::transport::json_to_flow_value;
 
+#[expect(
+    clippy::expect_used,
+    reason = "RlmProtocolEvent is a crate-owned enum, so serde_json encoding cannot fail"
+)]
 pub fn rlm_protocol_event(event: RlmProtocolEvent) -> lash_core::ProtocolEvent {
     lash_core::ProtocolEvent::typed(crate::plugin::RLM_PROTOCOL_PLUGIN_ID, event)
         .expect("RLM protocol events serialize")
@@ -208,6 +212,10 @@ pub(crate) async fn projected_bindings(
     Ok(bindings)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "each name is collected from the same projected-binding map it is read from, so get is always Some"
+)]
 async fn insert_projected_bindings(
     target: &mut ProjectedBindings,
     bindings: RlmProjectedBindings,
@@ -358,6 +366,10 @@ pub(crate) fn prune_protected_bindings(rlm: &mut FlowState, protected_names: &BT
 ///
 /// Pruning is one heap copy and one collection for the whole set rather than
 /// one of each per name.
+#[expect(
+    clippy::expect_used,
+    reason = "removing named bindings can only shrink the heap, never exceed its patch bound"
+)]
 pub(crate) fn prune_projected_binding_names<'a>(
     rlm: &mut FlowState,
     names: impl IntoIterator<Item = &'a str>,

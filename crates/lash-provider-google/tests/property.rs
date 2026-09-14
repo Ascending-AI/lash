@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 
@@ -121,6 +119,10 @@ fn request(deltas: Arc<Mutex<Vec<String>>>) -> LlmRequest {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture runtime and its scripted must-complete stream fail the property under test if they refuse"
+)]
 fn complete_with_chunks(chunks: Vec<Vec<u8>>) -> (LlmResponse, Vec<String>) {
     let deltas = Arc::new(Mutex::new(Vec::new()));
     let mut provider = GoogleOAuthProvider::new(

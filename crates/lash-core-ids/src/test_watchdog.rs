@@ -3,6 +3,11 @@ use std::time::{Duration, Instant};
 
 const CHILD_TIMEOUT: Duration = Duration::from_secs(15);
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-support watchdog: current_exe always resolves inside a running test binary, \
+              and this helper panics on any setup failure by design"
+)]
 pub fn assert_exact_test_completes(test_name: &str, child_env: &str, watchdog_description: &str) {
     let mut child = Command::new(std::env::current_exe().expect("current test binary"))
         .args(["--exact", test_name])

@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 #[cfg(feature = "testing")]
 pub mod cache_regression;
 #[cfg(feature = "testing")]

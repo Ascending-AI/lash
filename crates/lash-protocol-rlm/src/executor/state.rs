@@ -297,6 +297,10 @@ fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::Contin
     snapshot.to_canonical_bytes()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the exactly-one-canonical-`value`-globals guard above fires first, so remove(\"value\") is always Some"
+)]
 fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
     let snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
     if snapshot.globals().len() != 1 || snapshot.globals().get("value").is_none() {

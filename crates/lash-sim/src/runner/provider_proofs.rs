@@ -180,6 +180,10 @@ pub(super) async fn prove_codex_responses_tool_call_stream()
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_RATE_LIMIT)?;
     let err = provider
@@ -209,6 +213,10 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_codex_responses_disconnect() -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) = codex_provider(CODEX_RESPONSES_DISCONNECT)?;
     let err = provider
@@ -361,6 +369,10 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, FixedScriptRunnerError>
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_RATE_LIMIT)?;
@@ -391,6 +403,10 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, FixedScriptRunnerError>
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_VALIDATION)?;
@@ -420,6 +436,10 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, FixedScriptRunnerError>
 {
     let (mut provider, transport) = openai_compatible_provider(OPENAI_COMPAT_DISCONNECT)?;
@@ -446,6 +466,10 @@ pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, Fix
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_response_start_timeout()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let (mut provider, transport) =
@@ -475,6 +499,10 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let (events, sender) = event_collector();
@@ -517,6 +545,10 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_cancel_before_response_start()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let schedule = ScriptedTransportSchedule::new();
@@ -559,6 +591,10 @@ pub(super) async fn prove_openai_compatible_cancel_before_response_start()
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_openai_compatible_retry_exhaustion()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let attempt_budget = 2;

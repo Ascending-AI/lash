@@ -15,8 +15,6 @@
 //! inventory, like `scripts/check-substrate-boundary.sh`. It needs no CI wiring
 //! because it runs with the workspace suite.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_core::{ProcessStatus, WakeDeliveryState};
 use std::path::{Path, PathBuf};
 
@@ -41,6 +39,10 @@ const EXEMPT_FILES: &[&str] = &[
     "lash-core/src/store_backend_support/required_constraints.rs",
 ];
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn workspace_crates_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -105,6 +107,10 @@ fn violations_in(line: &str, column: &str, labels: &[String]) -> Vec<String> {
     found
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scan_file(
     path: &Path,
     relative: &str,
@@ -126,6 +132,10 @@ fn scan_file(
     failures
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scan_dir(
     root: &Path,
     crates_dir: &Path,

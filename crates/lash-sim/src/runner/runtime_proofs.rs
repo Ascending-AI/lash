@@ -511,6 +511,10 @@ impl lash::TurnActivitySink for RuntimeProofRecordingEvents {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn prove_final_value_semantic_channel()
 -> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());

@@ -441,6 +441,10 @@ pub(crate) fn history_item_type_definition(images: bool) -> Vec<String> {
     lines
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the inline arm above returns early, so only hinted rows reach this point and every hinted row carries an inferred shape"
+)]
 fn render_row_line(
     row: &WorkRow,
     registry: &SchemaRegistry,

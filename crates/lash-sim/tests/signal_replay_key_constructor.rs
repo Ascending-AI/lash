@@ -21,8 +21,6 @@
 //! repository, not just `crates/`, because the runbook binary is exactly the
 //! copy that could escape the workspace unnoticed.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::path::{Path, PathBuf};
 
 /// Directories under the workspace root whose Rust sources are scanned.
@@ -32,6 +30,10 @@ const SCANNED_ROOTS: &[&str] = &["crates", "runbooks", "examples"];
 /// sibling, which share the prefix by construction.
 const EXEMPT_FILES: &[&str] = &["crates/lash-core/src/runtime/process/events.rs"];
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -86,6 +88,10 @@ fn mints_signal_key(line: &str) -> bool {
     normalised.contains("process:{") && normalised.contains(":signal.")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scan_file(path: &Path, relative: &str, failures: &mut Vec<String>, scanned: &mut usize) {
     *scanned += 1;
     let source = std::fs::read_to_string(path).expect("read scanned source");
@@ -97,6 +103,10 @@ fn scan_file(path: &Path, relative: &str, failures: &mut Vec<String>, scanned: &
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scan_dir(root: &Path, workspace: &Path, failures: &mut Vec<String>, scanned: &mut usize) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;

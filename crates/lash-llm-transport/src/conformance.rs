@@ -444,6 +444,10 @@ pub trait ProviderNormalizer {
 /// messages to their real request builders; keeping this bridge in the shared
 /// suite prevents adapters from hand-copying replay metadata around the
 /// history seam the scenario is meant to protect.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the conformance history is a crate-owned round-trip fixture whose serde_json encode/decode cannot fail"
+)]
 fn standard_next_request_messages(parts: &[LlmOutputPart]) -> Vec<LlmMessage> {
     let assistant_id = "conformance.assistant";
     let mut history_parts = Vec::new();
@@ -539,6 +543,10 @@ pub fn provider_conformance(n: &dyn ProviderNormalizer) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: wire scenarios declare expected_tool_input_json for tool-use cases and the aborted response was just asserted to contain exactly the parsed tool call"
+)]
 fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: ProviderWire) {
     let who = n.name();
 

@@ -288,6 +288,10 @@ pub fn sqlite_fault_seeds(count: usize) -> Vec<u64> {
 }
 
 /// Runs the commit-boundary fault scenarios against the real SQLite substrate.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub async fn run_sqlite_fault_profile(
     artifact_root: impl AsRef<Path>,
     seeds: &[u64],
@@ -374,6 +378,10 @@ pub async fn run_backend_fault_profile(
     Ok(Some(report))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn generated_multi_arm_plan(
     backend: BackendFaultKind,
     seed: u64,

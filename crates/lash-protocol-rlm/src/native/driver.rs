@@ -87,6 +87,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         actions
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the parts payload is a vector of crate-owned extraction parts, whose serde_json encoding cannot fail"
+    )]
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
