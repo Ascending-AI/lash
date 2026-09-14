@@ -878,8 +878,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         })
     );
     let code_started_event = to_event_value(lash::TurnEvent::CodeBlockStarted {
-        language: "lashlang".to_string(),
-        code: "parallel.web_search_57jmhsdk2uvtc7o55qwq73sqyq({ query: \"FIG-1350\" })".to_string(),
+        language: "typescript".to_string(),
+        code: "await parallel.web_search_57jmhsdk2uvtc7o55qwq73sqyq({ query: \"FIG-1350\" });"
+            .to_string(),
         graph_key: None,
     });
     let tool_started_event = to_event_value(lash::TurnEvent::ToolCallStarted {
@@ -919,7 +920,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         parent_call_id: None,
     });
     let code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
-        language: "lashlang".to_string(),
+        language: "typescript".to_string(),
         output: "completed".to_string(),
         error: None,
         success: true,
@@ -928,7 +929,7 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         graph_key: None,
     });
     let no_id_code_completed_event = to_event_value(lash::TurnEvent::CodeBlockCompleted {
-        language: "lashlang".to_string(),
+        language: "typescript".to_string(),
         output: "completed without call id".to_string(),
         error: None,
         success: true,

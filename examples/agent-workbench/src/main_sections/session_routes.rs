@@ -29,7 +29,6 @@ pub(crate) async fn list_sessions(
     for entry in rostered {
         sessions.push(SessionSummary {
             current: entry.session_id == current_session_id,
-            dialect: RLM_LANGUAGE_ID,
             session_id: entry.session_id,
             name: entry.name,
             created_at_ms: entry.created_at_ms,
@@ -39,8 +38,6 @@ pub(crate) async fn list_sessions(
     Ok(Json(SessionListResponse {
         sessions,
         current_session_id: current_session_id.clone(),
-        dialects: vec![RLM_LANGUAGE_ID],
-        default_dialect: RLM_LANGUAGE_ID,
     }))
 }
 
@@ -49,20 +46,12 @@ pub(crate) async fn list_sessions(
 /// The roster row is written before the session is opened, because the row is
 /// what the selector lists.
 ///
-/// TypeScript is the sole RLM language (ADR 0096). A request naming any other
-/// language id is refused rather than quietly served TypeScript.
+/// TypeScript is the sole RLM language (ADR 0096), so the create form offers no
+/// language choice and the request carries none.
 pub(crate) async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<SessionCreateRequest>,
 ) -> Result<Json<SessionSummary>, AppError> {
-    match request.dialect.as_deref().map(str::trim) {
-        None | Some("") | Some(RLM_LANGUAGE_ID) => {}
-        Some(language_id) => {
-            return Err(AppError::bad_request(format!(
-                "`{language_id}` is not a registered RLM language; the registered language ids are {RLM_LANGUAGE_ID}"
-            )));
-        }
-    }
     let session_id = new_session_id();
     let name = match request.name.as_deref().map(str::trim) {
         None | Some("") => session_id.to_string(),
@@ -95,12 +84,10 @@ pub(crate) async fn create_session(
         json!({
             "session_id": session_id,
             "name": entry.name,
-            "dialect": RLM_LANGUAGE_ID,
         }),
     );
     Ok(Json(SessionSummary {
         current: session_id == state.current_session_id(),
-        dialect: RLM_LANGUAGE_ID,
         session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,
@@ -140,7 +127,6 @@ pub(crate) async fn select_session(
     );
     Ok(Json(SessionSummary {
         current: true,
-        dialect: RLM_LANGUAGE_ID,
         session_id: session_id.clone(),
         name: entry.name,
         created_at_ms: entry.created_at_ms,

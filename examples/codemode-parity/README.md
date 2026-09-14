@@ -1,15 +1,11 @@
-# Codemode parity examples
+# Codemode examples
 
-These pairs show the same flagship host flow in both permanent RLM dialects.
-They are source examples, not language tutorials: the host API and lifecycle
-are the point.
+These are the flagship host flows as RLM cells. They are source examples, not
+language tutorials: the host API and lifecycle are the point.
 
-- `turn.lash` / `turn.ts`: inspect two host results and finish a compact value.
-- `durable-process.lash` / `durable-process.ts`: define a durable process that
-  suspends on a named signal, resumes through a timer, emits progress, and
-  returns. The process artifact retains the source dialect across worker
-  restarts.
+- `turn.ts`: inspect two host results and finish a compact value.
+- `durable-process.ts`: define a durable process that suspends on a named
+  signal, resumes through a timer, emits progress, and returns.
 
-Hosts state the pair at session creation through the plugin options seam
-(`RLM_PROTOCOL_PLUGIN_ID` with `RlmCreateExtras { dialect, .. }`), applied as a
-guarded set-if-unset write; absence selects Lashlang.
+TypeScript is the sole RLM language (ADR 0096), so there is no dialect to state
+at session creation and no second spelling of either flow to keep in parity.

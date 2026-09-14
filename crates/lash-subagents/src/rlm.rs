@@ -1,7 +1,7 @@
 //! RLM protocol subagent spawning surface.
 //!
-//! Examples are written in Lashlang module syntax. Prompt prose is tuned for
-//! schema-first results and binding subagent output.
+//! Examples are written in TypeScript, the sole RLM language (ADR 0096).
+//! Prompt prose is tuned for schema-first results and binding subagent output.
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

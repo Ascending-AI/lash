@@ -77,11 +77,7 @@ fn sample(rows: Vec<Value>) -> Result<Vec<Value>> {
     for row in rows {
         if row["kind"] == "attempt" {
             groups
-                .entry((
-                    row["model"].to_string(),
-                    row["channel"].to_string(),
-                    row["dialect"].to_string(),
-                ))
+                .entry((row["model"].to_string(), row["channel"].to_string()))
                 .or_default()
                 .push(row);
         }
@@ -130,7 +126,7 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
         .build()?;
     let mut output = std::fs::File::create(format!("{}.reconcile.jsonl", path.display()))?;
     let mut report = String::from(
-        "# OpenRouter reconciliation\n\nStratified random sample of attempt rows, balanced across model/channel/dialect. Exact token comparisons; cost tolerance 0.000001 USD. Only native counters, cost and unavailable generation evidence gate exit. Normalized mismatches are informational. Both normalized and native generation token counters are shown; counters with different tokenizers are not substituted silently. Cache discount is retained as money, not interpreted as cached tokens.\n\n",
+        "# OpenRouter reconciliation\n\nStratified random sample of attempt rows, balanced across model/channel. Exact token comparisons; cost tolerance 0.000001 USD. Only native counters, cost and unavailable generation evidence gate exit. Normalized mismatches are informational. Both normalized and native generation token counters are shown; counters with different tokenizers are not substituted silently. Cache discount is retained as money, not interpreted as cached tokens.\n\n",
     );
     let mut mismatches = 0;
     let mut unavailable = 0;
@@ -187,17 +183,16 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
         mismatches += bad;
         unavailable += missing;
         let evidence = crate::provider_log::redact(
-            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"dialect":row["dialect"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"generation_cost":generation_cost,"interrupted":is_interrupted,"mismatches":bad,"unavailable":missing,"normalized_mismatch":informational}),
+            json!({"kind":"reconcile","model":row["model"],"channel":row["channel"],"task":row["task"],"repetition":row["repetition"],"round":row["round"],"provider_response_id":id,"comparisons":comparisons,"generation":response,"generation_cost":generation_cost,"interrupted":is_interrupted,"mismatches":bad,"unavailable":missing,"normalized_mismatch":informational}),
             key,
         );
         writeln!(output, "{evidence}")?;
         use std::fmt::Write as _;
         writeln!(
             report,
-            "## {} / {} / {} / {} / round {} ({})\n",
+            "## {} / {} / {} / round {} ({})\n",
             row["model"],
             row["channel"],
-            row["dialect"],
             row["task"],
             row["round"],
             id.unwrap_or("missing id")
@@ -287,7 +282,12 @@ mod tests {
     }
     #[test]
     fn sample_covers_every_cohort_without_duplicate_rows() {
-        let rows=(0..5).flat_map(|cohort|(0..10).map(move |i|json!({"kind":"attempt","model":"m","channel":cohort,"dialect":"d","task":i}))).collect();
+        let rows = (0..5)
+            .flat_map(|cohort| {
+                (0..10)
+                    .map(move |i| json!({"kind":"attempt","model":"m","channel":cohort,"task":i}))
+            })
+            .collect();
         let selected = sample(rows).unwrap();
         assert_eq!(selected.len(), 30);
         for c in 0..5 {

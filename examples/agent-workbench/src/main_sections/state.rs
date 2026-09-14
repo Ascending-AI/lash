@@ -49,9 +49,6 @@ pub(crate) struct Settings {
     pub(crate) session_id: SessionId,
     /// The operator's name for this session, or its id when they gave none.
     pub(crate) session_name: String,
-    /// The RLM language id this session runs. TypeScript is the sole RLM
-    /// language (ADR 0096), so this is always `"typescript"`.
-    pub(crate) rlm_dialect: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -398,16 +395,19 @@ impl SessionQuery {
     }
 }
 
-/// The create-a-session request: a name the operator can read, and the RLM
-/// language the session runs.
+/// The create-a-session request: a name the operator can read.
+///
+/// There is no language on it: TypeScript is the sole RLM language (ADR 0096),
+/// so a session has nothing to be pinned to.
+///
+/// `deny_unknown_fields` is what keeps the removal fail-closed: a create form or
+/// script still sending `dialect` is answered rather than quietly served
+/// TypeScript with the key dropped on the floor.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SessionCreateRequest {
     #[serde(default)]
     pub(crate) name: Option<String>,
-    /// An RLM language id. TypeScript is the sole RLM language (ADR 0096), so
-    /// absence means TypeScript and any other id is refused, never defaulted.
-    #[serde(default)]
-    pub(crate) dialect: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -420,22 +420,16 @@ pub(crate) struct SessionSelectRequest {
 pub(crate) struct SessionSummary {
     pub(crate) session_id: SessionId,
     pub(crate) name: String,
-    /// The RLM language this session runs; always `"typescript"` (ADR 0096).
-    pub(crate) dialect: &'static str,
     pub(crate) created_at_ms: i64,
     pub(crate) last_active_ms: i64,
     pub(crate) current: bool,
 }
 
-/// The session list, with the menu a create form has to offer.
+/// The session list.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct SessionListResponse {
     pub(crate) sessions: Vec<SessionSummary>,
     pub(crate) current_session_id: SessionId,
-    /// Every RLM language id. TypeScript is the sole one (ADR 0096).
-    pub(crate) dialects: Vec<&'static str>,
-    /// The RLM language a session gets when the create form offers no choice.
-    pub(crate) default_dialect: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

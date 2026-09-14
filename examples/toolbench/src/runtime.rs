@@ -12,7 +12,7 @@ use crate::grading::RunEvidence;
 use crate::tasks::Task;
 use crate::world::{SharedWorld, World};
 
-#[tracing::instrument(name = "task", skip_all, fields(model = model, task = task.id, repetition = run, channel = channel.name(), dialect = if channel == crate::ChannelSelection::Standard { "none" } else { "typescript" }))]
+#[tracing::instrument(name = "task", skip_all, fields(model = model, task = task.id, repetition = run, channel = channel.name()))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_task(
     task: &Task,

@@ -91,7 +91,7 @@ path.
 
 `just slack-clone-live-model-e2e` is the manual FIG-1388 companion to the
 token-free full-host leg. It starts only the existing platform, then runs two
-fresh Lash sessions in one fresh channel: Agent A uses RLM/Lashlang with
+fresh Lash sessions in one fresh channel: Agent A uses RLM cells with
 `anthropic/claude-sonnet-5`; Agent B uses the standard native tool loop with
 `deepseek/deepseek-v4-flash-0731`. Override those with
 `LASH_LIVE_E2E_RLM_MODEL` and `LASH_LIVE_E2E_STANDARD_MODEL`; the harness
@@ -712,8 +712,7 @@ the runtime and comes back:
 Neither can be answered from the session transcript, which is what makes them
 worth having rather than decorative.
 
-**Mode-exclusive features do not appear here, deliberately.** No Lashlang, no code
-cells, no durable processes, no triggers or cron, no `continue_as`. Those are
+**Mode-exclusive features do not appear here, deliberately.** No code cells, no durable processes, no triggers or cron, no `continue_as`. Those are
 RLM-mode capabilities; `examples/agent-workbench` is their reference host. If you
 want to see what standard mode is for, read this example; if you want to see what
 RLM mode is for, read that one.

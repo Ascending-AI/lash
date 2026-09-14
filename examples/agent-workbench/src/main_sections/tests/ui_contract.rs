@@ -18,24 +18,34 @@ fn workbench_renders_scoped_tabs_and_trigger_lifecycle_controls() {
     assert!(ui::INDEX_HTML.contains("scopedSessionId"));
 }
 
-/// The session panel is a selector plus a create form, and the create form's
-/// language menu is filled from `/api/sessions`, never written into the page.
-/// A hardcoded menu is a second source of truth for what the substrate can run.
+/// The session panel is a selector plus a create form, and the create form asks
+/// for a name only.
+///
+/// TypeScript is the sole RLM language (ADR 0096), so the page carries no
+/// language menu and no language badge. Asserting their absence is the point:
+/// a menu with one entry reads as a choice the operator does not have, and a
+/// badge is a second place a language could be claimed from.
 #[test]
-fn workbench_ui_renders_the_session_roster_and_a_dialect_choice() {
+fn workbench_ui_renders_the_session_roster_without_a_language_choice() {
     assert!(ui::INDEX_HTML.contains("id=\"sessionSelect\""));
     assert!(ui::INDEX_HTML.contains("id=\"newSessionForm\""));
-    assert!(ui::INDEX_HTML.contains("id=\"newSessionDialect\""));
-    assert!(ui::INDEX_HTML.contains("id=\"sessionDialect\""));
     assert!(ui::INDEX_HTML.contains("async function loadSessions"));
     assert!(ui::INDEX_HTML.contains("async function switchToSession"));
     assert!(ui::INDEX_HTML.contains("\"/api/sessions/select\""));
-    assert!(ui::INDEX_HTML.contains("sessionDialect.textContent = state.settings.rlm_dialect"));
-    // TypeScript is the sole RLM language (ADR 0096); the menu still comes from
-    // the backend rather than from static options in the page.
+    for gone in [
+        "id=\"newSessionDialect\"",
+        "id=\"sessionDialect\"",
+        "rlm_dialect",
+        "default_dialect",
+    ] {
+        assert!(
+            !ui::INDEX_HTML.contains(gone),
+            "the page must carry no language selector: `{gone}` is still there"
+        );
+    }
     assert!(
         !ui::INDEX_HTML.contains(&format!("<option value=\"{RLM_LANGUAGE_ID}\"")),
-        "the language menu must come from the backend, not from static options"
+        "the create form must not offer a language menu at all"
     );
 }
 

@@ -15,7 +15,7 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
 - `--channel cell|native|standard` selects one channel (default: cell).
 - `--paired` pairs cell and native in randomized order for each task.
 - `--channel-set all` includes both paired RLM channels plus standard, even
-  without `--paired`. Standard runs once per task, with `dialect: "none"`.
+  without `--paired`. Standard runs once per task and runs no RLM cell.
 - Repeat `--model` to compare models in the same run. Default:
   `z-ai/glm-5.3-flash`. Models share the concurrency budget and their work is
   interleaved, so cohorts run concurrently.
@@ -186,7 +186,7 @@ count actual additional provider invocations, not scheduled sleeps.
 
 `--trace-log PATH` defaults to `<results-file>.trace.log`. A file-only tracing
 subscriber records Lash debug events and structured provider request/response
-pairs, with model, task, repetition, channel and dialect span context. `RUST_LOG`
+pairs, with model, task, repetition and channel span context. `RUST_LOG`
 overrides `lash=debug,lash_core=debug,lash_provider_openai=debug,toolbench=debug`.
 Requests in these pairs are facade semantic requests; response evidence also
 includes the adapter's wire `request_body`. Stderr remains free of tracing output.
@@ -260,14 +260,15 @@ still appear on renderers before that change.
 
 One-task `kv-read` smoke on `z-ai/glm-5.3-flash`, medium reasoning, paired all
 channels, one repetition, concurrency 8 (2026-09-09). This measurement predates
-ADR 0096 and is kept as-is; the `lashlang` rows are historical only and that
-language can no longer be run:
+ADR 0096. It was taken while a second RLM language still existed, so it
+reports a cohort per channel and language; a run today reports one row per
+channel, and the two rows for the retired language are historical only:
 
-| Cohort | First-call prompt before | First-call prompt after | Change |
+| Cohort (channel/language) | First-call prompt before | First-call prompt after | Change |
 |---|---:|---:|---:|
 | standard/none | 1064 | 1064 | 0 |
-| cell/lashlang | 5114 | 4467 | -647 |
-| native/lashlang | 5143 | 4506 | -637 |
+| cell/lashlang (retired) | 5114 | 4467 | -647 |
+| native/lashlang (retired) | 5143 | 4506 | -637 |
 | cell/typescript | 4527 | 4527 | 0 |
 | native/typescript | 4590 | 4590 | 0 |
 
@@ -286,10 +287,10 @@ full message array to inspect those. Characters count Unicode scalars; bytes
 count UTF-8. These measures explain relative input size, not tokenization.
 
 Extended facade tracing captures wire request JSON and every response JSON
-chunk, with contextual model/task/repetition/channel/dialect in `--trace-log`.
+chunk, with contextual model/task/repetition/channel in `--trace-log`.
 `--dump-requests DIR` additionally writes redacted request JSON and response
 capture JSON (including ordered wire chunks, raw usage, normalized response
-and errors) named by model/task/channel/dialect/repetition/turn/round. Response
+and errors) named by model/task/channel/repetition/turn/round. Response
 captures are written once at provider completion or cancellation to retain
 interrupted calls without repeatedly serializing accumulated chunks. Credential
 values and sensitive object keys are redacted; request bodies are no longer
@@ -318,7 +319,7 @@ target/debug/toolbench --reconcile results.jsonl
 
 Reconciliation writes `results.jsonl.reconcile.md` and
 `results.jsonl.reconcile.jsonl` (`kind: "reconcile"`). It randomly samples at
-least 30 attempts, balanced across the model/channel/dialect groups present
+least 30 attempts, balanced across the model/channel groups present
 in the input (or all attempts when fewer than 30 exist), and queries the [OpenRouter generation endpoint](https://openrouter.ai/docs/api/api-reference/generations/get-generation).
 Both `tokens_prompt`/`tokens_completion` and their `native_tokens_*` counterparts
 are compared, without silently replacing differently tokenized counters.

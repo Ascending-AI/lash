@@ -14,10 +14,10 @@ use lash::SessionId;
 
 /// A created session takes its place beside the boot session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
+async fn a_created_session_runs_beside_the_ambient_default() {
     let data_dir = tempfile::tempdir().expect("temp dir");
     let provider = scripted_cells_provider(
-        "workbench-multi-session-dialects",
+        "workbench-multi-session",
         vec![
             "<typescript>\nfinish(\"typescript answer\");\n</typescript>".to_string(),
             "<typescript>\nfinish(\"ambient answer\");\n</typescript>".to_string(),
@@ -30,12 +30,10 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
         State(state.clone()),
         Json(SessionCreateRequest {
             name: Some("typescript work".to_string()),
-            dialect: Some("typescript".to_string()),
         }),
     )
     .await
-    .expect("a registered language is accepted at creation");
-    assert_eq!(created.dialect, "typescript");
+    .expect("a named session is created");
     assert_eq!(created.name, "typescript work");
     assert_ne!(created.session_id, ambient_session_id);
 
@@ -54,8 +52,7 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     )
     .await;
 
-    // Each session's transcript labels its own cells, and `/api/state` badges
-    // the language the session runs.
+    // Each session's transcript labels its own cells.
     let Json(created_view) = app_state(
         State(state.clone()),
         Query(SessionQuery {
@@ -64,7 +61,6 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     )
     .await
     .expect("project the created session");
-    assert_eq!(created_view.settings.rlm_dialect, "typescript");
     assert_eq!(created_view.settings.session_name, "typescript work");
     assert_eq!(
         transcript_code_languages(&created_view),
@@ -79,7 +75,6 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
     )
     .await
     .expect("project the ambient session");
-    assert_eq!(ambient_view.settings.rlm_dialect, "typescript");
     assert_eq!(
         transcript_code_languages(&ambient_view),
         vec!["typescript".to_string()]
@@ -89,38 +84,30 @@ async fn a_created_session_runs_its_own_dialect_beside_the_ambient_default() {
 // ADR 0096: the fixture that created a Lashlang session on a TypeScript
 // deployment is gone with the second dialect.
 
-/// An unregistered language id is refused at creation, and leaves no roster row.
+/// A create request that still names a language does not decode.
 ///
-/// Failing closed here keeps the refusal honest: a request naming a language
-/// this workbench cannot run is answered, never quietly served TypeScript.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_unregistered_dialect_is_refused_at_creation() {
-    let data_dir = tempfile::tempdir().expect("temp dir");
-    let provider = scripted_cells_provider("workbench-unknown-dialect", Vec::new());
-    let state = queued_send_test_state(data_dir.path(), provider).await;
-    let before = state.sessions.list().len();
-
-    let error = create_session(
-        State(state.clone()),
-        Json(SessionCreateRequest {
-            name: Some("typo".to_string()),
-            dialect: Some("lashscript".to_string()),
-        }),
-    )
-    .await
-    .expect_err("an unregistered language must be refused");
-
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+/// The field is gone rather than pinned (ADR 0096), and a plain Serde struct
+/// would drop an unknown key silently — so a stale form posting
+/// `{"dialect": "lashscript"}` would be answered `201` and served TypeScript,
+/// which is exactly the quiet substitution the removal is meant to prevent.
+/// `deny_unknown_fields` is what makes it an answer instead.
+#[test]
+fn a_create_request_that_still_names_a_language_does_not_decode() {
+    let error = serde_json::from_value::<SessionCreateRequest>(serde_json::json!({
+        "name": "typo",
+        "dialect": "lashscript",
+    }))
+    .expect_err("a create request naming a language must be refused");
     assert!(
-        error.message.contains("lashscript") && error.message.contains("typescript"),
-        "the refusal must name the offending id and the registered one: {}",
-        error.message
+        error.to_string().contains("dialect"),
+        "the refusal names the retired field: {error}"
     );
-    assert_eq!(
-        state.sessions.list().len(),
-        before,
-        "a refused creation must not leave a roster row"
-    );
+
+    let accepted = serde_json::from_value::<SessionCreateRequest>(serde_json::json!({
+        "name": "ok",
+    }))
+    .expect("a request carrying only a name still decodes");
+    assert_eq!(accepted.name.as_deref(), Some("ok"));
 }
 
 /// Switching moves what a query-less call resolves to, durably.
@@ -143,7 +130,6 @@ async fn selecting_a_session_moves_the_query_less_default() {
         State(state.clone()),
         Json(SessionCreateRequest {
             name: Some("second".to_string()),
-            dialect: Some("typescript".to_string()),
         }),
     )
     .await
@@ -175,10 +161,6 @@ async fn selecting_a_session_moves_the_query_less_default() {
         .expect("project the query-less default");
     assert_eq!(defaulted.settings.session_id, created.session_id);
     assert_eq!(defaulted.settings.session_name, "second");
-    assert_eq!(
-        defaulted.settings.rlm_dialect, "typescript",
-        "a session that has committed nothing is still badged with the language it will run"
-    );
 
     let error = select_session(
         State(state.clone()),
@@ -214,12 +196,11 @@ async fn the_session_roster_survives_the_web_process() {
                 State(state.clone()),
                 Json(SessionCreateRequest {
                     name: Some(name.to_string()),
-                    dialect: Some("typescript".to_string()),
                 }),
             )
             .await
             .expect("create a session to reload");
-            created.push((summary.session_id, "typescript".to_string()));
+            created.push((summary.session_id, name.to_string()));
         }
         created
     };
@@ -236,20 +217,14 @@ async fn the_session_roster_survives_the_web_process() {
     let Json(listing) = list_sessions(State(state.clone()))
         .await
         .expect("list the reloaded roster");
-    for (session_id, dialect) in &created_ids {
+    for (session_id, name) in &created_ids {
         let listed = listing
             .sessions
             .iter()
             .find(|summary| summary.session_id == session_id)
             .unwrap_or_else(|| panic!("`{session_id}` must survive the restart: {listing:#?}"));
-        assert_eq!(&listed.dialect, dialect);
+        assert_eq!(&listed.name, name);
     }
-    assert_eq!(
-        listing.dialects,
-        vec!["typescript"],
-        "the create menu is the substrate's registered languages"
-    );
-    assert_eq!(listing.default_dialect, "typescript");
 
     let (typescript_session_id, _) = created_ids
         .first()
@@ -283,7 +258,7 @@ async fn the_session_roster_survives_the_web_process() {
 /// ADR 0096: the dialect half of this fixture is gone with the second dialect;
 /// the slot itself still has to survive the rotation.
 #[test]
-fn a_reset_carries_the_slot_dialect_to_the_rotated_session() {
+fn a_reset_carries_the_slot_name_to_the_rotated_session() {
     let temp = tempfile::tempdir().expect("tempdir");
     let sessions = WorkbenchSessions::persistent(temp.path().join("session-id")).expect("roster");
     let original = sessions.current();
