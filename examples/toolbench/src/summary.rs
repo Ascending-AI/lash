@@ -8,7 +8,6 @@ use std::fmt::Write as _;
 pub(crate) struct Summary {
     model: String,
     channel: String,
-    dialect: String,
     reasoning_effort: crate::ReasoningEffort,
     passed: usize,
     rows: usize,
@@ -31,13 +30,13 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
     let mut cohorts = BTreeMap::<_, Vec<&TaskResult>>::new();
     for row in results {
         cohorts
-            .entry((&row.model, &row.channel, &row.dialect))
+            .entry((&row.model, &row.channel))
             .or_default()
             .push(row);
     }
     cohorts
         .into_iter()
-        .map(|((model, channel, dialect), rows)| {
+        .map(|((model, channel), rows)| {
             let mut walls = rows
                 .iter()
                 .map(|r| r.wall_ms as f64 / 1000.0)
@@ -58,7 +57,6 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
             Summary {
                 model: model.clone(),
                 channel: channel.clone(),
-                dialect: dialect.clone(),
                 reasoning_effort: rows[0].reasoning_effort,
                 passed: rows.iter().filter(|r| r.passed).count(),
                 rows: n,
@@ -113,14 +111,14 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
         .unwrap();
         out.push_str("| Cohort | Pass | Attempts | Prompt total | of which cached (read) | Cache write | Completion | Reasoning | Cost USD | Wall total/median s | Prompt/task | Completion/task | Reasoning/task | Cost/task USD | Attempts/task | First prompt mean | Retries |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for r in &rows {
-            writeln!(out,"| {}/{} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.dialect,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).unwrap();
+            writeln!(out,"| {} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).unwrap();
         }
         out.push('\n');
         for r in &rows {
             if let Some(base) = rows.iter().find(|b| b.channel == "standard")
                 && r.channel != "standard"
             {
-                writeln!(out,"- {}/{} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ attempts/task {}.",r.channel,r.dialect,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
+                writeln!(out,"- {} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ attempts/task {}.",r.channel,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
             }
         }
         out.push('\n');
@@ -157,7 +155,6 @@ mod tests {
             reasoning_effort: crate::ReasoningEffort::Medium,
             run: 1,
             id: "task".into(),
-            dialect: "none".into(),
             channel: "standard".into(),
             wall_ms,
             passed,

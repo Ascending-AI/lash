@@ -137,7 +137,6 @@ struct TaskResult {
     reasoning_effort: ReasoningEffort,
     run: usize,
     id: String,
-    dialect: String,
     channel: String,
     wall_ms: u128,
     passed: bool,
@@ -239,7 +238,7 @@ async fn main() -> Result<()> {
             for (repetition, probe) in probes.iter().enumerate() {
                 for attempt in &probe.attempts {
                     let mut row = attempt.clone();
-                    row.as_object_mut().unwrap().extend(serde_json::json!({"kind":"preflight","task":"__native_probe","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"repetition":repetition}).as_object().unwrap().clone());
+                    row.as_object_mut().unwrap().extend(serde_json::json!({"kind":"preflight","task":"__native_probe","model":model,"channel":item.channel.name(),"repetition":repetition}).as_object().unwrap().clone());
                     write_row(&mut file, &row)?;
                 }
                 all_attempts.extend(probe.attempts.clone());
@@ -247,7 +246,7 @@ async fn main() -> Result<()> {
             match outcome {
                 Ok(()) => Ok(None),
                 Err(reason) => {
-                    write_row(&mut file, &serde_json::json!({"usage":summary::Usage::from_attempts(&all_attempts),"provider_calls":all_attempts.len(),"kind":"excluded_route","pack":args.pack,"route":"openrouter","model":model,"channel":item.channel.name(),"dialect":item.dialect_name(),"reasoning_effort":args.reasoning_effort,"rounds":all_attempts.len(),"reason":reason}))?;
+                    write_row(&mut file, &serde_json::json!({"usage":summary::Usage::from_attempts(&all_attempts),"provider_calls":all_attempts.len(),"kind":"excluded_route","pack":args.pack,"route":"openrouter","model":model,"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":all_attempts.len(),"reason":reason}))?;
                     Ok(Some((item.model_index, item.channel)))
                 }
             }
@@ -278,12 +277,12 @@ async fn main() -> Result<()> {
             let mut file = writer.lock().await;
             for attempt in &evidence.attempts {
                 let mut row = attempt.clone();
-                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","pack":task.pack(),"task":task.id,"model":model,"route":"openrouter","dialect":item.dialect_name(),"channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
+                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","pack":task.pack(),"task":task.id,"model":model,"route":"openrouter","channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
                 write_row(&mut file, &row)?;
             }
             let result = TaskResult {
                 model: model.clone(), reasoning_effort: args.reasoning_effort,
-                run: item.run, id: task.id.into(), dialect: item.dialect_name().into(), channel: item.channel.name().into(),
+                run: item.run, id: task.id.into(), channel: item.channel.name().into(),
                 wall_ms: evidence.wall_ms, passed: grade.passed, failure_reason: grade.failure_reason,
                 executions: evidence.executions, expected_tool_call_count: task.tool_calls, cost_unknown: usage.cost.is_none(), max_task_cost_usd: args.max_task_cost_usd, turn_wall_limit_secs: args.turn_wall_limit_secs,
                 provider_calls: evidence.attempts.len(), system_prompt_tokens_first_call: evidence.attempts.first().and_then(|r| r["prompt_tokens_total"].as_u64()),
@@ -304,8 +303,7 @@ async fn main() -> Result<()> {
         }
     }).await?;
     results.sort_by(|a, b| {
-        (&a.model, a.run, &a.dialect, &a.id, &a.channel)
-            .cmp(&(&b.model, b.run, &b.dialect, &b.id, &b.channel))
+        (&a.model, a.run, &a.id, &a.channel).cmp(&(&b.model, b.run, &b.id, &b.channel))
     });
     let summaries = summary::aggregate(&results);
     for summary in &summaries {
@@ -341,18 +339,6 @@ struct WorkItem {
     run: usize,
     task_index: usize,
     channel: ChannelSelection,
-}
-
-impl WorkItem {
-    /// The RLM channels run TypeScript, the sole RLM language (ADR 0096); the
-    /// standard channel runs no RLM language at all.
-    fn dialect_name(&self) -> &'static str {
-        if self.channel == ChannelSelection::Standard {
-            "none"
-        } else {
-            "typescript"
-        }
-    }
 }
 
 fn build_work_list(
@@ -450,13 +436,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn key(item: &WorkItem) -> (usize, &str, usize, &str) {
-        (
-            item.run,
-            item.dialect_name(),
-            item.task_index,
-            item.channel.name(),
-        )
+    fn key(item: &WorkItem) -> (usize, usize, &str) {
+        (item.run, item.task_index, item.channel.name())
     }
 
     #[test]
@@ -505,7 +486,10 @@ mod tests {
         })
         .unwrap();
         assert_eq!(work.len(), 28);
-        assert!(work.iter().all(|item| item.dialect_name() == "none"));
+        assert!(
+            work.iter()
+                .all(|item| item.channel == ChannelSelection::Standard)
+        );
     }
 
     #[test]
