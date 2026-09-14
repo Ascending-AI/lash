@@ -1067,12 +1067,14 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         dir.path().join("sessions"),
     ));
     let provider = rolling_history_provider(vec![
-        response_with_usage(&lashlang_block(r#"finish "primed""#), 20_000),
+        response_with_usage(&typescript_block(r#"finish("primed");"#), 20_000),
         response_with_usage(
-            &lashlang_block(r#"await control.continue_as({ task: "finish from the new frame" })?"#),
+            &typescript_block(
+                r#"await control.continue_as({ task: "finish from the new frame" });"#,
+            ),
             1,
         ),
-        response_with_usage(&lashlang_block(r#"finish "continued""#), 1),
+        response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,

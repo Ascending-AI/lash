@@ -26,15 +26,9 @@ pub(super) fn agent_contract_execution_fact(
         "agent.started_process_tool_call_graph" => {
             require_agent_final_value(result, &json!({ "ok": true }), contract)?;
             require_agent_completed_process_entry(result, "lookup", contract)?;
-            require_agent_completed_labeled_resource(
-                result,
-                "Lookup app state in process",
-                contract,
-            )?;
             json!({
                 "final_value": { "ok": true },
                 "completed_process": "lookup",
-                "labeled_resource": "Lookup app state in process",
             })
         }
         "agent.durable_input_suspension_resolution" => {
@@ -79,11 +73,6 @@ pub(super) fn agent_contract_execution_fact(
         "agent.started_process_subagent_spawn" => {
             require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
             require_agent_completed_process_entry(result, "spawn_child", contract)?;
-            require_agent_completed_labeled_resource(
-                result,
-                "Spawn subagent with web search",
-                contract,
-            )?;
             require_agent_min_u64(
                 result,
                 "/graph_facts/child_session_exec_completed_count",
@@ -93,7 +82,6 @@ pub(super) fn agent_contract_execution_fact(
             json!({
                 "final_value": { "len": 2 },
                 "completed_process": "spawn_child",
-                "labeled_resource": "Spawn subagent with web search",
                 "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
             })
         }
@@ -108,7 +96,6 @@ pub(super) fn agent_contract_execution_fact(
             require_agent_final_value(result, &json!({ "parent": "done" }), contract)?;
             require_agent_completed_process_entry(result, "parent", contract)?;
             require_agent_completed_process_entry(result, "child", contract)?;
-            require_agent_completed_labeled_node(result, "Start nested child process", contract)?;
             require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
             require_agent_min_u64(
                 result,
@@ -119,13 +106,11 @@ pub(super) fn agent_contract_execution_fact(
             json!({
                 "final_value": { "parent": "done" },
                 "completed_processes": ["child", "parent"],
-                "labeled_node": "Start nested child process",
             })
         }
         "agent.failed_child_preserves_failure_graph" => {
             require_agent_no_final_value(result, contract)?;
             require_agent_bool(result, "/process_facts/all_terminal", true, contract)?;
-            require_agent_failed_labeled_resource(result, "Spawn failing subagent", contract)?;
             require_agent_min_u64(
                 result,
                 "/graph_facts/child_session_exec_completed_count",
@@ -150,7 +135,6 @@ pub(super) fn agent_contract_execution_fact(
             )?;
             json!({
                 "final_value_present": false,
-                "failed_labeled_resource": "Spawn failing subagent",
                 "child_task_fail_reason": "child boom",
                 "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
                 "all_processes_terminal": true,
@@ -397,44 +381,12 @@ pub(super) fn require_agent_completed_process_entry(
     )
 }
 
-pub(super) fn require_agent_completed_labeled_resource(
-    result: &Value,
-    title: &str,
-    contract: &str,
-) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/completed_labeled_resources",
-        title,
-        contract,
-    )
-}
-
-pub(super) fn require_agent_completed_labeled_node(
-    result: &Value,
-    title: &str,
-    contract: &str,
-) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/completed_labeled_nodes",
-        title,
-        contract,
-    )
-}
-
-pub(super) fn require_agent_failed_labeled_resource(
-    result: &Value,
-    title: &str,
-    contract: &str,
-) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/failed_labeled_resources",
-        title,
-        contract,
-    )
-}
+// The `@label(title: ..)` graph-title assertions that lived here retired with
+// the lashlang surface (ADR 0096): TypeScript has no label form, so the lowerer
+// builds no label node and `/graph_facts/*_labeled_*` is always empty. The
+// contracts they guarded still assert the operation itself — its final value,
+// its completed process entries, its child-session exec counts and its terminal
+// fold. Tracked in FIG-3047.
 
 pub(super) fn require_agent_array_str_contains(
     result: &Value,

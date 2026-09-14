@@ -6,7 +6,7 @@
   "request_match": {
     "body": {
       "stream": { "equals": true },
-      "stop_sequences": { "equals": ["</lashlang>"] }
+      "stop_sequences": { "equals": ["</typescript>"] }
     },
     "headers": {
       "x-api-key": { "present": true },
@@ -34,13 +34,13 @@
     {
       "at": 22,
       "event": "sse",
-      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<lashlang>\\nfinish \\\"settled\\\"\\n\"}}"
+      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<typescript>\\nfinish(\\\"settled\\\");\\n\"}}"
     },
     { "at": 23, "event": "sse", "data": "{\"type\":\"content_block_stop\",\"index\":0}" },
     {
       "at": 24,
       "event": "sse",
-      "data": "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"stop_sequence\",\"stop_sequence\":\"</lashlang>\"},\"usage\":{\"output_tokens\":6}}"
+      "data": "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"stop_sequence\",\"stop_sequence\":\"</typescript>\"},\"usage\":{\"output_tokens\":6}}"
     },
     { "at": 25, "event": "sse", "data": "{\"type\":\"message_stop\"}" },
     { "at": 26, "event": "end" }

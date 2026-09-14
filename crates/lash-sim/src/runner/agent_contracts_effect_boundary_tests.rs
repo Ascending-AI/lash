@@ -234,17 +234,21 @@ async fn batched_lashlang_provider_invocations_cross_tool_attempt_effect_boundar
     let (core, _) = agent_process_contract_core_with_effect_host(
         "lash_runtime batched tool attempt envelope",
         vec![
-            r#"<lashlang>
-process collect(tools: Tools) {
-  results = await {
-first: tools.envelope_probe({ value: "a" })?,
-second: tools.envelope_probe({ value: "b" })?
+            r#"<typescript>
+const collect = defineProcess({
+  name: "collect",
+  signals: {},
+  run: async () => {
+    const [first, second] = await Promise.all([
+      tools.envelope_probe({ value: "a" }),
+      tools.envelope_probe({ value: "b" })
+    ]);
+    return { first: first, second: second };
   }
-  finish results
-}
-handle = start collect(tools: tools)
-finish (await handle)?
-</lashlang>"#,
+});
+const handle = start(collect);
+finish(await handle);
+</typescript>"#,
         ],
         Some(tools),
         recording_effect_host(Arc::clone(&recorder)),

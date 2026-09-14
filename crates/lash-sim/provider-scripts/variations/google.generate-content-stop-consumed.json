@@ -5,7 +5,7 @@
   "endpoint": { "method": "POST", "path": "/v1internal:streamGenerateContent" },
   "request_match": {
     "body": {
-      "request.generationConfig.stopSequences": { "equals": ["</lashlang>"] }
+      "request.generationConfig.stopSequences": { "equals": ["</typescript>"] }
     },
     "headers": {
       "authorization": { "present": true },
@@ -22,7 +22,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<lashlang>\\nfinish \\\"settled\\\"\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":6}}}"
+      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<typescript>\\nfinish(\\\"settled\\\");\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":6}}}"
     },
     {
       "at": 21,

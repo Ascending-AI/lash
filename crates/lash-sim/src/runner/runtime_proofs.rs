@@ -612,13 +612,15 @@ pub(super) async fn prove_final_value_semantic_channel()
 }
 
 pub(super) fn rlm_final_value_provider() -> ProviderHandle {
-    const RAW_FINAL: &str = "Visible prose before semantic value.\n<lashlang>\nfinish { source: \"semantic-channel\", ok: true, count: 3 }\n</lashlang>";
+    const RAW_FINAL: &str = "Visible prose before semantic value.\n<typescript>\nfinish({ source: \"semantic-channel\", ok: true, count: 3 });\n</typescript>";
+    // The chunks still split inside the open and close tags, which is the point
+    // of the proof: the cell scanner has to stitch a tag across a chunk boundary.
     const CHUNKS: &[&str] = &[
         "Visible prose",
-        " before semantic value.\n<lash",
-        "lang>\nfinish { source: ",
-        "\"semantic-channel\", ok: true, count: 3 }",
-        "\n</lashlang>",
+        " before semantic value.\n<type",
+        "script>\nfinish({ source: ",
+        "\"semantic-channel\", ok: true, count: 3 });",
+        "\n</typescript>",
     ];
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-rlm-final-value")

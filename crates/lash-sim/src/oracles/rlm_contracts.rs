@@ -34,14 +34,14 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_u64(result, "/llm_call_count", 2, contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
             require_rlm_system_contains(result, "No code from that response executed.", contract)?;
-            require_rlm_system_contains(result, "finish <value>", contract)?;
+            require_rlm_system_contains(result, "finish(value)", contract)?;
             require_rlm_system_omits(result, "required output schema", contract)?;
             require_rlm_diagnostic(result, "request_finish", "finish_required", contract)?;
             json!({
                 "mode": "finish_required",
                 "decision": "request_finish",
                 "done": false,
-                "repair_prompt_contains": ["No code from that response executed.", "finish <value>"],
+                "repair_prompt_contains": ["No code from that response executed.", "finish(value)"],
                 "llm_call_count": 2,
             })
         }
@@ -50,7 +50,7 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_u64(result, "/llm_call_count", 1, contract)?;
             require_rlm_stopped_max_turns(result, contract)?;
             require_rlm_system_omits(result, "No code from that response executed.", contract)?;
-            require_rlm_system_omits(result, "finish <value>", contract)?;
+            require_rlm_system_omits(result, "finish(value)", contract)?;
             json!({
                 "mode": "finish_required",
                 "done": true,
@@ -64,23 +64,19 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_u64(result, "/llm_call_count", 1, contract)?;
             require_rlm_exec_code(result, "missing_name", contract)?;
             require_rlm_stopped_max_turns(result, contract)?;
-            require_rlm_trajectory_error(
-                result,
-                Some("unknown variable `missing_name`"),
-                contract,
-            )?;
+            require_rlm_trajectory_error(result, Some("unknown binding `missing_name`"), contract)?;
             json!({
                 "mode": "finish_required",
                 "done": true,
                 "stop_reason": "max_turns",
                 "exec_code": "missing_name",
-                "trajectory_error": "unknown variable `missing_name`",
+                "trajectory_error": "unknown binding `missing_name`",
             })
         }
         "rlm.typed_finish_emits_outcome_and_done" => {
             require_rlm_bool(result, "/done", true, contract)?;
             require_rlm_u64(result, "/llm_call_count", 1, contract)?;
-            require_rlm_exec_code(result, "finish { ok: true }", contract)?;
+            require_rlm_exec_code(result, "finish({ ok: true });", contract)?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             require_rlm_final_value(result, &json!({ "ok": true }), contract)?;
             require_rlm_bool(result, "/final_message_event", false, contract)?;
@@ -89,7 +85,7 @@ pub(super) fn rlm_protocol_execution_fact(
                 "mode": "finish_required_schema",
                 "done": true,
                 "final_value": { "ok": true },
-                "exec_code": "finish { ok: true }",
+                "exec_code": "finish({ ok: true });",
                 "final_message_event": false,
                 "checkpoint": "before_completion",
             })
@@ -101,7 +97,7 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_count(diagnostic, "prose_chars", 12, contract)?;
             require_rlm_count(diagnostic, "code_chars", 0, contract)?;
             require_rlm_count(diagnostic, "reasoning_chars", 0, contract)?;
-            require_rlm_count(diagnostic, "lashlang_cell_count", 0, contract)?;
+            require_rlm_count(diagnostic, "typescript_cell_count", 0, contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
             json!({
                 "decision": "request_finish",
@@ -115,7 +111,7 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_count(diagnostic, "prose_chars", 12, contract)?;
             require_rlm_count(diagnostic, "code_chars", 0, contract)?;
             require_rlm_count(diagnostic, "reasoning_chars", 0, contract)?;
-            require_rlm_count(diagnostic, "lashlang_cell_count", 0, contract)?;
+            require_rlm_count(diagnostic, "typescript_cell_count", 0, contract)?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             json!({
                 "decision": "finish_prose",
@@ -125,27 +121,27 @@ pub(super) fn rlm_protocol_execution_fact(
         }
         "rlm.cell_diagnostic_counts" => {
             let diagnostic =
-                require_rlm_diagnostic(result, "execute_lashlang", "natural", contract)?;
-            require_rlm_count(diagnostic, "lashlang_cell_count", 1, contract)?;
-            require_rlm_count(diagnostic, "code_chars", 10, contract)?;
-            require_rlm_exec_code(result, "print \"hi\"", contract)?;
+                require_rlm_diagnostic(result, "execute_typescript", "natural", contract)?;
+            require_rlm_count(diagnostic, "typescript_cell_count", 1, contract)?;
+            require_rlm_count(diagnostic, "code_chars", 12, contract)?;
+            require_rlm_exec_code(result, "print(\"hi\");", contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             json!({
-                "decision": "execute_lashlang",
+                "decision": "execute_typescript",
                 "counts": diagnostic.get("counts").cloned().unwrap_or(Value::Null),
-                "exec_code": "print \"hi\"",
+                "exec_code": "print(\"hi\");",
                 "trajectory_last": rlm_trajectory_last(result).cloned().unwrap_or(Value::Null),
             })
         }
         "rlm.retired_marker_plain_lashlang_text" => {
-            let code = "text = \"%%lashlang is just source here\"\nprint text";
+            let code = "const text = \"%%lashlang is just source here\";\nprint(text);";
             let diagnostic =
-                require_rlm_diagnostic(result, "execute_lashlang", "natural", contract)?;
-            require_rlm_count(diagnostic, "lashlang_cell_count", 1, contract)?;
+                require_rlm_diagnostic(result, "execute_typescript", "natural", contract)?;
+            require_rlm_count(diagnostic, "typescript_cell_count", 1, contract)?;
             require_rlm_exec_code(result, code, contract)?;
             require_rlm_no_tool_call_event(result, contract)?;
             json!({
-                "decision": "execute_lashlang",
+                "decision": "execute_typescript",
                 "exec_code": code,
                 "retired_marker_interpreted_as_source_text": true,
                 "tool_call_event": false,
@@ -154,14 +150,14 @@ pub(super) fn rlm_protocol_execution_fact(
         "rlm.lashlang_cell_exec_continues" => {
             require_rlm_bool(result, "/done", false, contract)?;
             require_rlm_u64(result, "/llm_call_count", 2, contract)?;
-            require_rlm_exec_code(result, "print \"hi\"", contract)?;
+            require_rlm_exec_code(result, "print(\"hi\");", contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             require_rlm_trajectory_output_contains(result, "hi\n", contract)?;
             json!({
                 "done": false,
                 "llm_call_count": 2,
-                "exec_code": "print \"hi\"",
+                "exec_code": "print(\"hi\");",
                 "checkpoint": "after_work",
                 "trajectory_output": "hi\n",
             })
@@ -170,7 +166,7 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_bool(result, "/done", false, contract)?;
             require_rlm_u64(result, "/llm_call_count", 2, contract)?;
             require_rlm_response_text_streamed(result, 0, true, contract)?;
-            require_rlm_exec_code(result, "print \"streamed\"", contract)?;
+            require_rlm_exec_code(result, "print(\"streamed\");", contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             require_rlm_trajectory_output_contains(result, "streamed\n", contract)?;
@@ -178,7 +174,7 @@ pub(super) fn rlm_protocol_execution_fact(
                 "done": false,
                 "llm_call_count": 2,
                 "text_streamed": true,
-                "exec_code": "print \"streamed\"",
+                "exec_code": "print(\"streamed\");",
                 "checkpoint": "after_work",
                 "trajectory_output": "streamed\n",
             })
@@ -186,7 +182,7 @@ pub(super) fn rlm_protocol_execution_fact(
         "rlm.empty_options_natural_default" => {
             require_rlm_bool(result, "/done", true, contract)?;
             require_rlm_final_value(result, &json!("done"), contract)?;
-            require_rlm_exec_code(result, "finish \"done\"", contract)?;
+            require_rlm_exec_code(result, "finish(\"done\");", contract)?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             if result.pointer("/termination/kind").and_then(Value::as_str)
                 != Some("empty_protocol_turn_options")
@@ -199,13 +195,13 @@ pub(super) fn rlm_protocol_execution_fact(
                 "mode": "empty_options_default",
                 "natural_default": true,
                 "final_value": "done",
-                "exec_code": "finish \"done\"",
+                "exec_code": "finish(\"done\");",
             })
         }
         "rlm.exec_result_no_tool_call_replay" => {
             require_rlm_exec_code(
                 result,
-                "x = await tools.read_file({ path: \"foo\" })?",
+                "const x = await tools.read_file({ path: \"foo\" });",
                 contract,
             )?;
             require_rlm_checkpoint(result, "after_work", contract)?;
@@ -213,7 +209,7 @@ pub(super) fn rlm_protocol_execution_fact(
             require_rlm_trajectory_omits(result, "rlm-call-1", contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             json!({
-                "exec_code": "x = await tools.read_file({ path: \"foo\" })?",
+                "exec_code": "const x = await tools.read_file({ path: \"foo\" });",
                 "checkpoint": "after_work",
                 "tool_call_event": true,
                 "trajectory_omits_tool_call_id": "rlm-call-1",
@@ -221,14 +217,18 @@ pub(super) fn rlm_protocol_execution_fact(
         }
         "rlm.exec_tool_control_frame_switch_terminal" => {
             require_rlm_bool(result, "/done", true, contract)?;
-            require_rlm_exec_code(result, "x = await tools.custom_frame_switch({})?", contract)?;
+            require_rlm_exec_code(
+                result,
+                "const x = await tools.custom_frame_switch({});",
+                contract,
+            )?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             require_rlm_tool_call_event(result, contract)?;
             require_rlm_agent_frame_switch(result, "next-frame", "continue", 1, contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             json!({
                 "done": true,
-                "exec_code": "x = await tools.custom_frame_switch({})?",
+                "exec_code": "const x = await tools.custom_frame_switch({});",
                 "checkpoint": "before_completion",
                 "agent_frame_switch": {
                     "frame_key_material": "next-frame",
@@ -240,14 +240,14 @@ pub(super) fn rlm_protocol_execution_fact(
         }
         "rlm.exec_tool_control_fail_terminal" => {
             require_rlm_bool(result, "/done", true, contract)?;
-            require_rlm_exec_code(result, "x = await tools.custom_fail({})?", contract)?;
+            require_rlm_exec_code(result, "const x = await tools.custom_fail({});", contract)?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             require_rlm_tool_call_event(result, contract)?;
             require_rlm_tool_error(result, "custom_fail", "no valid result", contract)?;
             require_rlm_trajectory_error(result, None, contract)?;
             json!({
                 "done": true,
-                "exec_code": "x = await tools.custom_fail({})?",
+                "exec_code": "const x = await tools.custom_fail({});",
                 "checkpoint": "before_completion",
                 "tool_error": { "tool_name": "custom_fail", "message": "no valid result" },
                 "tool_call_event": true,
@@ -256,21 +256,21 @@ pub(super) fn rlm_protocol_execution_fact(
         "rlm.natural_allows_finish_value" => {
             require_rlm_bool(result, "/done", true, contract)?;
             require_rlm_final_value(result, &json!({ "ok": true }), contract)?;
-            require_rlm_exec_code(result, "finish { ok: true }", contract)?;
+            require_rlm_exec_code(result, "finish({ ok: true });", contract)?;
             require_rlm_checkpoint(result, "before_completion", contract)?;
             json!({
                 "mode": "natural",
                 "final_value": { "ok": true },
-                "exec_code": "finish { ok: true }",
+                "exec_code": "finish({ ok: true });",
             })
         }
         "rlm.typed_schema_mismatch_repair_loop" => {
             require_rlm_u64(result, "/llm_call_count", 2, contract)?;
             require_rlm_checkpoint(result, "after_work", contract)?;
-            require_rlm_exec_code(result, "finish { missing: true }", contract)?;
+            require_rlm_exec_code(result, "finish({ missing: true });", contract)?;
             require_rlm_system_contains(
                 result,
-                "didn't match the required output schema",
+                "did not match the required output schema",
                 contract,
             )?;
             require_rlm_trajectory_error(result, Some("\"ok\" is a required property"), contract)?;
@@ -283,10 +283,10 @@ pub(super) fn rlm_protocol_execution_fact(
         }
         "rlm.typed_schema_any_of_mismatch" => {
             require_rlm_checkpoint(result, "after_work", contract)?;
-            require_rlm_exec_code(result, "finish true", contract)?;
+            require_rlm_exec_code(result, "finish(true);", contract)?;
             require_rlm_system_contains(
                 result,
-                "didn't match the required output schema",
+                "did not match the required output schema",
                 contract,
             )?;
             require_rlm_trajectory_error(
@@ -297,7 +297,7 @@ pub(super) fn rlm_protocol_execution_fact(
             json!({
                 "mode": "finish_required_schema",
                 "schema_feedback": "anyOf",
-                "exec_code": "finish true",
+                "exec_code": "finish(true);",
             })
         }
         other => {

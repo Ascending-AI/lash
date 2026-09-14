@@ -1212,14 +1212,14 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
                             if let Some(rx) = release_first_rx.lock().await.take() {
                                 let _ = rx.await;
                             }
-                            Ok(text_response(&lashlang_block(
-                                r#"print("first work complete")"#,
+                            Ok(text_response(&typescript_block(
+                                r#"print("first work complete");"#,
                             )))
                         }
-                        1 => Ok(text_response(&lashlang_block(
-                            r#"finish "active input delivered""#,
+                        1 => Ok(text_response(&typescript_block(
+                            r#"finish("active input delivered");"#,
                         ))),
-                        2 => Ok(text_response(&lashlang_block(r#"finish "later turn""#))),
+                        2 => Ok(text_response(&typescript_block(r#"finish("later turn");"#))),
                         other => panic!("unexpected provider call {other}"),
                     }
                 }
@@ -1295,7 +1295,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         assert_eq!(
             serde_json::to_string(&requests[1][..requests[1].len() - 1])
                 .expect("serialize stable request message prefix"),
-            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<lashlang>\nprint(\"first work complete\")\n</lashlang>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
+            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<typescript>\nprint(\"first work complete\");\n</typescript>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
         );
         assert_eq!(
             serde_json::to_string(&requests[2])?

@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::provider::{
     ProviderWireEndpoint, ProviderWireEvent, ProviderWireScript, ScriptedLlmHttpTransport,
 };
-use crate::provider_variations::LASHLANG_CLOSE_DELIMITER;
+use crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER;
 
 #[path = "provider_variation_matrix/schema.rs"]
 mod schema;
@@ -272,7 +272,7 @@ async fn run_matrix_row(
                 .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
             assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
             assert_eq!(
-                completion.full_text().contains(LASHLANG_CLOSE_DELIMITER),
+                completion.full_text().contains(TYPESCRIPT_CLOSE_DELIMITER),
                 literal_present,
                 "{} {dialect} violated the shared delimiter expectation",
                 row.variation
@@ -801,7 +801,7 @@ fn assert_unsupported_stop_disposition(
     completion: &ProviderCompletion,
     recording: &Recording,
 ) {
-    assert!(completion.full_text().contains(LASHLANG_CLOSE_DELIMITER));
+    assert!(completion.full_text().contains(TYPESCRIPT_CLOSE_DELIMITER));
     let disposition = completion
         .generation_disposition
         .as_ref()
@@ -931,7 +931,7 @@ fn matrix_request(
         model_capability,
         generation: lash_core::GenerationOptions {
             stop_sequences: (row.variation == "stop_consumed")
-                .then(|| LASHLANG_CLOSE_DELIMITER.to_string())
+                .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())
                 .into_iter()
                 .collect(),
             ..Default::default()

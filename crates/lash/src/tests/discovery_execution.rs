@@ -41,7 +41,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
     for mode in ["rlm", "batch", "native"] {
         let calls = Arc::new(StdMutex::new(Vec::new()));
         let first = if mode == "rlm" {
-            text_response(&lashlang_block("finish await tools.hidden({})?"))
+            text_response(&typescript_block("finish(await tools.hidden({}));"))
         } else {
             LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {

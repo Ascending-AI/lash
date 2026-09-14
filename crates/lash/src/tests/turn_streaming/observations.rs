@@ -443,7 +443,7 @@ pub(super) fn output_then_failing_rlm_prose_provider(
                 let stream = request.stream_events.expect("stream events");
                 if call == 0 {
                     stream.send(LlmStreamEvent::Delta(
-                        "retry observer single-copy marker\n<lashlang>\n".to_string(),
+                        "retry observer single-copy marker\n<typescript>\n".to_string(),
                     ));
                     return Err(
                         LlmTransportError::new("deterministic rate limit")
@@ -453,10 +453,10 @@ pub(super) fn output_then_failing_rlm_prose_provider(
                 }
                 let text = match call {
                     1 => {
-                        "retry observer single-copy marker\n<lashlang>\nretry_missing_name\n</lashlang>"
+                        "retry observer single-copy marker\n<typescript>\nretry_missing_name;\n</typescript>"
                     }
-                    2 => "<lashlang>\nfinish \"provider retry succeeded\"\n</lashlang>",
-                    _ => "<lashlang>\nfinish \"subsequent turn succeeded\"\n</lashlang>",
+                    2 => "<typescript>\nfinish(\"provider retry succeeded\");\n</typescript>",
+                    _ => "<typescript>\nfinish(\"subsequent turn succeeded\");\n</typescript>",
                 };
                 stream.send(LlmStreamEvent::Delta(text.to_string()));
                 Ok(LlmResponse {

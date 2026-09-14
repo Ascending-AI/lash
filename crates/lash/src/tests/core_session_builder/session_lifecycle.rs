@@ -855,7 +855,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
                 let seen = Arc::clone(&seen);
                 async move {
                     seen.lock_recover().push(system_text(&request));
-                    Ok(text_response(&lashlang_block("finish \"ok\"")))
+                    Ok(text_response(&typescript_block("finish(\"ok\");")))
                 }
             }
         })
@@ -895,10 +895,13 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .await?;
 
     let prompts = seen.lock_recover();
-    assert!(prompts[0].contains("- Triggers:"));
-    assert!(prompts[0].contains("connects a source value"));
-    assert!(prompts[0].contains("process definition"));
-    assert!(prompts[0].contains("await triggers.list("));
+    // The `lashlang_abilities` config field still drives the surface; the
+    // surface it drives is TypeScript's, the only one a session can be served
+    // (ADR 0096). Same three facts: the registration primitive is offered, its
+    // shape is stated, and the registry is readable.
+    assert!(prompts[0].contains("registerTrigger(c: {source:"));
+    assert!(prompts[0].contains("Literal target; inputs match params."));
+    assert!(prompts[0].contains("triggers.list"));
     assert!(!prompts[0].contains("TRIGGER."));
     Ok(())
 }
@@ -934,8 +937,8 @@ async fn rlm_completed_finish_is_single_copy_in_next_turn_request() -> Result<()
                         2 => "second answer",
                         other => panic!("unexpected provider request {other}"),
                     };
-                    Ok(text_response(&lashlang_block(&format!(
-                        "finish {answer:?}"
+                    Ok(text_response(&typescript_block(&format!(
+                        "finish({answer:?});"
                     ))))
                 }
             }
@@ -1015,8 +1018,8 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
                         let observed_turns = call.div_ceil(2);
                         for turn in 1..=observed_turns {
                             assert!(
-                                text.contains(&lashlang_block(&format!(
-                                    "print \"turn {turn} observation\""
+                                text.contains(&typescript_block(&format!(
+                                    "print(\"turn {turn} observation\");"
                                 ))),
                                 "request {call} lost the paired emission-format cell for turn {turn}"
                             );
@@ -1036,9 +1039,9 @@ async fn rlm_multi_turn_finish_history_preserves_observed_lashlang_few_shots() -
 
                     let turn = call / 2;
                     let response = if call.is_multiple_of(2) {
-                        lashlang_block(&format!("print \"turn {} observation\"", turn + 1))
+                        typescript_block(&format!("print(\"turn {} observation\");", turn + 1))
                     } else {
-                        lashlang_block(&format!("finish {:?}", ANSWERS[turn]))
+                        typescript_block(&format!("finish({:?});", ANSWERS[turn]))
                     };
                     Ok(text_response(&response))
                 }
@@ -2050,12 +2053,12 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
                     .lock_recover()
                     .len();
                 if response_index == 1 {
-                    Ok(text_response(&lashlang_block(
-                        r#"await control.continue_as({ task: "continue under reconciled policy" })?"#,
+                    Ok(text_response(&typescript_block(
+                        r#"await control.continue_as({ task: "continue under reconciled policy" });"#,
                     )))
                 } else {
-                    Ok(text_response(&lashlang_block(
-                        r#"finish "reconciled""#,
+                    Ok(text_response(&typescript_block(
+                        r#"finish("reconciled");"#,
                     )))
                 }
             }

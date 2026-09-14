@@ -50,21 +50,21 @@ async fn agent_tuple_json_array_execution() -> Result<Value, FixedScriptRunnerEr
         "lash_runtime agent tuple final value",
         &SessionId::from("sim-agent-tuple-json-array-contract"),
         "Use tuple values and finish the derived result.",
-        r#"<lashlang>
-pair = "left", "right"
-tail = slice(pair, 1, null)
-seen = []
-for item in pair {
-  seen = push(seen, item)
+        r#"<typescript>
+const pair = ["left", "right"];
+const tail = pair.slice(1);
+const seen = [];
+for (const item of pair) {
+  seen.push(item);
 }
-finish {
+finish({
   first: pair[0],
   tail: tail,
   seen: seen,
   tuple: pair,
   nested: { pair: pair }
-}
-</lashlang>"#,
+});
+</typescript>"#,
         &expected,
     )
     .await?;
@@ -222,11 +222,10 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         &SessionId::from("sim-agent-foreground-tool-contract"),
         "Call the app lookup tool and finish its value.",
         vec![
-            r#"<lashlang>
-@label(title: "Lookup app state")
-value = await tools.app_lookup({})?
-finish value
-</lashlang>"#,
+            r#"<typescript>
+const value = await tools.app_lookup({});
+finish(value);
+</typescript>"#,
         ],
         &expected,
         Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
@@ -261,16 +260,19 @@ async fn agent_started_process_tool_call_graph_execution() -> Result<Value, Fixe
         &SessionId::from("sim-agent-started-process-tool-contract"),
         "Start a process that calls the app lookup tool.",
         vec![
-            r#"<lashlang>
-process lookup(tools: Tools) {
-  @label(title: "Lookup app state in process")
-  value = await tools.app_lookup({})?
-  finish value
-}
-handle = start lookup(tools: tools)
-result = (await handle)?
-finish result
-</lashlang>"#,
+            r#"<typescript>
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => {
+    const value = await tools.app_lookup({});
+    return value;
+  }
+});
+const handle = start(lookup);
+const result = await handle;
+finish(result);
+</typescript>"#,
         ],
         &expected,
         Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
@@ -302,20 +304,26 @@ async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScri
         &SessionId::from("sim-agent-nested-process-contract"),
         "Start a parent process that starts and awaits a child process.",
         vec![
-            r#"<lashlang>
-process child() {
-  finish { child: "done" }
-}
-process parent() {
-  @label(title: "Start nested child process")
-  handle = start child()
-  result = (await handle)?
-  finish { parent: result.child }
-}
-handle = start parent()
-result = (await handle)?
-finish result
-</lashlang>"#,
+            r#"<typescript>
+const child = defineProcess({
+  name: "child",
+  signals: {},
+  run: async () => {
+    return { child: "done" };
+  }
+});
+const parent = defineProcess({
+  name: "parent",
+  signals: {},
+  run: async () => {
+    const inner = await start(child);
+    return { parent: inner.child };
+  }
+});
+const handle = start(parent);
+const result = await handle;
+finish(result);
+</typescript>"#,
         ],
         &expected,
         None,
@@ -336,24 +344,27 @@ async fn agent_started_process_subagent_spawn_execution() -> Result<Value, Fixed
         &SessionId::from("sim-agent-started-process-subagent-contract"),
         "Run a Lashlang process that spawns a subagent and returns its value.",
         vec![
-            r#"<lashlang>
-process spawn_child() {
-  @label(title: "Spawn subagent with web search")
-  result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start spawn_child()
-result = (await handle)?
-finish result
-</lashlang>"#,
-            r#"<lashlang>
-finish { len: len(chunk) }
-</lashlang>"#,
+            r#"<typescript>
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    const result = await agents.spawn({
+      capability: "default",
+      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["a", "b"] },
+      output: { len: "int" }
+    });
+    return result;
+  }
+});
+const handle = start(spawnChild);
+const result = await handle;
+finish(result);
+</typescript>"#,
+            r#"<typescript>
+finish({ len: chunk.length });
+</typescript>"#,
         ],
         &expected,
         None,
@@ -375,14 +386,18 @@ async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScri
         "lash_runtime agent session-turn process child",
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
-        r#"<lashlang>
-process child() {
-  finish { child: "done" }
-}
-handle = start child()
-result = (await handle)?
-finish result
-</lashlang>"#,
+        r#"<typescript>
+const child = defineProcess({
+  name: "child",
+  signals: {},
+  run: async () => {
+    return { child: "done" };
+  }
+});
+const handle = start(child);
+const result = await handle;
+finish(result);
+</typescript>"#,
         &expected,
     )
     .await?;
@@ -399,22 +414,21 @@ async fn agent_failed_child_preserves_failure_graph_execution()
     let (core, graph_store) = agent_process_contract_core_with_options(
         "lash_runtime agent failed child graph",
         vec![
-            r#"<lashlang>
-@label(title: "Spawn failing subagent")
-result = await agents.spawn({
+            r#"<typescript>
+const result = await agents.spawn({
   capability: "default",
   task: "Fail with reason child boom.",
   seed: {},
-  output: Type { reason: str }
-})?
-finish result
-</lashlang>"#,
-            r#"<lashlang>
-await task.fail({ reason: "child boom" })?
-</lashlang>"#,
-            r#"<lashlang>
-await task.fail({ reason: "parent observed child failure" })?
-</lashlang>"#,
+  output: { reason: "str" }
+});
+finish(result);
+</typescript>"#,
+            r#"<typescript>
+await task.fail({ reason: "child boom" });
+</typescript>"#,
+            r#"<typescript>
+await task.fail({ reason: "parent observed child failure" });
+</typescript>"#,
         ],
         None,
         true,
@@ -472,18 +486,20 @@ async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptR
         "lash_runtime agent parallel process join",
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
-        r#"<lashlang>
-process child(value: str) {
-  finish value
-}
-@label(title: "Start left process")
-left = start child(value: "left")
-@label(title: "Start right process")
-right = start child(value: "right")
-left_value = (await left)?
-right_value = (await right)?
-finish { joined: [left_value, right_value] }
-</lashlang>"#,
+        r#"<typescript>
+const child = defineProcess({
+  name: "child",
+  signals: {},
+  run: async (value) => {
+    return value;
+  }
+});
+const left = start(child, { value: "left" });
+const right = start(child, { value: "right" });
+const leftValue = await left;
+const rightValue = await right;
+finish({ joined: [leftValue, rightValue] });
+</typescript>"#,
         &expected,
     )
     .await?;
@@ -737,18 +753,22 @@ async fn facade_agent_durable_input_execution_with(
     let (core, graph_store) = agent_process_contract_core_with_effect_host(
         "lash_runtime agent durable input",
         vec![
-            r#"<lashlang>
-process request_answer(tools: Tools) {
-  result = await tools.mock_input_request({ question: "Need input?" })?
-  finish result
-}
-handle = start request_answer(tools: tools)
-result = (await handle)?
-finish result.answer
-</lashlang>"#,
-            r#"<lashlang>
-finish { recovered: true }
-</lashlang>"#,
+            r#"<typescript>
+const requestAnswer = defineProcess({
+  name: "request_answer",
+  signals: {},
+  run: async () => {
+    const result = await tools.mock_input_request({ question: "Need input?" });
+    return result;
+  }
+});
+const handle = start(requestAnswer);
+const result = await handle;
+finish(result.answer);
+</typescript>"#,
+            r#"<typescript>
+finish({ recovered: true });
+</typescript>"#,
         ],
         Some(registered_tools),
         effect_host,

@@ -446,19 +446,19 @@ def matrix() -> dict[str, object]:
                     "kind": "not_applicable",
                     "reason": "Responses has no provider wire stop-sequence field",
                     "assertion": "omitted_unsupported_stop",
-                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
+                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-sse": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses has no provider wire stop-sequence field",
                     "assertion": "omitted_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
+                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-websocket": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
                     "assertion": "omitted_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<lashlang>\nfinish "settled"\n</lashlang>\n')],
+                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
                 },
             },
         }
@@ -478,7 +478,7 @@ def matrix() -> dict[str, object]:
         "openai.chat-completions": {"kind": "provider_wire_scripts", "paths": ["../../variations/openai-compatible.chat-literal-present.json"]},
     }
     for dialect in DIALECTS[3:]:
-        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='<lashlang>\nfinish "settled"\n</lashlang>\n')])
+        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='<typescript>\nfinish("settled");\n</typescript>\n')])
     rows.append(
         {
             "variation": "literal_present",

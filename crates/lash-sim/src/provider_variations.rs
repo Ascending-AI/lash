@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
 
-pub const LASHLANG_CLOSE_DELIMITER: &str = "</lashlang>";
+pub const TYPESCRIPT_CLOSE_DELIMITER: &str = "</typescript>";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderStopDialect {
@@ -190,7 +190,7 @@ pub struct ProviderStopSelection {
 /// actual provider request on every call.
 ///
 /// Unlike a queue of request-matched scripts, this transport can model an
-/// unbounded protocol retry: every request with `</lashlang>` receives the
+/// unbounded protocol retry: every request with `</typescript>` receives the
 /// stop-consumed/no-literal response, while every request without a stop gets
 /// the literal-present response.
 #[derive(Clone, Debug)]
@@ -237,12 +237,12 @@ impl PairedProviderStopTransport {
             None => Ok(ProviderStopVariation::LiteralPresent),
             Some(Value::Array(stops))
                 if stops.len() == 1
-                    && stops.first().and_then(Value::as_str) == Some(LASHLANG_CLOSE_DELIMITER) =>
+                    && stops.first().and_then(Value::as_str) == Some(TYPESCRIPT_CLOSE_DELIMITER) =>
             {
                 Ok(ProviderStopVariation::StopConsumed)
             }
             Some(other) => Err(LlmTransportError::new(format!(
-                "paired provider-stop transport expected no stop or exactly [\"{LASHLANG_CLOSE_DELIMITER}\"], got {other}"
+                "paired provider-stop transport expected no stop or exactly [\"{TYPESCRIPT_CLOSE_DELIMITER}\"], got {other}"
             ))
             .with_kind(ProviderFailureKind::Validation)),
         }
@@ -265,7 +265,7 @@ impl LlmHttpTransport for PairedProviderStopTransport {
                 call_index,
                 variation,
                 carries_unclosed_cell_retry_prompt: body_text.contains(
-                    "Reply again using exactly one paired `<lashlang>...</lashlang>` block",
+                    "Reply again using exactly one paired `<typescript>...</typescript>` block",
                 ),
             });
         }
@@ -427,7 +427,7 @@ mod tests {
                     variation.name()
                 );
                 assert_eq!(
-                    response.full_text().contains(LASHLANG_CLOSE_DELIMITER),
+                    response.full_text().contains(TYPESCRIPT_CLOSE_DELIMITER),
                     matches!(variation, ProviderStopVariation::LiteralPresent),
                     "{} {} returned the wrong delimiter shape",
                     dialect.name(),
@@ -467,7 +467,7 @@ mod tests {
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
             .generation(GenerationOptions {
-                stop_sequences: vec![LASHLANG_CLOSE_DELIMITER.to_string()],
+                stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()
             })
             .effect_host(Arc::new(
@@ -586,7 +586,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(extraction_decisions, vec!["execute_lashlang"]);
+        assert_eq!(extraction_decisions, vec!["execute_typescript"]);
         assert_eq!(
             extraction_decisions
                 .iter()
@@ -632,7 +632,7 @@ mod tests {
             model_capability: Default::default(),
             generation: GenerationOptions {
                 stop_sequences: (variation == ProviderStopVariation::StopConsumed)
-                    .then(|| LASHLANG_CLOSE_DELIMITER.to_string())
+                    .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())
                     .into_iter()
                     .collect(),
                 ..GenerationOptions::default()

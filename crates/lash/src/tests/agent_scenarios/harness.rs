@@ -1,10 +1,8 @@
 use super::super::*;
 use super::contracts::{
-    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_completed_process_graph,
-    assert_labeled_node, assert_labeled_resource_operation,
+    GraphContract, assert_all_processes_terminal, assert_completed_process_graph,
     assert_min_completed_child_session_exec_graphs, assert_min_completed_process_graphs,
-    assert_no_duplicate_label_step, assert_session_turn_child_graph,
-    assert_successful_agent_scenario,
+    assert_session_turn_child_graph, assert_successful_agent_scenario,
 };
 use lash_core::llm::types::LlmUsage;
 use lash_sansio::ProcessId;
@@ -14,8 +12,6 @@ use std::collections::VecDeque;
 
 #[derive(Default)]
 pub(super) struct AgentScenarioExpectations {
-    pub(super) labeled_resource_titles: Vec<&'static str>,
-    pub(super) labeled_node_titles: Vec<&'static str>,
     pub(super) completed_process_entries: Vec<&'static str>,
     pub(super) min_completed_child_session_exec_graphs: usize,
     pub(super) min_completed_process_graphs: usize,
@@ -119,16 +115,6 @@ impl AgentScenario {
         attachment_id: lash_core::AttachmentId,
     ) -> Self {
         self.seeded_attachment_writes.push(attachment_id);
-        self
-    }
-
-    pub(super) fn labeled_resource(mut self, title: &'static str) -> Self {
-        self.expected_contracts.labeled_resource_titles.push(title);
-        self
-    }
-
-    pub(super) fn labeled_node(mut self, title: &'static str) -> Self {
-        self.expected_contracts.labeled_node_titles.push(title);
         self
     }
 
@@ -338,8 +324,8 @@ impl AgentScenarioRuntime {
     }
 }
 
-pub(super) fn lashlang_block(source: &str) -> String {
-    format!("<lashlang>\n{}\n</lashlang>", source.trim())
+pub(super) fn typescript_block(source: &str) -> String {
+    format!("<typescript>\n{}\n</typescript>", source.trim())
 }
 
 pub(super) async fn run_agent_turn_scenario(case: AgentScenario) -> Result<AgentScenarioRun> {
@@ -476,14 +462,6 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     }
 
     let contract = GraphContract::from_graphs(&run.graph_snapshots);
-    for title in case.expected_contracts.labeled_resource_titles {
-        assert_labeled_resource_operation(&contract, title, NodeStatusFact::Completed);
-        assert_no_duplicate_label_step(&contract, title);
-    }
-    for title in case.expected_contracts.labeled_node_titles {
-        assert_labeled_node(&contract, title, NodeStatusFact::Completed);
-        assert_no_duplicate_label_step(&contract, title);
-    }
     for entry_name in case.expected_contracts.completed_process_entries {
         assert_completed_process_graph(&contract, entry_name);
     }
@@ -753,8 +731,8 @@ impl AgentSessionTurnProcessScenario {
     }
 
     fn runtime(&self) -> Result<AgentScenarioRuntime> {
-        AgentScenarioSetup::new(vec![lashlang_block(
-            r#"finish { child: "done", scoped: true }"#,
+        AgentScenarioSetup::new(vec![typescript_block(
+            r#"finish({ child: "done", scoped: true });"#,
         )])
         .install_subagents(true)
         .build()
@@ -902,17 +880,21 @@ impl AgentDurableInputSuspensionScenario {
 
     fn runtime(&self, tools: Arc<dyn ToolProvider>) -> Result<AgentScenarioRuntime> {
         AgentScenarioSetup::new(vec![
-            lashlang_block(
+            typescript_block(
                 r#"
-process request_answer(tools: Tools) {
-  result = await tools.mock_input_request({ question: "Need input?" })?
-  finish result
-}
-handle = start request_answer(tools: tools)
-result = (await handle)?
-finish result.answer"#,
+const requestAnswer = defineProcess({
+  name: "request_answer",
+  signals: {},
+  run: async () => {
+    const result = await tools.mock_input_request({ question: "Need input?" });
+    return result;
+  }
+});
+const handle = start(requestAnswer);
+const result = await handle;
+finish(result.answer);"#,
             ),
-            lashlang_block("finish { recovered: true }"),
+            typescript_block("finish({ recovered: true });"),
         ])
         .tool_provider(tools)
         .build()
@@ -1042,18 +1024,22 @@ pub(super) async fn run_agent_durable_input_request_scenario() -> Result<()> {
 
 pub(super) async fn run_agent_process_llm_query_scenario() -> Result<()> {
     let runtime = AgentScenarioSetup::new(vec![
-        lashlang_block(
+        typescript_block(
             r#"
-process enrich(event: { email: str }) {
-  enriched = await llm.query({
-    task: "Classify the supplied email",
-    inputs: { event: event },
-    output: Type { category: str, confidence: float }
-  })?
-  finish enriched
-}
-handle = start enrich(event: { email: "hello@example.com" })
-finish (await handle)?"#,
+const enrich = defineProcess({
+  name: "enrich",
+  signals: {},
+  run: async (event) => {
+    const enriched = await llm.query({
+      task: "Classify the supplied email",
+      inputs: { event: event },
+      output: { category: "str", confidence: "float" }
+    });
+    return enriched;
+  }
+});
+const handle = start(enrich, { event: { email: "hello@example.com" } });
+finish(await handle);"#,
         ),
         r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#
             .to_string(),
@@ -1088,14 +1074,18 @@ finish (await handle)?"#,
 
 pub(super) async fn run_agent_direct_completion_attempt_retry_scenario() -> Result<()> {
     let runtime = AgentScenarioSetup::new(vec![
-        lashlang_block(
+        typescript_block(
             r#"
-process retry_direct(tools: Tools) {
-  value = await tools.retrying_direct({})?
-  finish value
-}
-handle = start retry_direct(tools: tools)
-finish (await handle)?"#,
+const retryDirect = defineProcess({
+  name: "retry_direct",
+  signals: {},
+  run: async () => {
+    const value = await tools.retrying_direct({});
+    return value;
+  }
+});
+const handle = start(retryDirect);
+finish(await handle);"#,
         ),
         "first-provider-result".to_string(),
         "second-provider-result".to_string(),

@@ -361,9 +361,9 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         #[cfg(feature = "rlm")]
         {
             let rlm_core = explicit_ephemeral_facets(rlm_core_builder())
-                .provider(queued_text_provider(vec![lashlang_block(
-                    r#"value = await tools.app_lookup({})?
-finish "done""#,
+                .provider(queued_text_provider(vec![typescript_block(
+                    r#"const value = await tools.app_lookup({});
+finish("done");"#,
                 )]))
                 .model(mock_model_spec())
                 .tools(Arc::new(LongTextTools))

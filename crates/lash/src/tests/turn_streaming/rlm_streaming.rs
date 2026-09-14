@@ -336,9 +336,9 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
 #[test]
 pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
     run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
-        const RAW_FINAL: &str = "Visible before cell.\n<lashlang>\npayload = r\"\"\"```markdown\ninside\n```\"\"\"\nfinish \"streamed raw final ok\"\n</lashlang>";
+        const RAW_FINAL: &str = "Visible before cell.\n<typescript>\nconst payload = \"```markdown\\ninside\\n```\";\nfinish(\"streamed raw final ok\");\n</typescript>";
         const EXPECTED_CODE: &str =
-            "payload = r\"\"\"```markdown\ninside\n```\"\"\"\nfinish \"streamed raw final ok\"";
+            "const payload = \"```markdown\\ninside\\n```\";\nfinish(\"streamed raw final ok\");";
 
         let provider = crate::testing::TestProvider::builder()
             .kind("stream-raw-final-test")
@@ -349,11 +349,11 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
                     .expect("RLM streaming turn should request provider stream events");
                 for chunk in [
                     "Visible before",
-                    " cell.\n<lash",
-                    "lang>\npayload = r\"\"\"",
-                    "```markdown\ninside\n",
-                    "```\"\"\"\nfinish ",
-                    "\"streamed raw final ok\"\n</lashlang>",
+                    " cell.\n<type",
+                    "script>\nconst payload = \"",
+                    "```markdown\\ninside\\n",
+                    "```\";\nfinish(",
+                    "\"streamed raw final ok\");\n</typescript>",
                 ] {
                     stream.send(LlmStreamEvent::Delta(chunk.to_string()));
                 }
@@ -400,7 +400,7 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
         let events = events.snapshot().await;
         let prose = assistant_prose(&events);
         assert_eq!(prose, "Visible before cell.\n");
-        assert!(!prose.contains("<lashlang>"));
+        assert!(!prose.contains("<typescript>"));
         assert!(!prose.contains("finish"));
         assert!(!prose.contains("```markdown"));
 
@@ -411,9 +411,9 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
         let TurnEvent::CodeBlockStarted { language, code, .. } = &code_started.event else {
             unreachable!();
         };
-        assert_eq!(language, "lashlang");
+        assert_eq!(language, "typescript");
         assert_eq!(code, EXPECTED_CODE);
-        assert!(!code.contains("<lashlang>"));
+        assert!(!code.contains("<typescript>"));
 
         let code_completed = events
             .iter()
@@ -462,7 +462,7 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
                 stream.send(LlmStreamEvent::Delta(
-                    "<lashlang>\nfinish \"cell survived reset\"\n</lashlang>\n".to_string(),
+                    "<typescript>\nfinish(\"cell survived reset\");\n</typescript>\n".to_string(),
                 ));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::AttemptReset);
@@ -513,7 +513,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
                     ..Default::default()
                 }));
                 stream.send(LlmStreamEvent::Delta(
-                    "<lashlang>\nfinish \"late events survived\"\n</lashlang>\n".to_string(),
+                    "<typescript>\nfinish(\"late events survived\");\n</typescript>\n".to_string(),
                 ));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::Delta("provider suffix".to_string()));
@@ -690,7 +690,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
                     .stream_events
                     .expect("stream events")
                     .send(LlmStreamEvent::Delta(
-                        "<lashlang>\nfinish \"deadline survived\"\n</lashlang>\n".to_string(),
+                        "<typescript>\nfinish(\"deadline survived\");\n</typescript>\n".to_string(),
                     ));
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
             })
@@ -764,7 +764,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_writes_no_ledger_row() -> R
             .complete(|_request| async move {
                 Ok(LlmResponse {
                     parts: vec![lash_core::llm::types::LlmOutputPart::Text {
-                        text: "<lashlang>\nfinish \"quiet\"\n</lashlang>\n".to_string(),
+                        text: "<typescript>\nfinish(\"quiet\");\n</typescript>\n".to_string(),
                         response_meta: None,
                     }],
                     terminal_reason: lash_core::LlmTerminalReason::Stop,
@@ -813,9 +813,9 @@ pub(super) async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Res
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"value = await tools.app_lookup({})?
-finish "done""#,
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"const value = await tools.app_lookup({});
+finish("done");"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -935,7 +935,7 @@ finish "done""#,
     else {
         unreachable!();
     };
-    assert_eq!(language, "lashlang");
+    assert_eq!(language, "typescript");
     assert!(*success);
     assert!(error.is_none());
     assert_eq!(call_id.as_ref(), tool_call_ids.first());
@@ -992,9 +992,14 @@ pub(super) fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<
             crate::TurnBudget::Unbounded,
             rlm_factory(),
         ))
-        .provider(queued_text_provider(vec![lashlang_block(
-            r#"failure = await tools.app_lookup({})
-finish "recovered""#,
+        .provider(queued_text_provider(vec![typescript_block(
+            r#"let failure;
+try {
+  failure = await tools.app_lookup({});
+} catch (error) {
+  failure = error;
+}
+finish("recovered");"#,
         )]))
         .model(mock_model_spec())
         .tools(Arc::new(FailingAppTools))
@@ -1039,10 +1044,10 @@ pub(super) async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inn
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"a = await tools.app_lookup({})?
-b = await tools.app_lookup({})?
-finish "done""#,
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"const a = await tools.app_lookup({});
+const b = await tools.app_lookup({});
+finish("done");"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -1121,9 +1126,9 @@ pub(super) async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_pro
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"value = await tools.app_lookup({})?
-finish "done""#,
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"const value = await tools.app_lookup({});
+finish("done");"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -1313,8 +1318,8 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        "value = await tools.app_lookup({})?\nfinish value",
+    .provider(queued_text_provider(vec![typescript_block(
+        "const value = await tools.app_lookup({});\nfinish(value);",
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
@@ -1395,15 +1400,19 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
+    .provider(queued_text_provider(vec![typescript_block(
         r#"
-process lookup(tools: Tools) {
-  value = await tools.app_lookup({})?
-  finish value
-}
-handle = start lookup(tools: tools)
-result = (await handle)?
-finish result"#,
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => {
+    const value = await tools.app_lookup({});
+    return value;
+  }
+});
+const handle = start(lookup);
+const result = await handle;
+finish(result);"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
@@ -1482,8 +1491,8 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block(r#"await control.continue_as({ task: "finish in a fresh frame" })?"#),
-        lashlang_block(r#"finish "done after continue_as""#),
+        typescript_block(r#"await control.continue_as({ task: "finish in a fresh frame" });"#),
+        typescript_block(r#"finish("done after continue_as");"#),
     ]))
     .model(mock_model_spec())
     .store_factory(Arc::new(
@@ -1537,9 +1546,9 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block(r#"finish "plain turn complete""#),
-        lashlang_block(r#"await control.continue_as({ task: "finish turn two" })?"#),
-        lashlang_block(r#"finish "turn two complete""#),
+        typescript_block(r#"finish("plain turn complete");"#),
+        typescript_block(r#"await control.continue_as({ task: "finish turn two" });"#),
+        typescript_block(r#"finish("turn two complete");"#),
     ]))
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
@@ -1602,8 +1611,8 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block(r#"await control.continue_as({ task: "finish in process" })?"#),
-        lashlang_block(r#"finish "done after in-process handoff""#),
+        typescript_block(r#"await control.continue_as({ task: "finish in process" });"#),
+        typescript_block(r#"finish("done after in-process handoff");"#),
     ]))
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
@@ -1658,8 +1667,8 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block(r#"await control.continue_as({ task: "finish from durable handoff" })?"#),
-        lashlang_block(r#"finish "done after durable handoff""#),
+        typescript_block(r#"await control.continue_as({ task: "finish from durable handoff" });"#),
+        typescript_block(r#"finish("done after durable handoff");"#),
     ]))
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
@@ -1732,9 +1741,17 @@ pub(super) async fn durable_queued_continue_as_seed_is_visible_to_follow_turn_li
                     let call = provider_call_count.fetch_add(1, Ordering::SeqCst);
                     let text = match call {
                         0 => {
-                            lashlang_block(
-                                r#"control = { total: 28 }
-finish { established: control.total }"#,
+                            typescript_block(
+                                // The retired surface let a durable global
+                                // collide with a module root (`control`);
+                                // TypeScript refuses that shadowing with a
+                                // typed error (ADR 0096), so the global this
+                                // turn establishes carries its own name. What
+                                // the test proves — the committed frame seed is
+                                // installed before the follow turn links — is
+                                // unchanged.
+                                r#"const established = { total: 28 };
+finish({ established: established.total });"#,
                             )
                         }
                         1 => {
@@ -1745,16 +1762,16 @@ finish { established: control.total }"#,
                                 let _ = tx.send(());
                             }
                             release_first_provider_call.notified().await;
-                            lashlang_block(
-                                r#"await control.continue_as({ task: "finish from seeded durable handoff", seed: { baton: "seed:durable", session_chars: len(session_projection) } })?"#,
+                            typescript_block(
+                                r#"await control.continue_as({ task: "finish from seeded durable handoff", seed: { baton: "seed:durable", session_chars: session_projection.length } });"#,
                             )
                         }
-                        2 => lashlang_block(
-                            r#"finish { seed_visible: baton, session_projection_chars: session_chars }"#,
+                        2 => typescript_block(
+                            r#"finish({ seed_visible: baton, session_projection_chars: session_chars });"#,
                         ),
                         _ => {
                             *repair_request.lock_recover() = Some(format!("{request:?}"));
-                            lashlang_block(r#"finish { unexpected_repair: true }"#)
+                            typescript_block(r#"finish({ unexpected_repair: true });"#)
                         }
                     };
                     Ok(text_response(&text))
@@ -1778,7 +1795,7 @@ finish { established: control.total }"#,
     let session = core.session(session_id).open().await?;
     let established = session
         .turn(TurnInput::text(
-            "establish a durable global that collides with a module root",
+            "establish a durable global carried across the frame switch",
         ))
         .run()
         .await?;
@@ -1818,11 +1835,21 @@ finish { established: control.total }"#,
         .expect("queued turn task")?
         .expect("queued turn should run");
 
+    // `Value::Projected` carries through path expressions and is stripped by
+    // computation. The retired surface reached the projection's length through
+    // the `len()` intrinsic — computation, so the seed entry was a bare number;
+    // TypeScript reaches it through the `.length` path read, so the entry stays
+    // projected and crosses the frame switch in the canonical `__projected__`
+    // seed wrapper (ADR 0096). Same three facts: the seed is installed before
+    // the follow turn links, the baton survives, and the projected length is
+    // the session projection's 15 characters.
     assert_eq!(
         output.final_value(),
         Some(&serde_json::json!({
             "seed_visible": "seed:durable",
-            "session_projection_chars": 15
+            "session_projection_chars": {
+                "__projected__": { "kind": "materialized", "value": 15 }
+            }
         })),
         "the committed frame seed must be installed before the follow turn links: {output:?}; repair_request={:?}",
         repair_request.lock_recover()

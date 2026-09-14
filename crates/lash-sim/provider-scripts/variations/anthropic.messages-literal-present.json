@@ -34,7 +34,7 @@
     {
       "at": 22,
       "event": "sse",
-      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<lashlang>\\nfinish \\\"settled\\\"\\n</lashlang>\\n\"}}"
+      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<typescript>\\nfinish(\\\"settled\\\");\\n</typescript>\\n\"}}"
     },
     { "at": 23, "event": "sse", "data": "{\"type\":\"content_block_stop\",\"index\":0}" },
     {

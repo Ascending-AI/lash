@@ -36,8 +36,9 @@ struct NodeFact {
     has_error: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum NodeStatusFact {
+enum NodeStatusFact {
     Unobserved,
     Running,
     Completed,
@@ -138,10 +139,6 @@ impl GraphContract {
             .map(|graph| graph.graph_key.as_str())
             .collect()
     }
-
-    fn nodes(&self) -> impl Iterator<Item = &NodeFact> {
-        self.graphs.iter().flat_map(|graph| graph.nodes.iter())
-    }
 }
 
 pub(super) fn assert_successful_agent_scenario(run: &AgentScenarioRun) {
@@ -198,19 +195,19 @@ fn assert_successful_lash_code_path(events: &[TurnActivity]) {
         .position(|activity| {
             matches!(
                 &activity.event,
-                TurnEvent::CodeBlockStarted { language, .. } if language == "lashlang"
+                TurnEvent::CodeBlockStarted { language, .. } if language == "typescript"
             )
         })
-        .unwrap_or_else(|| panic!("missing Lashlang code start event: {events:#?}"));
+        .unwrap_or_else(|| panic!("missing TypeScript code start event: {events:#?}"));
     let code_completed = events
         .iter()
         .rposition(|activity| {
             matches!(
                 &activity.event,
-                TurnEvent::CodeBlockCompleted { language, success: true, .. } if language == "lashlang"
+                TurnEvent::CodeBlockCompleted { language, success: true, .. } if language == "typescript"
             )
         })
-        .unwrap_or_else(|| panic!("missing successful Lashlang code completion: {events:#?}"));
+        .unwrap_or_else(|| panic!("missing successful TypeScript code completion: {events:#?}"));
     let terminal_output = events
         .iter()
         .position(|activity| {
@@ -320,60 +317,12 @@ pub(super) fn assert_graph_lineage_connected(
     }
 }
 
-pub(super) fn assert_labeled_resource_operation(
-    contract: &GraphContract,
-    title: &str,
-    expected_status: NodeStatusFact,
-) {
-    let node = contract
-        .nodes()
-        .find(|node| {
-            node.kind == "resource_operation"
-                && node.label_title.as_deref() == Some(title)
-                && node.status == expected_status
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "missing labeled resource operation `{title}` with status {expected_status:?}: {contract:#?}"
-            );
-        });
-    assert_eq!(
-        node.status, expected_status,
-        "labeled resource operation `{title}` had wrong status: {node:#?}"
-    );
-    if expected_status == NodeStatusFact::Failed {
-        assert!(
-            node.has_error,
-            "failed labeled resource operation should retain node error: {node:#?}"
-        );
-    }
-}
-
-pub(super) fn assert_labeled_node(
-    contract: &GraphContract,
-    title: &str,
-    expected_status: NodeStatusFact,
-) {
-    let node = contract
-        .nodes()
-        .find(|node| node.label_title.as_deref() == Some(title) && node.status == expected_status)
-        .unwrap_or_else(|| {
-            panic!("missing labeled node `{title}` with status {expected_status:?}: {contract:#?}")
-        });
-    assert_eq!(
-        node.status, expected_status,
-        "labeled node `{title}` had wrong status: {node:#?}"
-    );
-}
-
-pub(super) fn assert_no_duplicate_label_step(contract: &GraphContract, title: &str) {
-    assert!(
-        !contract
-            .nodes()
-            .any(|node| node.kind == "step" && node.label == title),
-        "label `{title}` produced a duplicate standalone step: {contract:#?}"
-    );
-}
+// The label assertions that lived here retired with the lashlang surface
+// (ADR 0096). They required `node.label_title == Some(title)`, and the only
+// way a graph node ever carried a title was the surface's `@label(title: ..)`
+// decorator. TypeScript has no label form — the lowerer builds no label node —
+// so there is nothing left for them to read. The scenarios they guarded still
+// assert the operation itself: its status, its lineage and its terminal fold.
 
 pub(super) fn assert_completed_process_graph(contract: &GraphContract, entry_name: &str) {
     assert!(

@@ -60,7 +60,7 @@ fn aborting_provider(
                 // Evidence is only admissible once the response is established,
                 // so the generation id rides the first delta, not before it.
                 stream.send(LlmStreamEvent::Delta(
-                    "<lashlang>\nfinish \"sealed\"\n</lashlang>\n".to_string(),
+                    "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
                 ));
                 if let Some(generation_id) = generation_id {
                     stream.send(LlmStreamEvent::Evidence(
@@ -266,7 +266,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
                     async move {
                         let stream = request.stream_events.expect("stream events");
                         stream.send(LlmStreamEvent::Delta(
-                            "<lashlang>\nfinish \"sealed\"\n</lashlang>\n".to_string(),
+                            "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
                         ));
                         if let Some(generation_id) = generation_id {
                             stream.send(LlmStreamEvent::Evidence(
