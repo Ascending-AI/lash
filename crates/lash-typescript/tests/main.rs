@@ -57,5 +57,8 @@ mod runtime_promises;
 #[path = "console_output.rs"]
 mod console_output;
 
+#[path = "execution_site_correlation.rs"]
+mod execution_site_correlation;
+
 #[path = "workflow_graph.rs"]
 mod workflow_graph;

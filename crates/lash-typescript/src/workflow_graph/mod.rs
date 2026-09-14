@@ -28,6 +28,7 @@ use crate::Diagnostic;
 mod editable_text;
 mod printer;
 
+use crate::lower::process_run_body_path;
 pub use editable_text::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
     parse_typescript_process_statement,
@@ -37,11 +38,11 @@ use editable_text::{
     parse_comprehension_clauses, parse_expression_field, parse_simple_binding_field,
     parse_typescript_fragment, statement_text, with_assignment, workflow_clause,
 };
+use printer::process_run_body as process_run_body_of;
 pub use printer::{
     TypeScriptSourceError, typescript_assign_target_source, typescript_expression_source,
     typescript_program_source, typescript_statement_source,
 };
-use printer::{process_run_body as process_run_body_of, process_run_body_path};
 
 /// Parse source, canonicalize it, and project it into a deterministic graph,
 /// with optional host-derived, non-authoritative type facets.
