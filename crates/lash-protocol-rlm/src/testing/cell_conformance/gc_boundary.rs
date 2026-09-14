@@ -12,15 +12,16 @@
 //! write on every turn. The persisted size is the number a host pays for.
 
 use super::drive;
-use super::harness::{Dialect, HarnessMode, Session};
+use super::harness::{HarnessMode, Session};
 use super::syntax::{Cell, Literal};
 
 /// The FIG-1562 law at its narrowest: a cell that leaves a closure behind as
 /// garbage must not fail the next cell.
-fn garbage_from_one_cell_does_not_reach_the_next_cells_validation(dialect: Dialect) {
-    let mut session = Session::open(dialect, HarnessMode::Resident);
-    session.run_ok(&Cell::closure_garbage("scaled").render(dialect));
-    let outcome = session.run_ok(&Cell::number("answer", 42.0).render(dialect));
+#[test]
+fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
+    let mut session = Session::open(HarnessMode::Resident);
+    session.run_ok(&Cell::closure_garbage("scaled").render());
+    let outcome = session.run_ok(&Cell::number("answer", 42.0).render());
     assert!(outcome.succeeded());
     assert_eq!(
         session.user_bindings().get("scaled"),
@@ -30,9 +31,9 @@ fn garbage_from_one_cell_does_not_reach_the_next_cells_validation(dialect: Diale
 }
 
 /// Garbage left behind by a cell that *failed* is garbage too.
-fn garbage_from_a_failed_cell_does_not_reach_the_next_cell(dialect: Dialect) {
+#[test]
+fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
     let (session, _) = drive(
-        dialect,
         HarnessMode::Resident,
         &[
             Cell::closure_garbage("scaled"),
@@ -48,13 +49,14 @@ fn garbage_from_a_failed_cell_does_not_reach_the_next_cell(dialect: Dialect) {
 }
 
 /// A structure a root still reaches survives every boundary collection.
-fn a_rooted_structure_survives_the_boundary_collection(dialect: Dialect) {
+#[test]
+fn a_rooted_structure_survives_the_boundary_collection() {
     let payload = (0..24).map(f64::from).collect::<Vec<_>>();
     let mut cells = vec![Cell::bind("rooted", Literal::List(payload.clone()))];
     for step in 0..6 {
         cells.push(Cell::closure_garbage(&format!("garbage{step}")));
     }
-    let (session, _) = drive(dialect, HarnessMode::Resident, &cells);
+    let (session, _) = drive(HarnessMode::Resident, &cells);
     assert_eq!(
         session.user_bindings().get("rooted"),
         Some(
@@ -73,25 +75,22 @@ fn a_rooted_structure_survives_the_boundary_collection(dialect: Dialect) {
 /// constant by construction and any growth is the heap or the encoder keeping
 /// something it should have dropped. Thirty cells is enough for a per-cell leak
 /// to be unmistakable and short enough to stay inside the CI budget.
-fn many_garbage_producing_cells_do_not_grow_the_persisted_state(
-    dialect: Dialect,
-    mode: HarnessMode,
-) {
+fn many_garbage_producing_cells_do_not_grow_the_persisted_state(mode: HarnessMode) {
     const CELLS: usize = 30;
     // The first cells introduce the bindings, so the size only means anything
     // once every name exists.
     const WARMUP: usize = 3;
 
-    let mut session = Session::open(dialect, mode);
+    let mut session = Session::open(mode);
     let mut sizes = Vec::with_capacity(CELLS);
     for step in 0..CELLS {
-        session.run_ok(&Cell::closure_garbage("scaled").render(dialect));
+        session.run_ok(&Cell::closure_garbage("scaled").render());
         session.run_ok(
             &Cell::bind(
                 "scratch",
                 Literal::List(vec![step as f64, step as f64 + 1.0, step as f64 + 2.0]),
             )
-            .render(dialect),
+            .render(),
         );
         sizes.push(session.persisted_bytes());
     }
@@ -111,13 +110,14 @@ fn many_garbage_producing_cells_do_not_grow_the_persisted_state(
 /// temporaries in one shape. Sampling only after each high cell makes the
 /// contract explicit: the same live data and lowering shape must produce the
 /// same persisted state throughout the session.
-pub(super) fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
+#[test]
+fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
     const ROUNDS: usize = 12;
     const WARMUP: usize = 3;
     // Raw TypeScript is required because no Cell variant expresses this repeated-filter lowering shape.
     const HIGH_TEMPORARY_CELL: &str = "const high = [1,2,3].filter(value=>value>=0).filter(value=>value>=0).filter(value=>value>=0).filter(value=>value>=0);";
 
-    let mut session = Session::open(Dialect::Typescript, HarnessMode::Resident);
+    let mut session = Session::open(HarnessMode::Resident);
     let mut high_sizes = Vec::with_capacity(ROUNDS);
     for round in 0..ROUNDS {
         session.run_ok("const low = 1;");
@@ -136,20 +136,21 @@ pub(super) fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted
 ///
 /// The complement of the leak regression: a session that never shrinks is a
 /// leak with extra steps, so the boundary has to actually reclaim.
-fn dropping_a_large_binding_shrinks_the_persisted_state(dialect: Dialect) {
-    let mut session = Session::open(dialect, HarnessMode::Resident);
-    session.run_ok(&Cell::number("anchor", 1.0).render(dialect));
+#[test]
+fn dropping_a_large_binding_shrinks_the_persisted_state() {
+    let mut session = Session::open(HarnessMode::Resident);
+    session.run_ok(&Cell::number("anchor", 1.0).render());
     let empty = session.persisted_bytes();
 
     let payload = (0..64).map(f64::from).collect::<Vec<_>>();
-    session.run_ok(&Cell::bind("payload", Literal::List(payload)).render(dialect));
+    session.run_ok(&Cell::bind("payload", Literal::List(payload)).render());
     let loaded = session.persisted_bytes();
     assert!(
         loaded > empty,
         "a 64-element list must cost something to persist: {empty} -> {loaded}"
     );
 
-    session.run_ok(&Cell::drop_value("payload").render(dialect));
+    session.run_ok(&Cell::drop_value("payload").render());
     let dropped = session.persisted_bytes();
     assert!(
         dropped < loaded,
@@ -165,9 +166,10 @@ fn dropping_a_large_binding_shrinks_the_persisted_state(dialect: Dialect) {
 /// closure, so collection could not remove it and the next cell's validation
 /// judged it. The observable form of "the roots match the view" is that the
 /// next cell does not know the name at all.
-fn a_closure_valued_name_is_unknown_to_the_next_cell(dialect: Dialect) {
-    let mut session = Session::open(dialect, HarnessMode::Resident);
-    session.run_ok(&Cell::closure_binding("callback").render(dialect));
+#[test]
+fn a_closure_valued_name_is_unknown_to_the_next_cell() {
+    let mut session = Session::open(HarnessMode::Resident);
+    session.run_ok(&Cell::closure_binding("callback").render());
     let failure = session.run_failing("finish(callback(1));");
     assert!(
         failure.contains("callback"),
@@ -180,96 +182,12 @@ fn a_closure_valued_name_is_unknown_to_the_next_cell(dialect: Dialect) {
     );
 }
 
-mod lashlang {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Lashlang;
-
-    #[test]
-    fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
-        super::garbage_from_one_cell_does_not_reach_the_next_cells_validation(DIALECT);
-    }
-
-    #[test]
-    fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
-        super::garbage_from_a_failed_cell_does_not_reach_the_next_cell(DIALECT);
-    }
-
-    #[test]
-    fn a_rooted_structure_survives_the_boundary_collection() {
-        super::a_rooted_structure_survives_the_boundary_collection(DIALECT);
-    }
-
-    #[test]
-    fn many_garbage_producing_cells_do_not_grow_the_persisted_state() {
-        super::many_garbage_producing_cells_do_not_grow_the_persisted_state(
-            DIALECT,
-            HarnessMode::Resident,
-        );
-    }
-
-    #[test]
-    fn many_garbage_producing_cells_do_not_grow_the_persisted_state_across_restarts() {
-        super::many_garbage_producing_cells_do_not_grow_the_persisted_state(
-            DIALECT,
-            HarnessMode::RestartBetweenCells,
-        );
-    }
-
-    #[test]
-    fn dropping_a_large_binding_shrinks_the_persisted_state() {
-        super::dropping_a_large_binding_shrinks_the_persisted_state(DIALECT);
-    }
+#[test]
+fn many_garbage_producing_cells_do_not_grow_the_persisted_state_resident() {
+    many_garbage_producing_cells_do_not_grow_the_persisted_state(HarnessMode::Resident);
 }
 
-mod typescript {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Typescript;
-
-    #[test]
-    fn garbage_from_one_cell_does_not_reach_the_next_cells_validation() {
-        super::garbage_from_one_cell_does_not_reach_the_next_cells_validation(DIALECT);
-    }
-
-    #[test]
-    fn garbage_from_a_failed_cell_does_not_reach_the_next_cell() {
-        super::garbage_from_a_failed_cell_does_not_reach_the_next_cell(DIALECT);
-    }
-
-    #[test]
-    fn a_rooted_structure_survives_the_boundary_collection() {
-        super::a_rooted_structure_survives_the_boundary_collection(DIALECT);
-    }
-
-    #[test]
-    fn many_garbage_producing_cells_do_not_grow_the_persisted_state() {
-        super::many_garbage_producing_cells_do_not_grow_the_persisted_state(
-            DIALECT,
-            HarnessMode::Resident,
-        );
-    }
-
-    #[test]
-    fn many_garbage_producing_cells_do_not_grow_the_persisted_state_across_restarts() {
-        super::many_garbage_producing_cells_do_not_grow_the_persisted_state(
-            DIALECT,
-            HarnessMode::RestartBetweenCells,
-        );
-    }
-
-    #[test]
-    fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
-        super::alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state();
-    }
-
-    #[test]
-    fn dropping_a_large_binding_shrinks_the_persisted_state() {
-        super::dropping_a_large_binding_shrinks_the_persisted_state(DIALECT);
-    }
-
-    #[test]
-    fn a_closure_valued_name_is_unknown_to_the_next_cell() {
-        super::a_closure_valued_name_is_unknown_to_the_next_cell(DIALECT);
-    }
+#[test]
+fn many_garbage_producing_cells_do_not_grow_the_persisted_state_across_restarts() {
+    many_garbage_producing_cells_do_not_grow_the_persisted_state(HarnessMode::RestartBetweenCells);
 }

@@ -374,8 +374,8 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "print healthy\nprint dead\nfinish ordinary".to_string(),
+                language: "typescript".to_string(),
+                code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -400,12 +400,16 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             .map(|observation| observation.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(touched.contains("rendered tool text"), "{touched}");
+        // A TypeScript `console.log` argument is an ordinary expression, so
+        // the healthy binding resolves through the materialize path rather
+        // than the render path a bare `print` used to take. Either way the
+        // healthy projection still resolves; only the dead one degrades.
+        assert!(touched.contains("materialized tool text"), "{touched}");
 
         // Touching the dead binding now fails the cell by name (FIG-2865).
         // It used to render the unavailability sentence as the value, so
-        // `print dead` observed an English diagnostic where the host's view
-        // belonged and the turn finished as if nothing were missing.
+        // `console.log(dead)` observed an English diagnostic where the host's
+        // view belonged and the turn finished as if nothing were missing.
         let failure = response
             .error
             .expect("touching a dead projection must fail");
@@ -444,8 +448,8 @@ pub(super) fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
             &mut state,
             lash_core::testing::code_execution_context(),
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "finish healthy".to_string(),
+                language: "typescript".to_string(),
+                code: "finish(healthy);".to_string(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -586,12 +590,12 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         let mut source = String::new();
         for index in 0..12 {
             let payload = format!("large-{index}-{}", "x".repeat(6 * 1024));
-            source.push_str(&format!("large_{index} = [\"{payload}\"]\n"));
+            source.push_str(&format!("let large_{index} = [\"{payload}\"];\n"));
         }
         for index in 0..40 {
-            source.push_str(&format!("small_{index} = {index}\n"));
+            source.push_str(&format!("let small_{index} = {index};\n"));
         }
-        let mut state = execute_test_code(RlmExecutionState::new(), source).await;
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let initial = state.snapshot_execution_state().expect("initial snapshot");
         assert_eq!(
             initial
@@ -608,7 +612,13 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
 
         state = execute_test_code(
             state,
-            "large_0 = push(large_0, \"one changed binding\")".to_string(),
+            // A TypeScript cell cannot assign to a prior cell's binding — an
+            // ambient global is `const` — so "change one binding" is a
+            // re-declaration that carries the same payload plus the new entry.
+            format!(
+                "let large_0 = [\"large-0-{}\", \"one changed binding\"];",
+                "x".repeat(6 * 1024)
+            ),
         )
         .await;
         let changed = state.snapshot_execution_state().expect("changed snapshot");
@@ -643,8 +653,11 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         // Snapshot v19 adds the empty, separate deferred-trigger record and
         // v20 the pinned child attempt bound to every root; together they
         // contribute the same fixed 63-byte cost to both.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_578);
-        assert_eq!(changed_budget.checkpoint_bytes, 14_096);
+        // The pinned sizes gained two bytes with the single-language cutover:
+        // the checkpoint carries the engine id, and `typescript` is two bytes
+        // longer than the retired `lashlang`.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_580);
+        assert_eq!(changed_budget.checkpoint_bytes, 14_098);
     });
 }
 
@@ -654,15 +667,18 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         let initial_payload = format!("before-{}", "x".repeat(8 * 1024));
         let mut state = execute_test_code(
             RlmExecutionState::new(),
-            format!("large = [\"{initial_payload}\"]"),
+            format!("let large = [\"{initial_payload}\"];"),
         )
         .await;
         let progress_snapshot = state
             .snapshot_execution_state()
             .expect("progress-boundary capture");
 
-        state =
-            execute_test_code(state, "large = push(large, \"after-progress\")".to_string()).await;
+        state = execute_test_code(
+            state,
+            format!("let large = [\"{initial_payload}\", \"after-progress\"];"),
+        )
+        .await;
         let final_snapshot = state
             .snapshot_execution_state()
             .expect("final capture after later assignment");
@@ -718,7 +734,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         let payload_b = format!("b-{}", "y".repeat(8 * 1024));
         let mut state = execute_test_code(
             RlmExecutionState::new(),
-            format!("large = [\"{payload_a}\"]"),
+            format!("let large = [\"{payload_a}\"];"),
         )
         .await;
         let durable_a = state.snapshot_execution_state().expect("durable A capture");
@@ -743,7 +759,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         lash_core::testing::stage_execution_state_components(&mut retry_runtime, durable_a)
             .expect("stage retry baseline A");
 
-        state = execute_test_code(state, format!("large = [\"{payload_b}\"]")).await;
+        state = execute_test_code(state, format!("let large = [\"{payload_b}\"];")).await;
         let progress_b = state
             .snapshot_execution_state()
             .expect("progress-boundary B capture");
@@ -752,7 +768,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             progress_b.clone(),
         )
         .expect("stage progress B");
-        state = execute_test_code(state, format!("large = [\"{payload_a}\"]")).await;
+        state = execute_test_code(state, format!("let large = [\"{payload_a}\"];")).await;
         let final_a = state.snapshot_execution_state().expect("final A capture");
         assert_ne!(final_a.root, progress_b.root);
         assert_eq!(
@@ -810,12 +826,12 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         let mut source = String::new();
         for index in 0..16 {
             let payload = format!("session-{index}-{}", "y".repeat(8 * 1024));
-            source.push_str(&format!("large_{index} = [\"{payload}\"]\n"));
+            source.push_str(&format!("let large_{index} = [\"{payload}\"];\n"));
         }
         for index in 0..80 {
-            source.push_str(&format!("small_{index} = {index}\n"));
+            source.push_str(&format!("let small_{index} = {index};\n"));
         }
-        let mut state = execute_test_code(RlmExecutionState::new(), source).await;
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let full_state_bytes = state
             .rlm
             .snapshot()
@@ -830,7 +846,10 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             let binding = turn % 16;
             state = execute_test_code(
                 state,
-                format!("large_{binding} = push(large_{binding}, \"turn-{turn}\")"),
+                format!(
+                    "let large_{binding} = [\"session-{binding}-{}\", \"turn-{turn}\"];",
+                    "y".repeat(8 * 1024)
+                ),
             )
             .await;
             let snapshot = state.snapshot_execution_state().expect("turn snapshot");
@@ -861,8 +880,8 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             measured.len()
         );
         assert_eq!(full_state_bytes, 136_711);
-        assert_eq!(minimum, 21_103);
-        assert_eq!(maximum, 21_157);
+        assert_eq!(minimum, 21_105);
+        assert_eq!(maximum, 21_107);
     });
 }
 
@@ -878,9 +897,9 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         let mut source = String::new();
         for index in 0..300 {
             let payload = format!("note-{index}-{}", "n".repeat(3 * 1024 + 512));
-            source.push_str(&format!("mid_{index} = [\"{payload}\"]\n"));
+            source.push_str(&format!("let mid_{index} = [\"{payload}\"];\n"));
         }
-        let mut state = execute_test_code(RlmExecutionState::new(), source).await;
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let full_state_bytes = state
             .rlm
             .snapshot()
@@ -896,7 +915,10 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             let binding = turn % 300;
             state = execute_test_code(
                 state,
-                format!("mid_{binding} = push(mid_{binding}, \"turn-{turn}\")"),
+                format!(
+                    "let mid_{binding} = [\"note-{binding}-{}\", \"turn-{turn}\"];",
+                    "n".repeat(3 * 1024 + 512)
+                ),
             )
             .await;
             let snapshot = state.snapshot_execution_state().expect("turn snapshot");
@@ -926,8 +948,8 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        assert_eq!(minimum, 94_350);
-        assert_eq!(maximum, 94_352);
+        assert_eq!(minimum, 94_352);
+        assert_eq!(maximum, 94_354);
     });
 }
 
@@ -941,16 +963,19 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
         let mut source = String::new();
         for index in 0..200 {
             let payload = format!("short-{index}-{}", "s".repeat(48));
-            source.push_str(&format!("short_{index} = [\"{payload}\"]\n"));
+            source.push_str(&format!("let short_{index} = [\"{payload}\"];\n"));
         }
-        let mut state = execute_test_code(RlmExecutionState::new(), source).await;
+        let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let initial = state.snapshot_execution_state().expect("initial snapshot");
         assert_eq!(initial.components.len(), 0);
         state.acknowledge_execution_state_capture();
 
         state = execute_test_code(
             state,
-            "short_0 = push(short_0, \"one changed binding\")".to_string(),
+            format!(
+                "let short_0 = [\"short-0-{}\", \"one changed binding\"];",
+                "s".repeat(48)
+            ),
         )
         .await;
         let changed = state.snapshot_execution_state().expect("changed snapshot");
@@ -988,8 +1013,8 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             &mut state,
             ctx,
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "scratch_note = \"after execution\"".to_string(),
+                language: "typescript".to_string(),
+                code: "let scratch_note = \"after execution\";".to_string(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::new(
@@ -1010,7 +1035,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
         let rendered = crate::rlm_support::render_bound_variables(
             &mut cache,
             &globals,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         );
 
         assert!(
@@ -1028,20 +1053,20 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         let ctx = lash_core::testing::code_execution_context();
         // Same constructs the runtime-perf `rlm_globals` scenario seeds:
         // a large record and a large list that exceed the inline budget.
-        let code = "big_map = {}\n\
-                for i in range(24) {\n\
-                  big_map[format(\"room_{}\", i)] = { exits: [\"north\", \"south\"], items: [format(\"item_{}\", i)] }\n\
-                }\n\
-                big_notes = []\n\
-                for i in range(45) {\n\
-                  big_notes = push(big_notes, format(\"note {}: observation\", i))\n\
-                }"
-            .to_string();
+        let code = r#"let big_map: Record<string, unknown> = {};
+                for (let i = 0; i < 24; i++) {
+                  big_map[`room_${i}`] = { exits: ["north", "south"], items: [`item_${i}`] };
+                }
+                let big_notes: string[] = [];
+                for (let i = 0; i < 45; i++) {
+                  big_notes = [...big_notes, `note ${i}: observation`];
+                }"#
+        .to_string();
         let response = execute_code_unbounded_for_tests(
             &mut state,
             ctx,
             ExecRequest {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 code,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1063,7 +1088,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         let s = crate::rlm_support::render_bound_variables(
             &mut cache,
             &globals,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();
 

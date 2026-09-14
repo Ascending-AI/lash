@@ -111,7 +111,7 @@ pub(crate) fn render_task_prompt(task: &str, output_schema: Option<&Value>) -> S
         let schema_pretty =
             serde_json::to_string_pretty(schema).unwrap_or_else(|_| schema.to_string());
         sections.push(format!(
-            "## Required output\n\nWhen done, end the task with `finish <value>`. The value MUST match this JSON Schema exactly:\n\n```json\n{schema_pretty}\n```"
+            "## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{schema_pretty}\n```"
         ));
     }
     sections.join("\n\n")

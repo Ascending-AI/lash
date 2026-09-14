@@ -503,7 +503,7 @@ pub struct RlmExecutionState {
 impl RlmExecutionState {
     #[cfg(test)]
     pub fn new() -> Self {
-        Self::for_engine("lashlang")
+        Self::for_engine("typescript")
     }
 
     pub(crate) fn for_engine(engine_id: impl Into<Arc<str>>) -> Self {

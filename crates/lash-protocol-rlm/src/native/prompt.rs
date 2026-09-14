@@ -1,10 +1,10 @@
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
 use lash_rlm_types::RlmTermination;
 
 /// Only transport prose changes. Runtime, language and standard library copy
 /// comes verbatim from the dialect's authoritative teaching.
 pub(crate) fn execution_section(
-    dialect: &dyn RlmDialect,
+    dialect: &TypescriptDialect,
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,
 ) -> String {
@@ -24,8 +24,7 @@ pub(crate) fn execution_section(
             "a paired `<typescript>` block",
             "the `execute_code` program",
         )
-        .replace("a paired `<lashlang>` block", "the `execute_code` program")
-        .replace("across `<lashlang>` blocks", "across programs");
+        .replace("across `<typescript>` blocks", "across programs");
     if let Some(start) = text.find("### Example cell")
         && let Some(close) = text[start..].find(dialect.cell_tags().close)
     {
@@ -36,28 +35,24 @@ pub(crate) fn execution_section(
     }
     // Other worked examples retain their existing language teaching.
     text.lines()
-        .filter(|line| {
-            !["<lashlang>", "</lashlang>", "<typescript>", "</typescript>"].contains(&line.trim())
-        })
+        .filter(|line| !["<typescript>", "</typescript>"].contains(&line.trim()))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-pub(super) fn finalization(dialect: &dyn RlmDialect, termination: &RlmTermination) -> String {
+pub(super) fn finalization(dialect: &TypescriptDialect, termination: &RlmTermination) -> String {
     transport_copy(&dialect.finalization_copy(termination), dialect)
 }
 
 /// Preserve the dialect's finish and workflow teaching while replacing the
 /// response transport vocabulary and the wrappers of worked examples.
-pub(super) fn transport_copy(original: &str, dialect: &dyn RlmDialect) -> String {
+pub(super) fn transport_copy(original: &str, dialect: &TypescriptDialect) -> String {
     let tags = dialect.cell_tags();
     let pair = format!("`{}...{}`", tags.open, tags.close);
     let mut text = original
         .replace(&format!("paired {pair} block"), "`execute_code` call")
         .replace(&format!("`{}` block", tags.open), "`execute_code` call")
-        .replace("Lashlang block", "`execute_code` call")
         .replace("TypeScript block", "`execute_code` call")
-        .replace("a <lashlang> block", "an `execute_code` call")
         .replace("in a block", "in an `execute_code` call")
         .replace(
             "response's block calls",

@@ -1,9 +1,8 @@
+use crate::dialect::TypescriptDialect;
 use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use lash_sansio::TurnId;
 use serde_json::Value;
-
-use crate::dialect::RlmDialect;
 
 use super::state::RlmReasoningPart;
 
@@ -66,7 +65,7 @@ fn prose_message(
 }
 
 pub(super) fn finish_required_reminder_message(
-    dialect: &dyn RlmDialect,
+    dialect: &TypescriptDialect,
     id: String,
     requires_schema: bool,
 ) -> Message {
@@ -88,7 +87,7 @@ pub(super) fn finish_required_reminder_message(
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(dialect: &dyn RlmDialect, id: String) -> Message {
+pub(super) fn finish_schema_mismatch_message(dialect: &TypescriptDialect, id: String) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
@@ -105,7 +104,7 @@ pub(super) fn finish_schema_mismatch_message(dialect: &dyn RlmDialect, id: Strin
 }
 
 pub(super) fn invalid_cell_message(
-    dialect: &dyn RlmDialect,
+    dialect: &TypescriptDialect,
     id: String,
     error_text: &str,
 ) -> Message {

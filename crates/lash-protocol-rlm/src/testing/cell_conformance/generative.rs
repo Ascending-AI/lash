@@ -14,19 +14,19 @@
 //! runs the same generator far longer for anyone chasing a specific failure.
 
 use super::drive;
-use super::harness::{Dialect, HarnessMode};
+use super::harness::HarnessMode;
 use super::syntax::{Cell, Literal};
 
-/// Sessions generated per dialect in the resident mode. Each session is eleven
+/// Sessions generated in the resident mode. Each session is eleven
 /// cells — ten generated plus the terminal finish — so this is sixteen and a
-/// half thousand cells per dialect, which the executor runs well inside the
+/// half thousand cells, which the executor runs well inside the
 /// suite's budget.
 const RESIDENT_SESSIONS: u64 = 1_500;
-/// Sessions generated per dialect in the restart-between-every-cell mode. Each
+/// Sessions generated in the restart-between-every-cell mode. Each
 /// cell there costs a full capture and restore, so the count is smaller and the
 /// breadth comes from the resident sweep above.
 const RESTARTING_SESSIONS: u64 = 120;
-/// Sessions per dialect in the `#[ignore]`d soak.
+/// Sessions in the `#[ignore]`d soak.
 const SOAK_SESSIONS: u64 = 25_000;
 /// Cells per generated session.
 const SESSION_LENGTH: usize = 10;
@@ -54,7 +54,7 @@ impl Prng {
 }
 
 /// What the generator knows a name currently holds, so it only emits cells the
-/// dialect can actually run.
+/// executor can actually run.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Number,
@@ -79,7 +79,7 @@ const ANCHOR: &str = "anchor";
 ///
 /// The sequence always ends with a finish over a live name, so every generated
 /// session also exercises the terminal path after whatever came before it.
-pub(super) fn generate_session(dialect: Dialect, seed: u64) -> Vec<Cell> {
+fn generate_session(seed: u64) -> Vec<Cell> {
     let mut prng = Prng::new(seed);
     let mut kinds: std::collections::BTreeMap<&'static str, Kind> =
         std::collections::BTreeMap::new();
@@ -91,9 +91,9 @@ pub(super) fn generate_session(dialect: Dialect, seed: u64) -> Vec<Cell> {
 
     while cells.len() < SESSION_LENGTH {
         let name = NAMES[prng.below(NAMES.len())];
-        // A cell cannot read the name it binds — neither dialect can say that
-        // — so the sources a derive or an extend may draw on exclude the
-        // destination the generator already picked.
+        // A cell cannot read the name it binds, so the sources a derive or an
+        // extend may draw on exclude the destination the generator already
+        // picked.
         let numbers = live_names(&kinds, Kind::Number, name);
         let lists = live_names(&kinds, Kind::List, name);
         let cell = match prng.below(12) {
@@ -136,16 +136,16 @@ pub(super) fn generate_session(dialect: Dialect, seed: u64) -> Vec<Cell> {
                 kinds.insert(name, Kind::Number);
                 Cell::closure_garbage(name)
             }
-            8 if Cell::closure_binding(name).expressed_by(dialect) => {
+            8 => {
                 kinds.remove(name);
                 Cell::closure_binding(name)
             }
             9 => Cell::CompileError,
             10 => Cell::RuntimeError,
-            11 if Cell::Refusal.expressed_by(dialect) => Cell::Refusal,
-            // The guarded arms above fall through here when the dialect or the
-            // session state cannot supply them, which keeps the sequence length
-            // a function of the seed alone rather than of the dialect.
+            11 => Cell::Refusal,
+            // The guarded arms above fall through here when the session state
+            // cannot supply them, which keeps the sequence length a function of
+            // the seed alone.
             _ => {
                 kinds.insert(name, Kind::Number);
                 Cell::closure_garbage(name)
@@ -174,80 +174,37 @@ fn live_names(
         .collect()
 }
 
-fn sweep(dialect: Dialect, mode: HarnessMode, sessions: u64) {
+fn sweep(mode: HarnessMode, sessions: u64) {
     for seed in 0..sessions {
-        let cells = generate_session(dialect, seed);
-        drive(dialect, mode, &cells);
-    }
-}
-
-mod lashlang {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Lashlang;
-
-    #[test]
-    fn generated_sessions_never_poison_a_session() {
-        sweep(DIALECT, HarnessMode::Resident, RESIDENT_SESSIONS);
-    }
-
-    #[test]
-    fn generated_sessions_survive_a_restart_between_every_cell() {
-        sweep(
-            DIALECT,
-            HarnessMode::RestartBetweenCells,
-            RESTARTING_SESSIONS,
-        );
-    }
-
-    #[test]
-    #[ignore = "soak: the same generator, far longer; run it when chasing a generated failure"]
-    fn generated_sessions_soak() {
-        sweep(DIALECT, HarnessMode::Resident, SOAK_SESSIONS);
-    }
-}
-
-mod typescript {
-    use super::*;
-
-    const DIALECT: Dialect = Dialect::Typescript;
-
-    #[test]
-    fn generated_sessions_never_poison_a_session() {
-        sweep(DIALECT, HarnessMode::Resident, RESIDENT_SESSIONS);
-    }
-
-    #[test]
-    fn generated_sessions_survive_a_restart_between_every_cell() {
-        sweep(
-            DIALECT,
-            HarnessMode::RestartBetweenCells,
-            RESTARTING_SESSIONS,
-        );
-    }
-
-    #[test]
-    #[ignore = "soak: the same generator, far longer; run it when chasing a generated failure"]
-    fn generated_sessions_soak() {
-        sweep(DIALECT, HarnessMode::Resident, SOAK_SESSIONS);
+        let cells = generate_session(seed);
+        drive(mode, &cells);
     }
 }
 
 /// The corpus is a fixture: the same seed builds the same session, different
-/// seeds build different ones, and the length does not depend on the dialect.
+/// seeds build different ones, and every session has the same length.
 #[test]
 fn the_generated_corpus_is_deterministic() {
-    for dialect in Dialect::ALL {
-        let first = generate_session(*dialect, 7);
-        assert_eq!(first, generate_session(*dialect, 7), "{dialect}");
-        assert_ne!(first, generate_session(*dialect, 8), "{dialect}");
-        assert_eq!(first.len(), SESSION_LENGTH + 1, "{dialect}");
-    }
-    assert_ne!(
-        generate_session(Dialect::Lashlang, 3),
-        generate_session(Dialect::Typescript, 3),
-        "the dialects differ in the cells they can express, so their corpora differ"
-    );
+    let first = generate_session(7);
+    assert_eq!(first, generate_session(7));
+    assert_ne!(first, generate_session(8));
+    assert_eq!(first.len(), SESSION_LENGTH + 1);
+}
+
+#[test]
+fn generated_sessions_never_poison_a_session() {
+    sweep(HarnessMode::Resident, RESIDENT_SESSIONS);
+}
+
+#[test]
+fn generated_sessions_survive_a_restart_between_every_cell() {
+    sweep(HarnessMode::RestartBetweenCells, RESTARTING_SESSIONS);
+}
+
+#[test]
+#[ignore = "soak: the same generator, far longer; run it when chasing a generated failure"]
+fn generated_sessions_soak() {
+    sweep(HarnessMode::Resident, SOAK_SESSIONS);
 }
 
 /// The corpus reaches every cell shape it is supposed to.
@@ -257,32 +214,26 @@ fn the_generated_corpus_is_deterministic() {
 /// that only asserts an invariant.
 #[test]
 fn the_generated_corpus_reaches_every_cell_shape() {
-    for dialect in Dialect::ALL {
-        let mut seen_closure_garbage = false;
-        let mut seen_closure_binding = false;
-        let mut seen_failure = false;
-        let mut seen_extend = false;
-        let mut seen_drop = false;
-        for seed in 0..RESIDENT_SESSIONS {
-            for cell in generate_session(*dialect, seed) {
-                match cell {
-                    Cell::ClosureGarbage { .. } => seen_closure_garbage = true,
-                    Cell::ClosureBinding { .. } => seen_closure_binding = true,
-                    Cell::CompileError | Cell::RuntimeError | Cell::Refusal => seen_failure = true,
-                    Cell::Extend { .. } => seen_extend = true,
-                    Cell::Drop { .. } => seen_drop = true,
-                    _ => {}
-                }
+    let mut seen_closure_garbage = false;
+    let mut seen_closure_binding = false;
+    let mut seen_failure = false;
+    let mut seen_extend = false;
+    let mut seen_drop = false;
+    for seed in 0..RESIDENT_SESSIONS {
+        for cell in generate_session(seed) {
+            match cell {
+                Cell::ClosureGarbage { .. } => seen_closure_garbage = true,
+                Cell::ClosureBinding { .. } => seen_closure_binding = true,
+                Cell::CompileError | Cell::RuntimeError | Cell::Refusal => seen_failure = true,
+                Cell::Extend { .. } => seen_extend = true,
+                Cell::Drop { .. } => seen_drop = true,
+                _ => {}
             }
         }
-        assert!(seen_closure_garbage, "{dialect}: no closure-garbage cell");
-        assert!(seen_failure, "{dialect}: no failing cell");
-        assert!(seen_extend, "{dialect}: no extend cell");
-        assert!(seen_drop, "{dialect}: no drop cell");
-        assert_eq!(
-            seen_closure_binding,
-            *dialect == Dialect::Typescript,
-            "{dialect}: closure-valued bindings appear exactly where the dialect expresses them"
-        );
     }
+    assert!(seen_closure_garbage, "no closure-garbage cell");
+    assert!(seen_closure_binding, "no closure-valued binding cell");
+    assert!(seen_failure, "no failing cell");
+    assert!(seen_extend, "no extend cell");
+    assert!(seen_drop, "no drop cell");
 }

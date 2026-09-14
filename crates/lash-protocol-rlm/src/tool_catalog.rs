@@ -4,7 +4,7 @@ use lash_lashlang_runtime::{
     required_tool_lashlang_executable, required_tool_typescript_executable,
 };
 
-use crate::dialect::{RlmDialectRegistry, TOOL_PROSE_TOKENS, dialect_identity_markers};
+use crate::dialect::{TOOL_PROSE_TOKENS, TypescriptDialect, dialect_identity_markers};
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
 /// rendered as a full prompt doc under its Lashlang call-path. RLM contributes
@@ -13,11 +13,11 @@ use crate::dialect::{RlmDialectRegistry, TOOL_PROSE_TOKENS, dialect_identity_mar
 /// and that no member's model-facing prose spells a dialect out literally.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
-    dialects: &RlmDialectRegistry,
+    dialect: &TypescriptDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
     validate_rlm_language_bindings(&ctx)?;
-    validate_dialect_neutral_tool_prose(&ctx, dialects)?;
+    validate_dialect_neutral_tool_prose(&ctx, dialect)?;
     Ok(ToolCatalogContribution::default())
 }
 
@@ -31,7 +31,7 @@ pub(crate) fn rlm_tool_catalog(
 /// tool, so the dialect's path is always available.
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
-    dialect: &dyn crate::dialect::RlmDialect,
+    dialect: &crate::dialect::TypescriptDialect,
     features: crate::protocol::RlmPromptFeatures,
 ) -> String {
     let mut vocabulary = dialect.prompt_vocabulary();
@@ -69,19 +69,14 @@ pub(crate) fn rlm_prompt_tool_docs(
             }
             let markdown = compact.render_markdown();
             let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-            let signature = if dialect.renders_tool_catalogue_inline() {
-                let input = lash_typescript::render_schema_type(contract.input_schema.canonical());
-                let input = if input == "Record<string, never>" {
-                    "{}"
-                } else {
-                    &input
-                };
-                let output =
-                    lash_typescript::render_schema_type(contract.output_schema.canonical());
-                format!("{call_path}({input}): Promise<{output}>")
+            let input = lash_typescript::render_schema_type(contract.input_schema.canonical());
+            let input = if input == "Record<string, never>" {
+                "{}"
             } else {
-                format!("await {}? -> {}", compact.signature, compact.returns)
+                &input
             };
+            let output = lash_typescript::render_schema_type(contract.output_schema.canonical());
+            let signature = format!("{call_path}({input}): Promise<{output}>");
             format!("`{signature}`\n{notes}")
         })
         .collect::<Vec<_>>();
@@ -303,17 +298,10 @@ fn collect_literal_strings(
 /// would otherwise reach the model raw.
 pub(crate) fn validate_dialect_neutral_tool_prose(
     ctx: &ToolCatalogContext,
-    dialects: &RlmDialectRegistry,
+    dialect: &TypescriptDialect,
 ) -> Result<(), PluginError> {
-    let markers: Vec<(&'static str, Vec<String>)> = dialects
-        .dialects()
-        .map(|dialect| {
-            (
-                dialect.language_id(),
-                dialect_identity_markers(dialect.as_ref()),
-            )
-        })
-        .collect();
+    let markers: Vec<(&'static str, Vec<String>)> =
+        vec![(dialect.language_id(), dialect_identity_markers(dialect))];
     // Every violation, not the first: a host fixing its plugin should see the
     // whole list once instead of rediscovering it one failed session at a time.
     let mut violations = Vec::new();
@@ -467,7 +455,7 @@ fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), Plugin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dialect::lashlang_test_dialect;
+    use crate::dialect::typescript_test_dialect;
     use lash_core::{
         ToolContract, ToolDefinition, facade_support::build_tool_catalog,
         test_support::ToolCatalogBuildInput,
@@ -477,17 +465,6 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    /// Both shipped dialects, the way a session registers them.
-    ///
-    /// The prose guard is registry-driven on purpose: it has to reject every
-    /// registered dialect's words, not just the inactive one's.
-    fn test_dialect_registry() -> RlmDialectRegistry {
-        RlmDialectRegistry::new([
-            Arc::new(lashlang_test_dialect()) as Arc<dyn crate::dialect::RlmDialect>,
-            Arc::new(crate::dialect::typescript_test_dialect()),
-        ])
-    }
 
     #[test]
     fn rlm_catalog_renders_all_members_under_call_path() {
@@ -526,7 +503,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .unwrap();
         assert!(contribution.is_empty(), "RLM contributes no removals");
@@ -543,7 +520,7 @@ mod tests {
         assert!(catalog.has_callable_tool("read_file"));
         let docs = rlm_prompt_tool_docs(
             &catalog,
-            &lashlang_test_dialect(),
+            &typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.contains("web.fetch"), "{docs}");
@@ -613,7 +590,7 @@ mod tests {
         );
         let docs = rlm_prompt_tool_docs(
             &catalog,
-            &lashlang_test_dialect(),
+            &typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.contains("pinned"), "{docs}");
@@ -664,7 +641,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .expect_err("missing binding should fail RLM registration");
 
@@ -695,7 +672,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .expect("internal process bodies are not Lashlang-callable catalog members");
     }
@@ -726,7 +703,7 @@ mod tests {
                     subagent: None,
                     extensions: Default::default(),
                 },
-                &test_dialect_registry(),
+                &typescript_test_dialect(),
             )
             .expect_err("an unaddressable TypeScript call path must fail registration");
 
@@ -770,7 +747,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .expect_err("missing TypeScript binding should fail RLM registration");
 
@@ -826,7 +803,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .expect("RLM catalog validates explicit binding");
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
@@ -840,13 +817,13 @@ mod tests {
 
         let docs = rlm_prompt_tool_docs(
             &catalog,
-            &lashlang_test_dialect(),
+            &typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.len() <= 768, "plan.update docs exceeded budget");
         assert!(docs.contains("plan.update("), "{docs}");
         assert!(
-            docs.contains("plan: list[record{step: str, status: str}]"),
+            docs.contains("plan: Array<Record<string, unknown>>"),
             "{docs}"
         );
         assert!(!docs.contains("update_plan("), "{docs}");
@@ -854,10 +831,10 @@ mod tests {
         let host_environment = LashlangSurface::default()
             .host_environment(&catalog)
             .expect("explicit binding builds host environment");
-        let program = lashlang::parse(
-            r#"await plan.update({ plan: [{ step: "Patch", status: "pending" }] })?"#,
+        let program = lash_typescript::parse(
+            r#"await plan.update({ plan: [{ step: "Patch", status: "pending" }] });"#,
         )
-        .expect("module call parses");
+        .expect("module call lowers");
         lashlang::LinkedModule::link(program, host_environment).expect("module call links");
     }
     /// The three strings this guard was built from, exactly as `main` shipped
@@ -869,12 +846,11 @@ mod tests {
     /// would not prove it catches *these*. Each was measured in a judged
     /// TypeScript session's saved system prompt.
     const LEAKED_HOST_PROSE: &[&str] = &[
-        "A Lashlang process definition value, for example `on_button`.",
+        "A TypeScript process definition value, for example `on_button`.",
         "Optional typed result shape. Use string descriptors for record fields, e.g. \
-         `{ queries: \"list[str]\" }`, or pass a Lashlang `Type { ... }` literal for nested \
-         shapes.",
+         `{ queries: \"list[str]\" }`, or write the shape inside a <typescript> cell.",
         "Optional record of state to seed into the child. Each entry's kind is preserved \
-         automatically: if its lashlang source root is a host-projected binding (e.g. \
+         automatically: if its typescript source root is a host-projected binding (e.g. \
          `seed: { problem: input.prompt }`), the child receives it as a read-only projected \
          binding; otherwise it lands as a regular RLM global.",
     ];
@@ -922,7 +898,7 @@ mod tests {
                 subagent: None,
                 extensions: Default::default(),
             },
-            &test_dialect_registry(),
+            &typescript_test_dialect(),
         )
         .map(|_| ())
     }
@@ -936,26 +912,17 @@ mod tests {
                     .expect_err("dialect-named prose must not register");
                 let message = err.to_string();
                 assert!(
-                    message.contains("names the `lashlang` dialect"),
+                    message.contains("names the `typescript` dialect"),
                     "{message}"
                 );
                 assert!(message.contains("{{type_literal_hint}}"), "{message}");
             }
         }
 
-        // The rule is neutrality, not foreignness: the *other* dialect's words
-        // are rejected by the same gate, in the same Lashlang-default session.
-        for prose in [
-            "Write the result into a <typescript> cell.",
-            "Call finish(value) when done.",
-        ] {
-            let err = catalog_registration(tool_with_prose(ProseSite::Description, prose))
-                .expect_err("TypeScript wording must not register either");
-            assert!(
-                err.to_string().contains("names the `typescript` dialect"),
-                "{err}"
-            );
-        }
+        // With TypeScript the only RLM language, "dialect-neutral" means the
+        // prose must not name *this* language: there is no second dialect for
+        // a host to be neutral toward, so the foreign-wording half of this
+        // rule retired with the Lashlang surface (FIG-3021).
     }
 
     /// Neutral prose registers, so the guard is a rule and not a wall.
@@ -987,7 +954,7 @@ mod tests {
         assert!(message.contains("not an RLM prose token"), "{message}");
     }
 
-    /// The token resolves to each dialect's own answer in the rendered doc.
+    /// The token resolves to the dialect's own answer in the rendered doc.
     ///
     /// Rendered through `rlm_prompt_tool_docs`, the path a served turn uses, so
     /// this cannot pass while the doc block skips the substitution.
@@ -1010,18 +977,12 @@ mod tests {
         })
         .expect("complete resident definition");
 
-        let lashlang = rlm_prompt_tool_docs(
-            &catalog,
-            &lashlang_test_dialect(),
-            crate::protocol::RlmPromptFeatures::default(),
-        );
-        assert!(
-            lashlang.contains("or pass a `Type { ... }` literal for nested shapes"),
-            "{lashlang}"
-        );
+        // TypeScript has no type-literal form, so its `type_literal_hint` is
+        // empty: the token resolves to nothing at all rather than to the
+        // retired Lashlang `Type { ... }` sentence.
         let typescript = rlm_prompt_tool_docs(
             &catalog,
-            &crate::dialect::typescript_test_dialect(),
+            &typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(
@@ -1029,9 +990,7 @@ mod tests {
             "{typescript}"
         );
         assert!(!typescript.contains("Type {"), "{typescript}");
-        for rendered in [&lashlang, &typescript] {
-            assert!(!rendered.contains("{{"), "unresolved token: {rendered}");
-        }
+        assert!(!typescript.contains("{{"), "unresolved token: {typescript}");
     }
 
     /// A leak nested deep in a schema, and one in an *output* schema.
@@ -1055,7 +1014,7 @@ mod tests {
                         "properties": {
                             "definition": {
                                 "type": "object",
-                                "description": "A Lashlang process definition value."
+                                "description": "A TypeScript process definition value."
                             }
                         }
                     }
@@ -1068,7 +1027,7 @@ mod tests {
                     "properties": {
                         "id": {
                             "type": "string",
-                            "description": "Handle id; print it with `finish <value>` when done."
+                            "description": "Handle id; print it with `finish(value)` when done."
                         }
                     }
                 }
@@ -1104,14 +1063,14 @@ mod tests {
         // is reported alongside the typo, not swallowed by it.
         let err = catalog_registration(tool_with_prose(
             ProseSite::Schema,
-            "Optional typed result shape{{type_literal_hint. Pass a Lashlang type literal for \
-             nested shapes.",
+            "Optional typed result shape{{type_literal_hint. Pass a TypeScript type literal \
+             for nested shapes.",
         ))
         .expect_err("both defects must be reported");
         let message = err.to_string();
         assert!(message.contains("unclosed"), "{message}");
         assert!(
-            message.contains("names the `lashlang` dialect"),
+            message.contains("names the `typescript` dialect"),
             "{message}"
         );
         assert!(message.contains("2 violation(s)"), "{message}");
@@ -1187,7 +1146,7 @@ mod tests {
                 "properties": {
                     "shape": {
                         "type": "string",
-                        "enum": ["plain", "lashlang record"],
+                        "enum": ["plain", "typescript record"],
                         "default": "plain"
                     }
                 }
@@ -1197,7 +1156,7 @@ mod tests {
         .with_tool_binding(ToolBinding::new(["processes"], "list"));
         let err = catalog_registration(leaked).expect_err("an enum value names a dialect");
         assert!(
-            err.to_string().contains("names the `lashlang` dialect"),
+            err.to_string().contains("names the `typescript` dialect"),
             "{err}"
         );
 
@@ -1222,33 +1181,23 @@ mod tests {
         );
     }
 
-    /// The guard only measures if each dialect's marker list can fire, and if
-    /// the two lists are not the same list.
+    /// The guard only measures if the marker list can actually fire.
     #[test]
-    fn every_registered_dialect_contributes_distinct_markers() {
-        let registry = test_dialect_registry();
-        let mut all = Vec::new();
-        for dialect in registry.dialects() {
-            let markers = crate::dialect::dialect_identity_markers(dialect.as_ref());
-            assert!(
-                markers.contains(&dialect.language_id().to_lowercase()),
-                "{markers:?}"
-            );
-            assert!(markers.len() >= 3, "{markers:?}");
-            all.push(markers);
-        }
-        assert_eq!(all.len(), 2, "both shipped dialects are registered");
-        assert_ne!(
-            all[0], all[1],
-            "collapsed marker lists make the guard vacuous"
+    fn the_registered_dialect_contributes_its_identity_markers() {
+        let dialect = typescript_test_dialect();
+        let markers = crate::dialect::dialect_identity_markers(&dialect);
+        assert!(
+            markers.contains(&dialect.language_id().to_lowercase()),
+            "{markers:?}"
         );
+        assert!(markers.len() >= 3, "{markers:?}");
     }
 }
 
 pub(crate) fn validate_discovery(
     tools: &[lash_core::ToolManifest],
     discovery: Option<&lash_core::ToolDiscovery>,
-    dialect: &dyn crate::dialect::RlmDialect,
+    dialect: &crate::dialect::TypescriptDialect,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
         && !tools.iter().any(|tool| {
@@ -1268,7 +1217,7 @@ pub(crate) fn validate_discovery(
 pub(crate) fn with_discovery_sentence(
     mut execution: String,
     discovery: Option<&lash_core::ToolDiscovery>,
-    dialect: &dyn crate::dialect::RlmDialect,
+    dialect: &crate::dialect::TypescriptDialect,
 ) -> String {
     if let Some(discovery) = discovery {
         let suffix = if dialect.language_id() == "lashlang" {
@@ -1314,11 +1263,8 @@ mod discovery_tests {
             .iter()
             .map(|entry| entry.manifest.clone())
             .collect::<Vec<_>>();
-        let dialects: [Box<dyn crate::dialect::RlmDialect>; 2] = [
-            Box::new(crate::dialect::lashlang_test_dialect()),
-            Box::new(crate::dialect::typescript_test_dialect()),
-        ];
-        for dialect in dialects {
+        {
+            let dialect = crate::dialect::typescript_test_dialect();
             for native in [false, true] {
                 for discovery in [
                     None,
@@ -1326,7 +1272,7 @@ mod discovery_tests {
                         operation: "tools.search".into(),
                     }),
                 ] {
-                    validate_discovery(&manifests, discovery.as_ref(), dialect.as_ref()).unwrap();
+                    validate_discovery(&manifests, discovery.as_ref(), &dialect).unwrap();
                     let visible = if discovery.is_some() {
                         catalog.inline_tools()
                     } else {
@@ -1334,7 +1280,7 @@ mod discovery_tests {
                     };
                     let execution = if native {
                         crate::native::prompt::execution_section(
-                            dialect.as_ref(),
+                            &dialect,
                             Default::default(),
                             &visible,
                         )
@@ -1343,9 +1289,8 @@ mod discovery_tests {
                             .render_execution_section(Default::default(), &visible)
                             .unwrap()
                     };
-                    let text =
-                        with_discovery_sentence(execution, discovery.as_ref(), dialect.as_ref());
-                    let docs = rlm_prompt_tool_docs(&visible, dialect.as_ref(), Default::default());
+                    let text = with_discovery_sentence(execution, discovery.as_ref(), &dialect);
+                    let docs = rlm_prompt_tool_docs(&visible, &dialect, Default::default());
                     assert!(docs.contains("Description for search"));
                     assert!(docs.contains("Description for visible"));
                     assert_eq!(docs.contains("Description for hidden"), discovery.is_none());
@@ -1363,7 +1308,7 @@ mod discovery_tests {
                         Some(&lash_core::ToolDiscovery {
                             operation: operation.into()
                         }),
-                        dialect.as_ref()
+                        &dialect
                     ),
                     Err(PluginError::InvalidToolDiscovery { .. })
                 ));

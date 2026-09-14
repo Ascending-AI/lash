@@ -140,7 +140,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
             // A fresh execution state is exactly the redrive case: the pin the
             // first run held never reached the durable snapshot.
             let mut state = RlmExecutionState::for_engine("typescript");
-            execute_code_with_dialect_and_bounds(
+            execute_code_with_channel_and_bounds(
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
@@ -159,7 +159,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(SourceDialect::Typescript),
+                crate::plugin::RlmChannel::Cell,
             )
             .await
         }
@@ -305,7 +305,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     );
 
     let mut state = RlmExecutionState::for_engine("typescript");
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         ctx.clone(),
         ExecRequest {
@@ -324,7 +324,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(SourceDialect::Typescript),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     assert!(response.error.is_none(), "{:?}", response.error);

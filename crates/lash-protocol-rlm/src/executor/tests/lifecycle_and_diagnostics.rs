@@ -110,8 +110,8 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut state = RlmExecutionState::new();
     let mut context = lash_core::testing::code_execution_context();
     let mut request = ExecRequest {
-        language: "lashlang".to_string(),
-        code: "finish 1".to_string(),
+        language: "typescript".to_string(),
+        code: "finish(1);".to_string(),
     };
     let mut artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
         lashlang::global_in_memory_lashlang_artifact_store();
@@ -142,7 +142,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                 ),
             );
             request.code =
-                r#"finish await web.fetch({ url: "https://example.test" })?"#.to_string();
+                r#"finish(await web.fetch({ url: "https://example.test" }));"#.to_string();
             deferred_resolver = Some(Arc::new(BindingDeferredResolver {
                 calls: Default::default(),
             })
@@ -154,7 +154,13 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             );
         }
         HostSetupFailureSite::ArtifactStore => {
-            request.code = "process worker() { finish null }".to_string();
+            request.code = r#"const worker = defineProcess({
+              name: "worker",
+              signals: {},
+              run: async () => { return null; }
+            });
+            finish(null);"#
+                .to_string();
             artifact_store = Arc::new(FailingArtifactStore);
             surface = LashlangSurface::new(
                 lashlang::LashlangAbilities::default().with_processes(),
@@ -163,7 +169,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             );
         }
         HostSetupFailureSite::RehydrateProjectedGlobals => {
-            request.code = "finish len(restored)".to_string();
+            request.code = "finish(restored.length);".to_string();
             let registry = Arc::new(ProjectionRegistry::new());
             let descriptor = Arc::new(SnapshotProjectedToolText::default());
             let reference = registry.register_memory(descriptor.clone());
@@ -185,7 +191,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                     ),
                 )
                 .expect("insert projected values before heap activation");
-            let first = execute_code_with_dialect_and_bounds(
+            let first = execute_code_with_channel_and_bounds(
                 &mut state,
                 context.clone(),
                 request.clone(),
@@ -200,7 +206,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                     lashlang::ExecutionBound::Unbounded,
                     lashlang::ExecutionBound::logical_bytes(40 * 1024),
                 ),
-                RlmSourceContext::cell(SourceDialect::Lashlang),
+                crate::plugin::RlmChannel::Cell,
             )
             .await;
             assert_eq!(first.error, None, "activate a bounded heap");
@@ -307,21 +313,14 @@ pub(super) fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
 }
 
 #[test]
-pub(super) fn execution_started_inventory_matches_lifecycle_for_both_dialects() {
+pub(super) fn execution_started_inventory_matches_lifecycle() {
     block_on(async {
-        for (language, source, dialect) in [
-            (
-                "lashlang",
-                "first = await web.fetch({ url: \"a\" })?\nsecond = await web.fetch({ url: \"b\" })?\nfinish second",
-                SourceDialect::Lashlang,
-            ),
-            (
+        {
+            let (language, source) = (
                 "typescript",
                 "const first = await web.fetch({ url: 'a' }); const second = await web.fetch({ url: 'b' }); finish(second);",
-                SourceDialect::Typescript,
-            ),
-        ] {
-            let evidence = execute_and_collect_inventory(source, language, dialect).await;
+            );
+            let evidence = execute_and_collect_inventory(source, language).await;
             assert!(
                 evidence.declared.len() > 1,
                 "{language}: regression program must exercise multiple nodes, got {:?}",
@@ -380,7 +379,6 @@ impl TraceSink for RecordingTraceSink {
 pub(super) async fn execute_and_collect_inventory(
     source: &str,
     language: &str,
-    dialect: SourceDialect,
 ) -> InventoryEvidence {
     let sink = Arc::new(RecordingTraceSink::default());
     let context =
@@ -401,7 +399,7 @@ pub(super) async fn execute_and_collect_inventory(
             ),
         );
     let mut state = RlmExecutionState::for_engine(language);
-    let response = execute_code_with_dialect_and_bounds(
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         context,
         ExecRequest {
@@ -420,7 +418,7 @@ pub(super) async fn execute_and_collect_inventory(
             trace_context: TraceContext::default(),
         },
         lashlang::ExecutionBounds::unbounded(),
-        RlmSourceContext::cell(dialect),
+        crate::plugin::RlmChannel::Cell,
     )
     .await;
     assert_eq!(
@@ -494,26 +492,17 @@ pub(super) async fn execute_and_collect_inventory(
 }
 
 #[test]
-pub(super) fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects() {
+pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
     block_on(async {
-        for (language, successful_code, code, cancelled_binding, source_dialect) in [
-            (
-                "lashlang",
-                "survives = 7",
-                "cancelled_tail = 1\nwhile true {}",
-                "cancelled_tail",
-                SourceDialect::Lashlang,
-            ),
-            (
+        {
+            let (language, successful_code, code, cancelled_binding) = (
                 "typescript",
                 "let survives: number = 7;",
                 "let cancelledTail: number = 1; while (true) {}",
                 "cancelledTail",
-                SourceDialect::Typescript,
-            ),
-        ] {
+            );
             let mut state = RlmExecutionState::for_engine(language);
-            let successful = execute_code_with_dialect_and_bounds(
+            let successful = execute_code_with_channel_and_bounds(
                 &mut state,
                 lash_core::testing::code_execution_context(),
                 ExecRequest {
@@ -527,14 +516,14 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects()
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(source_dialect),
+                crate::plugin::RlmChannel::Cell,
             )
             .await;
             assert_eq!(successful.error, None, "{language}: first cell");
 
             let response = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
-                execute_code_with_dialect_and_bounds(
+                execute_code_with_channel_and_bounds(
                     &mut state,
                     lash_core::testing::code_execution_context_cancelling_after_yield(),
                     ExecRequest {
@@ -548,7 +537,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects()
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    RlmSourceContext::cell(source_dialect),
+                    crate::plugin::RlmChannel::Cell,
                 ),
             )
             .await
@@ -593,16 +582,10 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects()
 #[test]
 pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
     block_on(async {
-        for (language, code, source_dialect) in [
-            ("lashlang", "missing =", SourceDialect::Lashlang),
-            (
-                "typescript",
-                "let missing: number = ;",
-                SourceDialect::Typescript,
-            ),
-        ] {
+        {
+            let (language, code) = ("typescript", "let missing: number = ;");
             let mut state = RlmExecutionState::for_engine(language);
-            let response = execute_code_with_dialect_and_bounds(
+            let response = execute_code_with_channel_and_bounds(
                 &mut state,
                 lash_core::testing::cancelled_code_execution_context(),
                 ExecRequest {
@@ -616,7 +599,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
-                RlmSourceContext::cell(source_dialect),
+                crate::plugin::RlmChannel::Cell,
             )
             .await;
 
@@ -633,25 +616,16 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
 #[test]
 pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell() {
     block_on(async {
-        for (language, first_code, tail_code, tail_binding, source_dialect) in [
-            (
-                "lashlang",
-                "survives = 7",
-                "cancelled_tail = 1",
-                "cancelled_tail",
-                SourceDialect::Lashlang,
-            ),
-            (
+        {
+            let (language, first_code, tail_code, tail_binding) = (
                 "typescript",
                 "let survives: number = 7;",
                 "let cancelledTail: number = 1;",
                 "cancelledTail",
-                SourceDialect::Typescript,
-            ),
-        ] {
+            );
             let mut state = RlmExecutionState::for_engine(language);
             for code in [first_code, tail_code] {
-                let response = execute_code_with_dialect_and_bounds(
+                let response = execute_code_with_channel_and_bounds(
                     &mut state,
                     lash_core::testing::code_execution_context(),
                     ExecRequest {
@@ -665,7 +639,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    RlmSourceContext::cell(source_dialect),
+                    crate::plugin::RlmChannel::Cell,
                 )
                 .await;
                 assert_eq!(response.error, None, "{language}: `{code}`");
@@ -694,25 +668,16 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
 #[test]
 pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_bookkeeping() {
     block_on(async {
-        for (language, first_code, tail_code, tail_binding, source_dialect) in [
-            (
-                "lashlang",
-                format!("survives = \"{}\"", "x".repeat(1024)),
-                "cancelled_tail = 1",
-                "cancelled_tail",
-                SourceDialect::Lashlang,
-            ),
-            (
+        {
+            let (language, first_code, tail_code, tail_binding) = (
                 "typescript",
                 format!("let survives: string = \"{}\";", "x".repeat(1024)),
                 "let cancelledTail: number = 1;",
                 "cancelledTail",
-                SourceDialect::Typescript,
-            ),
-        ] {
+            );
             for acknowledge_first_capture in [false, true] {
                 let mut state = RlmExecutionState::for_engine(language);
-                let first = execute_code_with_dialect_and_bounds(
+                let first = execute_code_with_channel_and_bounds(
                     &mut state,
                     lash_core::testing::code_execution_context(),
                     ExecRequest {
@@ -726,7 +691,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    RlmSourceContext::cell(source_dialect),
+                    crate::plugin::RlmChannel::Cell,
                 )
                 .await;
                 assert_eq!(first.error, None, "{language}: large first cell");
@@ -738,7 +703,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     state.acknowledge_execution_state_capture();
                 }
 
-                let tail = execute_code_with_dialect_and_bounds(
+                let tail = execute_code_with_channel_and_bounds(
                     &mut state,
                     lash_core::testing::code_execution_context(),
                     ExecRequest {
@@ -752,7 +717,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
-                    RlmSourceContext::cell(source_dialect),
+                    crate::plugin::RlmChannel::Cell,
                 )
                 .await;
                 assert_eq!(tail.error, None, "{language}: tail cell");
@@ -779,10 +744,11 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
 
 #[test]
 pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
-    let code = "payload = \"\"\"";
-    let error = lashlang::parse(code).expect_err("unterminated multiline string");
-    let diagnostic = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
-    assert!(diagnostic.contains("standalone `</lashlang>` line"));
+    let diagnostic = format_rlm_parse_diagnostic(
+        "unterminated template literal".to_string(),
+        crate::plugin::RlmChannel::Cell,
+    );
+    assert!(diagnostic.contains("standalone `</typescript>` line"));
     assert!(diagnostic.contains("inside multiline source text"));
 }
 
@@ -792,40 +758,21 @@ pub(super) fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
 /// cell channel is given, without the cell-only advice appended.
 #[test]
 pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
-    let code = "payload = \"\"\"";
-    let error = lashlang::parse(code).expect_err("unterminated multiline string");
-    let positioned = lashlang::format_parse_diagnostic(code, &error);
+    let positioned = "unterminated template literal".to_string();
 
-    let native = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::NativeTool);
+    let native =
+        format_rlm_parse_diagnostic(positioned.clone(), crate::plugin::RlmChannel::NativeTool);
     assert_eq!(native, positioned);
-    assert!(!native.contains("</lashlang>"), "{native}");
+    assert!(!native.contains("</typescript>"), "{native}");
     assert!(!native.contains("standalone delimiter line"), "{native}");
 
-    let cell = format_rlm_parse_diagnostic(code, &error, crate::plugin::RlmChannel::Cell);
+    let cell = format_rlm_parse_diagnostic(positioned.clone(), crate::plugin::RlmChannel::Cell);
     assert_eq!(
         cell.strip_prefix(positioned.as_str())
             .expect("the cell diagnostic is the same diagnostic plus the hint")
             .trim(),
-        "A standalone `</lashlang>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
+        "A standalone `</typescript>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line."
     );
-}
-
-/// The channel reaches the formatter from the session's pinned config, not
-/// from a default at the executor's door: an `RlmSourceContext` carries the
-/// dialect and the channel together, so a new execution path cannot reach
-/// the formatter without saying which channel it is.
-#[test]
-pub(super) fn source_context_carries_the_channel_alongside_the_dialect() {
-    let cell = RlmSourceContext::cell(SourceDialect::Typescript);
-    assert_eq!(cell.dialect, SourceDialect::Typescript);
-    assert_eq!(cell.channel, crate::plugin::RlmChannel::Cell);
-
-    let native = RlmSourceContext::new(
-        SourceDialect::Lashlang,
-        crate::plugin::RlmChannel::NativeTool,
-    );
-    assert_eq!(native.dialect, SourceDialect::Lashlang);
-    assert_eq!(native.channel, crate::plugin::RlmChannel::NativeTool);
 }
 
 /// A typo is not a policy refusal.
@@ -1058,7 +1005,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             Arc::new(crate::control_tools::RlmControlToolsProvider {
-                vocabulary: crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+                vocabulary: crate::dialect::DialectPromptVocabulary::default(),
             }),
             catalog,
             invocation,
@@ -1067,8 +1014,8 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         &mut RlmExecutionState::new(),
         context,
         ExecRequest {
-            language: "lashlang".to_string(),
-            code: r#"await control.continue_as({ task: "continue deterministically" })?"#
+            language: "typescript".to_string(),
+            code: r#"await control.continue_as({ task: "continue deterministically" });"#
                 .to_string(),
         },
         lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1148,7 +1095,7 @@ pub(super) async fn execute_test_code(
         &mut state,
         lash_core::testing::code_execution_context(),
         ExecRequest {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             code,
         },
         lashlang::global_in_memory_lashlang_artifact_store(),
@@ -1159,7 +1106,33 @@ pub(super) async fn execute_test_code(
         RlmLashlangExecutionTraceConfig::default(),
     ))
     .await;
-    assert_eq!(response.error, None, "test Lashlang execution failed");
+    assert_eq!(response.error, None, "test TypeScript execution failed");
+    state
+}
+
+/// Executes a statement-per-line program, splitting it across cells.
+///
+/// The TypeScript frontend caps a single cell at 64 KiB of source, which the
+/// state-growth fixtures below deliberately exceed: they seed dozens of
+/// multi-kilobyte bindings before measuring what one later assignment costs.
+/// Seeding them one cell at a time is the same end state — RLM globals persist
+/// across cells — without pretending a model would ever emit a 1 MB cell.
+pub(super) async fn execute_test_code_chunked(
+    mut state: RlmExecutionState,
+    source: String,
+) -> RlmExecutionState {
+    const MAX_CELL_BYTES: usize = 48 * 1024;
+    let mut cell = String::new();
+    for line in source.lines() {
+        if !cell.is_empty() && cell.len() + line.len() + 1 > MAX_CELL_BYTES {
+            state = Box::pin(execute_test_code(state, std::mem::take(&mut cell))).await;
+        }
+        cell.push_str(line);
+        cell.push('\n');
+    }
+    if !cell.trim().is_empty() {
+        state = Box::pin(execute_test_code(state, cell)).await;
+    }
     state
 }
 
@@ -1236,15 +1209,14 @@ pub(super) fn projected_history(values: Vec<FlowValue>) -> ProjectedBindings {
     projected
 }
 
-pub(super) async fn execute_with_lashlang_abilities(
+pub(super) async fn execute_with_abilities(
     code: &str,
     abilities: lashlang::LashlangAbilities,
 ) -> ExecResponse {
-    execute_with_lashlang_host_environment(code, abilities, lashlang::LashlangHostCatalog::new())
-        .await
+    execute_with_host_environment(code, abilities, lashlang::LashlangHostCatalog::new()).await
 }
 
-pub(super) async fn execute_with_lashlang_host_environment(
+pub(super) async fn execute_with_host_environment(
     code: &str,
     abilities: lashlang::LashlangAbilities,
     resources: lashlang::LashlangHostCatalog,
@@ -1266,7 +1238,7 @@ pub(super) async fn execute_with_lashlang_host_environment(
         &mut state,
         ctx,
         ExecRequest {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             code: code.to_string(),
         },
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
@@ -1293,8 +1265,8 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             &mut RlmExecutionState::new(),
             lash_core::testing::code_execution_context(),
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i".to_string(),
+                language: "typescript".to_string(),
+                code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -1321,8 +1293,8 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             &mut RlmExecutionState::new(),
             lash_core::testing::code_execution_context(),
             ExecRequest {
-                language: "lashlang".to_string(),
-                code: "value = 1".to_string(),
+                language: "typescript".to_string(),
+                code: "const value = 1;".to_string(),
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -1352,8 +1324,8 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
-            language: "lashlang".to_string(),
-            code: "finish 1".to_string(),
+            language: "typescript".to_string(),
+            code: "finish(1);".to_string(),
         };
         let resolver = || Arc::new(ProjectionRegistry::new());
         let surface = || {

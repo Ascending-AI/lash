@@ -1,13 +1,12 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
 use crate::driver::{RlmPreambleConfig, SharedPromptUsage};
 use crate::execution_prompt::render_system_prompt;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
-    LlmRequest, ProjectorContext, PromptContribution, ProtocolBuildInput, TurnDriverConfig,
-    TurnDriverPreamble,
+    LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
 use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 use lash_sansio::sync::RwLockExt;
@@ -16,7 +15,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
     bound_variables_prompt: SharedBoundVariablesPrompt,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
@@ -30,19 +29,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_catalog
     };
 
-    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
-        tool_catalog,
-        dialect.as_ref(),
-        config.prompt_features,
-    );
-    if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
-        prompt_contributions.push(PromptContribution::execution(
-            "Tools",
-            format!(
-                "Call the operations below with their declared argument records.\n\n{tool_docs}"
-            ),
-        ));
-    }
     prompt_contributions.extend(input.extra_prompt_contributions);
     let execution =
         super::prompt::execution_section(dialect.as_ref(), config.prompt_features, tool_catalog);
@@ -80,7 +66,7 @@ struct NativeContextProjector {
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
     bound_variables_prompt: SharedBoundVariablesPrompt,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {

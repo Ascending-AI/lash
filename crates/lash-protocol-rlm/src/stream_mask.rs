@@ -1,4 +1,4 @@
-//! RLM stream mask: suppresses paired `<lashlang>` blocks from the visible
+//! RLM stream mask: suppresses paired `<typescript>` blocks from the visible
 //! assistant stream and aborts the provider stream as soon as the closing tag
 //! is complete.
 //!
@@ -17,15 +17,13 @@ use lash_core::plugin::{
 use crate::cell_scan::{
     StreamedCellStart, complete_cell_start, complete_end_tag_span, possible_start_tag_suffix_len,
 };
-#[cfg(test)]
-use crate::dialect::LashlangDialect;
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
 
 /// Install the stream-mask hooks on the given registrar. Called by
 /// [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
 pub fn register_stream_mask(
     reg: &mut PluginRegistrar,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 ) -> Result<(), PluginError> {
     let state = Arc::new(Mutex::new(CellDetector::with_dialect(dialect)));
 
@@ -92,7 +90,7 @@ fn transform_final_response(
 }
 
 struct CellDetector {
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
     pending: String,
     inside_cell: bool,
     cell_closed: bool,
@@ -112,12 +110,12 @@ struct CellDetector {
 impl CellDetector {
     #[cfg(test)]
     fn new() -> Self {
-        Self::with_dialect(Arc::new(LashlangDialect::prompt_only(
+        Self::with_dialect(Arc::new(TypescriptDialect::prompt_only(
             lash_lashlang_runtime::LashlangSurface::default(),
         )))
     }
 
-    fn with_dialect(dialect: Arc<dyn RlmDialect>) -> Self {
+    fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
         Self {
             dialect,
             pending: String::new(),
@@ -345,12 +343,12 @@ mod tests {
     use super::*;
     use crate::cell_scan::first_cell_span;
 
-    fn first_lashlang_cell_span(text: &str) -> Option<crate::cell_scan::CellSpan> {
+    fn first_cell_span_for_tests(text: &str) -> Option<crate::cell_scan::CellSpan> {
         first_cell_span(
             text,
             crate::dialect::CellTags {
-                open: "<lashlang>",
-                close: "</lashlang>",
+                open: "<typescript>",
+                close: "</typescript>",
             },
         )
     }
@@ -376,11 +374,11 @@ mod tests {
     #[test]
     fn possible_start_tag_suffix_is_held() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Plan.\n<lash");
+        let t = d.process_chunk("Plan.\n<type");
         assert_eq!(t.chunk, "Plan.\n");
-        assert_eq!(d.pending, "<lash");
+        assert_eq!(d.pending, "<type");
 
-        let t = d.process_chunk("lang>\n");
+        let t = d.process_chunk("script>\n");
         assert_eq!(t.chunk, "");
         assert!(d.inside_cell);
         assert!(!d.cell_closed);
@@ -395,7 +393,7 @@ mod tests {
         assert_eq!(t.chunk, "Plan.\n");
         assert_eq!(d.pending, "  ");
 
-        let t = d.process_chunk("<lashlang>\nfinish 1");
+        let t = d.process_chunk("<typescript>\nfinish 1");
         assert_eq!(t.chunk, "");
         assert!(d.inside_cell);
         assert!(!d.cell_closed);
@@ -405,7 +403,7 @@ mod tests {
     #[test]
     fn start_tag_and_body_in_same_chunk_preserves_body_and_does_not_abort_before_close() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Thinking...\n\n<lashlang>\ncode\n```markdown\ninside\n```\n");
+        let t = d.process_chunk("Thinking...\n\n<typescript>\ncode\n```markdown\ninside\n```\n");
         assert_eq!(t.chunk, "Thinking...\n\n");
         assert!(d.inside_cell);
         assert_eq!(d.cell_body, "code\n```markdown\ninside\n```\n");
@@ -428,9 +426,9 @@ mod tests {
         }
 
         for raw in [
-            "<lashlang>\nprint 1\n</lashlang>suffix",
-            "<lashlang>\nprint 1\n</lashlang>",
-            "<lashlang>\nprint 1\n</lashlang>\nsuffix",
+            "<typescript>\nprint 1\n</typescript>suffix",
+            "<typescript>\nprint 1\n</typescript>",
+            "<typescript>\nprint 1\n</typescript>\nsuffix",
         ] {
             let expected = accepted(&[raw]);
             for split in raw
@@ -446,7 +444,7 @@ mod tests {
             }
         }
 
-        let malformed = "<lashlang>\nprint 1\n</lashlang>suffix";
+        let malformed = "<typescript>\nprint 1\n</typescript>suffix";
         let after_tag = malformed.find("suffix").expect("suffix boundary");
         assert_eq!(
             accepted(&[&malformed[..after_tag], &malformed[after_tag..]]),
@@ -457,7 +455,7 @@ mod tests {
     #[test]
     fn body_after_start_tag_is_suppressed_until_close() {
         let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<lashlang>\n").chunk, "");
+        assert_eq!(d.process_chunk("<typescript>\n").chunk, "");
         let t = d.process_chunk("finish \"hi\"\n");
         assert_eq!(t.chunk, "");
         assert!(!t.abort_stream);
@@ -471,18 +469,18 @@ mod tests {
     #[test]
     fn one_line_cell_is_masked_and_normalized() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Checking.\n<lashlang>finish 1</lashlang>\n");
+        let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>\n");
         assert_eq!(t.chunk, "Checking.\n");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
         assert_eq!(d.cell_body, "finish 1");
         assert_eq!(
             event_names(&t.events),
-            vec!["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]
+            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
         );
         assert_eq!(
             d.spliced_response_text(),
-            "Checking.\n<lashlang>\nfinish 1\n</lashlang>"
+            "Checking.\n<typescript>\nfinish 1\n</typescript>"
         );
     }
 
@@ -491,7 +489,7 @@ mod tests {
     #[test]
     fn one_line_cell_at_response_end_closes_on_the_eof_leg() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Checking.\n<lashlang>finish 1</lashlang>");
+        let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>");
         assert_eq!(t.chunk, "Checking.\n");
         assert!(!t.abort_stream, "an unfinished line decides nothing yet");
         assert!(!d.cell_closed);
@@ -501,11 +499,11 @@ mod tests {
         assert_eq!(d.cell_body, "finish 1");
         assert_eq!(
             event_names(&events),
-            vec!["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]
+            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
         );
         assert_eq!(
             d.spliced_response_text(),
-            "Checking.\n<lashlang>\nfinish 1\n</lashlang>"
+            "Checking.\n<typescript>\nfinish 1\n</typescript>"
         );
     }
 
@@ -514,8 +512,8 @@ mod tests {
     #[test]
     fn one_line_cell_split_mid_source_holds_the_line() {
         let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<lashlang>fin").chunk, "");
-        let t = d.process_chunk("ish 1</lashlang>\n");
+        assert_eq!(d.process_chunk("<typescript>fin").chunk, "");
+        let t = d.process_chunk("ish 1</typescript>\n");
         assert_eq!(t.chunk, "");
         assert!(t.abort_stream);
         assert_eq!(d.cell_body, "finish 1");
@@ -527,9 +525,9 @@ mod tests {
     #[test]
     fn an_unfinished_line_that_is_prose_is_released_at_response_end() {
         for raw in [
-            "<lashlang> is the opening tag.",
+            "<typescript> is the opening tag.",
             "The tag is <lash",
-            "<lashlang>print 1</lashlang> ok",
+            "<typescript>print 1</typescript> ok",
         ] {
             let mut d = CellDetector::new();
             d.process_chunk(raw);
@@ -561,17 +559,17 @@ mod tests {
 
         for (raw, expected) in [
             (
-                "Plan.\n<lashlang>finish 1</lashlang>",
-                Some("Plan.\n<lashlang>\nfinish 1\n</lashlang>".to_string()),
+                "Plan.\n<typescript>finish 1</typescript>",
+                Some("Plan.\n<typescript>\nfinish 1\n</typescript>".to_string()),
             ),
             (
-                "Plan.\n<lashlang>finish 1</lashlang>\ntail",
-                Some("Plan.\n<lashlang>\nfinish 1\n</lashlang>".to_string()),
+                "Plan.\n<typescript>finish 1</typescript>\ntail",
+                Some("Plan.\n<typescript>\nfinish 1\n</typescript>".to_string()),
             ),
             // Prose, at every split: a trailer after the closing tag means the
             // line was never a cell.
-            ("Plan.\n<lashlang>print 1</lashlang> ok\n", None),
-            ("Plan.\n<lashlang>print 1</lashlang> ok", None),
+            ("Plan.\n<typescript>print 1</typescript> ok\n", None),
+            ("Plan.\n<typescript>print 1</typescript> ok", None),
         ] {
             assert_eq!(accepted(&[raw]), expected, "whole: {raw:?}");
             for split in raw
@@ -591,8 +589,8 @@ mod tests {
     #[test]
     fn inline_start_tag_text_does_not_trigger() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Use <lashlang> here.\n");
-        assert_eq!(t.chunk, "Use <lashlang> here.\n");
+        let t = d.process_chunk("Use <typescript> here.\n");
+        assert_eq!(t.chunk, "Use <typescript> here.\n");
         assert!(!d.inside_cell);
         assert!(t.events.is_empty());
     }
@@ -600,9 +598,9 @@ mod tests {
     #[test]
     fn incomplete_start_tag_can_become_visible_prose() {
         let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<lashlang>").chunk, "");
+        assert_eq!(d.process_chunk("<typescript>").chunk, "");
         let t = d.process_chunk(" here\n");
-        assert_eq!(t.chunk, "<lashlang> here\n");
+        assert_eq!(t.chunk, "<typescript> here\n");
         assert!(!d.inside_cell);
     }
 
@@ -612,7 +610,7 @@ mod tests {
         d.process_chunk("Hi! How can I help you?");
         d.reset();
 
-        let t = d.process_chunk("New response.\n\n<lashlang>\ncode\n");
+        let t = d.process_chunk("New response.\n\n<typescript>\ncode\n");
         assert_eq!(t.chunk, "New response.\n\n");
         assert!(!t.chunk.contains("How can I help"));
     }
@@ -620,7 +618,7 @@ mod tests {
     #[test]
     fn reset_after_partial_cell_isolates_next_response() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1");
+        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(d.inside_cell);
         assert!(!d.cell_closed);
@@ -638,7 +636,7 @@ mod tests {
     #[test]
     fn reset_after_closed_cell_isolates_next_response() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
+        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
@@ -663,7 +661,7 @@ mod tests {
     #[test]
     fn stream_ended_without_phase_two_does_not_poison_the_next_turn() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
+        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
@@ -690,7 +688,7 @@ mod tests {
     #[test]
     fn stream_ended_keeps_the_splice_available_for_phase_two() {
         let mut d = CellDetector::new();
-        d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\n");
+        d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Complete);
 
         assert!(d.cell_closed);
@@ -701,31 +699,31 @@ mod tests {
     #[test]
     fn close_tag_split_across_chunks_aborts_stream() {
         let mut d = CellDetector::new();
-        assert_eq!(d.process_chunk("<lashlang>\nfinish 1\n</lash").chunk, "");
+        assert_eq!(d.process_chunk("<typescript>\nfinish 1\n</type").chunk, "");
 
-        let t = d.process_chunk("lang>\n");
+        let t = d.process_chunk("script>\n");
         assert_eq!(t.chunk, "");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
         assert_eq!(d.cell_body, "finish 1");
-        assert_eq!(event_names(&t.events), vec!["rlm_lashlang_cell_end"]);
+        assert_eq!(event_names(&t.events), vec!["rlm_typescript_cell_end"]);
     }
 
     #[test]
     fn close_tag_plus_trailing_prose_in_same_chunk_aborts_and_drops_suffix() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1\n</lashlang>\nTrailing prose.");
+        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\nTrailing prose.");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
         assert!(d.cell_closed);
         assert_eq!(d.cell_body, "finish 1");
         assert_eq!(
             event_names(&t.events),
-            vec!["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]
+            vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
         );
         assert_eq!(
             d.spliced_response_text(),
-            "Visible.\n<lashlang>\nfinish 1\n</lashlang>"
+            "Visible.\n<typescript>\nfinish 1\n</typescript>"
         );
     }
 
@@ -733,7 +731,7 @@ mod tests {
     fn client_abort_preserves_preceding_signed_reasoning_part() {
         let mut detector = CellDetector::new();
         let transformed =
-            detector.process_chunk("Visible.\n<lashlang>\nprint \"hi\"\n</lashlang>\nignored");
+            detector.process_chunk("Visible.\n<typescript>\nprint \"hi\"\n</typescript>\nignored");
         assert!(transformed.abort_stream);
 
         let replay = lash_core::llm::types::ProviderReasoningReplay {
@@ -770,14 +768,14 @@ mod tests {
         ));
         assert_eq!(
             response.full_text(),
-            "Visible.\n<lashlang>\nprint \"hi\"\n</lashlang>"
+            "Visible.\n<typescript>\nprint \"hi\"\n</typescript>"
         );
     }
 
     #[test]
     fn incomplete_block_does_not_abort_and_does_not_close() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("Visible.\n<lashlang>\nfinish 1");
+        let t = d.process_chunk("Visible.\n<typescript>\nfinish 1");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(!t.abort_stream);
         assert!(d.inside_cell);
@@ -814,25 +812,25 @@ mod tests {
     #[test]
     fn final_response_splice_reconstructs_cell_with_exact_body() {
         let (d, visible) = stream_chunks(&[
-            "Quick check.\n\n<lashlang>\n",
+            "Quick check.\n\n<typescript>\n",
             "print \"hi\"\n",
-            "finish 1\n</lashlang>",
+            "finish 1\n</typescript>",
         ]);
         assert_eq!(visible, "Quick check.\n\n");
         let spliced = d.spliced_response_text();
-        let span = first_lashlang_cell_span(&spliced).expect("spliced cell parses");
+        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
         let code = &spliced[span.body_start..span.body_end];
         assert_eq!(code, "print \"hi\"\nfinish 1");
     }
 
     #[test]
     fn final_response_splice_ignores_raw_provider_full_text_with_suffix() {
-        let raw_final = "Visible before code.\n<lashlang>\nfinish \"ok\"\n</lashlang>\nignored";
+        let raw_final = "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
         let (d, visible) = stream_chunks(&[
             "Visible before",
-            " code.\n<lash",
-            "lang>\nfinish ",
-            "\"ok\"\n</lashlang>\nignored",
+            " code.\n<type",
+            "script>\nfinish ",
+            "\"ok\"\n</typescript>\nignored",
         ]);
         assert_eq!(visible, "Visible before code.\n");
 
@@ -844,32 +842,32 @@ mod tests {
         let spliced = d.spliced_response_text();
         assert_eq!(
             spliced,
-            "Visible before code.\n<lashlang>\nfinish \"ok\"\n</lashlang>"
+            "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>"
         );
-        let span = first_lashlang_cell_span(&spliced).expect("spliced cell parses");
+        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
         assert_eq!(&spliced[span.body_start..span.body_end], "finish \"ok\"");
         assert!(!spliced.contains("ignored"));
     }
 
     #[test]
     fn final_response_transform_never_splices_using_raw_provider_text() {
-        let raw_final = "Visible before code.\n<lashlang>\nfinish \"ok\"\n</lashlang>\nignored";
+        let raw_final = "Visible before code.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
         let (d, visible) = stream_chunks(&[
             "Visible before",
             " code.\n%%",
-            " ordinary prose\n<lashlang>\nfinish ",
-            "\"ok\"\n</lashlang>\nignored",
+            " ordinary prose\n<typescript>\nfinish ",
+            "\"ok\"\n</typescript>\nignored",
         ]);
         assert_eq!(visible, "Visible before code.\n%% ordinary prose\n");
 
         let response = transform_final_response(&d, response_with_text(raw_final));
         assert_eq!(
             response.full_text(),
-            "Visible before code.\n%% ordinary prose\n<lashlang>\nfinish \"ok\"\n</lashlang>"
+            "Visible before code.\n%% ordinary prose\n<typescript>\nfinish \"ok\"\n</typescript>"
         );
-        assert_eq!(response.full_text().matches("<lashlang>").count(), 1);
-        assert_eq!(response.full_text().matches("</lashlang>").count(), 1);
-        let span = first_lashlang_cell_span(&response.full_text()).expect("cell parses");
+        assert_eq!(response.full_text().matches("<typescript>").count(), 1);
+        assert_eq!(response.full_text().matches("</typescript>").count(), 1);
+        let span = first_cell_span_for_tests(&response.full_text()).expect("cell parses");
         assert_eq!(
             &response.full_text()[span.body_start..span.body_end],
             "finish \"ok\""
@@ -891,8 +889,9 @@ mod tests {
 
     #[test]
     fn final_response_transform_replaces_raw_text_parts_but_preserves_reasoning_parts() {
-        let raw_final = "Plan.\n<lashlang>\nfinish \"ok\"\n</lashlang>\nignored";
-        let (d, visible) = stream_chunks(&["Plan.\n<lash", "lang>\nfinish \"ok\"\n</lashlang>"]);
+        let raw_final = "Plan.\n<typescript>\nfinish \"ok\"\n</typescript>\nignored";
+        let (d, visible) =
+            stream_chunks(&["Plan.\n<type", "script>\nfinish \"ok\"\n</typescript>"]);
         assert_eq!(visible, "Plan.\n");
         let response = lash_core::LlmResponse {
             execution_evidence: Some(lash_core::ExecutionEvidence {
@@ -924,9 +923,9 @@ mod tests {
         let response = transform_final_response(&d, response);
         assert_eq!(
             response.full_text(),
-            "Plan.\n<lashlang>\nfinish \"ok\"\n</lashlang>"
+            "Plan.\n<typescript>\nfinish \"ok\"\n</typescript>"
         );
-        assert_eq!(response.full_text().matches("<lashlang>").count(), 1);
+        assert_eq!(response.full_text().matches("<typescript>").count(), 1);
         assert_eq!(
             response
                 .execution_evidence
@@ -963,12 +962,16 @@ mod tests {
 
     #[test]
     fn final_response_splice_also_handles_already_transformed_visible_text() {
-        let (d, visible) = stream_chunks(&["Visible.\n", "<lashlang>\nfinish \"ok\"\n</lashlang>"]);
+        let (d, visible) =
+            stream_chunks(&["Visible.\n", "<typescript>\nfinish \"ok\"\n</typescript>"]);
         assert_eq!(visible, "Visible.\n");
 
         let spliced = d.spliced_response_text();
-        assert_eq!(spliced, "Visible.\n<lashlang>\nfinish \"ok\"\n</lashlang>");
-        let span = first_lashlang_cell_span(&spliced).expect("spliced cell parses");
+        assert_eq!(
+            spliced,
+            "Visible.\n<typescript>\nfinish \"ok\"\n</typescript>"
+        );
+        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
         assert_eq!(&spliced[span.body_start..span.body_end], "finish \"ok\"");
     }
 
@@ -977,20 +980,20 @@ mod tests {
         let (d, visible) = stream_chunks(&[
             "Line one.",
             "\n  ",
-            "<las",
-            "hlang>  \n",
+            "<types",
+            "cript>  \n",
             "payload = r\"\"\"```markdown\nbody\n```\"\"\"\n",
-            "finish payload\n  </lash",
-            "lang>  ",
+            "finish payload\n  </types",
+            "cript>  ",
         ]);
         assert_eq!(visible, "Line one.\n");
 
         let spliced = d.spliced_response_text();
         assert_eq!(
             spliced,
-            "Line one.\n<lashlang>\npayload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload\n</lashlang>"
+            "Line one.\n<typescript>\npayload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload\n</typescript>"
         );
-        let span = first_lashlang_cell_span(&spliced).expect("spliced cell parses");
+        let span = first_cell_span_for_tests(&spliced).expect("spliced cell parses");
         assert_eq!(
             &spliced[span.body_start..span.body_end],
             "payload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload"
@@ -1000,23 +1003,23 @@ mod tests {
     #[test]
     fn start_tag_only_without_newline_is_left_to_final_parser() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("<lashlang>");
+        let t = d.process_chunk("<typescript>");
         assert_eq!(t.chunk, "");
         assert!(!d.inside_cell);
-        assert_eq!(d.splice_or_visible_for_test(""), "<lashlang>");
+        assert_eq!(d.splice_or_visible_for_test(""), "<typescript>");
     }
 
     #[test]
     fn final_response_transform_is_noop_for_incomplete_streamed_block() {
         let mut d = CellDetector::new();
         assert_eq!(
-            d.process_chunk("Visible.\n<lashlang>\nfinish 1").chunk,
+            d.process_chunk("Visible.\n<typescript>\nfinish 1").chunk,
             "Visible.\n"
         );
         assert!(d.inside_cell);
         assert!(!d.cell_closed);
 
-        let response = response_with_text("Visible.\n<lashlang>\nfinish 1");
+        let response = response_with_text("Visible.\n<typescript>\nfinish 1");
         let transformed = transform_final_response(&d, response.clone());
         assert_eq!(transformed.full_text(), response.full_text());
         assert_eq!(transformed.parts, response.parts);
@@ -1025,8 +1028,8 @@ mod tests {
     #[test]
     fn old_percent_marker_streams_as_plain_prose() {
         let mut d = CellDetector::new();
-        let t = d.process_chunk("%%lashlang\nfinish 1\n");
-        assert_eq!(t.chunk, "%%lashlang\nfinish 1\n");
+        let t = d.process_chunk("%%typescript\nfinish 1\n");
+        assert_eq!(t.chunk, "%%typescript\nfinish 1\n");
         assert!(!d.inside_cell);
         assert!(!t.abort_stream);
     }

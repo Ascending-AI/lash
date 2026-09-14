@@ -1264,7 +1264,7 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
         assert_eq!(issue.kind, "rlm_protocol");
         assert_eq!(issue.retryable, Some(false));
         assert!(issue.message.contains("native_lookup"));
-        assert!(issue.message.contains("must flow through Lashlang"));
+        assert!(issue.message.contains("must flow through the cell program"));
 
         core.flush_trace_sink()?;
         let logged = std::fs::read_to_string(&trace_path).expect("read trace");

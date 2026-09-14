@@ -2,13 +2,10 @@ use lash_core::llm::types::LlmRole;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
-/// These fixtures cover the Lashlang wording; the cross-dialect walker in
-/// `dialect::prompt_walker_tests` covers both.
+/// These fixtures cover the prompt wording; the walker in
+/// `dialect::prompt_walker_tests` covers the whole contract.
 fn final_answer_format_prompt_test(options: &RlmTurnOptions) -> Option<String> {
-    final_answer_format_prompt(
-        options,
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
-    )
+    final_answer_format_prompt(options, crate::dialect::DialectPromptVocabulary::default())
 }
 
 use super::*;
@@ -95,9 +92,9 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         bound_variables_prompt: Arc::new(RwLock::new(crate::rlm_support::render_bound_variables(
             &mut bound_variables_cache,
             &[],
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         ))),
-        dialect: Arc::new(LashlangDialect::prompt_only(LashlangSurface::default())),
+        dialect: Arc::new(TypescriptDialect::prompt_only(LashlangSurface::default())),
     }
 }
 
@@ -114,7 +111,7 @@ fn rendered_bound_variables(
     crate::rlm_support::render_bound_variables(
         cache,
         &globals,
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        crate::dialect::DialectPromptVocabulary::default(),
     )
 }
 
@@ -200,7 +197,7 @@ fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
 fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
     for caller_stops in [
         vec!["caller-boundary".to_string()],
-        vec!["</lashlang>".to_string()],
+        vec!["</typescript>".to_string()],
     ] {
         let request = project_iteration_request_with_generation(
             &projector(100),
@@ -242,12 +239,12 @@ fn chronological_history_renders_messages_and_steps_in_order() {
     let history = projector.format_history(&events);
 
     // History renders in the emission grammar: prior steps are the literal
-    // `<lashlang>` cell the model must emit, outputs as separate blocks.
+    // `<typescript>` cell the model must emit, outputs as separate blocks.
     assert!(history.contains("first"));
-    assert!(history.contains("<lashlang>\nprint 1\n</lashlang>"));
+    assert!(history.contains("<typescript>\nprint 1\n</typescript>"));
     assert!(history.contains("history[1].output[0] (1 chars):\n1"));
     assert!(history.contains("second"));
-    assert!(history.contains("<lashlang>\nprint 2\n</lashlang>"));
+    assert!(history.contains("<typescript>\nprint 2\n</typescript>"));
     assert!(history.contains("history[3].output[0] (1 chars):\n2"));
     // The `--- history[N] ---` meta-format is gone entirely.
     assert!(!history.contains("--- history["));
@@ -261,7 +258,7 @@ fn chronological_history_renders_messages_and_steps_in_order() {
 fn folded_step_renders_as_emission_cell_not_history_echo() {
     let projector = projector(1000);
     // Regression for the observed glm-5.2 echo: a step preceded by assistant
-    // prose folds into ONE assistant message that is the literal `<lashlang>`
+    // prose folds into ONE assistant message that is the literal `<typescript>`
     // cell — byte-identical to what the model emits — never a
     // `--- history[...] ---` meta-format the model could imitate.
     let events = [
@@ -355,7 +352,7 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("<lashlang>\nprint \"observed mid-turn\"\n</lashlang>"));
+    assert!(rendered.contains("<typescript>\nprint \"observed mid-turn\"\n</typescript>"));
     assert!(rendered.contains("observed mid-turn"));
     assert!(rendered.contains("Host-rendered answer: forty-two."));
     assert!(!rendered.contains("Internal terminal commentary."));
@@ -392,7 +389,7 @@ fn terminal_step_without_committed_transcript_renders_unchanged() {
         ];
         let history = projector(1000).format_history(&events);
 
-        assert!(history.contains(&format!("<lashlang>\n{code}\n</lashlang>")));
+        assert!(history.contains(&format!("<typescript>\n{code}\n</typescript>")));
         assert!(history.contains(&format!("Final output:\n{expected}")));
     }
 }
@@ -413,7 +410,7 @@ fn later_turn_assistant_does_not_supersede_uncommitted_terminal_step() {
     ];
     let history = projector(1000).format_history(&events);
 
-    assert!(history.contains("<lashlang>\nfinish 42\n</lashlang>"));
+    assert!(history.contains("<typescript>\nfinish 42\n</typescript>"));
     assert!(history.contains("Final output:\n42"));
     assert!(history.contains("Natural answer from turn two."));
 }
@@ -503,7 +500,7 @@ fn chronological_history_excludes_hidden_tool_events() {
     let history = projector.format_history(&events);
 
     assert!(history.contains("first"));
-    assert!(history.contains("<lashlang>\nx = 1\n</lashlang>"));
+    assert!(history.contains("<typescript>\nx = 1\n</typescript>"));
     assert!(!history.contains("tool_call"));
     assert!(!history.contains("--- history["));
 }
@@ -513,7 +510,7 @@ fn long_user_message_gets_full_history_reference() {
     let projector = projector(10);
     let history = projector.format_history(&[user_event("u1", "abcdefghijklmnopqrstuvwxyz")]);
 
-    assert!(history.contains("re-run `print history[0].content`"));
+    assert!(history.contains("re-run `console.log(history[0].content)`"));
     assert!(history.contains("... (16 characters omitted) ..."));
     assert!(!history.contains("user_input_"));
 }
@@ -529,7 +526,7 @@ fn truncated_lashlang_step_output_emits_full_reference() {
     let output = "x".repeat(60 * 1024);
     let history = projector.format_history(&[step_event(0, "print big", &output)]);
 
-    assert!(history.contains("re-run `print history[0].output[0]`"));
+    assert!(history.contains("re-run `console.log(history[0].output[0])`"));
     assert!(history.contains("full value retained"));
     assert!(history.contains("...truncated..."));
 }
@@ -547,7 +544,7 @@ fn truncated_step_output_states_value_is_retained_not_lost() {
 
     assert!(history.contains("full value retained"), "{history}");
     assert!(
-        history.contains("re-run `print history[0].output[0]`"),
+        history.contains("re-run `console.log(history[0].output[0])`"),
         "{history}"
     );
     // The bare, easily-misread "chars, full: <ref>" framing is gone.
@@ -568,7 +565,7 @@ fn structured_lashlang_step_output_keeps_diagnostic_fields_in_projected_history(
     let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
     assert!(
-        history.contains("re-run `print history[0].output[0]`"),
+        history.contains("re-run `console.log(history[0].output[0])`"),
         "{history}"
     );
     let status = history.find(r#""status":"failed""#).expect("status field");
@@ -808,7 +805,7 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             text,
             cache_breakpoint: false,
             ..
-        }) if text.starts_with("<lashlang>") && text.contains("print 1")
+        }) if text.starts_with("<typescript>") && text.contains("print 1")
     ));
     // The last history message (the observation) carries the rolling fence.
     assert!(matches!(
@@ -890,7 +887,7 @@ fn bound_variables_render_in_the_volatile_tail_in_name_order() {
     assert!(tail.contains("=== BOUND VARIABLES ==="), "{tail}");
     assert!(tail.contains(r#"- `scratch_note` = "saved""#), "{tail}");
     assert!(
-        tail.contains("- `history`: `list[HistoryItem]`, read-only, 3 entries"),
+        tail.contains("- `history`: `HistoryItem[]`, read-only, 3 entries"),
         "{tail}"
     );
     let alpha = tail.find("- `alpha` = 1").expect("alpha row");
@@ -952,7 +949,7 @@ fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
     })
     .expect("markdown guidance");
 
-    assert!(guidance.contains("call `finish <value>` with a nicely formatted Markdown string"));
+    assert!(guidance.contains("call `finish(value)` with a nicely formatted Markdown string"));
     assert!(guidance.contains("not a raw record/list/tool-result value"));
 }
 
@@ -1028,7 +1025,7 @@ fn incremental_render_extends_cached_prefix_on_subsequent_calls() {
     let initial =
         projector.format_history(&[user_event("u1", "first"), step_event(0, "print 1", "1")]);
     assert!(initial.contains("first"));
-    assert!(initial.contains("<lashlang>\nprint 1\n</lashlang>"));
+    assert!(initial.contains("<typescript>\nprint 1\n</typescript>"));
 
     let extended = projector.format_history(&[
         user_event("u1", "first"),
@@ -1039,5 +1036,5 @@ fn incremental_render_extends_cached_prefix_on_subsequent_calls() {
     // The stable prefix is byte-identical, so the cached prefix extends.
     assert!(extended.starts_with(&initial));
     assert!(extended.contains("second"));
-    assert!(extended.contains("<lashlang>\nprint 2\n</lashlang>"));
+    assert!(extended.contains("<typescript>\nprint 2\n</typescript>"));
 }

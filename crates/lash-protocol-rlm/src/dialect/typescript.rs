@@ -1,30 +1,27 @@
 use lash_core::SessionError;
 use lash_lashlang_runtime::LashlangSurface;
 
-use super::{
-    CellTags, DialectSession, LashlangDialectServices, RlmDialect, RlmDialectSession, SourceDialect,
-};
+use super::{CellTags, DialectSession, RlmDialectServices};
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
 pub(crate) struct TypescriptDialect {
     surface: LashlangSurface,
-    services: LashlangDialectServices,
+    services: RlmDialectServices,
 }
 
 impl TypescriptDialect {
-    pub(crate) fn new(surface: LashlangSurface, services: LashlangDialectServices) -> Self {
+    pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
         Self { surface, services }
     }
 
-    /// A dialect that can render prompts and diagnostics but cannot execute,
-    /// mirroring `LashlangDialect::prompt_only`. The protocol driver needs one
-    /// per dialect to answer questions about cells without an execution
-    /// environment behind it.
+    /// A dialect that can render prompts and diagnostics but cannot execute.
+    /// The protocol driver needs one to answer questions about cells without an
+    /// execution environment behind it.
     pub(crate) fn prompt_only(surface: LashlangSurface) -> Self {
         Self {
             surface,
-            services: LashlangDialectServices {
+            services: RlmDialectServices {
                 projection_resolver: std::sync::Arc::new(
                     crate::projection::ProjectionRegistry::new(),
                 ),
@@ -303,20 +300,19 @@ Literal target; inputs match params, arrow erased."#);
     }
 }
 
-impl RlmDialect for TypescriptDialect {
-    fn language_id(&self) -> &'static str {
+impl TypescriptDialect {
+    pub(crate) fn language_id(&self) -> &'static str {
         LANGUAGE_ID
     }
 
-    fn renders_tool_catalogue_inline(&self) -> bool {
-        true
-    }
-
-    fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
+    pub(crate) fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
         TYPESCRIPT_PROMPT_VOCABULARY
     }
 
-    fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> Result<String, SessionError> {
+    pub(crate) fn tool_call_path(
+        &self,
+        manifest: &lash_core::ToolManifest,
+    ) -> Result<String, SessionError> {
         Ok(
             lash_lashlang_runtime::required_tool_typescript_executable(manifest)
                 .map_err(|error| SessionError::Protocol(error.to_string()))?
@@ -338,7 +334,7 @@ impl RlmDialect for TypescriptDialect {
     /// authored example does that (they escape it as `\n`), and the walker
     /// parses every rendered example, so the day one does the check fails
     /// rather than the model reading a syntax error.
-    fn render_tool_example(&self, example: &str) -> String {
+    pub(crate) fn render_tool_example(&self, example: &str) -> String {
         example
             .lines()
             .map(|line| {
@@ -371,27 +367,18 @@ impl RlmDialect for TypescriptDialect {
             .join("\n")
     }
 
-    fn snapshot_engine_id(&self) -> &'static str {
-        LANGUAGE_ID
-    }
-
-    fn cell_tags(&self) -> CellTags {
+    pub(crate) fn cell_tags(&self) -> CellTags {
         CellTags {
             open: "<typescript>",
             close: "</typescript>",
         }
     }
 
-    fn create_session(&self) -> Result<Box<dyn RlmDialectSession>, SessionError> {
-        Ok(Box::new(DialectSession::new(
-            SourceDialect::Typescript,
-            LANGUAGE_ID,
-            self.surface.clone(),
-            self.services.clone(),
-        )))
+    pub(crate) fn create_session(&self) -> DialectSession {
+        DialectSession::new(self.surface.clone(), self.services.clone())
     }
 
-    fn render_execution_section(
+    pub(crate) fn render_execution_section(
         &self,
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
@@ -408,7 +395,7 @@ impl RlmDialect for TypescriptDialect {
         } else {
             "**Tools** or **Host Surface**"
         };
-        let response_shape = super::cell_response_shape(self.cell_tags(), self.prompt_vocabulary());
+        let response_shape = super::cell_response_shape(self.cell_tags());
         let environment = self
             .surface
             .host_environment(tool_catalog)
@@ -442,7 +429,7 @@ impl RlmDialect for TypescriptDialect {
         ))
     }
 
-    fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String {
+    pub(crate) fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String {
         match termination {
             lash_rlm_types::RlmTermination::FinishRequired { schema } => {
                 self.finish_required_finalization(schema.is_some())
@@ -453,7 +440,7 @@ impl RlmDialect for TypescriptDialect {
         }
     }
 
-    fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
+    pub(crate) fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
         match error {
             crate::protocol::CellExtractionError::UnclosedCell => {
                 "Model response started a `<typescript>` block but did not close it. Retry with one complete paired block. A line whose trimmed content is exactly `</typescript>` closes the cell.".to_string()
@@ -461,7 +448,7 @@ impl RlmDialect for TypescriptDialect {
         }
     }
 
-    fn finish_required_copy(&self, requires_schema: bool) -> String {
+    pub(crate) fn finish_required_copy(&self, requires_schema: bool) -> String {
         if requires_schema {
             "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
         } else {
@@ -469,17 +456,17 @@ impl RlmDialect for TypescriptDialect {
         }
     }
 
-    fn finish_schema_mismatch_copy(&self) -> String {
+    pub(crate) fn finish_schema_mismatch_copy(&self) -> String {
         "The `finish` value did not match the required output schema. Correct it and call `finish(value)` again.".to_string()
     }
 
-    fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
+    pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
         format!(
             "{error_text}\n\nReply again using exactly one paired `<typescript>...</typescript>` block."
         )
     }
 
-    fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
+    pub(crate) fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
         let cap = output_token_cap
             .map(|cap| format!(" The request cap was {cap} tokens."))
             .unwrap_or_default();
@@ -488,20 +475,65 @@ impl RlmDialect for TypescriptDialect {
         )
     }
 
-    fn code_stream_kind(&self) -> &'static str {
+    pub(crate) fn code_stream_kind(&self) -> &'static str {
         "typescript_code"
     }
 
-    fn execution_diagnostic_name(&self) -> &'static str {
+    pub(crate) fn execution_diagnostic_name(&self) -> &'static str {
         "execute_typescript"
     }
 
-    fn stream_cell_start_event_name(&self) -> &'static str {
+    pub(crate) fn stream_cell_start_event_name(&self) -> &'static str {
         "rlm_typescript_cell_start"
     }
 
-    fn stream_cell_end_event_name(&self) -> &'static str {
+    pub(crate) fn stream_cell_end_event_name(&self) -> &'static str {
         "rlm_typescript_cell_end"
+    }
+
+    pub(crate) fn render_history_cell(&self, prose: &str, code: &str) -> String {
+        crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
+    }
+
+    pub(crate) fn finish_required_finalization(&self, requires_schema: bool) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let mut text = format!(
+            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+            open = self.cell_tags().open,
+            close = self.cell_tags().close,
+            finish = vocabulary.finish_statement,
+            finish_null = vocabulary.finish_null_statement,
+        );
+        if requires_schema {
+            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
+        }
+        text
+    }
+
+    /// What to tell a model that opened a line with the cell tag in a position
+    /// the cell grammar refuses.
+    ///
+    /// The rule itself is the whole content, because the failure this replaces
+    /// was a reply that got no rule at all: a misplaced fence was read as prose,
+    /// the driver answered "please finish", and the model — correctly seeing
+    /// nothing wrong with its own code — re-sent it until the turn's budget died
+    /// (FIG-1475).
+    ///
+    /// It names the *canonical* shape only, and deliberately says nothing about
+    /// the one-line shape the scanner also reads. Every prompt fragment teaches
+    /// standalone tag lines; a correction that advertised a second accepted
+    /// shape would contradict them, and this copy exists to remove a
+    /// contradiction rather than add one. A reply already in the one-line shape
+    /// never reaches this copy — it executes.
+    pub(crate) fn malformed_cell_fence_retry_copy(&self) -> String {
+        let vocabulary = self.prompt_vocabulary();
+        let tags = self.cell_tags();
+        format!(
+            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line.",
+            noun = vocabulary.cell_noun,
+            open = tags.open,
+            close = tags.close,
+        )
     }
 }
 
@@ -516,20 +548,11 @@ mod tests {
     use lash_core::plugin::ToolCatalogContext;
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
-    /// Both shipped dialects, the way a session registers them.
-    fn test_dialect_registry() -> crate::dialect::RlmDialectRegistry {
-        crate::dialect::RlmDialectRegistry::new([
-            std::sync::Arc::new(crate::dialect::lashlang_test_dialect())
-                as std::sync::Arc<dyn crate::dialect::RlmDialect>,
-            std::sync::Arc::new(crate::dialect::typescript_test_dialect()),
-        ])
-    }
-
     #[test]
     fn identity_and_cell_tags_are_typescript() {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -540,7 +563,6 @@ mod tests {
             },
         );
         assert_eq!(dialect.language_id(), "typescript");
-        assert_eq!(dialect.snapshot_engine_id(), "typescript");
         assert_eq!(dialect.cell_tags().open, "<typescript>");
         assert_eq!(dialect.cell_tags().close, "</typescript>");
     }
@@ -588,7 +610,7 @@ mod tests {
                 language_features: Default::default(),
                 resources,
             },
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -650,7 +672,7 @@ mod tests {
     fn execution_section_renders_promise_tool_signatures_and_agent_contract() {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -701,7 +723,7 @@ mod tests {
                 abilities: lashlang::LashlangAbilities::all(),
                 ..LashlangSurface::default()
             },
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -741,7 +763,7 @@ mod tests {
                 abilities: lashlang::LashlangAbilities::all(),
                 ..LashlangSurface::default()
             },
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -803,7 +825,7 @@ mod tests {
     fn every_diagnostic_code_named_in_the_prompt_exists() {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
-            LashlangDialectServices {
+            RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                 deferred_tool_resolver: None,
@@ -984,7 +1006,7 @@ mod tests {
             .block_on(async {
                 let dialect = TypescriptDialect::new(
                     LashlangSurface::default(),
-                    LashlangDialectServices {
+                    RlmDialectServices {
                         projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
                         deferred_tool_resolver: None,
@@ -995,7 +1017,7 @@ mod tests {
                         channel: crate::plugin::RlmChannel::Cell,
                     },
                 );
-                let mut session = dialect.create_session().expect("typescript session");
+                let mut session = dialect.create_session();
                 let response = session
                     .execute(
                         lash_core::testing::code_execution_context(),
@@ -1074,7 +1096,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let dialects = test_dialect_registry();
+        let dialect = crate::dialect::typescript_test_dialect();
         let mut admitted = Vec::new();
         let mut refused = Vec::new();
         for (modules, operation) in &candidates {
@@ -1102,7 +1124,7 @@ mod tests {
                     subagent: None,
                     extensions: Default::default(),
                 },
-                &dialects,
+                &dialect,
             );
             match registration {
                 Ok(_) => admitted.push((tool, modules.clone(), operation.clone(), call_path)),

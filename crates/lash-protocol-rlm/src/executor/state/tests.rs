@@ -2,7 +2,7 @@
 //! restore.
 
 use super::*;
-use crate::dialect::{LashlangDialect, LashlangDialectServices, RlmDialect};
+use crate::dialect::{RlmDialectServices, TypescriptDialect};
 use lashlang::{
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
@@ -423,8 +423,10 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     assert_eq!(retained_bytes, 5_122_602);
     // Snapshot v19's separate empty trigger-resolution record adds 43 fixed
     // root bytes, and v20's pinned child attempt bound adds 20 more, without
-    // retaining any additional session payload.
-    assert_eq!(changed_bytes, 117_975);
+    // retaining any additional session payload. The single-language cutover
+    // added the last two: the checkpoint carries the engine id, and
+    // `typescript` is two bytes longer than the retired `lashlang`.
+    assert_eq!(changed_bytes, 117_977);
     assert_eq!(initial_leaves, 50);
     assert_eq!(changed_bodies, 1);
 }
@@ -1247,10 +1249,10 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
 }
 
 #[test]
-fn lashlang_dialect_pins_snapshot_engine_id() {
-    let dialect = LashlangDialect::new(
+fn the_dialect_pins_snapshot_engine_id() {
+    let dialect = TypescriptDialect::new(
         lash_lashlang_runtime::LashlangSurface::default(),
-        LashlangDialectServices {
+        RlmDialectServices {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
             deferred_tool_resolver: None,
@@ -1261,20 +1263,14 @@ fn lashlang_dialect_pins_snapshot_engine_id() {
         },
     );
 
-    assert_eq!(dialect.snapshot_engine_id(), "lashlang");
-
-    let mut session = dialect.create_session().expect("create Lashlang session");
+    let mut session = dialect.create_session();
     let snapshot = session
         .snapshot_execution_state()
-        .expect("snapshot Lashlang session");
-    let root: RlmSnapshotRoot = rmp_serde::from_slice(
-        snapshot
-            .root
-            .as_deref()
-            .expect("fresh Lashlang snapshot has a root"),
-    )
-    .expect("decode Lashlang snapshot root");
-    assert_eq!(root.engine, "lashlang");
+        .expect("snapshot the session");
+    let root: RlmSnapshotRoot =
+        rmp_serde::from_slice(snapshot.root.as_deref().expect("fresh snapshot has a root"))
+            .expect("decode snapshot root");
+    assert_eq!(root.engine, "typescript");
 }
 
 #[test]

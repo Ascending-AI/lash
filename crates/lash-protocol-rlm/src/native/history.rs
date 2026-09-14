@@ -1,3 +1,4 @@
+use crate::dialect::TypescriptDialect;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -8,12 +9,11 @@ use lash_core::{
 };
 use lash_rlm_types::RlmAttachmentRef;
 
-use crate::dialect::RlmDialect;
 use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) images: bool,
-    pub(super) dialect: &'a dyn RlmDialect,
+    pub(super) dialect: &'a TypescriptDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
     pub(super) turn_causes: &'a [lash_core::TurnCause],
@@ -613,17 +613,10 @@ mod finalization_contract {
     use super::*;
     #[test]
     fn every_native_round_has_one_finalization_policy() {
-        for typescript in [false, true] {
+        {
             let surface = lash_lashlang_runtime::LashlangSurface::default();
-            let dialect: Box<dyn RlmDialect> = if typescript {
-                Box::new(crate::dialect::typescript::TypescriptDialect::prompt_only(
-                    surface,
-                ))
-            } else {
-                Box::new(crate::dialect::lashlang::LashlangDialect::prompt_only(
-                    surface,
-                ))
-            };
+            let dialect: Box<TypescriptDialect> =
+                Box::new(crate::dialect::TypescriptDialect::prompt_only(surface));
             for protocol_iteration in [1, 2, 8] {
                 let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
                     images: false,
@@ -642,11 +635,7 @@ mod finalization_contract {
                 let text = format!("{messages:?}");
                 assert_eq!(text.matches("=== FINALIZATION ===").count(), 1);
                 assert_eq!(text.matches("finish-policy").count(), 1);
-                assert!(text.contains(if typescript {
-                    "HistoryItem[]"
-                } else {
-                    "list[HistoryItem]"
-                }));
+                assert!(text.contains("HistoryItem[]"));
             }
         }
     }

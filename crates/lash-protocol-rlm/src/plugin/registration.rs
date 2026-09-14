@@ -7,7 +7,7 @@ use super::protocol_driver::RlmProtocolDriver;
 use super::protocol_session::RlmProtocolSession;
 use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
-use crate::dialect::{RlmDialect, RlmDialectRegistry};
+use crate::dialect::TypescriptDialect;
 use crate::driver::SharedPromptUsage;
 use crate::stream_mask;
 use lash_core::plugin::{PluginError, PluginRegistrar};
@@ -16,18 +16,16 @@ use lash_core::plugin::{PluginError, PluginRegistrar};
 pub(super) fn register_rlm_protocol_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
-    dialect_registry: RlmDialectRegistry,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
     last_prompt_usage: SharedPromptUsage,
 ) -> Result<(), PluginError> {
-    // The catalog contribution carries the whole registry, not just the active
-    // dialect: model-facing tool prose is authored once and served to every
-    // dialect, so the neutrality guard has to know all of their words.
-    let catalog_dialects = dialect_registry.clone();
+    // The catalog contribution carries the dialect so the neutrality guard
+    // knows the words model-facing tool prose may not spell literally.
+    let catalog_dialect = Arc::clone(&dialect);
     let discovery = config.discovery.clone();
     let discovery_dialect = Arc::clone(&dialect);
     let runtime_state = Arc::new(
-        RlmRuntimeState::new(dialect_registry, Arc::clone(&dialect))
+        RlmRuntimeState::new(Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
     );
     let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
@@ -57,7 +55,7 @@ pub(super) fn register_rlm_protocol_plugin(
             discovery.as_ref(),
             discovery_dialect.as_ref(),
         )?;
-        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialects)
+        crate::tool_catalog::rlm_tool_catalog(ctx, &catalog_dialect)
     }));
     reg.tool_calls().before(Arc::new(|ctx| {
         Box::pin(async move { normalize_projected_tool_args(ctx) })

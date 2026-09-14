@@ -9,13 +9,13 @@ use lash_core::llm::types::{LlmContentBlock, LlmMessage};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
-    LlmRequest, ProjectorContext, PromptContribution, PromptUsage, ProtocolBuildInput,
-    TurnDriverConfig, TurnDriverPreamble,
+    LlmRequest, ProjectorContext, PromptUsage, ProtocolBuildInput, TurnDriverConfig,
+    TurnDriverPreamble,
 };
 use lash_lashlang_runtime::LashlangSurface;
 use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 
-use crate::dialect::{LashlangDialect, RlmDialect};
+use crate::dialect::TypescriptDialect;
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
@@ -70,8 +70,8 @@ pub fn build_rlm_preamble(
     let bound_variables_prompt = Arc::new(RwLock::new(crate::rlm_support::render_bound_variables(
         &mut cache,
         &[],
-        // This preamble path constructs a prompt-only Lashlang dialect below.
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+        // This preamble path constructs a prompt-only TypeScript dialect below.
+        crate::dialect::DialectPromptVocabulary::default(),
     )));
     build_rlm_preamble_with_bound_variables(input, config, bound_variables_prompt)
 }
@@ -81,7 +81,7 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
     config: RlmProjectorConfig,
     bound_variables_prompt: SharedBoundVariablesPrompt,
 ) -> TurnDriverPreamble {
-    let dialect: Arc<dyn RlmDialect> = Arc::new(LashlangDialect::prompt_only(
+    let dialect: Arc<TypescriptDialect> = Arc::new(TypescriptDialect::prompt_only(
         config.lashlang_surface.clone(),
     ));
     build_rlm_preamble_with_dialect(
@@ -102,7 +102,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
     bound_variables_prompt: SharedBoundVariablesPrompt,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
     let tool_names = tool_catalog.tool_names();
@@ -116,19 +116,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_catalog
     };
 
-    let tool_docs = crate::tool_catalog::rlm_prompt_tool_docs(
-        tool_catalog,
-        dialect.as_ref(),
-        config.prompt_features,
-    );
-    if !dialect.renders_tool_catalogue_inline() && !tool_docs.trim().is_empty() {
-        prompt_contributions.push(PromptContribution::execution(
-            "Tools",
-            format!(
-                "Call the operations below with their declared argument records.\n\n{tool_docs}"
-            ),
-        ));
-    }
     prompt_contributions.extend(input.extra_prompt_contributions);
     let execution = dialect
         .render_execution_section(config.prompt_features, tool_catalog)
@@ -213,12 +200,9 @@ mod catalogue_tests {
         );
 
         assert_eq!(preamble.tool_names.as_ref(), &vec!["search_tools", "grep"]);
-        let prompt = preamble
-            .prompt_contributions
-            .iter()
-            .map(|contribution| contribution.content.as_ref())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // The TypeScript dialect renders the tool catalogue inline in the
+        // execution section rather than as a separate prompt contribution.
+        let prompt = preamble.execution_prompt.as_ref();
         assert!(prompt.contains("tools.search"));
         assert!(prompt.contains("files.grep"));
         assert!(!prompt.contains("search_tools("));
@@ -248,7 +232,7 @@ mod catalogue_tests {
 
         assert!(!preamble.execution_prompt.contains("process name"));
         assert!(!preamble.execution_prompt.contains("sleep for"));
-        assert!(preamble.execution_prompt.contains("- Tools:"));
+        assert!(preamble.execution_prompt.contains("### Tools"));
     }
 
     #[test]
@@ -266,13 +250,13 @@ mod catalogue_tests {
             schema: Some(serde_json::json!({ "type": "object" })),
         });
 
-        assert!(prompt.contains("finish <value>"));
+        assert!(prompt.contains("finish(value)"));
         assert!(prompt.contains("REQUIRED OUTPUT"));
         assert!(prompt.contains(
-            "Every response, including the last, acts inside a paired `<lashlang>...</lashlang>` block"
+            "Every response, including the last, acts inside a paired `<typescript>...</typescript>` block"
         ));
-        assert!(prompt.contains("Do not call `finish <value>` until the answer is in hand"));
-        assert!(prompt.contains("the final response's block calls `finish <value>`"));
+        assert!(prompt.contains("Do not call `finish(value)` until the answer is in hand"));
+        assert!(prompt.contains("the final response's block calls `finish(value)`"));
         assert!(prompt.contains("prose alone never ends this turn"));
         assert!(prompt.contains("Never announce an action without the block that performs it"));
     }
@@ -283,7 +267,7 @@ mod catalogue_tests {
 
         assert!(prompt.contains("Natural termination:"));
         assert!(prompt.contains("prose alone ends this turn as the final answer"));
-        assert!(prompt.contains("finish <value>"));
+        assert!(prompt.contains("finish(value)"));
         assert!(prompt.contains("write prose only when no work remains"));
         assert!(prompt.contains("otherwise perform the next step in a block"));
         assert!(prompt.contains("inside the program to return a computed value"));
@@ -296,7 +280,7 @@ struct RlmContextProjector {
     max_budget_tokens: Option<usize>,
     last_prompt_usage: SharedPromptUsage,
     bound_variables_prompt: SharedBoundVariablesPrompt,
-    dialect: Arc<dyn RlmDialect>,
+    dialect: Arc<TypescriptDialect>,
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
@@ -471,7 +455,7 @@ fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
-    LashlangDialect::prompt_only(LashlangSurface::default()).finalization_copy(termination)
+    TypescriptDialect::prompt_only(LashlangSurface::default()).finalization_copy(termination)
 }
 
 impl RlmContextProjector {
@@ -511,7 +495,7 @@ impl RlmContextProjector {
 pub(crate) fn render_conformance_history_message(
     message: lash_core::Message,
 ) -> Result<LlmMessage, String> {
-    let dialect = LashlangDialect::prompt_only(LashlangSurface::default());
+    let dialect = TypescriptDialect::prompt_only(LashlangSurface::default());
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
     )];

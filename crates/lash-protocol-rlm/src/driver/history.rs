@@ -3,8 +3,8 @@
 //!
 //! Contract:
 //! - **History == emission.** A prior executed step renders as an `Assistant`
-//!   message holding the canonical cell `{prose}\n<lashlang>\n{code}\n</lashlang>`
-//!   (`render_lashlang_cell_text`), followed by a `User` message holding that
+//!   message holding the canonical cell `{prose}\n<typescript>\n{code}\n</typescript>`
+//!   (`render_cell_text_for_tests`), followed by a `User` message holding that
 //!   step's printed output, images, error, and final value. A plain user turn
 //!   renders its content verbatim as a `User` message. There is no
 //!   `--- history[N] ---` meta-format: what the model sees as history is exactly
@@ -51,6 +51,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::dialect::TypescriptDialect;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -62,12 +63,11 @@ use lash_core::{
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 use lashlang::{Value as FlowValue, ValueProjectionContext};
 
-use crate::dialect::RlmDialect;
 use crate::projection::{decode_rlm_protocol_event, json_to_flow_value, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) images: bool,
-    pub(super) dialect: &'a dyn RlmDialect,
+    pub(super) dialect: &'a TypescriptDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
     pub(super) turn_messages: &'a lash_core::facade_support::MessageSequence,
     pub(super) turn_causes: &'a [lash_core::TurnCause],

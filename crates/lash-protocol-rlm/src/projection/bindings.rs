@@ -402,7 +402,7 @@ mod tests {
             .expect("bind task payload");
         let contribution = RlmProjectionExtension::prompt_contributions_for(
             &bindings,
-            crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            crate::dialect::DialectPromptVocabulary::default(),
         )
         .pop()
         .expect("prompt contribution");

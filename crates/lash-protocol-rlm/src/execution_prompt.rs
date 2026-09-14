@@ -1,11 +1,11 @@
-use crate::dialect::RlmDialect;
+use crate::dialect::TypescriptDialect;
 use std::sync::Arc;
 
 /// Give the assembled RLM execution section its dialect identity. The shared
 /// template owns the generic heading. If transport is its first subsection,
 /// collapse both headings so those instructions become the direct body.
 /// Other template sections and host-provided execution headings stay intact.
-pub(crate) fn render_system_prompt(prompt: &str, dialect: &dyn RlmDialect) -> Option<Arc<str>> {
+pub(crate) fn render_system_prompt(prompt: &str, dialect: &TypescriptDialect) -> Option<Arc<str>> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return None;
