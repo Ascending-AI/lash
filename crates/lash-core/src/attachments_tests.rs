@@ -3,11 +3,11 @@
 //! The attachment layer moved to `lash-core-store`; these cases drive it
 //! through `lash-core`'s in-memory session-store factory, so they live here.
 
-use crate::{SessionId, TurnId};
+use crate::SessionId;
 use lash_core_store::attachments::*;
 use lash_sansio::sync::MutexExt;
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 fn attachment_uri(attachment_id: &AttachmentId) -> String {
@@ -18,10 +18,7 @@ fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 
-use crate::store::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentWriteFence, AttachmentWritePermit, StoreError,
-};
+use crate::store::{AttachmentIntent, AttachmentManifest, AttachmentWriteFence};
 use lash_sansio::{AttachmentTypeMetadata, MediaType};
 
 #[derive(Default)]

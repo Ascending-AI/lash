@@ -61,8 +61,6 @@ pub mod session_model;
 #[cfg(feature = "testing")]
 pub mod stable_hash {
     pub use lash_core_ids::stable_hash::sha256_hex;
-    #[cfg(test)]
-    pub(crate) use lash_core_ids::stable_hash::stable_json_sha256_hex;
     pub(crate) use lash_core_ids::stable_hash::{blake3_hex, stable_json_string};
 }
 #[cfg(not(feature = "testing"))]
@@ -682,9 +680,7 @@ pub use triggers::{
     TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
 };
 
-pub(crate) mod facade_ops {
-    use super::ProtocolTurnOptions;
-}
+pub(crate) mod facade_ops {}
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 /// Durable protocol-driver state owned by protocol-engine implementors.
 ///
@@ -931,7 +927,6 @@ pub(crate) use session::RuntimeExecutionProcessEventContext;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
-pub(crate) use session_graph::SessionMessageTreeNode;
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,

@@ -457,7 +457,7 @@ pub struct SessionMessageTreeNode {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ActiveReadReplacement {
+pub struct ActiveReadReplacement {
     pub(crate) leaf_node_id: Option<NodeId>,
     pub(crate) new_tail_nodes: Vec<SessionNodeRecord>,
 }

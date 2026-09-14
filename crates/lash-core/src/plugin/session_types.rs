@@ -1,4 +1,3 @@
-pub use lash_core_store::session_identity::facade_ops;
 pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObserverIntent,
@@ -7,14 +6,12 @@ pub use lash_core_store::session_identity::{
 };
 
 use crate::SessionId;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::SessionAppendNode;
-use crate::facade_support::SessionGraphFacadeOps;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionHandle {

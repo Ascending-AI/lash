@@ -31,7 +31,6 @@ mod runtime_error_tests;
 pub mod session_execution_lease;
 pub mod session_graph;
 pub(crate) mod session_graph_integrity;
-pub mod session_graph_legacy_response;
 pub mod session_identity;
 pub mod session_policy;
 mod session_policy_serde;
@@ -159,6 +158,7 @@ pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
 pub(crate) mod facade_support {
     pub(crate) use crate::session_graph::facade_ops::SessionGraphFacadeOps;
 
+    #[allow(unused_imports)]
     pub(crate) use crate::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub(crate) use crate::tool_state::facade_ops::ToolStateFacadeOps;
     pub(crate) use lash_sansio::visible_response_text_from_parts;
@@ -182,6 +182,7 @@ pub(crate) mod runtime {
         PromptUsage, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,
     };
 
+    #[allow(unused_imports)]
     pub(crate) use crate::turn_input_vocabulary::ingress_message_id;
 
     pub(crate) mod turn_input_ingress {
@@ -206,35 +207,55 @@ pub(crate) use session_policy::ApplyConfigPatch;
 pub(crate) use store::OrphanedTurnInputScope;
 pub(crate) use store::work_claim::WorkCompletion;
 
+#[allow(unused_imports)]
 pub(crate) use attachments::AttachmentGcFence;
+#[allow(unused_imports)]
 pub(crate) use lash_core_ids::test_watchdog;
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::attachment::MediaType;
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::llm::capability::{ModelCapability, ReasoningRetentionPolicy};
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::llm::capability::{
     OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionSelection,
 };
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::llm::types::LlmResponse;
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::tool_contract::ToolContract;
+#[allow(unused_imports)]
 pub(crate) use lash_sansio::tool_output::AttachmentMaterializationReason;
+#[allow(unused_imports)]
 pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
 };
+#[allow(unused_imports)]
 pub(crate) use queued_work_vocabulary::QueuedWorkCompletionData;
+#[allow(unused_imports)]
 pub(crate) use queued_work_vocabulary::TurnWorkPayload;
+#[allow(unused_imports)]
 pub(crate) use session_graph::{
     SESSION_NODE_BODY_SCHEMA_VERSION, SharedJsonValue, build_active_read_projection,
     build_active_read_replacement, frame_node_id,
 };
+#[allow(unused_imports)]
 pub(crate) use session_graph_integrity::graph_node_indices;
+#[allow(unused_imports)]
 pub(crate) use store::attachment_manifest::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
     AttachmentWriteFence, AttachmentWritePermit,
 };
+#[allow(unused_imports)]
 pub(crate) use store::commit_budget::{CommitBudget, CommitBudgetLimit};
+#[allow(unused_imports)]
 pub(crate) use store::runtime_commit::{RuntimeCommit, RuntimeTurnCommitStamp};
+#[allow(unused_imports)]
 pub(crate) use store::{SessionAdmission, SessionBinding};
+#[allow(unused_imports)]
 pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
+#[allow(unused_imports)]
 pub(crate) use turn_input_vocabulary::{TurnInputClaimMode, ingress_message_id};
+#[allow(unused_imports)]
 pub(crate) use turn_input_vocabulary::{TurnInputCompletionData, TurnInputSettlementClaim};
 
 pub(crate) use turn_input_vocabulary::TurnActivityId;

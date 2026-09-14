@@ -1,13 +1,10 @@
-use crate::SessionId;
 pub use lash_core_store::process_identity::*;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{
-    ProcessId, ProcessIncarnation, ProcessObserverBy, ProcessRef, ProcessStatus, RecoveryContract,
-};
+use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {

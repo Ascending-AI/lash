@@ -2,7 +2,6 @@
 //! checkpoint components, and their resident bodies.
 
 use super::*;
-use lash_sansio::sync::MutexExt;
 
 #[test]
 fn commit_operation_identity_depends_on_caller_boundary_not_head_revision() {

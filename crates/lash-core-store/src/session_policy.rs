@@ -1,7 +1,6 @@
 //! Durable and host-reconciled session policy.
 
 use crate::{ChargeSafetyPolicy, ModelSpec, NoProgressBudget, SessionId, TurnBudget};
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionPolicy {

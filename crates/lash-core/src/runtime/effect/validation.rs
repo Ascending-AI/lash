@@ -9,7 +9,7 @@ use lash_trace::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
+use super::RuntimeEffectEnvelope;
 
 /// Matches the whole-body bound used by extended provider-request tracing.
 /// Values over this bound are omitted whole rather than prefix-truncated.

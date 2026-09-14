@@ -8,7 +8,6 @@ use crate::{
     CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCancelOriginHint,
     TurnCause, TurnId,
 };
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;

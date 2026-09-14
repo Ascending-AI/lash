@@ -3,8 +3,9 @@ pub use lash_core_store::plugin_state::{PluginNamespaceState, PluginState};
 
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+#[allow(unused_imports)]
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

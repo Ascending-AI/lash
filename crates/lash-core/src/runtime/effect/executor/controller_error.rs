@@ -6,6 +6,7 @@
 pub use lash_core_store::runtime_error::RuntimeEffectControllerError;
 
 use crate::PluginError;
+#[allow(unused_imports)]
 use crate::runtime::{RuntimeError, RuntimeErrorCode};
 
 impl From<PluginError> for RuntimeEffectControllerError {

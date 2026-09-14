@@ -4,7 +4,6 @@ use crate::plugin::PluginError;
 pub use lash_core_store::process_identity::*;
 
 use super::engine::PersistedSegmentHandover;
-use super::events::ProcessWakeDelivery;
 use super::model::{ProcessArtifactCleanupAck, ProcessChangeCursor, ProcessRecord};
 pub use super::registry_concerns::{
     ProcessClockRebind, ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry,

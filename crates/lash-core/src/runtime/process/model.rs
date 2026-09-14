@@ -9,9 +9,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::definition_ref::{ProcessDefinitionRef, ProcessDefinitionValue, ProcessEngineKind};
-use super::events::{
-    ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, default_process_event_types,
-};
+use super::events::{ProcessAwaitOutput, ProcessEventType, default_process_event_types};
 use super::op_scope::ProcessOpScope;
 use super::validation::prepare_process_registration;
 

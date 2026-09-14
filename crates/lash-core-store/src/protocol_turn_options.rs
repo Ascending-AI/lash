@@ -1,7 +1,5 @@
 //! Durable protocol turn options carried on the session head.
 
-use serde::Deserialize;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProtocolTurnOptions {
     pub payload: serde_json::Value,

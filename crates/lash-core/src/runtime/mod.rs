@@ -327,11 +327,11 @@ pub use process_worker::{
     trigger_delivery_reconcile_scope,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
+pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection,
 };
-pub(crate) use queued_drain_policy::{exact_selection_drain_policy, shared_drain_mode_policy};
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
@@ -421,10 +421,6 @@ impl RuntimeTurnPhaseProbeSlot {
                 .cloned()
         })
     }
-}
-
-pub(crate) mod facade_ops {
-    use super::*;
 }
 
 #[derive(Clone)]

@@ -20,12 +20,6 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
-use super::identity_types::{
-    RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,
-    process_transfer_set_identity,
-};
-#[cfg(test)]
-use lash_core_store::effect_identity::process_transfer_set_preimage;
 
 /// Effect-specific header whose address is present by construction.
 ///

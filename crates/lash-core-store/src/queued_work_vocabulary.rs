@@ -7,7 +7,6 @@
 use crate::{
     PluginMessage, ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
