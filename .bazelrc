@@ -47,7 +47,11 @@ common --experimental_repository_downloader_retries=5
 build:shared --remote_default_exec_properties=cpu_count=4
 build:shared --remote_default_exec_properties=memory_kb=4194304
 build:shared --remote_local_fallback=false
-build:shared --remote_upload_local_results=true
+# Only pool workers publish action results. A spawn that still runs locally
+# (no-remote-exec targets, service gates) is never uploaded, and the pool's
+# client listener refuses the write anyway, so a local machine cannot seed a
+# result that CI would trust.
+build:shared --remote_upload_local_results=false
 test:shared --test_output=errors
 test --cache_test_results=yes
 
