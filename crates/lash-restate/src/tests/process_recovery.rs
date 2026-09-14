@@ -2137,13 +2137,16 @@ pub(super) async fn ingress_sweep_resubmits_a_stale_reference_and_defers_the_cur
 /// FIG-2964: a host crash between registration and submission leaves exactly
 /// the row the sweep is meant to own, and the sweep starts it exactly once.
 ///
-/// Two neighbours prove the rule is a resubmission rule and not a "start every
-/// nonterminal row" rule: a row carrying a standing cancel request is leaving,
-/// not starting, and the sweep neither submits it nor writes its terminal — the
-/// workflow's own journaled step is the only writer of a terminal.
+/// A row carrying a standing cancel request is submitted too. Only a
+/// `StartFailed` request is terminal on the spot; every other origin is
+/// recorded and waits for a run to honour it, and the sweep never writes a
+/// terminal of its own. Withholding the submission would therefore leave the
+/// row permanently non-terminal — `await_process_terminal` would never return
+/// and retention would never reclaim it. The run settles it instead
+/// (`fig779_suspended_process_redrive_observes_durable_cancellation` pins that
+/// a redriven segment observes its durable cancellation and terminalises).
 #[tokio::test]
-pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_leaves_the_cancelling_row_alone()
-{
+pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_cancelling_row() {
     let registry = process_registry();
     registry
         .register_process(rerunnable_registration("crashed-before-submit"))
@@ -2152,7 +2155,7 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_leaves_the_can
     let cancelling = registry
         .register_process(rerunnable_registration("cancel-requested"))
         .await
-        .expect("register the row that is on its way out");
+        .expect("register the row that carries a standing cancel request");
     registry
         .request_process_cancel(
             &lash_core::ProcessRef::from_record(&cancelling),
@@ -2163,63 +2166,91 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_leaves_the_can
         .await
         .expect("record the standing cancel request");
 
-    // One response, one accepted connection: a second submit would have nothing
-    // to talk to, so the server shape is part of the "exactly once" proof.
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_crashed","status":"Accepted"}"#,
-    }])
+    // Two responses, two accepted connections: a third submit would have
+    // nothing to talk to, so the server shape is part of the "exactly once per
+    // row" proof.
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![
+        MockHttpResponse {
+            status: "202 Accepted",
+            body: r#"{"invocationId":"inv_crashed","status":"Accepted"}"#,
+        },
+        MockHttpResponse {
+            status: "202 Accepted",
+            body: r#"{"invocationId":"inv_cancelling","status":"Accepted"}"#,
+        },
+    ])
     .await;
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
     let report = runner
         .admit_pending_processes("test")
         .await
-        .expect("sweep starts the crashed row");
+        .expect("sweep starts both rows");
     server.await.expect("mock ingress server task");
 
     let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
-        1,
-        "exactly one child is started for the crashed row: {requests:?}"
+        2,
+        "each row is started exactly once: {requests:?}"
+    );
+    let mut submitted = requests
+        .iter()
+        .filter_map(|request| {
+            request
+                .strip_prefix("POST /LashProcessWorkflow/")
+                .and_then(|rest| rest.split("/run/send").next())
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    submitted.sort();
+    assert_eq!(
+        submitted,
+        vec![
+            "cancel-requested".to_string(),
+            "crashed-before-submit".to_string()
+        ],
+        "both rows reach the ingress, keyed by their own segment: {requests:?}"
+    );
+    let mut admitted = report
+        .admitted
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    admitted.sort();
+    assert_eq!(
+        admitted,
+        vec![
+            "cancel-requested".to_string(),
+            "crashed-before-submit".to_string()
+        ]
     );
     assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/crashed-before-submit/run/send "),
-        "the crashed row is the one submitted: {}",
-        requests[0]
-    );
-    assert_eq!(
-        report.admitted,
-        vec![ProcessId::from("crashed-before-submit")]
-    );
-    assert_eq!(
-        report
-            .deferred
-            .iter()
-            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
-            .collect::<Vec<_>>(),
-        vec![(
-            "cancel-requested".to_string(),
-            ProcessRecoveryAttemptOutcome::Busy
-        )],
+        report.deferred.is_empty(),
+        "neither row is deferred: {:?}",
+        report.deferred
     );
 
-    // The cancelling row is untouched: no run was submitted for it, and the
-    // sweep wrote no terminal of its own.
-    let untouched = registry
+    // The cancel-requested row is now owned by Restate and still non-terminal:
+    // the sweep submitted it and wrote no terminal of its own. Its run honours
+    // the standing request.
+    let cancelling = registry
         .get_process(&ProcessId::from("cancel-requested"))
         .await
         .expect("read process")
         .expect("the cancelling row stands");
     assert!(
-        !untouched.is_terminal(),
+        !cancelling.is_terminal(),
         "the sweep must never terminalise a row it did not run, got {:?}",
-        untouched.status
+        cancelling.status
     );
-    assert!(
-        untouched.external_ref.is_none(),
-        "a row the sweep skipped must gain no backend owner"
+    assert_eq!(
+        cancelling
+            .external_ref
+            .as_ref()
+            .map(|external| external.id.as_str()),
+        Some("LashProcessWorkflow/cancel-requested"),
+        "the submitted row names the workflow that will settle it"
     );
-    assert!(untouched.cancel_request.is_some());
+    assert!(cancelling.cancel_request.is_some());
 }

@@ -2342,10 +2342,14 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             }));
             let output = match process_task.await {
                 Ok(Ok(output)) => output,
-                Ok(Err(error)) => return Err(ProcessWorkflowStartFailure::Rejected(error)),
+                // The task ran: whatever it reports, the run was accepted, so
+                // this is never proof of non-acceptance. `Rejected` here would
+                // contradict its own invariant inside the harness that proves
+                // compensation.
+                Ok(Err(error)) => return Err(ProcessWorkflowStartFailure::Ambiguous(error)),
                 Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
                 Err(error) => {
-                    return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
+                    return Err(ProcessWorkflowStartFailure::Ambiguous(TerminalError::new(
                         format!("test process workflow task failed: {error}"),
                     )));
                 }

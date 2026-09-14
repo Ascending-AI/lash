@@ -421,14 +421,14 @@ impl RestateProcessIngressRunner {
         if let Some(current) = current.as_ref().filter(|current| current.is_terminal()) {
             return Ok(IngressSubmitOutcome::SettledByPeer(current.status));
         }
-        // A standing cancel request means the row is on its way out, not into a
-        // run. It is not terminalised here — the sweep never writes a terminal
-        // for a row it did not run; the workflow's own journaled step does that.
-        if let Some(current) = current.as_ref()
-            && current.cancel_request.is_some()
-        {
-            return Ok(IngressSubmitOutcome::CancelRequested);
-        }
+        // A standing cancel request is not a reason to withhold the submission.
+        // Only a `StartFailed` request is terminal on the spot; every other
+        // origin is recorded and waits for the run to honour it. Since the
+        // sweep never writes a terminal of its own, skipping here would leave a
+        // cancel-requested row that was never submitted permanently
+        // non-terminal: `await_process_terminal` would never return and
+        // retention would never reclaim it. The row is submitted, and the
+        // workflow's own journaled cancellation step settles it.
         let latest_handover = self
             .continuations
             .latest_segment_handover(&process_id)
@@ -625,14 +625,11 @@ impl RestateProcessIngressRunner {
                             },
                         });
                     }
-                    // Neither row is this pass's to start, and neither is a
-                    // fault. `Busy` is the existing dialect's word for a row
-                    // another owner holds; this lane adds a resubmission rule,
-                    // not a new recovery outcome.
-                    Ok(
-                        IngressSubmitOutcome::AlreadySubmitted
-                        | IngressSubmitOutcome::CancelRequested,
-                    ) => {
+                    // Not this pass's row to start, and not a fault. `Busy`
+                    // is the existing dialect's word for a row another owner
+                    // holds; this lane adds a resubmission rule, not a new
+                    // recovery outcome.
+                    Ok(IngressSubmitOutcome::AlreadySubmitted) => {
                         report.deferred.push(ProcessAdmissionDeferred {
                             process_id,
                             disposition: ProcessRecoveryAttemptOutcome::Busy,
@@ -680,8 +677,6 @@ enum IngressSubmitOutcome {
     /// The row already carries an external reference for its current segment:
     /// a submission reached Restate and the workflow key coalesces onto it.
     AlreadySubmitted,
-    /// The row carries a standing cancel request; it is leaving, not starting.
-    CancelRequested,
 }
 
 impl RestateProcessIngressRunner {

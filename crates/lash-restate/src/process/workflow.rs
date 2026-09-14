@@ -690,7 +690,14 @@ where
                 // the ordinal, so a sweep that raced this handover and wrote the
                 // same successor first is an idempotent no-op rather than a
                 // conflict.
-                self.registry
+                // Log and continue: the successor send above is already
+                // journaled, so propagating a failure here would terminally
+                // fail a segment of a chain that is advancing. A missing later
+                // reference costs exactly one coalescing resubmission, which
+                // the ordinal-aware sweep now performs against the successor's
+                // own workflow key.
+                if let Err(error) = self
+                    .registry
                     .set_external_ref(
                         &process_id,
                         lash_core::ProcessExternalRef {
@@ -703,7 +710,14 @@ where
                         },
                     )
                     .await
-                    .map_err(handler_error_from_plugin)?;
+                {
+                    tracing::warn!(
+                        process_id = %process_id,
+                        segment_ordinal = next_segment_ordinal,
+                        error = %error,
+                        "segment handover could not record its successor's external reference; the recovery sweep will resubmit the successor's key"
+                    );
+                }
                 let record = self
                     .registry
                     .get_process(&process_id)

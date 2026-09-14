@@ -8,6 +8,10 @@ mod external_ref;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 mod lifecycle;
 mod parent_end;
+mod registration;
+pub use registration::{
+    registration_and_observers_are_atomic, registration_reports_created_then_existing,
+};
 #[doc(hidden)]
 pub mod status_filters;
 
@@ -1755,70 +1759,6 @@ pub async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) 
             .expect("read expired-completion process")
             .expect("expired-completion process exists")
             .is_terminal()
-    );
-}
-
-pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry>) {
-    let record = registry
-        .register_process_with_observers(
-            registration("observer-registration"),
-            &[SessionId::from("observer-a"), SessionId::from("observer-b")],
-        )
-        .await
-        .expect("register process with observers");
-    assert_eq!(record.status, ProcessStatus::Running);
-    assert_eq!(
-        registry
-            .observers_for_process(&record.id)
-            .await
-            .expect("read process observers"),
-        vec!["observer-a".to_string(), "observer-b".to_string()]
-    );
-    assert!(
-        registry
-            .is_observer(&SessionId::from("observer-a"), &record.id)
-            .await
-            .expect("check observer")
-    );
-
-    let replay = registry
-        .register_process_with_observers(
-            registration("observer-registration"),
-            &[SessionId::from("observer-b"), SessionId::from("observer-a")],
-        )
-        .await
-        .expect("replay registration");
-    assert_eq!(
-        record.registration_fingerprint,
-        replay.registration_fingerprint
-    );
-    assert!(
-        registry
-            .register_process_with_observers(
-                registration("observer-registration"),
-                &[SessionId::from("observer-a")],
-            )
-            .await
-            .is_err(),
-        "changing the atomic initial observer set must conflict"
-    );
-
-    registry
-        .register_process(
-            registration("wake-without-observer")
-                .with_wake_session_id(Some(SessionId::from("wake-only-session"))),
-        )
-        .await
-        .expect("register wake-only process");
-    assert!(
-        !registry
-            .is_observer(
-                &SessionId::from("wake-only-session"),
-                &ProcessId::from("wake-without-observer")
-            )
-            .await
-            .expect("wake target must not imply observer"),
-        "no observer edge may be minted from an embedded wake target"
     );
 }
 

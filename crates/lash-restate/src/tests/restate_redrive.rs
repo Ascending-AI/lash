@@ -1936,6 +1936,57 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
         .expect("completed durable timer replay should finish without panicking");
 }
 
+/// FIG-2964: a refused successor-reference write does not fail the segment.
+///
+/// The write happens after the successor send is journaled, so propagating its
+/// error would terminally fail a segment of a chain that is already advancing.
+/// The only cost of a missing later reference is one coalescing resubmission,
+/// which the ordinal-aware sweep performs against the successor's own workflow
+/// key.
+#[tokio::test]
+pub(super) async fn segment_handover_survives_a_refused_successor_reference_write() {
+    let process_id = "fig2964-handover-ref-write-refused";
+    let stores = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let (registry, continuations, boundary) = drive_to_live_segment_boundary_with_stores(
+        process_id,
+        Arc::clone(&stores) as Arc<dyn lash_core::ProcessRegistry>,
+        Arc::clone(&stores) as Arc<dyn lash_core::ProcessContinuationStore>,
+    )
+    .await;
+    stores
+        .fail_next_external_ref_write_for_testing(lash_core::PluginError::Session(
+            "injected external-ref write failure".to_string(),
+        ))
+        .await;
+
+    // The assertion inside `complete_handover` is the point: the segment still
+    // reports `SegmentChained`, so its invocation did not fail.
+    boundary.complete_handover(process_id).await;
+
+    let handover = continuations
+        .latest_segment_handover(&ProcessId::from(process_id))
+        .await
+        .expect("read handover")
+        .expect("the boundary persisted a handover");
+    assert_eq!(
+        handover.segment_ordinal, 1,
+        "the handover is durable whether or not its reference write landed"
+    );
+    let record = registry
+        .get_process(&ProcessId::from(process_id))
+        .await
+        .expect("read process")
+        .expect("the row stands");
+    assert_eq!(
+        record
+            .external_ref
+            .as_ref()
+            .and_then(|external| external.segment_ordinal),
+        Some(0),
+        "the refused write leaves the earlier reference standing; the sweep resubmits segment 1"
+    );
+}
+
 /// FIG-2964: the handover path writes the successor's external reference, so a
 /// live segment chain — not a hand-built fixture — is what produces a row whose
 /// recorded reference names an ordinal above zero.
@@ -1962,6 +2013,20 @@ pub(super) async fn drive_to_live_segment_boundary(
     LiveSegmentBoundary,
 ) {
     let (registry, continuations) = process_stores();
+    drive_to_live_segment_boundary_with_stores(process_id, registry, continuations).await
+}
+
+/// The same live boundary against caller-supplied stores, so a test can drive
+/// the handover against a registry that refuses a write.
+pub(super) async fn drive_to_live_segment_boundary_with_stores(
+    process_id: &str,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+) -> (
+    Arc<dyn lash_core::ProcessRegistry>,
+    Arc<dyn lash_core::ProcessContinuationStore>,
+    LiveSegmentBoundary,
+) {
     let registration = rerunnable_registration(process_id);
     registry
         .register_process(registration.clone())

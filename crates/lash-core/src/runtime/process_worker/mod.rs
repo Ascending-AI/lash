@@ -880,7 +880,7 @@ impl DurableProcessWorker {
                 biased;
                 () = self.execution_scheduler.shutdown.cancelled() => return,
                 _ = self.execution_scheduler.changed.notified() => false,
-                () = tokio::time::sleep(rescan), if idle => true,
+                () = self.config.runtime_host.clock.sleep(rescan), if idle => true,
             };
             if rescan_due {
                 let mut state = self.execution_scheduler.state.lock_recover();
