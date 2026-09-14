@@ -28,6 +28,10 @@ use crate::Diagnostic;
 mod editable_text;
 mod printer;
 
+pub use editable_text::{
+    TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
+    parse_typescript_process_statement,
+};
 use editable_text::{
     assign_target_text, expression_text, opaque_process_run_body, parse_assignment_target_field,
     parse_comprehension_clauses, parse_expression_field, parse_simple_binding_field,

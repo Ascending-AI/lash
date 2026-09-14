@@ -314,8 +314,14 @@ impl Printer {
                 let mut then_bound = bound.clone();
                 out.push_str(&self.block(then_block, level, &mut then_bound)?);
                 match else_block.as_ref() {
+                    // An absent `else` is the lowerer's unit value, and an
+                    // authored `else {}` is a block whose only element is that
+                    // unit completion. Neither carries a statement, and a graph
+                    // whose else branch holds no nodes renders as an empty
+                    // block too, so all three print alike: GetPut would break
+                    // if canonical text kept an else the graph cannot hold.
                     Expr::Undefined => {}
-                    Expr::Block(statements) if statements.is_empty() => {}
+                    other if statement_block_contents(other).is_empty() => {}
                     other => {
                         let mut else_bound = bound.clone();
                         out.push_str(" else ");

@@ -111,16 +111,6 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             ],
         ),
         entry(
-            "control.comprehension",
-            "List comprehension",
-            "container",
-            Some("comprehension"),
-            None,
-            None,
-            None,
-            vec![field("binding", "identifier", json!("items"))],
-        ),
-        entry(
             "stmt.assign",
             "Set variable",
             "state_update",
@@ -167,7 +157,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             vec![field(
                 "source",
                 "expression",
-                json!(r#"await display.show_message({ text: "raw" })?"#),
+                json!(r#"await display.show_message({ text: "raw" })"#),
             )],
         ),
         entry(
@@ -179,16 +169,6 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             Some("finish"),
             vec![field("expression", "expression", json!("0"))],
-        ),
-        entry(
-            "stmt.fail",
-            "Fail",
-            "terminal",
-            None,
-            None,
-            None,
-            Some("fail"),
-            vec![field("expression", "expression", json!(r#""error""#))],
         ),
     ]);
     entries

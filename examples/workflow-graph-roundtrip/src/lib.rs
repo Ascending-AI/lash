@@ -22,10 +22,11 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lashlang::{
-    GraphRenderError, WorkflowGraph, workflow_graph_from_source,
+use lash_typescript::workflow_graph::{
+    GraphRenderError, WorkflowGraphBuildError, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
+use lashlang::WorkflowGraph;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -42,31 +43,41 @@ pub use contract::{
 pub use runtime::RunTiming;
 
 /// Default deterministic workflow served as version 1.
-pub const DEFAULT_WORKFLOW: &str = r#"
-@label(title: "Onboarding lights", description: "A visible, deterministic workflow")
-process onboarding() signals { continue: any } {
-  @label(title: "Start onboarding", description: "Set the header state")
-  await display.set_status({ key: "phase", value: "starting" })?
-  sleep for "400ms"
-  await display.show_message({ text: "Welcome to the workflow graph" })?
-  await display.set_light({ name: "ready", state: "green" })?
-  sleep for "400ms"
-  if true {
-    await display.set_progress({ pct: 35 })?
-  } else {
-    await display.show_message({ text: "Alternate path" })?
+///
+/// TypeScript is the only cell language, so this corpus is TypeScript and the
+/// lens's canonical text is TypeScript (FIG-3033). The retired Lashlang corpus
+/// carried `@label(title:, description:)` on the process and on two steps;
+/// TypeScript has no label form yet (FIG-3047), so those two nodes now take
+/// their derived names. No title mechanism is invented here to replace them.
+pub const DEFAULT_WORKFLOW: &str = r#"const onboarding = defineProcess({
+  name: "onboarding",
+  signals: { continue: null },
+  run: async () => {
+    await display.set_status({ key: "phase", value: "starting" });
+    await sleep("400ms");
+    await display.show_message({ text: "Welcome to the workflow graph" });
+    await display.set_light({ name: "ready", state: "green" });
+    await sleep("400ms");
+    if (true) {
+      await display.set_progress({ pct: 35 });
+    } else {
+      await display.show_message({ text: "Alternate path" });
+    }
+    const approval = await waitSignal("continue");
+    await display.highlight({ target: "checklist" });
+    await display.add_item({ list: "steps", item: "Approved" });
+    let count = 0;
+    while (count < 2) {
+      await display.add_item({ list: "steps", item: "Loop item" });
+      count = count + 1;
+      await sleep("250ms");
+    }
+    await sleep("400ms");
+    await display.set_progress({ pct: 100 });
+    await display.set_light({ name: "complete", state: "blue" });
+    return approval;
   }
-  @label(title: "Wait for approval", description: "The host auto-fires this signal")
-  approval = wait_signal("continue")
-  await display.highlight({ target: "checklist" })?
-  await display.add_item({ list: "steps", item: "Approved" })?
-  count = 0
-  while count < 2 { await display.add_item({ list: "steps", item: "Loop item" })? count = count + 1 sleep for "250ms" }
-  sleep for "400ms"
-  await display.set_progress({ pct: 100 })?
-  await display.set_light({ name: "complete", state: "blue" })?
-  finish approval
-}
+});
 "#;
 
 #[derive(Clone)]
@@ -87,11 +98,11 @@ struct SavedWorkflow {
 }
 
 impl AppState {
-    pub fn new() -> Result<Self, lashlang::WorkflowGraphBuildError> {
+    pub fn new() -> Result<Self, WorkflowGraphBuildError> {
         Self::with_run_timing(RunTiming::default())
     }
 
-    pub fn with_run_timing(timing: RunTiming) -> Result<Self, lashlang::WorkflowGraphBuildError> {
+    pub fn with_run_timing(timing: RunTiming) -> Result<Self, WorkflowGraphBuildError> {
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let source = workflow_graph_to_source(&graph)
             .expect("the default workflow graph should render canonically");

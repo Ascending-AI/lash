@@ -123,6 +123,100 @@ pub(super) fn opaque_process_run_body(process: &lashlang::ProcessDecl) -> Option
     process_run_body_of(process)
 }
 
+/// Parse one editable TypeScript expression fragment with `globals` in scope.
+///
+/// This is the lens's public fragment door: hosts that let a person retype a
+/// node's expression parse the result through the dialect's own front-end, in
+/// expression position, rather than carrying a second grammar. The text is
+/// read inside parentheses so `{ count: 0 }` is an object literal and not a
+/// labelled block.
+pub fn parse_typescript_expression(
+    text: &str,
+    globals: &BTreeSet<String>,
+    processes: &BTreeSet<String>,
+) -> Result<Expr, TypeScriptFragmentError> {
+    let parenthesized = format!("(\n{text}\n)");
+    let program = crate::parse_workflow_fragment(&parenthesized, globals, processes)
+        .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
+    if !program.declarations.is_empty() {
+        return Err(TypeScriptFragmentError(
+            "expected one expression, found a declaration".to_string(),
+        ));
+    }
+    single_expression(program.main)
+        .ok_or_else(|| TypeScriptFragmentError("expected exactly one expression".to_string()))
+}
+
+/// Parse one editable TypeScript assignment target such as `total`,
+/// `state.count` or `rows[0]`, with `globals` in scope.
+pub fn parse_typescript_assign_target(
+    text: &str,
+    globals: &BTreeSet<String>,
+    processes: &BTreeSet<String>,
+) -> Result<AssignTarget, TypeScriptFragmentError> {
+    let root = text
+        .split(['.', '['])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let mut globals = globals.clone();
+    globals.insert(root);
+    let expression = parse_typescript_expression(text, &globals, processes)?;
+    assign_target_from_expression(&expression)
+        .ok_or_else(|| TypeScriptFragmentError("expected an assignment target".to_string()))
+}
+
+/// Parse one editable TypeScript statement that only a process body accepts,
+/// such as the `return` that ends a process.
+///
+/// The text is reparsed inside a generated `defineProcess` wrapper, with
+/// `globals` re-declared in the run body so an edited reassignment still
+/// parses, and the wrapper's single statement is returned. The wrapper name
+/// never reaches a graph.
+pub fn parse_typescript_process_statement(
+    text: &str,
+    globals: &BTreeSet<String>,
+    processes: &BTreeSet<String>,
+) -> Result<Expr, TypeScriptFragmentError> {
+    let prelude = globals
+        .iter()
+        .map(|name| format!("  let {name};\n"))
+        .collect::<String>();
+    let source = format!(
+        "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", signals: {{}}, run: async () => {{\n{prelude}{text}\n}} }});\n"
+    );
+    let program = crate::parse_workflow_fragment(&source, &BTreeSet::new(), processes)
+        .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
+    let Some(lashlang::Declaration::Process(process)) = program.declarations.into_iter().next()
+    else {
+        return Err(TypeScriptFragmentError(
+            "expected one process statement".to_string(),
+        ));
+    };
+    let Some(body) = opaque_process_run_body(&process) else {
+        return Err(TypeScriptFragmentError(
+            "expected one process statement".to_string(),
+        ));
+    };
+    let statements = super::printer::statement_block_contents(body)
+        .iter()
+        .skip(globals.len())
+        .cloned()
+        .collect::<Vec<_>>();
+    match statements.len() {
+        1 => Ok(statements.into_iter().next().expect("one statement")),
+        found => Err(TypeScriptFragmentError(format!(
+            "expected one statement, found {found}"
+        ))),
+    }
+}
+
+/// A rejected editable fragment, carrying the dialect's own message.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct TypeScriptFragmentError(String);
+
 pub(super) fn parse_expression_field(
     node: &WorkflowNode,
     field: &'static str,
@@ -179,33 +273,18 @@ pub(super) fn parse_assignment_target_field(
     field: &'static str,
     text: &str,
 ) -> Result<AssignTarget, GraphRenderError> {
-    let root = text
-        .split(['.', '['])
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    let mut globals = node
+    let globals = node
         .available_variables
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    globals.insert(root);
-    let program =
-        crate::parse_workflow_fragment(text, &globals, &BTreeSet::new()).map_err(|error| {
-            GraphRenderError::InvalidAssignmentTarget {
-                node_id: node.id.to_string(),
-                field,
-                message: error.to_string(),
-            }
-        })?;
-    let invalid = || GraphRenderError::InvalidAssignmentTarget {
-        node_id: node.id.to_string(),
-        field,
-        message: "expected an assignment target".to_string(),
-    };
-    let expression = single_expression(program.main).ok_or_else(invalid)?;
-    assign_target_from_expression(&expression).ok_or_else(invalid)
+    parse_typescript_assign_target(text, &globals, &BTreeSet::new()).map_err(|error| {
+        GraphRenderError::InvalidAssignmentTarget {
+            node_id: node.id.to_string(),
+            field,
+            message: error.to_string(),
+        }
+    })
 }
 
 fn assign_target_from_expression(expression: &Expr) -> Option<AssignTarget> {

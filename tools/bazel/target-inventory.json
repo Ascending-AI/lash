@@ -2047,6 +2047,7 @@
         "axum",
         "compact_str",
         "lash-internal-lashlang",
+        "lash-internal-typescript",
         "lash-runtime",
         "reqwest",
         "serde",

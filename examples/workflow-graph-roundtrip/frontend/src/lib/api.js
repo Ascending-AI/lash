@@ -83,12 +83,15 @@ export async function fetchOperations() {
 // `{ ok:false, error:{ code, message } }`. A missing endpoint (older backend)
 // or any transport failure resolves to `{ ok:true, unsupported:true }` so the
 // UI degrades to "no inline verdict" rather than showing false errors.
-export async function validateFragment(kind, text) {
+// `availableVars` is the scope the fragment is typed in: TypeScript rejects a
+// fragment that reads a name it cannot see, so the field sends the names the
+// node was projected with.
+export async function validateFragment(kind, text, availableVars = []) {
   try {
     const res = await fetch('/validate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ kind, text }),
+      body: JSON.stringify({ kind, text, availableVars }),
     });
     if (!res.ok) return { ok: true, unsupported: true };
     const body = await res.json();

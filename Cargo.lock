@@ -5904,6 +5904,7 @@ dependencies = [
  "axum",
  "compact_str 0.9.1",
  "lash-internal-lashlang",
+ "lash-internal-typescript",
  "lash-runtime",
  "reqwest 0.13.4",
  "serde",

@@ -17,11 +17,18 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         .post(format!("{base}/project"))
         .json(&serde_json::json!({
             "source": r#"
-                process typed(name: str) {
-                  result = await display.show_message({ text: name })?
-                  for item in "not a list" { seen = item }
-                  finish result
-                }
+                const typed = defineProcess({
+                  name: "typed",
+                  signals: {},
+                  run: async (name) => {
+                    let result = await display.show_message({ text: name });
+                    let shape = { ready: true };
+                    for (const item of [shape.missing]) {
+                      let seen = item;
+                    }
+                    return result;
+                  },
+                });
             "#
         }))
         .send()
@@ -58,9 +65,13 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
             .iter()
             .any(|variable| { variable.name == "result" && variable.variable_type == "null" })
     );
+    // FIG-3033: TypeScript's `for (const x of xs)` lowers through an iterable
+    // copy, so a non-list target is never statically flagged the way Lashlang's
+    // `for x in xs` was. The property kept here is the one the suite exists
+    // for: a type diagnostic lands on the node whose expression caused it.
     assert!(loop_node.data.diagnostics.iter().any(|diagnostic| {
-        diagnostic.kind == "incompatible_iteration_target"
-            && diagnostic.message.contains("expected a list")
+        diagnostic.kind == "unknown_object_field"
+            && diagnostic.message.contains("no field `missing`")
     }));
 
     let canonical_source = document.source.clone();
@@ -132,16 +143,31 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
             .iter()
             .any(|argument| { argument.slot == "arg[0].task" && argument.expected_type == "str" })
     );
-    assert!(summarize.data.available_vars.iter().any(|variable| {
-        variable.name == "email"
-            && variable.variable_type == "{ from: str, snippet: str, subject: str, unread: bool }"
-    }));
-    let format_digest = call_with_task(&emails, "Format these five summaries");
+    // FIG-3033: `for (const email of emails)` lowers through an iterable copy,
+    // so the loop binding itself projects as `any`; the mocked element type
+    // still reaches the call through the list it iterates.
     assert!(
-        format_digest.data.available_vars.iter().any(|variable| {
-            variable.name == "summaries" && variable.variable_type == "list[str]"
-        })
+        summarize
+            .data
+            .available_vars
+            .iter()
+            .any(|variable| variable.name == "email")
     );
+    assert!(summarize.data.available_vars.iter().any(|variable| {
+        variable.name == "emails"
+            && variable.variable_type
+                == "list[{ from: str, snippet: str, subject: str, unread: bool }]"
+    }));
+    // FIG-3033: TypeScript has no renderable list-accumulation form, so the
+    // corpus carries the mocked list straight into the digest call. The
+    // property under test is unchanged: a list-typed local reaches a later
+    // node with its element type intact.
+    let format_digest = call_with_task(&emails, "Format these five summaries");
+    assert!(format_digest.data.available_vars.iter().any(|variable| {
+        variable.name == "emails"
+            && variable.variable_type
+                == "list[{ from: str, snippet: str, subject: str, unread: bool }]"
+    }));
 
     let nvidia = select_workflow(&client, &base, "research-nvidia-stock").await;
     assert_clean_facets(&nvidia);
@@ -158,10 +184,18 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
         variable.name == "search"
             && variable.variable_type == "{ results: list[{ content: str, title: str, url: str }] }"
     }));
+    // FIG-3033: the declared `output:` type literal has no TypeScript spelling
+    // (`Expr::TypeLiteral` is unrepresentable), so the corpus cannot narrow a
+    // subagent result and the binding projects as `any`. Its visibility in the
+    // later node's scope -- what this assertion exists for -- is unchanged.
     let research_message = call_with_operation(&nvidia, "show_message");
-    assert!(research_message.data.available_vars.iter().any(|variable| {
-        variable.name == "research" && variable.variable_type == "{ summary: str, risks: str }"
-    }));
+    assert!(
+        research_message
+            .data
+            .available_vars
+            .iter()
+            .any(|variable| { variable.name == "research" && variable.variable_type == "any" })
+    );
     assert!(
         research_message
             .data
@@ -173,7 +207,9 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     let response = client
         .post(format!("{base}/project"))
         .json(&serde_json::json!({
-            "source": nvidia.source.replace("research.summary", "research.missing")
+            // The subagent result is untyped in TypeScript (see above), so the
+            // bad field is read off the typed web-search result instead.
+            "source": nvidia.source.replace("search.results", "search.missing")
         }))
         .send()
         .await
@@ -185,7 +221,7 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
         .expect("invalid typed field projection");
     let invalid: WorkflowDocument =
         serde_json::from_value(body["document"].clone()).expect("invalid typed document");
-    let invalid_message = call_with_operation(&invalid, "show_message");
+    let invalid_message = call_with_operation(&invalid, "spawn");
     assert!(invalid_message.data.diagnostics.iter().any(|diagnostic| {
         diagnostic.kind == "unknown_object_field" && diagnostic.message.contains("missing")
     }));
@@ -217,8 +253,8 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     }));
     let standup_message = call_with_operation(&standup, "show_message");
     assert!(standup_message.data.available_vars.iter().any(|variable| {
-        variable.name == "standup"
-            && variable.variable_type == "{ digest: str, blockers: list[str] }"
+        // FIG-3033: same `output:` type-literal gap as the research corpus.
+        variable.name == "standup" && variable.variable_type == "any"
     }));
 
     server.abort();
