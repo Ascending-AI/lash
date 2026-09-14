@@ -138,9 +138,9 @@ class BazelTestContractTests(unittest.TestCase):
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
         deferred_labels = set(generated_list("WORKSPACE_DEFERRED_TEST_TARGETS"))
 
-        self.assertEqual(122, len(all_labels))
+        self.assertEqual(123, len(all_labels))
         self.assertEqual(106, len(bazel_labels))
-        self.assertEqual(15, len(cargo_labels))
+        self.assertEqual(16, len(cargo_labels))
         self.assertEqual(1, len(deferred_labels))
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertFalse(bazel_labels & deferred_labels)
@@ -172,7 +172,7 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertEqual(
             {
-                "cargo-frontend-assets": 3,
+                "cargo-frontend-assets": 4,
                 "cargo-service-gate": 11,
                 "cargo-trybuild": 1,
             },
@@ -710,7 +710,7 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(186, len(clippy))
+        self.assertEqual(187, len(clippy))
         self.assertTrue(
             all(
                 target.get("clippy_exempt")

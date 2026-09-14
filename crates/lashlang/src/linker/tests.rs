@@ -7,6 +7,7 @@ mod catalog_tests;
 mod diagnostic_tests;
 mod identity_tests;
 mod module_link_tests;
+mod process_literal_tests;
 mod process_signature_tests;
 mod schema_witness_tests;
 mod trigger_tests;
@@ -79,6 +80,30 @@ fn resources() -> LashlangHostCatalog {
         .expect("host catalog operation must not conflict");
     crate::add_trigger_resource_operations(&mut catalog)
         .expect("trigger resource operations are unique");
+    // The FIG-2997 lift fixture: a leaf tool whose `program` slot is typed
+    // `Process` through the `x-lash` keyword (FIG-2993), the way real process
+    // controls declare a target. The lift is type-directed on exactly this
+    // contract shape.
+    catalog
+        .add_module_operation_contract(
+            ["crew"],
+            "Crew",
+            "run",
+            "crew.run",
+            &crate::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "program": { "x-lash": { "kind": "process_unknown" } },
+                        "inputs": { "type": "object" }
+                    },
+                    "required": ["program", "inputs"]
+                }),
+                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+            ),
+        )
+        .expect("process-slot fixture operation");
     catalog
         .add_trigger_source_constructor(
             ["timer", "Schedule"],
@@ -111,7 +136,6 @@ fn resources() -> LashlangHostCatalog {
 fn full_host_environment() -> LashlangHostEnvironment {
     LashlangHostEnvironment::new(resources(), LashlangAbilities::all())
 }
-
 /// `timer.Schedule({ expr: <expr> })` — the timer trigger source constructor.
 fn timer_schedule(expr: &str) -> Expr {
     builders::receiver_call(

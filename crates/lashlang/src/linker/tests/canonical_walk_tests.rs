@@ -158,43 +158,7 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
 }
 
 #[test]
-fn default_trigger_key_rejects_a_shadowed_comprehension_source() {
-    // process scan(tick: timer.Tick) { finish tick.fired_at }
-    // source = timer.Schedule({ expr: "0 8 * * *" })
-    // sources = [timer.Schedule({ expr: "0 9 * * *" })]
-    // registrations = [await triggers.register({
-    //   source: source,
-    //   target: scan,
-    //   inputs: { tick: trigger.event }
-    // })? for source in sources]
-    // finish registrations
-    let program = builders::module(
-        vec![scan_tick_process()],
-        vec![
-            builders::assign("source", timer_schedule("0 8 * * *")),
-            builders::assign("sources", builders::list(vec![timer_schedule("0 9 * * *")])),
-            builders::assign(
-                "registrations",
-                builders::comprehension(
-                    register_scan_trigger(builders::var("source")),
-                    vec![builders::comprehension_for(
-                        "source",
-                        builders::var("sources"),
-                    )],
-                ),
-            ),
-            builders::finish(builders::var("registrations")),
-        ],
-    );
-
-    assert!(matches!(
-        LinkedModule::link(program, full_host_environment()),
-        Err(LinkError::UnresolvedDerivedTriggerSubscriptionKey { .. })
-    ));
-}
-
-#[test]
-fn default_trigger_key_uses_the_pre_try_scope_in_the_catch_path() {
+fn trigger_registration_in_the_catch_path_lowers_from_its_own_scope() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // try { source = timer.Schedule({ expr: "0 9 * * *" }) }
@@ -204,8 +168,11 @@ fn default_trigger_key_uses_the_pre_try_scope_in_the_catch_path() {
     //   inputs: { tick: trigger.event }
     // })? }
     //
-    // The catch body must derive its key from the pre-try binding, so the
-    // shadowing assignment lives inside the try body.
+    // Subscriptions are runtime identity now (the host materializes a derived
+    // key from the descriptor the registration actually carries), so what the
+    // linker still owns is the shape: the catch body lowers with the scope its
+    // lowering scope had, and the record names no key for anyone to disagree
+    // with.
     let program = builders::module(
         vec![scan_tick_process()],
         vec![
@@ -221,29 +188,8 @@ fn default_trigger_key_uses_the_pre_try_scope_in_the_catch_path() {
         ],
     );
 
-    let linked = LinkedModule::link(program, full_host_environment())
-        .expect("catch path resolves source from its lowering scope");
-    let source = serde_json::json!({ "expr": "0 8 * * *" });
-    let source_key = semantic_trigger_source_key("timer.Schedule", &source);
-    let expected_key = semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key);
-    let mut actual_key = None;
-    struct KeyVisitor<'key>(&'key mut Option<String>);
-    impl crate::ExprVisitor for KeyVisitor<'_> {
-        fn visit_expr(&mut self, expr: &Expr) {
-            if let Expr::ReceiverCall {
-                operation, args, ..
-            } = expr
-                && operation.as_str() == crate::TriggerHostOperation::Register.receiver_method()
-                && let Ok(call) = crate::register_call_args(args)
-                && let Some(Expr::String(key)) = call.subscription_key
-            {
-                *self.0 = Some(key.to_string());
-            }
-            crate::walk_expr(self, expr);
-        }
-    }
-    crate::walk_expr(&mut KeyVisitor(&mut actual_key), &linked.program().main);
-    assert_eq!(actual_key.as_deref(), Some(expected_key.as_str()));
+    LinkedModule::link(program, full_host_environment())
+        .expect("catch path lowers the registration from its lowering scope");
 }
 
 fn registration_call(expr: &Expr) -> (&Expr, &[Expr]) {
@@ -266,17 +212,8 @@ fn registration_call(expr: &Expr) -> (&Expr, &[Expr]) {
     (receiver, args)
 }
 
-fn registration_key(expr: &Expr) -> &str {
-    let (_, args) = registration_call(expr);
-    let call = crate::register_call_args(args).expect("lowered registration remains valid");
-    let Some(Expr::String(key)) = call.subscription_key else {
-        panic!("lowered registration has no literal key")
-    };
-    key.as_str()
-}
-
 #[test]
-fn assignment_indexes_retain_lowering_and_their_own_trigger_keys_in_evaluation_order() {
+fn assignment_indexes_retain_lowering_and_their_own_registrations_in_evaluation_order() {
     // process scan(tick: timer.Tick) { finish tick.fired_at }
     // items[await triggers.register({
     //   source: timer.Schedule({ expr: "0 8 * * *" }), target: scan,
@@ -302,7 +239,7 @@ fn assignment_indexes_retain_lowering_and_their_own_trigger_keys_in_evaluation_o
         ],
     );
     let linked = LinkedModule::link(program, full_host_environment().with_globals(["items"]))
-        .expect("every registration keeps its own derived key");
+        .expect("every registration stays at its own site");
     let Expr::Block(main) = &linked.program().main else {
         unreachable!("parsed main is a block")
     };
@@ -315,29 +252,54 @@ fn assignment_indexes_retain_lowering_and_their_own_trigger_keys_in_evaluation_o
     let (index_receiver, _) = registration_call(index);
     assert!(matches!(index_receiver, Expr::ResourceRef(_)));
 
-    let expected = ["0 8 * * *", "0 9 * * *", "0 10 * * *"].map(|expr| {
-        let source_key =
-            semantic_trigger_source_key("timer.Schedule", &serde_json::json!({ "expr": expr }));
-        semantic_trigger_subscription_key("scan", "timer.Schedule", &source_key)
-    });
-    assert_eq!(registration_key(index), expected[0]);
-    assert_eq!(registration_key(rhs), expected[1]);
-    assert_eq!(registration_key(subsequent), expected[2]);
+    // Each registration keeps its own source descriptor, and no literal key is
+    // materialized by the linker: subscriptions are runtime identity, derived
+    // from the descriptor value the registration actually carries.
+    let sources = ["0 8 * * *", "0 9 * * *", "0 10 * * *"];
+    assert_eq!(registration_source_literal(index), sources[0]);
+    assert_eq!(registration_source_literal(rhs), sources[1]);
+    assert_eq!(registration_source_literal(subsequent), sources[2]);
 
-    struct OrderedKeys(Vec<String>);
-    impl crate::ExprVisitor for OrderedKeys {
+    struct Ordered(Vec<String>);
+    impl crate::ExprVisitor for Ordered {
         fn visit_expr(&mut self, expr: &Expr) {
             if let Expr::ReceiverCall { operation, .. } = expr
                 && operation.as_str() == crate::TriggerHostOperation::Register.receiver_method()
             {
-                self.0.push(registration_key(expr).to_string());
+                let (_, args) = registration_call(expr);
+                let call =
+                    crate::register_call_args(args).expect("lowered registration remains valid");
+                assert!(
+                    call.subscription_key.is_none(),
+                    "the linker must not materialize a subscription key"
+                );
+                self.0.push(registration_source_literal(expr).to_string());
             }
             crate::walk_expr(self, expr);
         }
     }
-    let mut ordered = OrderedKeys(Vec::new());
+    let mut ordered = Ordered(Vec::new());
     crate::walk_expr(&mut ordered, &linked.program().main);
-    assert_eq!(ordered.0, expected);
+    assert_eq!(ordered.0, sources);
+}
+
+/// The `expr` literal of a registration's `source` descriptor.
+fn registration_source_literal(expr: &Expr) -> &str {
+    let (_, args) = registration_call(expr);
+    let call = crate::register_call_args(args).expect("lowered registration remains valid");
+    let Expr::HostDescriptorConstructor { input, .. } = call.source else {
+        panic!("expected a static descriptor source")
+    };
+    let Expr::Record(fields) = &**input else {
+        panic!("expected a literal descriptor payload")
+    };
+    let Some(Expr::String(expr)) = fields
+        .iter()
+        .find_map(|(name, value)| (name.as_str() == "expr").then_some(value))
+    else {
+        panic!("expected an `expr` literal")
+    };
+    expr.as_str()
 }
 
 /// The statements of a block, or the one statement a non-block body is.

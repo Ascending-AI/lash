@@ -934,6 +934,7 @@ impl Compiler {
 
     pub(super) fn fold_compile_time_expr(&self, expr: &Expr) -> Option<Value> {
         match expr {
+            Expr::ProcessLiteral(_) => None,
             Expr::LabelAnnotated { expr, .. } => self.fold_compile_time_expr(expr),
             Expr::Null => Some(Value::Null),
             Expr::Undefined => Some(Value::Undefined),

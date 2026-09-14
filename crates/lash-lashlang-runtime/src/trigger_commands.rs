@@ -79,12 +79,20 @@ async fn prepare_trigger_draft(
             inputs: &request.inputs,
         })
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
-    let subscription_key =
-        materialized_trigger_subscription_key(request.subscription_key.as_deref())?;
     let source_key = lash_core::facade_support::default_trigger_source_key(
         &request.source.source_type,
         &request.source.value,
     );
+    // Explicit keys ride the call verbatim. A registration without one is a
+    // derived subscription: the compiler stopped materializing these into the
+    // linked record (FIG-2997), so the owner of the descriptor and the target
+    // derives the identity here, from what the registration actually carries.
+    let subscription_key = materialized_trigger_subscription_key(
+        request.subscription_key.as_deref(),
+        &request.target.process_name,
+        &request.source.source_type,
+        &source_key,
+    )?;
     let target = trigger_target_process_input(&request.target).map_err(|err| {
         ExecutionHostError::new(format!("failed to encode trigger target: {err}"))
     })?;
@@ -404,12 +412,18 @@ fn trigger_expected_revision(payload: &Value) -> Result<u64, ExecutionHostError>
 
 fn materialized_trigger_subscription_key(
     subscription_key: Option<&str>,
+    process_name: &str,
+    source_type: &str,
+    source_key: &str,
 ) -> Result<String, ExecutionHostError> {
-    subscription_key.map(ToOwned::to_owned).ok_or_else(|| {
-        ExecutionHostError::new(
-            "linked lashlang trigger registrations must carry a materialized `subscription_key`",
-        )
-    })
+    match subscription_key {
+        Some(key) => Ok(key.to_owned()),
+        None => Ok(lash_core::facade_support::derived_trigger_subscription_key(
+            process_name,
+            source_type,
+            source_key,
+        )),
+    }
 }
 
 fn trigger_target_process_input(
@@ -442,12 +456,22 @@ mod tests {
     use super::materialized_trigger_subscription_key;
 
     #[test]
-    fn trigger_registration_rejects_an_unmaterialized_subscription_key() {
-        let error =
-            materialized_trigger_subscription_key(None).expect_err("missing key must be rejected");
-        assert_eq!(
-            error.to_string(),
-            "linked lashlang trigger registrations must carry a materialized `subscription_key`"
-        );
+    fn trigger_registration_materializes_a_derived_subscription_key() {
+        let key =
+            materialized_trigger_subscription_key(None, "scan", "timer.Schedule", "source-key")
+                .expect("a registration without a key derives one at the boundary");
+        assert!(key.starts_with("derived/"), "{key}");
+    }
+
+    #[test]
+    fn trigger_registration_keeps_an_explicit_subscription_key_verbatim() {
+        let key = materialized_trigger_subscription_key(
+            Some("morning-scan"),
+            "scan",
+            "timer.Schedule",
+            "source-key",
+        )
+        .expect("explicit key is kept");
+        assert_eq!(key, "morning-scan");
     }
 }

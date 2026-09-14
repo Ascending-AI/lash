@@ -388,6 +388,11 @@ impl Compiler {
                     },
                 );
             }
+            // A literal lowers away in the linker, so compilation never sees
+            // one; the hoisted declaration it became is compiled as a process.
+            Expr::ProcessLiteral(_) => unreachable!(
+                "process literal survived the link; the expected-type hook must lift it"
+            ),
             Expr::Call { function, args } => {
                 self.compile_expr(function);
                 for arg in args {

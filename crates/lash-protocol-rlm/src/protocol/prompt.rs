@@ -154,7 +154,7 @@ pub(crate) fn host_operation_description(module: &str, operation: &str) -> Optio
             "List visible process runs. Empty arguments select running runs; `definition` selects a definition and `status: \"any\"` includes visible run history.",
         ),
         ("triggers", "register") => Some(
-            "Register a source value and process definition with every parameter supplied exactly once in inputs. `subscription_key` is stable within the caller's owner scope; supply it or use the linker-derived default. A different definition at an existing key conflicts. The source-owning host/plugin emits occurrences; constructors build source values.",
+            "Register a source value and process definition with every parameter supplied exactly once in inputs. `subscription_key` is stable within the caller's owner scope; supply it or omit it to have a stable key derived from the source and target. A different definition at an existing key conflicts. The source-owning host/plugin emits occurrences; constructors build source values.",
         ),
         ("triggers", "list") => Some(
             "List visible registrations; filter by target, name, source_type or enabled. Each row carries registrant provenance. Registrations remain until an explicit mutation or owner-lifecycle cleanup removes them.",

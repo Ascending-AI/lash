@@ -10,8 +10,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Expr, GENERATED_BINDING_PREFIX, MemberProperty, Pattern, PropertyKey, Stmt, TsAssignTarget,
-    reserved_identifier,
+    CallArg, Expr, FunctionBody, GENERATED_BINDING_PREFIX, MemberProperty, Pattern, PropertyKey,
+    Stmt, TsAssignTarget, reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -467,4 +467,208 @@ impl super::Lowerer {
             }
         }
     }
+}
+
+/// The source-level names this program *calls*.
+///
+/// A `const`-bound async arrow that is never a callee and never handed to a
+/// callback method is a process-literal candidate (FIG-2997): the linker lifts
+/// it where a `Process` slot asks for it. An arrow that is called — directly,
+/// or by an array-callback method that would invoke it through the binding —
+/// keeps today's async-helper shape, because a process value is not callable.
+pub(super) fn called_binding_names(statements: &[Stmt]) -> BTreeSet<String> {
+    let mut called = BTreeSet::new();
+    for statement in statements {
+        collect_statement_called_names(statement, &mut called);
+    }
+    called
+}
+
+fn collect_statement_called_names(statement: &Stmt, called: &mut BTreeSet<String>) {
+    match statement {
+        Stmt::Labeled { stmt, .. } => collect_statement_called_names(stmt, called),
+        Stmt::Empty | Stmt::Break | Stmt::Continue => {}
+        Stmt::Function { function, .. } => match &function.body {
+            FunctionBody::Block(statements) => {
+                for statement in statements {
+                    collect_statement_called_names(statement, called);
+                }
+            }
+            FunctionBody::Expression(expression) => {
+                collect_expression_called_names(expression, called);
+            }
+        },
+        Stmt::Expr(expression) | Stmt::Throw(expression) => {
+            collect_expression_called_names(expression, called);
+        }
+        Stmt::Return(expression) => {
+            if let Some(expression) = expression {
+                collect_expression_called_names(expression, called);
+            }
+        }
+        Stmt::Block(statements) => {
+            for statement in statements {
+                collect_statement_called_names(statement, called);
+            }
+        }
+        Stmt::Var { declarations, .. } => {
+            for declaration in declarations {
+                if let Some(initializer) = &declaration.init {
+                    collect_expression_called_names(initializer, called);
+                }
+                for expression in declaration.pattern.child_expressions() {
+                    collect_expression_called_names(expression, called);
+                }
+            }
+        }
+        Stmt::Enum { members, .. } => {
+            for member in members {
+                collect_expression_called_names(&member.value, called);
+            }
+        }
+        Stmt::If {
+            test,
+            consequent,
+            alternate,
+        } => {
+            collect_expression_called_names(test, called);
+            collect_statement_called_names(consequent, called);
+            if let Some(alternate) = alternate {
+                collect_statement_called_names(alternate, called);
+            }
+        }
+        Stmt::While { test, body } => {
+            collect_expression_called_names(test, called);
+            collect_statement_called_names(body, called);
+        }
+        Stmt::DoWhile { body, test } => {
+            collect_expression_called_names(test, called);
+            collect_statement_called_names(body, called);
+        }
+        Stmt::For {
+            init,
+            test,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                collect_statement_called_names(init, called);
+            }
+            if let Some(test) = test {
+                collect_expression_called_names(test, called);
+            }
+            if let Some(update) = update {
+                collect_expression_called_names(update, called);
+            }
+            collect_statement_called_names(body, called);
+        }
+        Stmt::ForOf {
+            pattern,
+            iterable,
+            body,
+            ..
+        }
+        | Stmt::ForIn {
+            pattern,
+            object: iterable,
+            body,
+            ..
+        } => {
+            collect_expression_called_names(iterable, called);
+            for expression in pattern.child_expressions() {
+                collect_expression_called_names(expression, called);
+            }
+            collect_statement_called_names(body, called);
+        }
+        Stmt::Switch {
+            discriminant,
+            cases,
+        } => {
+            collect_expression_called_names(discriminant, called);
+            for case in cases {
+                if let Some(test) = &case.test {
+                    collect_expression_called_names(test, called);
+                }
+                for statement in &case.consequent {
+                    collect_statement_called_names(statement, called);
+                }
+            }
+        }
+        Stmt::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            for statement in body {
+                collect_statement_called_names(statement, called);
+            }
+            if let Some(catch) = catch {
+                for expression in catch.binding.iter().flat_map(Pattern::child_expressions) {
+                    collect_expression_called_names(expression, called);
+                }
+                for statement in &catch.body {
+                    collect_statement_called_names(statement, called);
+                }
+            }
+            if let Some(finally) = finally {
+                for statement in finally {
+                    collect_statement_called_names(statement, called);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expression_called_names(expression: &Expr, called: &mut BTreeSet<String>) {
+    match expression {
+        Expr::Function(_) => {}
+        Expr::Call { callee, args, .. } => {
+            if let Expr::Ident(name, _) = callee.as_ref() {
+                called.insert(name.clone());
+            }
+            collect_expression_called_names(callee, called);
+            let callback_invocation = matches!(
+                callee.as_ref(),
+                Expr::Member {
+                    property: MemberProperty::Field(method),
+                    ..
+                } if is_callback_method(method)
+            );
+            for argument in args {
+                let value = match argument {
+                    CallArg::Value(value) => value,
+                    CallArg::Spread(value) => value,
+                };
+                if callback_invocation && let Expr::Ident(name, _) = value {
+                    called.insert(name.clone());
+                }
+                collect_expression_called_names(value, called);
+            }
+        }
+        expression => {
+            for child in expression.children() {
+                collect_expression_called_names(child, called);
+            }
+        }
+    }
+}
+
+fn is_callback_method(method: &str) -> bool {
+    matches!(
+        method,
+        "map"
+            | "filter"
+            | "reduce"
+            | "reduceRight"
+            | "find"
+            | "findIndex"
+            | "findLast"
+            | "findLastIndex"
+            | "some"
+            | "every"
+            | "forEach"
+            | "flatMap"
+            | "sort"
+            | "toSorted"
+    )
 }

@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 41,
-  "cargo_target_count": 130,
-  "generated_label_count": 187,
+  "cargo_target_count": 131,
+  "generated_label_count": 188,
   "packages": [
     {
       "declared_features": [],
@@ -2193,6 +2193,16 @@
           "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
           "kind": "test",
           "label": "//examples/workflow-graph-roundtrip:type_facets__test",
+          "tags": [
+            "cargo-frontend-assets",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "workflow_graph",
+          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
+          "kind": "test",
+          "label": "//examples/workflow-graph-roundtrip:workflow_graph__test",
           "tags": [
             "cargo-frontend-assets",
             "manual"

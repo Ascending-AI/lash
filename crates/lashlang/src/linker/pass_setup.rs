@@ -54,8 +54,14 @@ pub(super) struct Linker<'module> {
     /// The source expression whose facts the workflow projector will read for
     /// a recovered error in the current top-level workflow node.
     pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
-    pub(super) collect_trigger_keys: Cell<bool>,
-    pub(super) derived_trigger_registrations: RefCell<BTreeSet<(String, String, String)>>,
+    /// Process declarations lifted from `Expr::ProcessLiteral` during the
+    /// lowering walk, in lift order, with the span to record for each.
+    pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>)>>,
+    /// The AST path of every expression in the program, keyed by node pointer:
+    /// `main`-rooted paths are the `children()` index chain, and a declaration
+    /// body's path is prefixed with `u32::MAX` plus the declaration index so a
+    /// literal inside a process body cannot collide with a `main` path.
+    pub(super) expression_paths: BTreeMap<usize, Vec<u32>>,
 }
 
 impl<'module> Linker<'module> {
@@ -76,8 +82,8 @@ impl<'module> Linker<'module> {
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: Cell::new(None),
-            collect_trigger_keys: Cell::new(false),
-            derived_trigger_registrations: RefCell::new(BTreeSet::new()),
+            lifted_declarations: RefCell::new(Vec::new()),
+            expression_paths: expression_paths_by_pointer(program),
         }
     }
 
@@ -103,7 +109,6 @@ impl<'module> Linker<'module> {
         // therefore still surface before main errors, matching the prior
         // two-pass (validate-then-lower) ordering.
         self.collect_declarations()?;
-        self.collect_trigger_keys.set(true);
         let declarations = self
             .program
             .declarations
@@ -119,10 +124,16 @@ impl<'module> Linker<'module> {
             scope.bind(name, any_binding());
         }
         let main = self.lower_expr(&self.program.main, &mut scope)?.0;
+        let mut declarations = declarations;
+        let mut declaration_spans = self.program.declaration_spans.clone();
+        for (declaration, span) in self.lifted_declarations.borrow_mut().drain(..) {
+            declaration_spans.push(span.unwrap_or(Span { start: 0, end: 0 }));
+            declarations.push(declaration);
+        }
         Ok(Program {
             declarations,
             main,
-            declaration_spans: self.program.declaration_spans.clone(),
+            declaration_spans,
             expression_spans: self.program.expression_spans.clone(),
             expression_source_spans: self.program.expression_source_spans.clone(),
         })
@@ -481,6 +492,19 @@ impl<'module> Linker<'module> {
     pub(super) fn is_type_assignable(&self, source: &TypeExpr, target: &TypeExpr) -> bool {
         let source = self.resolve_type_aliases(source);
         let target = self.resolve_type_aliases(target);
+        // A host descriptor is a record-shaped value: the constructor wraps its
+        // payload in a typed record, so it reaches a gradual dict slot. This is
+        // what lets a trigger registration's `source` lower through the
+        // operation contract like any other argument.
+        if matches!(&target, TypeExpr::Dict)
+            && let TypeExpr::Ref(name) = &source
+            && self
+                .surface
+                .resources
+                .is_known_opaque_value_type(name.as_str())
+        {
+            return true;
+        }
         crate::trigger::is_resolved_type_assignable(&source, &target)
     }
 
@@ -850,20 +874,6 @@ impl<'module> Linker<'module> {
                         });
                     }
                     scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
-                    if let TypeExpr::Ref(source_type) = &param.ty {
-                        scope.set_static_trigger_binding(
-                            param.name.as_str(),
-                            Some(StaticTriggerBinding::Source {
-                                source_type: source_type.to_string(),
-                                source_key: semantic_trigger_source_key(
-                                    source_type.as_str(),
-                                    &serde_json::json!({
-                                        "process_param": param.name.as_str(),
-                                    }),
-                                ),
-                            }),
-                        );
-                    }
                 }
                 let mut seen_signals = BTreeSet::new();
                 for signal in &process.signals {
@@ -1046,6 +1056,7 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::Cancel(_) => Some("cancel"),
         Expr::StartProcess(_) => Some("start"),
         Expr::ProcessRef { .. } => Some("a process reference"),
+        Expr::ProcessLiteral(_) => Some("a process literal"),
         Expr::Print(_) => Some("print"),
         Expr::Yield(_) => Some("yield"),
         Expr::Wake(_) => Some("wake"),

@@ -405,6 +405,15 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(&function.body, &mut function_scope);
                 Some(RequirementBinding::Value)
             }
+            Expr::ProcessLiteral(literal) => {
+                let mut literal_scope = BTreeMap::new();
+                for param in &literal.params {
+                    self.collect_type(&param.ty);
+                    literal_scope.insert(param.name.to_string(), RequirementBinding::Value);
+                }
+                self.collect_expr(&literal.body, &mut literal_scope);
+                Some(RequirementBinding::Value)
+            }
             Expr::Call { function, args } => {
                 self.collect_expr(function, scope);
                 for arg in args {
