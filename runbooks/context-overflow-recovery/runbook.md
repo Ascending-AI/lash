@@ -78,10 +78,15 @@ turn outcome is.
 3. **Distinction needs two observations.** The control turn must stop as `provider_error`
    on the same harness. One outcome observed alone proves nothing about distinguishability;
    if both arms report the same stop, that is a real-defect stop.
-4. **Recovery runs on the existing seam.** The host reads the outcome from the public turn
-   report and calls `compact_context` on the session admin surface. A recovery that reaches
-   past the public surface, or that the kernel performs on the host's behalf, fails this
-   scenario's purpose.
+4. **Recovery is plugin-owned (FIG-2950).** The registered rolling-history
+   plugin owns the recovery policy: its `after_turn` trigger records the
+   durable marker for a persisted `context_overflow` outcome, and the next
+   turn re-derives the pending recovery from that durable state — one bounded
+   out-of-band summarizer (the standard compaction prompt with the oversized
+   body elided), then the summary and one terminal record appended through
+   the plugin's graph seam. The fixture writes no host-side compaction call;
+   a host-side `compact_context` in the fixture is the pre-FIG-2950 policy
+   and its absence is what this scenario now proves.
 5. **The session continues; it is not restarted.** The post-recovery turn runs on the same
    session id and finishes successfully.
 6. **Every claim needs observed evidence.** A required outcome with no companion evidence is
@@ -129,13 +134,21 @@ arms to agree, because the path the reason took must not change the outcome. The
 arms disagree, the public accessor disagrees with the serialized outcome, an overflow turn
 reports success, or the control turn produces the same stop as an overflow turn.
 
-## Phase 3 — Host recovery on the existing seam
+## Phase 3 — Plugin-owned recovery, both arms
 
-Require, of each overflow arm, `compacted == true` and `messages_after_compaction == 1`: the host's compaction
-provider ran and the frame was replaced by its summary, so the oversized body is no longer
-in the context the next turn will assemble.
+Require, of each overflow arm, `plugin_recovery_pending == true` (the durable
+marker the `after_turn` trigger appended rides the overflow turn's own
+commit), `plugin_recovery_completed == true` (the plugin's terminal record is
+in the committed history), and `plugin_recovery_summary_chars > 0`: the
+out-of-band summarizer ran once and its summary is durable, so the recovered
+window no longer contains the oversized body. `history_messages_after_recovery > 0`
+confirms the session kept its history. The original history, including the
+oversized body, stays inspectable — that is the whole point of the durable
+record order; recovery never rewrites it.
 
-**Fail if:** compaction did not run, or the history still carries the oversized body.
+**Fail if:** the plugin never derecorded the marker or terminal record, no
+summary was produced, or the recovery required the fixture's host hand-rolled
+compaction.
 
 ## Phase 4 — The session continues
 
@@ -155,7 +168,7 @@ judged.
 | 0 | Kernel maps `ContextOverflow` to its own stop | | `01-contract-tests.log` |
 | 1 | Overflow arrives mid-turn on an oversized tool result, both arms | | `03-observed.jsonl` |
 | 2 | Outcome is its own, agrees across arms, and differs from a provider error | | `03-observed.jsonl` |
-| 3 | Host recovers through `compact_context`, both arms | | `03-observed.jsonl` |
+| 3 | Recovery is plugin-owned and completed durably, both arms | | `03-observed.jsonl` |
 | 4 | The same session continues and finishes, both arms | | `03-observed.jsonl` |
 
 Record the dialect, the artifact directory, and the companion's final line with the

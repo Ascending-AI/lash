@@ -672,7 +672,7 @@ impl ToolIntentIngress {
             )),
             RealizedIntent::TriggerRegistration(receipt) => Some((
                 lash_core::ToolIntentKind::RegisterTrigger,
-                serde_json::to_value(&*receipt).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(receipt).unwrap_or(serde_json::Value::Null),
             )),
             RealizedIntent::Process(_) => None,
         };

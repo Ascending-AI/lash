@@ -48,6 +48,12 @@ const OVERSIZED_BYTES: usize = 512 * 1024;
 /// turn's context.
 const OVERSIZED_TOOL: &str = "oversized_report";
 
+const ROLLING_HISTORY_PLUGIN_ID: &str = "rolling_history";
+const OVERFLOW_RECOVERY_MARKER_TITLE: &str =
+    "Rolling-history context-overflow recovery marker (pending):";
+const OVERFLOW_RECOVERY_COMPLETED_TITLE: &str =
+    "Rolling-history context-overflow recovery completed:";
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let run_id = format!(
@@ -112,30 +118,24 @@ async fn overflow_and_recovery(
     let overflow_stop = stop_tag(&overflow.result.outcome)?;
     let tool_bytes = harness.served_tool_bytes();
 
-    // The host's own policy decision, taken on the outcome the kernel stated.
-    let compacted = if overflow.result.is_context_overflow() {
-        session
-            .admin()
-            .state()
-            .compact_context(
-                Some("keep the request and the report's verdict, drop the body".to_string()),
-                harness
-                    .core
-                    .effect_host()
-                    .scoped_static(lash::runtime::ExecutionScope::runtime_operation(format!(
-                        "context-overflow-recovery:{run_id}"
-                    )))
-                    .map_err(|err| anyhow!("{err}"))?
-                    .ok_or_else(|| anyhow!("effect host supplies no owned runtime scope"))?,
-            )
-            .await
-            .map_err(|err| anyhow!("{err}"))
-            .context("host recovery: compact the session context")?
-    } else {
-        false
-    };
-
-    let messages_after_compaction = session.read_view().messages().len();
+    // No host compaction call: the plugin owns the recovery now. The host
+    // only observes the durable recovery state the plugin appended, and the
+    // next turn below re-derives and executes it.
+    let overflow_history = session.read_view().messages().to_vec();
+    let plugin_recovery_pending = overflow_history.iter().any(|message| {
+        let origin = message.origin.as_ref().map(|origin| match origin {
+            lash_core::MessageOrigin::Plugin { plugin_id, .. } => plugin_id.clone(),
+            _ => String::new(),
+        });
+        origin.as_deref() == Some(ROLLING_HISTORY_PLUGIN_ID)
+            && message
+                .parts
+                .iter()
+                .any(|part| part.content.starts_with(OVERFLOW_RECOVERY_MARKER_TITLE))
+    });
+    if overflow.result.is_context_overflow() && !plugin_recovery_pending {
+        bail!("the plugin silently swallowed the overflow trigger");
+    }
 
     // The same session, not a new one: the claim is that the session continues.
     let continued = session
@@ -144,6 +144,9 @@ async fn overflow_and_recovery(
         .await
         .map_err(|err| anyhow!("{err}"))
         .context("the post-recovery turn")?;
+    let continued_history = session.read_view().messages().to_vec();
+    let continued_history_len = continued_history.len();
+    let overflow_history_after_turn = continued_history;
 
     Ok(json!({
         "checkpoint": checkpoint,
@@ -156,9 +159,29 @@ async fn overflow_and_recovery(
         "overflow_stop": overflow_stop,
         "overflow_is_context_overflow": overflow.result.is_context_overflow(),
         "overflow_is_success": overflow.result.is_success(),
-        "compacted": compacted,
-        "messages_after_compaction": messages_after_compaction,
+        "plugin_recovery_pending": plugin_recovery_pending,
         "continued_stop": stop_tag(&continued.result.outcome)?,
+        // Plugin-owned recovery evidence, re-derived from the durable history
+        // after the continued turn: the plugin appended its summary and the
+        // completed record, and the original history stays inspectable.
+        "plugin_recovery_completed": overflow_history_after_turn.iter().any(|message| {
+            message.parts.iter().any(|part| {
+                part.content
+                    .starts_with(OVERFLOW_RECOVERY_COMPLETED_TITLE)
+            })
+        }),
+        "plugin_recovery_summary_chars": overflow_history_after_turn
+            .iter()
+            .filter_map(|message| {
+                message.parts.iter().find_map(|part| {
+                    part.content
+                        .strip_prefix("Compaction summary:")
+                        .map(|rest| rest.trim().len())
+                })
+            })
+            .next()
+            .unwrap_or(0),
+        "history_messages_after_recovery": continued_history_len,
         "continued_is_success": continued.result.is_success(),
         "continued_is_context_overflow": continued.result.is_context_overflow(),
         "continued_assistant_message": continued.result.assistant_message(),
@@ -270,6 +293,14 @@ impl Harness {
                 lash::persistence::InMemoryProcessExecutionEnvStore::default(),
             ))
             .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+            .trace_jsonl_path(
+                std::env::var_os("LASH_CONTEXT_OVERFLOW_TRACE")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::path::PathBuf::from("/dev/null")),
+            )
+            .plugin(Arc::new(
+                lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+            ))
             .plugin(Arc::new(OverflowPluginFactory {
                 tool_bytes: Arc::clone(&tool_bytes),
             }))
@@ -323,9 +354,33 @@ fn oversized_call_cell() -> String {
 fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider::ProviderHandle {
     lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
         .kind("context-overflow-recovery")
-        .complete(move |_request| {
+        .complete(move |request| {
             let call = calls.fetch_add(1, Ordering::SeqCst);
+            // The plugin-owned recovery branch: the out-of-band summarizer
+            // carries the standard compaction prompt. It is not a cell, so it
+            // must be answered with plain assistant text.
+            let is_recovery_summarizer = matches!(
+                request
+                    .messages
+                    .last()
+                    .and_then(|message| message.blocks.iter().find_map(|block| match block {
+                        lash::provider::LlmContentBlock::Text { text, .. } => Some(text.clone()),
+                        _ => None,
+                    })),
+                Some(text) if text.contains("Provide a detailed summary of the conversation above")
+            );
             async move {
+                if is_recovery_summarizer {
+                    // The out-of-band summarizer runs in the plugin's compaction
+                    // child session; the scripted answer is a terminal finish
+                    // cell whose value becomes the recovered summary.
+                    return Ok(text_response(
+                        lash_restate_postgres_workers_e2e::scripted_finish_cell(
+                            "\"Recovery summary: the user asked for the oversized report's \
+                             verdict; the report body was elided and still needs stating.\"",
+                        ),
+                    ));
+                }
                 Ok(match (script, call) {
                     // Turn 1, call 1: reach for the oversized report.
                     (_, 0) => text_response(oversized_call_cell()),

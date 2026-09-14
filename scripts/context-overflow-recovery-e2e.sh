@@ -112,13 +112,17 @@ if control["control_stop"] != "provider_error":
 if control["control_stop"] == observed["overflow_stop"]:
     fail(f"overflow and provider error collapsed into one outcome: {control}")
 
-# The host recovered on the existing seam and the same session continued, on
-# both arms.
+# Plugin-owned recovery (FIG-2950): the registered rolling-history policy
+# derives the pending trigger from the durable marker, spends one bounded
+# out-of-band summarizer, and appends its summary plus a terminal record. The
+# host only observes the durable state and the same session continues.
 for name, value in (("injected", observed), ("classified", classified)):
-    if value["compacted"] is not True:
-        fail(f"[{name}] host recovery did not compact: {value}")
-    if value["messages_after_compaction"] != 1:
-        fail(f"[{name}] compaction did not replace the frame: {value}")
+    if value["plugin_recovery_pending"] is not True:
+        fail(f"[{name}] the plugin never recorded the overflow trigger: {value}")
+    if value["plugin_recovery_completed"] is not True:
+        fail(f"[{name}] plugin-owned recovery did not complete: {value}")
+    if value["plugin_recovery_summary_chars"] <= 0:
+        fail(f"[{name}] plugin recovery produced no summary: {value}")
     if value["continued_is_success"] is not True:
         fail(f"[{name}] the session did not continue after recovery: {value}")
     if value["continued_is_context_overflow"] is not False:
@@ -132,7 +136,7 @@ if classified["overflow_stop"] != observed["overflow_stop"]:
 
 print(
     f"context-overflow-recovery [{dialect}] gates: mid-turn overflow (injected + "
-    "classified), own outcome, distinct from provider_error, host compacted, "
+    "classified), own outcome, distinct from provider_error, plugin-owned recovery, "
     "session continued"
 )
 PY
