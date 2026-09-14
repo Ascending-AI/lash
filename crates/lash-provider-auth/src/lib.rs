@@ -4,6 +4,8 @@
 //! Provider-specific endpoints, device-code flows, PKCE helpers, and
 //! refresh logic live in each provider crate under `oauth.rs`.
 
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 use base64::Engine;
 use sha2::{Digest, Sha256};
 

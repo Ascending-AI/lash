@@ -269,6 +269,10 @@ impl AnthropicProvider {
             if message["role"] != "user" {
                 continue;
             }
+            #[expect(
+                clippy::expect_used,
+                reason = "every message this builder emits carries a `content` array"
+            )]
             let blocks = message["content"].as_array_mut().expect("content blocks");
             let is_result = |block: &Value| block["type"] == "tool_result";
             if let Some(address) = breakpoint.as_mut()
@@ -357,6 +361,10 @@ impl AnthropicProvider {
             cache_control_emitted = true;
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the address was recorded from `messages` earlier in this call and nothing removes blocks in between"
+        )]
         if let Some(address) = breakpoint {
             let block = messages
                 .get_mut(address.message_index)
@@ -486,10 +494,10 @@ impl AnthropicProvider {
                             &accepted_by,
                         ));
                     }
-                    if matches!(source, AttachmentSource::Stored { .. })
+                    if let AttachmentSource::Stored { attachment_ref } = source
                         && req.attachment_bytes(source).is_none()
                     {
-                        let mime = source.media_type().expect("stored source MIME");
+                        let mime = &attachment_ref.media_type;
                         return Err(LlmTransportError::new(format!(
                     "Anthropic Messages could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))

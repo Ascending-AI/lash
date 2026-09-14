@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};

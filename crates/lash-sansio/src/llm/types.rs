@@ -656,6 +656,10 @@ impl NonNegativeFiniteF64 {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "every constructor runs `validate`, which refuses anything but a finite JSON number"
+    )]
     pub fn get(&self) -> f64 {
         self.0
             .as_f64()

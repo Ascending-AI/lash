@@ -25,6 +25,8 @@
 //! See `README.md` for the Slack-fidelity statement, the session-mapping
 //! doctrine, and the migration notes for pointing the bot at real Slack.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 pub mod bot;
 pub mod ids;
 #[cfg(feature = "live-e2e")]

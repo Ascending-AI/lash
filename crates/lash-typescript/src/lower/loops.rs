@@ -90,6 +90,10 @@ impl Lowerer {
         self.declare(declaration_name, BindingKind::Let, true, false)?;
         let internal = self.binding(declaration_name)?.internal.clone();
         let start = self.lower_expr(start)?;
+        #[expect(
+            clippy::expect_used,
+            reason = "the classic-for validation above refuses a loop without a condition"
+        )]
         let condition = self.lower_expr(test.expect("validated classic for condition"))?;
         let update = self.lower_update_statement(declaration_name, *delta)?;
         let body = self.with_loop(|lowerer| {

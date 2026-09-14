@@ -122,9 +122,14 @@ pub(super) fn validate_schema(schema: &Value, value: &Value) -> Result<(), Strin
     if compiled.is_valid(value) {
         return Ok(());
     }
-    compiled.validate(value).map_err(|mut errors| {
-        format_validation_error(errors.next().expect("validation failure contains an error"))
-    })
+    compiled
+        .validate(value)
+        .map_err(|mut errors| match errors.next() {
+            Some(error) => format_validation_error(error),
+            // `is_valid` already said the value is invalid, so the iterator always
+            // yields at least one error; report rather than panic if it ever does not.
+            None => "value does not match the schema".to_string(),
+        })
 }
 
 pub fn validate_tool_input(contract: &ToolContract, args: &Value) -> Result<(), String> {

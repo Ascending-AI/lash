@@ -1,5 +1,10 @@
 //! SQLite cold-process recovery helper for durable waits and effect replay.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test-only helper binary: the store conformance tests spawn it, and a broken setup assumption must abort it loudly"
+)]
+
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::path::PathBuf;

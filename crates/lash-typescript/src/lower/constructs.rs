@@ -117,6 +117,10 @@ impl Lowerer {
         }
         let nested_function = self.current_function() != 0;
         let index = self.root_scope_depth.saturating_sub(1);
+        #[expect(
+            clippy::expect_used,
+            reason = "`root_scope_depth` indexes a scope the lowerer pushed before lowering began"
+        )]
         let scope = self
             .scopes
             .get_mut(index)

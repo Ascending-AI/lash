@@ -7,6 +7,8 @@
 //! store, a plugin or the runtime, so `lash-core` re-exports every module and
 //! item below at its original path.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 pub mod llm;
 pub mod model;
 pub mod provider;

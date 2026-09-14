@@ -7,6 +7,8 @@
 //! Notify gating — that gating is the harness artifact under test). Compares
 //! committed assistant message + cumulative provider exchange count per turn.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::path::Path;

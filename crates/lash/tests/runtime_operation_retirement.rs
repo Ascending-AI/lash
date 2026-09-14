@@ -4,6 +4,11 @@
 //! journals (FIG-2499, FIG-2500). A runtime operation the facade did not mint
 //! is left alone.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use lash_sansio::SessionId;
 use std::sync::{Arc, Mutex};
 

@@ -121,6 +121,10 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
 /// source round-trip is unavailable. Such expressions retain their typed
 /// execution sites; their editable display text is a trace-only placeholder.
 pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
+    #[expect(
+        clippy::expect_used,
+        reason = "`Program` derives `Serialize` over plain data, so encoding it cannot fail"
+    )]
     let hash_input = typescript_program_source(program)
         .unwrap_or_else(|_| serde_json::to_string(program).expect("program serializes"));
     GraphProjector::new(&hash_input, program, None, true).project()
@@ -767,13 +771,13 @@ fn validate_subgraph(
         .collect::<BTreeSet<_>>();
     if local_ids.len() != graph.nodes.len() {
         let mut seen = BTreeSet::new();
+        // The set is smaller than the vector, so a repeated id is always found;
+        // name the graph rather than panic if that ever stops holding.
         let id = graph
             .nodes
             .iter()
             .find(|node| !seen.insert(node.id.clone()))
-            .expect("a duplicate exists")
-            .id
-            .to_string();
+            .map_or_else(|| "<unknown>".to_string(), |node| node.id.to_string());
         return Err(GraphRenderError::DuplicateNodeId { id });
     }
     for node in &graph.nodes {
@@ -813,16 +817,14 @@ fn validate_node(
         }
     }
     match &node.kind {
-        WorkflowNodeKind::Container(
-            container @ WorkflowContainer::If {
-                then_is_block,
-                else_is_block,
-                ..
-            },
-        ) => {
-            let mut children = container.child_subgraphs().map(|(_, child)| child);
-            let then_graph = children.next().expect("if has a then child");
-            let else_graph = children.next().expect("if has an else child");
+        WorkflowNodeKind::Container(WorkflowContainer::If {
+            then_is_block,
+            else_is_block,
+            then_graph,
+            else_graph,
+            ..
+        }) => {
+            let (then_graph, else_graph) = (then_graph.as_ref(), else_graph.as_ref());
             if !then_is_block && *else_is_block {
                 return invalid_payload(
                     node,
@@ -854,20 +856,17 @@ fn validate_node(
                 }
             }
         }
-        WorkflowNodeKind::Container(
-            container @ WorkflowContainer::ListComprehension { clauses, .. },
-        ) => {
+        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
+            clauses,
+            element,
+            ..
+        }) => {
             if clauses.is_empty() {
                 return invalid_payload(
                     node,
                     "list-comprehension container requires at least one clause",
                 );
             }
-            let element = container
-                .child_subgraphs()
-                .next()
-                .expect("list comprehension has an element child")
-                .1;
             if element.nodes.len() != 1 {
                 return invalid_payload(
                     node,
@@ -1094,77 +1093,58 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                 condition,
                 then_is_block,
                 else_is_block,
-                ..
-            } => {
-                let mut children = container.child_subgraphs().map(|(_, child)| child);
-                let then_graph = children.next().expect("if has a then child");
-                let else_graph = children.next().expect("if has an else child");
-                with_assignment(
-                    node,
-                    binding,
-                    Expr::If {
-                        condition: Box::new(parse_expression_field(
-                            node,
-                            "condition",
-                            condition,
-                            context,
-                        )?),
-                        then_block: Box::new(subgraph_to_branch(
-                            node,
-                            then_graph,
-                            context,
-                            *then_is_block,
-                            "then_graph",
-                        )?),
-                        else_block: Box::new(subgraph_to_branch(
-                            node,
-                            else_graph,
-                            context,
-                            *else_is_block,
-                            "else_graph",
-                        )?),
-                    },
-                    true,
-                )?
-            }
+                then_graph,
+                else_graph,
+            } => with_assignment(
+                node,
+                binding,
+                Expr::If {
+                    condition: Box::new(parse_expression_field(
+                        node,
+                        "condition",
+                        condition,
+                        context,
+                    )?),
+                    then_block: Box::new(subgraph_to_branch(
+                        node,
+                        then_graph,
+                        context,
+                        *then_is_block,
+                        "then_graph",
+                    )?),
+                    else_block: Box::new(subgraph_to_branch(
+                        node,
+                        else_graph,
+                        context,
+                        *else_is_block,
+                        "else_graph",
+                    )?),
+                },
+                true,
+            )?,
             WorkflowContainer::For {
-                binding, iterable, ..
+                binding,
+                iterable,
+                body,
             } => Expr::For {
                 binding: parse_simple_binding_field(node, "binding", binding)?.root,
                 iterable: Box::new(parse_expression_field(node, "iterable", iterable, context)?),
-                body: Box::new(subgraph_to_block(
-                    container
-                        .child_subgraphs()
-                        .next()
-                        .expect("for has a body child")
-                        .1,
-                    context,
-                )?),
+                body: Box::new(subgraph_to_block(body, context)?),
             },
-            WorkflowContainer::While { condition, .. } => Expr::While {
+            WorkflowContainer::While { condition, body } => Expr::While {
                 condition: Box::new(parse_expression_field(
                     node,
                     "condition",
                     condition,
                     context,
                 )?),
-                body: Box::new(subgraph_to_block(
-                    container
-                        .child_subgraphs()
-                        .next()
-                        .expect("while has a body child")
-                        .1,
-                    context,
-                )?),
+                body: Box::new(subgraph_to_block(body, context)?),
             },
             WorkflowContainer::ListComprehension {
-                binding, clauses, ..
+                binding,
+                clauses,
+                element,
             } => {
-                let element = container
-                    .child_subgraphs()
-                    .next()
-                    .expect("list comprehension has an element child")
-                    .1;
                 let Expr::Block(mut expressions) = subgraph_to_block(element, context)? else {
                     unreachable!("subgraph rendering always returns a block")
                 };
@@ -1245,7 +1225,12 @@ fn parse_opaque_statement(
             message: format!("expected one statement, found {}", expressions.len()),
         });
     }
-    Ok(expressions.into_iter().next().expect("one expression"))
+    #[expect(
+        clippy::expect_used,
+        reason = "the length check above returned for any count other than one"
+    )]
+    let expression = expressions.into_iter().next().expect("one expression");
+    Ok(expression)
 }
 
 fn add_dependency_edges(

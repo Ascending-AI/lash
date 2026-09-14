@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::sync::Arc;
 
 use lash_core::facade_support::PluginHost;

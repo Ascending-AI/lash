@@ -1,5 +1,7 @@
 //! HTTP backend for the workflow-graph round-trip example.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash::sync::MutexExt;
 mod catalog;
 mod contract;

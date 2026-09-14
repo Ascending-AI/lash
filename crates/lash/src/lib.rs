@@ -10,6 +10,11 @@
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of that root.
 
+#![expect(
+    clippy::expect_used,
+    reason = "FIG-2784 pass 1, a later PR in the chain"
+)]
+
 /// Administrative facade handles and operations.
 pub mod admin;
 mod core;

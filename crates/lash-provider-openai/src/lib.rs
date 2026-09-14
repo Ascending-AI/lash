@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "FIG-2784 pass 1, a later PR in the chain"
+)]
+
 mod chat;
 pub mod codex;
 mod common;

@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 #[path = "../examples/bench_support/mod.rs"]
 mod bench_support;
 

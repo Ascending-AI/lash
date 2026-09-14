@@ -25,6 +25,8 @@
 //! Every phase prints one JSON `checkpoint` line; the shell runner asserts on
 //! those lines and keeps them as artifacts.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;

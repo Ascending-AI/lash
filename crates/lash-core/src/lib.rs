@@ -10,6 +10,12 @@
 //! shape and the `ProtocolDriverPlugin` slot, while external protocol crates
 //! provide the driver implementation.
 
+#![expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "FIG-2784 pass 1, a later PR in the chain"
+)]
+
 /// Re-exported so `impl_noop_attachment_manifest!` can paste an
 /// `#[async_trait]` impl into crates that do not depend on `async-trait`
 /// directly. Not part of the supported surface.

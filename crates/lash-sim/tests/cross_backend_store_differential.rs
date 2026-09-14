@@ -12,6 +12,8 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

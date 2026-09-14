@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
 // Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation; crate-root clippy allow (forked code is tested, not linted).
 /*!
 

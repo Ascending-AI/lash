@@ -3,6 +3,8 @@
 //! paired `<typescript>` blocks are executed, `print` yields observations, and
 //! `finish` yields the final value.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 mod cell_scan;
 mod control_tools;
 mod dialect;

@@ -4,6 +4,11 @@
 //! them into integration binaries; the `runtime::tests::*` module path is
 //! reproduced verbatim so every test keeps its name.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 #[allow(dead_code, unused_imports)]
 mod runtime_support;
 

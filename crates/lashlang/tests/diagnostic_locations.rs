@@ -9,6 +9,8 @@
 //! TypeScript the model wrote — so the assertions below pin the TypeScript
 //! line, column and caret run, not a printed lashlang form.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, State, TypeExpr,

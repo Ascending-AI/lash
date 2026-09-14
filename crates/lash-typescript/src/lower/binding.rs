@@ -323,6 +323,10 @@ impl super::Lowerer {
         // prompt, so keep the author's name in that case.
         let preserve_name = preserve_name || !self.has_binding(name);
         let owner_function = self.current_function();
+        #[expect(
+            clippy::expect_used,
+            reason = "the lowerer pushes the program root scope before any declaration and never pops past it"
+        )]
         let scope = self.scopes.last_mut().expect("a scope is always active");
         if scope.bindings.contains_key(name) {
             return Err(Diagnostic::new(

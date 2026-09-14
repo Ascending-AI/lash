@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lashlang::{
     AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,

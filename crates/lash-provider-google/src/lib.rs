@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 #[cfg(test)]
 mod attachment_tests;
 mod config;

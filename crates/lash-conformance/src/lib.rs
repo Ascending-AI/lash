@@ -1,5 +1,7 @@
 //! Backend certification laws shared by store implementations.
 
+#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
+
 use lash_core::*;
 mod conformance;
 pub use conformance::*;

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

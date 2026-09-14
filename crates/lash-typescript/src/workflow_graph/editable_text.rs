@@ -212,6 +212,10 @@ pub fn parse_typescript_process_statement(
         .cloned()
         .collect::<Vec<_>>();
     match statements.len() {
+        #[expect(
+            clippy::expect_used,
+            reason = "this arm matches a length of exactly one, so the iterator yields that statement"
+        )]
         1 => Ok(statements.into_iter().next().expect("one statement")),
         found => Err(TypeScriptFragmentError(format!(
             "expected one statement, found {found}"

@@ -12,6 +12,8 @@
 //! - The `batch` tool that composes parallel native tool calls (only
 //!   exposed when this protocol stack is installed).
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use lash_sansio::TurnId;
 use std::sync::Arc;
 

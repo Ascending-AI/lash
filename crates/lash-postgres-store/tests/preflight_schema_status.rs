@@ -6,6 +6,11 @@
 //! shape that actually diverged — lash tables present, component version never
 //! stamped — asserted against both sides in one test so neither can move alone.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
+)]
+
 use lash_core::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
 use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 

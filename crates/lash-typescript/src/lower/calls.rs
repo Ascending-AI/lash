@@ -801,6 +801,10 @@ impl Lowerer {
             let (value, mapping_args) = match args {
                 [value] => (value, &[][..]),
                 [value, callback] => (value, std::slice::from_ref(callback)),
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the slice pattern binds exactly three arguments, so the tail range is in bounds"
+                )]
                 [value, _callback, _this_arg] => {
                     (value, args.get(1..).expect("mapping arguments exist"))
                 }
@@ -979,6 +983,10 @@ impl Lowerer {
         if method.starts_with(|character: char| character.is_ascii_uppercase())
             && receiver_is_module_authority
         {
+            #[expect(
+                clippy::expect_used,
+                reason = "`receiver_is_module_authority` is true only when `module_path(object)` already resolved"
+            )]
             return Ok(LashExpr::ReceiverCall {
                 receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
                     module_path(object)
@@ -1031,6 +1039,10 @@ impl Lowerer {
             ));
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "`receiver_is_module_authority` is true only when `module_path(object)` already resolved"
+        )]
         let receiver = if receiver_is_module_authority {
             LashExpr::ResourceRef(ResourceRefExpr::unresolved(
                 module_path(object)

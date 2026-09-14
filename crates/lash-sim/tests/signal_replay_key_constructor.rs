@@ -21,6 +21,8 @@
 //! repository, not just `crates/`, because the runbook binary is exactly the
 //! copy that could escape the workspace unnoticed.
 
+#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
+
 use std::path::{Path, PathBuf};
 
 /// Directories under the workspace root whose Rust sources are scanned.
