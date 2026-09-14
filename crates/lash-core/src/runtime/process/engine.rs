@@ -480,6 +480,40 @@ impl<'run> ProcessEngineRunContext<'run> {
     }
 }
 
+/// Settle one engine's staged start artifacts onto the owner of the process a
+/// start has just registered.
+///
+/// The staging owner is stable per process id and therefore shared by every
+/// concurrent attempt at the same start, so the transfer can find its source
+/// edge already severed by another attempt. Engine start artifacts are named by
+/// the same immutable payload the registration carries, so protecting them under
+/// the process owner reaches exactly the state the transfer would have left
+/// (FIG-3090). The engine's own refusal is untouched.
+pub async fn settle_started_process_engine_artifacts(
+    engine: &dyn ProcessEngine,
+    staging_owner: &crate::ArtifactOwner,
+    process_owner: &crate::ArtifactOwner,
+    payload: &serde_json::Value,
+    staged: bool,
+) -> Result<(), crate::PluginError> {
+    if !staged {
+        return engine.protect_start_artifacts(process_owner, payload).await;
+    }
+    match engine
+        .transfer_start_artifacts(staging_owner, process_owner, payload)
+        .await
+    {
+        Ok(()) => {}
+        Err(error) if crate::artifact_staging_owner_edge_is_missing(&error) => {
+            engine
+                .protect_start_artifacts(process_owner, payload)
+                .await?;
+        }
+        Err(error) => return Err(error),
+    }
+    engine.retire_artifact_owner(staging_owner).await
+}
+
 #[async_trait::async_trait]
 /// Deployment extension point for non-kernel process runtimes.
 ///
