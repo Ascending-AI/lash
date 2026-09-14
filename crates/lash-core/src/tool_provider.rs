@@ -747,6 +747,10 @@ impl<'run> ToolContext<'run> {
         clippy::too_many_arguments,
         reason = "testing constructor mirrors the sealed runtime tool context dependencies"
     )]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only builder: `FrameNodeId::new` rejects only the empty string, and the literal here is not"
+    )]
     pub(crate) fn builder(
         session_id: SessionId,
         sessions: Arc<dyn SessionStateService>,

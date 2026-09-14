@@ -114,6 +114,10 @@ impl PersistentRuntimeServices {
         self.0
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the persistent constructor is the only one that hands out these services, and it always sets a store"
+    )]
     pub fn store(&self) -> Arc<dyn crate::store::RuntimePersistence> {
         self.0
             .store

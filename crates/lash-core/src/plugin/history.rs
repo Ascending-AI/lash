@@ -227,6 +227,12 @@ impl SessionReadView {
 
     /// Exposes session graph to store and durable-substrate implementors while validating and
     /// applying durable session transitions.
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and the frame the base \
+                  graph just named is one of its own node identities, so it also resolves \
+                  when the derived tail is rewritten against it"
+    )]
     pub fn session_graph(&self) -> &crate::SessionGraph {
         match &self.0.graph {
             SessionReadGraph::Owned(graph) => graph,

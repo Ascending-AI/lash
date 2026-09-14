@@ -4,6 +4,16 @@
 //! providing a configurable mock implementation plus a couple of small
 //! builders for common policy / turn fixtures.
 
+// Test-support module: these fixtures run inside a test, and a broken setup
+// assumption must abort it loudly rather than be reshaped into a runtime error
+// the test under way would then report as a runtime defect. Clippy's
+// `allow-expect-in-tests` reaches `#[test]` functions only, not the fixtures
+// they call.
+#![expect(
+    clippy::expect_used,
+    reason = "test-support fixtures: a broken setup assumption aborts the test"
+)]
+
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;

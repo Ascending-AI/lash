@@ -317,6 +317,10 @@ fn tool_node_id(call_id: &str) -> String {
 /// child session/turn nests under whatever spawned it. The `Turn` / `ToolCall`
 /// arms intentionally mirror [`turn_node_id`] / [`tool_node_id`] so the
 /// cross-session parent reference resolves to a real span.
+#[expect(
+    clippy::expect_used,
+    reason = "a `CausalRef` is an enum of validated string identities, whose serialization has no failing case"
+)]
 fn causal_node_id(caused_by: &crate::CausalRef) -> String {
     match caused_by {
         crate::CausalRef::Turn {
@@ -446,6 +450,10 @@ pub(crate) fn trace_llm_request(req: &LlmRequest) -> TraceLlmRequest {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a `SchemaContract` is a JSON document already held in memory, whose re-serialization has no failing case"
+)]
 fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
     TraceToolSpec {
         name: tool.name.clone(),
@@ -470,6 +478,10 @@ impl std::io::Write for CompositionHashWriter {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the tool contract serializes into an in-memory hasher, so neither the value nor the writer can fail"
+)]
 pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
     #[cfg(any(test, feature = "testing"))]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));

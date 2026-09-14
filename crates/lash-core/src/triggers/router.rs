@@ -813,6 +813,10 @@ impl TriggerRouter {
             execution_context: Box::new(execution_context),
         };
         let effect_id = command.effect_id();
+        #[expect(
+            clippy::expect_used,
+            reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+        )]
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 effect_controller.execution_scope().clone(),

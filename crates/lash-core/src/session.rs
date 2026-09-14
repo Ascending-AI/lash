@@ -526,6 +526,10 @@ impl Session {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`SessionToolAccess` is composed entirely of strings, enums and maps, whose serialization has no failing case"
+)]
 fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) -> [u8; 32] {
     let encoded = serde_json::to_vec(tool_access)
         .expect("SessionToolAccess is composed entirely of serializable authority values");

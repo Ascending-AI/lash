@@ -353,15 +353,10 @@ impl RuntimeCommitPlanner {
 
         let (planned_node_facts, derived_frame_node_id) =
             derive_appended_node_facts(&self.commit.graph, parent_node_facts)?;
-        if self.commit.graph.leaf_node_id.is_some() && derived_frame_node_id.is_none() {
-            return Err(StoreError::MissingFrameOpenAncestor {
-                leaf_node_id: self
-                    .commit
-                    .graph
-                    .leaf_node_id
-                    .clone()
-                    .expect("checked selected leaf"),
-            });
+        if let Some(leaf_node_id) = self.commit.graph.leaf_node_id.clone()
+            && derived_frame_node_id.is_none()
+        {
+            return Err(StoreError::MissingFrameOpenAncestor { leaf_node_id });
         }
         if self.commit.current_frame_node_id.as_deref() != derived_frame_node_id.as_deref() {
             return Err(StoreError::CurrentFrameNodeMismatch {
@@ -483,6 +478,10 @@ impl<'a> RuntimeCommitPlan<'a> {
     }
 
     /// Assemble canonical session-head metadata after checkpoint storage.
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and a derived frame node id is never empty"
+    )]
     pub fn head_meta(&self, checkpoint_ref: BlobRef) -> SessionHeadMeta {
         SessionHeadMeta::assemble(
             SessionHeadPayload {

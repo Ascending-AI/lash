@@ -489,6 +489,10 @@ impl ExecutionRegistrations<'_> {
 
 impl PluginRegistrar {
     /// The host-owned namespace bound to the registering plugin.
+    #[expect(
+        clippy::expect_used,
+        reason = "`PluginRegistrar::new` is private and every registrar reaching a plugin is bound by `bind_state` first"
+    )]
     pub fn state(&self) -> super::PluginStateStore {
         self.state
             .clone()

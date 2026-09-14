@@ -41,6 +41,10 @@ mod tests;
 /// Project every catalog member to a JSON record for host-owned discovery
 /// (e.g. the production `tools.search` path in agent-workbench). The projection
 /// ranges over members and emits no tiered state.
+#[expect(
+    clippy::expect_used,
+    reason = "`projected` is built one line above by a `json!` object literal, so it is always a JSON object"
+)]
 pub(crate) fn project_tool_catalog<I>(entries: I) -> Vec<serde_json::Value>
 where
     I: IntoIterator<Item = crate::ToolCatalogEntry>,

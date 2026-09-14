@@ -176,6 +176,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     fn language_runtime_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
         let execution_scope = self
             .dispatch
@@ -196,6 +200,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     fn deferred_resolution_invocation(&self, effect_id: &str) -> crate::RuntimeEffectInvocation {
         let execution_scope = self
             .dispatch
@@ -1046,6 +1054,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         let controller = self.dispatch.effect_controller.controller();
         let scoped = self.dispatch.effect_controller.scoped();
+        #[expect(
+            clippy::expect_used,
+            reason = "`EffectTaskController::scoped` returns a proxy that owns the controller it was just built around"
+        )]
         let (owned_controller, task_requests): (
             Arc<dyn crate::RuntimeEffectController>,
             Option<
@@ -1210,6 +1222,10 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
+        #[expect(
+            clippy::expect_used,
+            reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+        )]
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 self.dispatch

@@ -74,6 +74,10 @@ impl SelectedQueuedWorkClaimOutcome {
     /// were acquired; this projection discards the already-satisfied ID
     /// evidence.
     #[track_caller]
+    #[expect(
+        clippy::expect_used,
+        reason = "this is the panicking accessor itself: callers opt into the panic by choosing `expect` over the fallible projection"
+    )]
     pub fn expect(self, message: &str) -> QueuedWorkClaim {
         self.claim.expect(message)
     }

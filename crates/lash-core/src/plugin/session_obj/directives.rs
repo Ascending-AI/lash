@@ -236,6 +236,10 @@ impl PluginSession {
                             read_view.messages().to_vec().into(),
                         ));
                     }
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the branch above initializes `updated_messages` on exactly the path that reaches here"
+                    )]
                     let messages = updated_messages
                         .as_mut()
                         .expect("message sequence was initialized above");

@@ -111,6 +111,10 @@ pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
 /// FrameOpen ID must be final before runtime effects begin. The host-provided
 /// session id fixes the identity before store admission; binding must leave it
 /// unchanged.
+#[expect(
+    clippy::expect_used,
+    reason = "`FrameNodeId::new` rejects only the empty string, and the derived id always carries its `frame-node/v3/` prefix"
+)]
 pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNodeId {
     let preimage = format!(
         "{}:{session_id}:{}:{frame_key}",
@@ -1044,6 +1048,10 @@ impl SessionGraph {
         self.cache = Arc::new(lock);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the `OnceLock` was just set above, and nothing clears it behind a shared borrow"
+    )]
     fn try_cache(&self) -> Result<&SessionGraphCache, crate::StoreError> {
         if let Some(cache) = self.cache.get() {
             return Ok(cache);
@@ -1080,6 +1088,10 @@ impl SessionGraph {
         );
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the node was pushed onto `data.nodes` on the line above, so the vector is non-empty"
+    )]
     fn append_prebuilt_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
         if nodes.is_empty() {
             return;
@@ -1173,6 +1185,10 @@ impl SessionGraph {
         self.append_node_draft(SessionNodeDraft::protocol_event(event))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "`append_node_drafts` returns one node id per draft, and exactly one draft was passed"
+    )]
     pub(crate) fn append_node_draft(&mut self, draft: SessionNodeDraft) -> NodeId {
         self.append_node_drafts([draft])
             .into_iter()
@@ -1213,6 +1229,10 @@ impl SessionGraph {
         true
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and a node id read back out of the graph is never empty"
+    )]
     pub(crate) fn try_agent_frame_records(
         &self,
         session_id: &SessionId,
@@ -1445,6 +1465,10 @@ impl SessionGraph {
 
     /// Builds a `SessionGraph` from active read state data for store, effect-host, and protocol
     /// implementors while materializing, executing, or persisting a session turn.
+    #[expect(
+        clippy::expect_used,
+        reason = "frame resolution can only fail for a scoped rewrite, and this one passes `None` as the frame"
+    )]
     pub fn from_active_read_state(messages: &[Message]) -> Self {
         let mut graph = Self::default();
         graph

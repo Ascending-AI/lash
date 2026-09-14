@@ -240,6 +240,10 @@ impl PluginSession {
         Arc::clone(&self.tool_registry)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "session assembly refuses a contribution set without a protocol session before this object exists"
+    )]
     pub(crate) fn protocol_session(&self) -> &Arc<dyn ProtocolSessionPlugin> {
         &self
             .contributions
@@ -265,6 +269,10 @@ impl PluginSession {
             .map(|entry| Arc::clone(&entry.hook))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "session assembly refuses a contribution set without a protocol driver before this object exists"
+    )]
     pub fn protocol_driver(&self) -> Arc<dyn ProtocolDriverPlugin> {
         self.contributions
             .protocol_driver
