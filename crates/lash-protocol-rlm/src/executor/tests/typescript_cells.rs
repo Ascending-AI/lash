@@ -278,3 +278,51 @@ fn a_restored_typescript_closure_does_not_poison_a_different_cell() {
         }
     });
 }
+
+/// `finish` is the only statement that ends the turn; every other terminal
+/// statement leaves it open.
+///
+/// The RLM loop asks the provider again for as long as the executed cell
+/// reports no terminal finish, and the agent-workbench immutable-deployment
+/// gate depends on exactly that: its first cell registers a process and must
+/// leave the turn open so the second provider call (the gate) happens at all.
+/// Re-authoring that cell's trailing report as `finish(...)` during the
+/// single-language cutover terminated the turn after the registration and the
+/// gate became unreachable, which is the shape FIG-3074 reports. Both arms are
+/// asserted here: the reporting cell stays open, the finishing cell closes with
+/// its value.
+#[test]
+fn only_finish_closes_a_typescript_cells_turn() {
+    block_on(async {
+        let (_, reporting) = execute_typescript_test_cell(
+            RlmExecutionState::for_engine("typescript"),
+            "print(\"journal prefix committed\");",
+        )
+        .await;
+        assert!(
+            reporting.error.is_none(),
+            "reporting cell failed: {:?}",
+            reporting.error
+        );
+        assert_eq!(
+            reporting.terminal_finish, None,
+            "a cell that only reports must leave the turn open for the next provider call"
+        );
+
+        let (_, finishing) = execute_typescript_test_cell(
+            RlmExecutionState::for_engine("typescript"),
+            "finish(\"journal prefix committed\");",
+        )
+        .await;
+        assert!(
+            finishing.error.is_none(),
+            "finishing cell failed: {:?}",
+            finishing.error
+        );
+        assert_eq!(
+            finishing.terminal_finish,
+            Some(serde_json::json!("journal prefix committed")),
+            "a cell that calls finish must close the turn with its value"
+        );
+    });
+}
