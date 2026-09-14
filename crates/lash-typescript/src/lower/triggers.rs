@@ -140,6 +140,7 @@ impl Lowerer {
         if let Expr::Member {
             object,
             property: MemberProperty::Field(field),
+            ..
         } = expr
             && field == "event"
         {

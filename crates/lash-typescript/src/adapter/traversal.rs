@@ -80,13 +80,16 @@ impl Expr {
                 children.push(value);
                 children.extend(target.child_expressions());
             }
-            Expr::Member { object, property } | Expr::Delete { object, property } => {
+            Expr::Member {
+                object, property, ..
+            }
+            | Expr::Delete { object, property } => {
                 children.push(object);
                 if let MemberProperty::Index(index) = property {
                     children.push(index);
                 }
             }
-            Expr::Unary { value, .. } | Expr::Await(value) => children.push(value),
+            Expr::Unary { value, .. } | Expr::Await { value, .. } => children.push(value),
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 children.push(left);
                 children.push(right);
@@ -110,7 +113,7 @@ impl Expr {
                     FunctionBody::Expression(expression) => children.push(expression),
                 }
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, .. } => {
                 children.push(callee);
                 children.extend(args.iter().map(|arg| match arg {
                     CallArg::Value(value) | CallArg::Spread(value) => value,

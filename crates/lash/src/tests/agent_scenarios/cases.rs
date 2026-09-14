@@ -558,7 +558,7 @@ finish(result);"#,
         root         exec      cell.start              lang="typescript"
         root         tool      tool.start              name="spawn_agent" call=call-001
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
-        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed"
+        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed --…"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=227B

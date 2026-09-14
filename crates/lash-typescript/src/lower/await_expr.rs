@@ -22,12 +22,13 @@ impl Lowerer {
                     .is_ok_and(|binding| binding.role == BindingRole::ProcessHandle)
         );
         let promise_kind = match inner {
-            Expr::Call { callee, args }
+            Expr::Call { callee, args, .. }
                 if matches!(
                     callee.as_ref(),
                     Expr::Member {
                         object,
                         property: MemberProperty::Field(method),
+                        ..
                     } if matches!(object.as_ref(), Expr::Ident(name) if name == "Promise" && !self.has_binding(name))
                         && matches!(method.as_str(), "all" | "allSettled")
                 ) =>
@@ -120,7 +121,7 @@ impl Lowerer {
 fn is_async_map(value: &Expr) -> bool {
     matches!(
         value,
-        Expr::Call { callee, args }
+        Expr::Call { callee, args, .. }
             if matches!(callee.as_ref(), Expr::Member { property: MemberProperty::Field(map), .. } if map == "map")
                 && matches!(args.as_slice(), [CallArg::Value(Expr::Function(function))] if function.is_async)
     )

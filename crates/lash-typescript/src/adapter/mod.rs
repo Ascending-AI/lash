@@ -198,6 +198,7 @@ pub(crate) enum Expr {
     Member {
         object: Box<Expr>,
         property: MemberProperty,
+        span: SourceSpan,
     },
     Unary {
         op: UnaryOp,
@@ -226,6 +227,7 @@ pub(crate) enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,
+        span: SourceSpan,
     },
     New {
         constructor: String,
@@ -235,7 +237,10 @@ pub(crate) enum Expr {
         base: Box<Expr>,
         operations: Vec<OptionalOperation>,
     },
-    Await(Box<Expr>),
+    Await {
+        value: Box<Expr>,
+        span: SourceSpan,
+    },
     Update {
         target: AssignTarget,
         delta: f64,
@@ -859,7 +864,9 @@ impl Adapter {
             swc::Pat::Ident(name) => Pattern::Ident(name.id.sym.to_string()),
             swc::Pat::Expr(expr) => match self.convert_expr(expr)? {
                 Expr::Ident(name) => Pattern::Ident(name),
-                Expr::Member { object, property } => Pattern::Member { object, property },
+                Expr::Member {
+                    object, property, ..
+                } => Pattern::Member { object, property },
                 _ => {
                     return Err(reject_defect(
                         DiagnosticCode::UnsupportedExpression,
@@ -1017,6 +1024,7 @@ impl Adapter {
                     Expr::Member {
                         object: Box::new(Expr::Ident(enum_name.clone())),
                         property: MemberProperty::Field(name),
+                        span: source_span(expr.span()),
                     }
                 } else {
                     Expr::Ident(name)
@@ -1116,7 +1124,9 @@ impl Adapter {
                     swc::UnaryOp::TypeOf => UnaryOp::TypeOf,
                     swc::UnaryOp::Void => UnaryOp::Void,
                     swc::UnaryOp::Delete => {
-                        let Expr::Member { object, property } = self.convert_expr(&expr.arg)?
+                        let Expr::Member {
+                            object, property, ..
+                        } = self.convert_expr(&expr.arg)?
                         else {
                             return Err(reject(
                                 DiagnosticCode::SyntaxError,
@@ -1180,6 +1190,7 @@ impl Adapter {
                         args,
                         optional: false,
                     },
+                    source_span(call.span),
                 )
             }
             swc::Expr::Tpl(template) => Expr::Template {
@@ -1255,9 +1266,10 @@ impl Adapter {
                     span,
                 ));
             }
-            swc::Expr::Await(await_expr) => {
-                Expr::Await(Box::new(self.convert_expr(&await_expr.arg)?))
-            }
+            swc::Expr::Await(await_expr) => Expr::Await {
+                value: Box::new(self.convert_expr(&await_expr.arg)?),
+                span: source_span(await_expr.span),
+            },
             swc::Expr::SuperProp(_) => {
                 return Err(reject(
                     DiagnosticCode::SuperUnsupported,
@@ -1421,6 +1433,7 @@ impl Adapter {
                 property,
                 optional: false,
             },
+            source_span(member.span),
         ))
     }
 
@@ -1437,7 +1450,12 @@ impl Adapter {
             .collect()
     }
 
-    fn append_optional_operation(&self, base: Expr, operation: OptionalOperation) -> Expr {
+    fn append_optional_operation(
+        &self,
+        base: Expr,
+        operation: OptionalOperation,
+        span: SourceSpan,
+    ) -> Expr {
         match base {
             Expr::OptionalChain {
                 base,
@@ -1453,6 +1471,7 @@ impl Adapter {
                 } => Expr::Member {
                     object: Box::new(base),
                     property,
+                    span,
                 },
                 OptionalOperation::Call {
                     args,
@@ -1460,6 +1479,7 @@ impl Adapter {
                 } => Expr::Call {
                     callee: Box::new(base),
                     args,
+                    span,
                 },
                 operation => Expr::OptionalChain {
                     base: Box::new(base),
@@ -1492,6 +1512,7 @@ impl Adapter {
                         property,
                         optional: chain.optional,
                     },
+                    source_span(member.span),
                 )
             }
             swc::OptChainBase::Call(call) => self.append_optional_operation(
@@ -1500,6 +1521,7 @@ impl Adapter {
                     args: self.convert_call_args(&call.args)?,
                     optional: chain.optional,
                 },
+                source_span(call.span),
             ),
         })
     }
@@ -1507,7 +1529,9 @@ impl Adapter {
     fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {
         match self.convert_expr(expr)? {
             Expr::Ident(name) => Ok(AssignTarget::Ident(name)),
-            Expr::Member { object, property } => Ok(AssignTarget::Member { object, property }),
+            Expr::Member {
+                object, property, ..
+            } => Ok(AssignTarget::Member { object, property }),
             _ => Err(Diagnostic::refusal(
                 DiagnosticCode::UnsupportedExpression,
                 "Unsupported: update on a non-assignment target. Assign the expression to a variable first.",
@@ -1524,12 +1548,14 @@ impl Adapter {
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Ident(name)) => {
                 Ok(AssignTarget::Ident(name.id.sym.to_string()))
             }
-            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => match self
-                .convert_member(member)?
-            {
-                Expr::Member { object, property } => Ok(AssignTarget::Member { object, property }),
-                _ => unreachable!(),
-            },
+            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
+                match self.convert_member(member)? {
+                    Expr::Member {
+                        object, property, ..
+                    } => Ok(AssignTarget::Member { object, property }),
+                    _ => unreachable!(),
+                }
+            }
             swc::AssignTarget::Pat(pattern) => {
                 let pattern: swc::Pat = pattern.clone().into();
                 Ok(AssignTarget::Pattern(Box::new(

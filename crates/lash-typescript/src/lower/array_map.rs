@@ -36,12 +36,13 @@ impl Lowerer {
         &mut self,
         expression: &Expr,
     ) -> Result<LashExpr, Diagnostic> {
-        let Expr::Call { callee, args } = expression else {
+        let Expr::Call { callee, args, .. } = expression else {
             unreachable!("caller identifies an async array map")
         };
         let Expr::Member {
             object,
             property: crate::adapter::MemberProperty::Field(method),
+            ..
         } = callee.as_ref()
         else {
             unreachable!("caller identifies an async array map")

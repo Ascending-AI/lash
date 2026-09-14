@@ -775,6 +775,7 @@ mod tests {
             ("lower/constructs.rs", include_str!("lower/constructs.rs")),
             ("lower/loops.rs", include_str!("lower/loops.rs")),
             ("lower/regex.rs", include_str!("lower/regex.rs")),
+            ("lower/spans.rs", include_str!("lower/spans.rs")),
             ("lower/array_map.rs", include_str!("lower/array_map.rs")),
             (
                 "lower/array_callbacks.rs",
