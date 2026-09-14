@@ -261,6 +261,32 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 73;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
+
+/// Fixed stand-in for the await-event signing secret each store mints from
+/// system randomness when it first creates its schema.
+///
+/// Two values in this fixture are minted from randomness rather than derived
+/// from the fixture's inputs: this secret and
+/// [`FIXTURE_ATTACHMENT_WRITE_ID`]. Left alone they make regeneration
+/// nondeterministic, which costs the no-diff double-regeneration proof — the
+/// only evidence that the committed bytes are a function of the code and not
+/// of the run. The generators therefore overwrite both rows with these seeds
+/// before the fixture is dumped. Production randomness is untouched: the store
+/// still mints a fresh secret and a fresh write token on every real open and
+/// every real attachment write; only the generator's copy is pinned.
+pub const FIXTURE_AWAIT_EVENT_SIGNING_SECRET: [u8; 32] = [0x88; 32];
+
+/// Fixed stand-in for the attachment write token minted by
+/// `begin_attachment_write` while seeding the fixture.
+///
+/// Spelled as the 32-character lowercase hexadecimal encoding the durable
+/// stores persist, and shaped like the v4 UUID the production token is drawn
+/// from so a reader cannot mistake the column's domain. See
+/// [`FIXTURE_AWAIT_EVENT_SIGNING_SECRET`] for why it is pinned.
+pub const FIXTURE_ATTACHMENT_WRITE_ID: &str = "88888888888848888888888888888888";
+
+/// The attachment whose manifest row carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
+pub const FIXTURE_ATTACHMENT_ID: &str = "durable-read-attachment";
 const PROCESS_ID: &str = "durable-read-waiting-process";
 const WAKE_PROCESS_ID: &str = "durable-read-wake-process";
 const TOMBSTONE_PROCESS_ID: &str = "durable-read-retired-process";
@@ -407,8 +433,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("commit identity-bearing fixture append");
 
-    let attachment_id =
-        AttachmentId::parse("durable-read-attachment").expect("valid attachment id");
+    let attachment_id = AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id");
     let attachment_intent = AttachmentIntent {
         attachment_id: attachment_id.clone(),
         session_id: SessionId::from(SESSION_ID.to_string()),
@@ -958,9 +983,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert!(
         AttachmentManifest::list_all_refs(handles.runtime.as_ref())
             .expect("read fixture attachment manifest")
-            .contains(
-                &AttachmentId::parse("durable-read-attachment").expect("valid attachment id")
-            ),
+            .contains(&AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id")),
         "durable fixture semantic drift: committed attachment disappeared"
     );
 

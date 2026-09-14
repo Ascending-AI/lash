@@ -682,7 +682,7 @@ async fn drop_fixture_schema(database_url: &str) {
 
 async fn install_fixed_await_event_secret(storage: &PostgresStorage) {
     sqlx::query("UPDATE lash_await_event_meta SET signing_secret = $1 WHERE singleton = TRUE")
-        .bind(vec![0x88_u8; 32])
+        .bind(fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec())
         .execute(storage.pool())
         .await
         .expect("install deterministic Postgres await-event signing secret");
@@ -722,6 +722,28 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
     .execute(storage.pool())
     .await
     .expect("normalize server-authoritative fixture effect timestamps");
+    pin_attachment_write_token(storage).await;
+}
+
+/// Replace the random write token `begin_attachment_write` minted while seeding
+/// with the fixture's fixed one.
+///
+/// The token is minted inside the store, so it cannot be handed in; it is
+/// rewritten afterwards instead. The row must exist and must be the only one,
+/// or the fixture no longer matches what this generator believes it wrote.
+async fn pin_attachment_write_token(storage: &PostgresStorage) {
+    let rewritten =
+        sqlx::query("UPDATE lash_attachment_manifest SET write_id = $1 WHERE attachment_id = $2")
+            .bind(fixture::FIXTURE_ATTACHMENT_WRITE_ID)
+            .bind(fixture::FIXTURE_ATTACHMENT_ID)
+            .execute(storage.pool())
+            .await
+            .expect("pin the Postgres fixture attachment write token")
+            .rows_affected();
+    assert_eq!(
+        rewritten, 1,
+        "the fixture seeds exactly one attachment manifest row to pin; {rewritten} were rewritten"
+    );
 }
 
 fn fixture_database_url(database_url: &str) -> String {
