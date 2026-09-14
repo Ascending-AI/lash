@@ -119,8 +119,15 @@ impl Lowerer {
     /// reading the binding made a process registering a trigger against
     /// another process unwritable (FIG-3059). A reference has nothing to
     /// capture.
+    ///
+    /// Only a registration written *inside* a process body takes this route.
+    /// At the top level the binding is in scope with nothing to capture, and
+    /// the variable read is the form every stored artifact was built from; the
+    /// canonical IR there is durable, so it does not move for a rewrite that
+    /// buys nothing.
     fn lower_process_target(&mut self, target: &Expr) -> Result<LashExpr, Diagnostic> {
-        if let Expr::Ident(name, _) = target
+        if self.process_depth > 0
+            && let Expr::Ident(name, _) = target
             && let Ok(BindingRole::ProcessDefinition(process)) =
                 self.binding(name).map(|binding| binding.role.clone())
         {
