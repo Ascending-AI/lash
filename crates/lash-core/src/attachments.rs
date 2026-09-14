@@ -1425,7 +1425,7 @@ impl SessionAttachmentStore {
         // is taken back from a sweep that condemned it. If this fails the bytes
         // never land.
         let mut attempts: u32 = 0;
-        let permit = loop {
+        let reference = loop {
             attempts += 1;
             let fence = self
                 .manifest
@@ -1436,8 +1436,8 @@ impl SessionAttachmentStore {
                         "failed to record attachment intent for `{attachment_id}`: {err}"
                     ))
                 })?;
-            match fence {
-                AttachmentWriteFence::Granted(permit) => break permit,
+            let permit = match fence {
+                AttachmentWriteFence::Granted(permit) => permit,
                 // A sweep armed this digest's delete before we recorded an
                 // intent. Writing bytes into an in-flight delete would lose
                 // them, so back off and re-acquire: the sweep releases the
@@ -1452,44 +1452,70 @@ impl SessionAttachmentStore {
                         });
                     }
                     reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    continue;
                 }
-            }
-        };
-        let reference = match self.backend.put(bytes, meta).await {
-            Ok(reference) => reference,
-            Err(backend_error) => {
+            };
+            // Cloned per attempt because a retry has to re-put: a sweep that
+            // condemned the digest in the window below deletes both this row and
+            // the bytes, so the recovering attempt is a full re-put, not a bare
+            // re-stamp.
+            let reference = match self.backend.put(bytes.clone(), meta.clone()).await {
+                Ok(reference) => reference,
+                Err(backend_error) => {
+                    if let Err(rollback_error) =
+                        self.manifest.abort_attachment_write(&intent, permit).await
+                    {
+                        return Err(AttachmentStoreError::ManifestRecordFailed(format!(
+                            "backend put for `{attachment_id}` failed ({backend_error}); \
+                             condemnation rollback also failed: {rollback_error}"
+                        )));
+                    }
+                    return Err(backend_error);
+                }
+            };
+            if reference.id != attachment_id {
+                let backend_error = AttachmentStoreError::Contract(format!(
+                    "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
+                    reference.id
+                ));
                 if let Err(rollback_error) =
                     self.manifest.abort_attachment_write(&intent, permit).await
                 {
                     return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                        "backend put for `{attachment_id}` failed ({backend_error}); \
-                         condemnation rollback also failed: {rollback_error}"
+                        "{backend_error}; condemnation rollback also failed: {rollback_error}"
                     )));
                 }
                 return Err(backend_error);
             }
-        };
-        if reference.id != attachment_id {
-            let backend_error = AttachmentStoreError::Contract(format!(
-                "attachment store returned id `{}` after manifest intent for `{attachment_id}`",
-                reference.id
-            ));
-            if let Err(rollback_error) = self.manifest.abort_attachment_write(&intent, permit).await
+            match self
+                .manifest
+                .complete_attachment_write(&intent, permit)
+                .await
             {
-                return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                    "{backend_error}; condemnation rollback also failed: {rollback_error}"
-                )));
+                Ok(()) => break reference,
+                // The manifest has no TTL and no elapsed-time authority, so an
+                // unstamped intent that is already past the sweep's grace cutoff
+                // reads as an abandoned attempt: a sweep that condemns this
+                // digest between the grant and the stamp deletes the row this
+                // permit names, and the stamp then certifies nothing. That is
+                // the documented recovery point for the writer, not a failure —
+                // re-acquire the fence (which claims the condemnation and stops
+                // the delete from arming) and re-put. The bytes are only ever
+                // written behind a granted permit, so nothing lands inside an
+                // armed delete.
+                Err(StoreError::StaleWritePermit { .. })
+                    if attempts < RECLAMATION_FENCE_ATTEMPTS =>
+                {
+                    reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
+                    continue;
+                }
+                Err(err) => {
+                    return Err(AttachmentStoreError::ManifestRecordFailed(format!(
+                        "failed to complete attachment write for `{attachment_id}` after the backend put succeeded: {err}"
+                    )));
+                }
             }
-            return Err(backend_error);
-        }
-        self.manifest
-            .complete_attachment_write(&intent, permit)
-            .await
-            .map_err(|err| {
-                AttachmentStoreError::ManifestRecordFailed(format!(
-                    "failed to complete attachment write for `{attachment_id}` after the backend put succeeded: {err}"
-                ))
-            })?;
+        };
         if let Some(owner) = &owner {
             owner
                 .recorded_intent_ids
