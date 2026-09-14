@@ -151,6 +151,10 @@ impl Compiler {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each pending function is taken and compiled exactly once from the reserved index in this same queue"
+    )]
     fn compile_pending_functions(&mut self) {
         let mut next = 0;
         while next < self.pending_functions.len() {
@@ -774,6 +778,10 @@ impl Compiler {
         self.push_null_if(leave_value);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
+    )]
     fn compile_for_loop_body(&mut self, body: &Expr) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
@@ -907,6 +915,10 @@ impl Compiler {
         self.clear_const_slots();
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
+    )]
     pub(super) fn compile_while_expr(&mut self, condition: &Expr, body: &Expr, leave_value: bool) {
         self.clear_const_slots();
         let loop_start = self.code.len();

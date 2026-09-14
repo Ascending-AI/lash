@@ -148,6 +148,10 @@ pub(crate) fn fold_code_point(cu: u32, unicode: bool) -> u32 {
     uppercase(cu)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the index was computed by the same table's binary search above, so it is in range"
+)]
 pub fn fold(cu: u32) -> u32 {
     let searched = FOLDS.binary_search_by(|fr| {
         if fr.first() > cu {
@@ -177,6 +181,10 @@ pub fn fold(cu: u32) -> u32 {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the index was computed by the same table's search above, so it is in range"
+)]
 fn uppercase(cu: u32) -> u32 {
     let searched = TO_UPPERCASE.binary_search_by(|fr| {
         if fr.first() > cu {

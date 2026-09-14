@@ -392,6 +392,10 @@ pub(super) async fn run_once_high_traffic(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller provisions the SQLite root exactly once for this scenario and passes Some, which the message states"
+)]
 async fn run_high_traffic_step(
     scenario: RuntimePerfScenario,
     chat_turns: usize,

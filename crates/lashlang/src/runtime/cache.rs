@@ -108,6 +108,10 @@ impl CompiledProcessCache {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the index came from position() over this same entries vec a few lines above"
+    )]
     pub fn get_or_compile(
         &mut self,
         artifact: &ModuleArtifact,
@@ -260,6 +264,10 @@ impl LinkedProgramCache {
     ///
     /// A hit is recorded and promoted exactly as it is on the compiling paths,
     /// so this is the lookup those paths use rather than a peek beside them.
+    #[expect(
+        clippy::expect_used,
+        reason = "the index came from position() over this same entries vec a few lines above"
+    )]
     pub fn cached_linked_program(
         &mut self,
         source: &str,
@@ -387,6 +395,10 @@ impl CompiledProgramCache {
     ///
     /// A hit is recorded and promoted exactly as it is on the compiling paths,
     /// so this is the lookup those paths use rather than a peek beside them.
+    #[expect(
+        clippy::expect_used,
+        reason = "the index came from position() over this same entries vec two lines above"
+    )]
     pub fn cached_compiled_program(&mut self, source: &str) -> Option<Arc<CompiledProgram>> {
         let source_hash = program_source_hash(source);
         if let Some(entry) = self.entries.back()

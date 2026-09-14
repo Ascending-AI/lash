@@ -365,6 +365,10 @@ fn publish_one(
         .ok_or_else(|| anyhow::anyhow!("published live replay batch was empty"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the run commits into one active runtime frame scope, so its read view resolves after the run, per the message"
+)]
 pub(super) async fn run_once_trace_jsonl(
     scenario: RuntimePerfScenario,
     chat_turns: usize,

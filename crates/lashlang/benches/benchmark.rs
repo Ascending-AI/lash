@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 #[path = "../examples/bench_support/mod.rs"]
 mod bench_support;
 
@@ -16,6 +14,10 @@ use lashlang::{
 use std::hint::black_box;
 use std::time::Duration;
 
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark entry point; the current-thread tokio runtime is configured with fixed constants"
+)]
 fn lashlang_benchmarks(c: &mut Criterion) {
     let host = BenchHost;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -34,6 +36,10 @@ fn lashlang_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "each benchmark step asserts its fixture's one-shot mode outcome and snapshot round trip, per each message"
+)]
 fn benchmark_one_shot_modes(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     rt: &tokio::runtime::Runtime,
@@ -98,6 +104,10 @@ fn benchmark_one_shot_modes(
     });
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark entry point; the fixture program links and the runtime executes the asserted outcome, per each message"
+)]
 fn lashlang_m9_benchmarks(c: &mut Criterion) {
     let host = BenchHost;
     let rt = tokio::runtime::Builder::new_current_thread()

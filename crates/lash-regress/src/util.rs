@@ -189,6 +189,10 @@ pub trait SliceHelp {
 
 impl<T> SliceHelp for [T] {
     type Item = T;
+    #[expect(
+        clippy::unwrap_used,
+        reason = "binary_search_by cannot find either probe because the searched key never compares equal in the split range, per the unwrap_err contract"
+    )]
     fn equal_range_by<'a, F>(&'a self, mut f: F) -> core::ops::Range<usize>
     where
         F: FnMut(&'a Self::Item) -> Ordering,

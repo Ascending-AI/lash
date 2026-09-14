@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 mod bench_support;
 
 use bench_support::{
@@ -12,6 +10,10 @@ use lashlang::{
 };
 use std::env;
 
+#[expect(
+    clippy::expect_used,
+    reason = "example main: the scenario argument was parsed by the caller's table and the fixed runtime executes it, per each message"
+)]
 fn main() {
     let mut args = env::args().skip(1);
     if matches!(args.next().as_deref(), Some("--list-scenarios")) {

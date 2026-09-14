@@ -31,6 +31,10 @@ pub fn to_utf16(input: &str) -> Vec<u16> {
 
 /// Given a range of a string encoded as UTF16, return the corresponding
 /// range in the original string (UTF-8).
+#[expect(
+    clippy::expect_used,
+    reason = "the utf16 ranges come from the same generated table, so every segment encodes, per the message"
+)]
 pub fn range_from_utf16(utf16: &[u16], r: lash_regress::Range) -> lash_regress::Range {
     use std::char::decode_utf16;
     // Figure out start.
@@ -191,6 +195,10 @@ impl TestCompiledRegex {
 
     /// Match against a string, returning the match as a Vec containing None
     /// for unmatched groups, or the matched strings.
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixture asserts the pattern matches the input; a miss is a broken fixture assumption, per the message"
+    )]
     pub fn match1_vec<'b>(&self, input: &'b str) -> Vec<Option<&'b str>> {
         let mut result = Vec::new();
         let m: lash_regress::Match = self.find(input).expect("Failed to match");
@@ -285,6 +293,10 @@ impl TestConfig {
 
     /// Compile a pattern to a regex, with given flags.
     #[track_caller]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the fixture config picks compile-then-match or compile-error semantics; each unwrap asserts which half applies"
+    )]
     pub fn compilef(&self, pattern: &str, flags_str: &str) -> TestCompiledRegex {
         let mut flags = lash_regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;

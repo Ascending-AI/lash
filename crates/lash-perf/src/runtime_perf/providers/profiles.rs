@@ -4,6 +4,10 @@ pub(crate) fn benchmark_stream_profile(scenario: RuntimePerfScenario) -> Benchma
     benchmark_stream_profile_for_request(scenario, &empty_request())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the settlement scenario below resolves its configured child count in this same profile builder, which the message states"
+)]
 pub(super) fn benchmark_stream_profile_for_request(
     scenario: RuntimePerfScenario,
     request: &LlmRequest,
@@ -337,7 +341,6 @@ finish(first.value);"#,
                 r#"
 const benchmarkEchoProcess = defineProcess({
   name: "benchmark_echo_process",
-  signals: {},
   run: async (value: string, ordinal: number) => {
     return await tools.benchmark_echo({ value: value, ordinal: ordinal });
   }
@@ -345,7 +348,6 @@ const benchmarkEchoProcess = defineProcess({
 
 const benchmarkSlowProcess = defineProcess({
   name: "benchmark_slow_process",
-  signals: {},
   run: async (value: string, delay_ms: number) => {
     return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
   }
@@ -366,7 +368,6 @@ finish(first_result.value);"#,
                 r#"
 const forward_mail = defineProcess({
   name: "forward_mail",
-  signals: {},
   run: async (event: mail.Received) => {
     if (event.account == "test") {
       await inbox.test23.send({
@@ -409,7 +410,6 @@ finish("runtime perf benchmark ok");"#,
                 r#"
 const benchmarkAsyncProcess = defineProcess({
   name: "benchmark_async_process",
-  signals: {},
   run: async (value: string) => {
     return await tools.benchmark_async({ value: value, delay_ms: 0 });
   }
@@ -440,7 +440,6 @@ finish(first_result.value);"#,
                 r#"
 const settlementChild = defineProcess({{
   name: "settlement_child",
-  signals: {{}},
   run: async (value: string) => {{
     return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
   }}
@@ -458,7 +457,6 @@ finish("runtime perf benchmark ok");"#
                 r#"
 const spawnChild = defineProcess({
   name: "spawn_child",
-  signals: {},
   run: async () => {
     return await agents.spawn({
       capability: "default",
@@ -484,7 +482,6 @@ finish("runtime perf benchmark ok");"#,
                 r#"
 const explore = defineProcess({
   name: "explore",
-  signals: {},
   run: async () => {
     return await agents.spawn({
       capability: "default",
@@ -561,7 +558,6 @@ finish("runtime perf benchmark ok");"#,
                 r#"
 const deepChild = defineProcess({
   name: "deep_child",
-  signals: {},
   run: async () => {
     const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
     await sleep(0);
@@ -596,6 +592,10 @@ finish(result);"#,
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the trigger name is a plain string produced a few lines above, so it always serializes, per the message"
+)]
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
     if kind == Some("tool") {
@@ -608,7 +608,6 @@ finish(result.value);"#,
         return text_profile(typescript_block(
             r#"const loadChild = defineProcess({
   name: "load_child",
-  signals: {},
   run: async () => {
     return await agents.spawn({
       capability: "default",
@@ -627,7 +626,6 @@ finish("runtime perf benchmark ok");"#,
         return text_profile(typescript_block(
             r#"const loadWake = defineProcess({
   name: "load_wake",
-  signals: {},
   run: async () => {
     return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
   }
@@ -644,7 +642,6 @@ finish(result.value);"#,
         return text_profile(typescript_block(&format!(
             r#"const load_forward = defineProcess({{
   name: "load_forward",
-  signals: {{}},
   run: async (event: mail.Received) => {{
     return event.title;
   }}

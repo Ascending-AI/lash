@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
@@ -267,6 +265,10 @@ pub trait ToolDefinitionBindingExt {
 }
 
 impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
+    #[expect(
+        clippy::expect_used,
+        reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the manifest's JSON bindings map can only fail if the type is widened, which the site's message asserts"
+    )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
         let value =
             serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
@@ -288,6 +290,10 @@ pub trait RemoteToolGrantBindingExt {
 }
 
 impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
+    #[expect(
+        clippy::expect_used,
+        reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the remote grant's binding map can only fail if the type is widened, which the site's message asserts"
+    )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
         let value =
             serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
@@ -1331,6 +1337,10 @@ pub fn admit_lashlang_process(
     Ok(lashlang_process_identity(&input))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the engine and the admission descriptor are constructed from the same LASHLANG_ENGINE_KIND constant a few lines below, so registration cannot refuse"
+)]
 pub fn lashlang_process_engine_registration(
     engine: LashlangProcessEngine,
 ) -> lash_core::ProcessEngineRegistration {

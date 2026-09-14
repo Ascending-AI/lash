@@ -344,6 +344,10 @@ pub(super) fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, 
     spans
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "an AST child index of a source file far below u32::MAX fits, per the message"
+)]
 fn collect_expression_spans_by_pointer(
     expr: &Expr,
     path: &mut Vec<u32>,
@@ -367,6 +371,12 @@ fn collect_expression_spans_by_pointer(
 /// with `u32::MAX` and the declaration index: no real child index is that
 /// large, so a process literal inside a process body can never collide with a
 /// `main` path when a lifted declaration's name is derived.
+/// Note: the declaration index and child indexes are enumerated in-memory
+/// AST positions, all far below `u32::MAX`, as each site's message states.
+#[expect(
+    clippy::expect_used,
+    reason = "declaration and AST child indexes fit u32"
+)]
 pub(super) fn expression_paths_by_pointer(program: &Program) -> BTreeMap<usize, Vec<u32>> {
     let mut paths = BTreeMap::new();
     collect_expression_paths(&program.main, &mut Vec::new(), &mut paths);
@@ -385,6 +395,7 @@ pub(super) fn expression_paths_by_pointer(program: &Program) -> BTreeMap<usize, 
     paths
 }
 
+#[expect(clippy::expect_used, reason = "AST child index fits u32")]
 fn collect_expression_paths(
     expr: &Expr,
     path: &mut Vec<u32>,

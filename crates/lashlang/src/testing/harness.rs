@@ -83,6 +83,10 @@ impl ExecutionHost for EchoHost {
 
 /// The host environment the scaffolding links against: a `tools` module with
 /// `echo`, `err`, `missing` and `spawn`, and every ability granted.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
+)]
 pub fn test_environment() -> LashlangHostEnvironment {
     let mut resources = LashlangHostCatalog::new();
     for operation in ["echo", "err", "missing", "spawn"] {
@@ -112,12 +116,20 @@ pub fn compile_labeled_program(program: Program) -> CompiledProgram {
 }
 
 /// Links and compiles one declared process of `program`, with labels enabled.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls: the runbook-style program compiles or the fixture author's assumption breaks, per the message"
+)]
 pub fn compile_labeled_process_program(program: Program, process_name: &str) -> CompiledProgram {
     crate::compile_linked_process(&link_labeled(program), process_name)
         .expect("process should compile")
 }
 
 /// Links `program` against [`labeled_test_environment`].
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls: linking against the labeled test environment succeeds or the fixture author is at fault, per the message"
+)]
 pub fn link_labeled(program: Program) -> LinkedModule {
     LinkedModule::link(program, labeled_test_environment()).expect("program should link")
 }

@@ -1,4 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
 #![allow(dead_code)]
 
 mod bench_support;
@@ -65,6 +64,10 @@ impl ExecutionHost for FrameHost {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "example main: the fixture program compiles and executes within its stated cap, per each message"
+)]
 fn main() {
     let mut args = env::args().skip(1);
     if matches!(args.next().as_deref(), Some("--list-scenarios")) {

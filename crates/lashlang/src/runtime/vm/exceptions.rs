@@ -180,6 +180,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "one thrown value produces one heap import, established by import_values above, per the message"
+    )]
     pub(super) fn throw_value(
         &mut self,
         value: Value,
@@ -239,6 +243,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the iterator depth was checked against the handler above in the while condition, per the message"
+    )]
     fn unwind_to_handler(&mut self, handler: &ExceptionHandler) -> Result<(), RuntimeError> {
         if handler.frame_depth > self.frames.len() {
             return Err(RuntimeError::InvalidExceptionState {

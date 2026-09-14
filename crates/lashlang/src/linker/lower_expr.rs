@@ -1192,6 +1192,10 @@ impl<'module> Linker<'module> {
     /// makes the declared return type usable: the call's binding is the
     /// declared output, so a function result flows into typed positions exactly
     /// like a process result does.
+    #[expect(
+        clippy::expect_used,
+        reason = "function calls are only lowered after the declared-function pass registered the signature, per the message"
+    )]
     pub(super) fn lower_function_call(
         &self,
         function: &AstString,

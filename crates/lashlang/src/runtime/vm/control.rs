@@ -660,6 +660,10 @@ fn needs_heap_import(value: &Value) -> bool {
     matches!(value, Value::Tuple(_) | Value::List(_) | Value::Record(_))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the import count was matched to the walk over needs_heap_import values, per the message"
+)]
 fn replace_imported_value(value: &mut Value, imported: &mut impl Iterator<Item = Value>) {
     if needs_heap_import(value) {
         *value = imported.next().expect("heap import count matches");

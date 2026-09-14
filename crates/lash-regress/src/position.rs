@@ -130,6 +130,10 @@ impl RefPosition<'_> {
         unsafe_code,
         reason = "all internal constructors provide a non-null slice-derived pointer"
     )]
+    #[expect(
+        clippy::expect_used,
+        reason = "every caller passes a slice-derived pointer, which the message asserts under the prohibit-unsafe build"
+    )]
     pub fn new(ptr: *const u8) -> Self {
         debug_assert!(!ptr.is_null(), "Pointer cannot be null");
         // Annoyingly there's no *const NonNull.

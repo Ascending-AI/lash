@@ -190,6 +190,10 @@ async fn execute<H: ExecutionHost>(
     execute_support::execute(source, state, host, test_host_environment()).await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "fixture catalog registers each host operation once into a fresh catalog, per each message"
+)]
 fn test_host_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources

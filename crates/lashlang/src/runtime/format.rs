@@ -38,6 +38,10 @@ pub(crate) fn stringify_value_direct(value: &Value) -> Result<String, RuntimeErr
     Ok(output)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "write_number writes into an in-memory String buffer, whose fmt::Write cannot fail, per the message"
+)]
 pub(crate) fn append_stringified_value_direct(
     output: &mut String,
     value: &Value,
@@ -65,6 +69,10 @@ pub(crate) fn append_stringified_value_direct(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "write_number writes into an in-memory String buffer, whose fmt::Write cannot fail, per the message"
+)]
 pub(crate) fn append_stringified_value_async<'a>(
     output: &'a mut String,
     value: &'a Value,
@@ -120,6 +128,10 @@ pub(crate) fn append_tuple_literal_direct(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serde_json::to_string of a plain string value cannot fail, per the message"
+)]
 fn append_tuple_item_literal_direct(
     output: &mut String,
     value: &Value,
@@ -154,6 +166,10 @@ pub(crate) fn append_tuple_literal_async<'a>(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serde_json::to_string of a plain string value cannot fail, per the message"
+)]
 fn append_tuple_item_literal_async<'a>(
     output: &'a mut String,
     value: &'a Value,
@@ -192,6 +208,10 @@ fn write_i64(output: &mut impl fmt::Write, value: i64) -> fmt::Result {
     write_u64(output, value as u64)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the buffer holds ASCII digits written above, so it is valid UTF-8, per the message"
+)]
 fn write_u64(output: &mut impl fmt::Write, mut value: u64) -> fmt::Result {
     let mut buffer = [0u8; 20];
     let mut index = buffer.len();
@@ -574,6 +594,10 @@ pub(crate) fn execute_compiled_format_direct(
     Ok(output)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "write_number writes into an in-memory String buffer, whose fmt::Write cannot fail, per both sites' message"
+)]
 pub(crate) fn execute_compiled_format_one_number_compact_direct(
     template: &CompiledFormatTemplate,
     value: f64,
@@ -606,6 +630,10 @@ pub(crate) fn execute_compiled_format_one_number_compact_direct(
     Ok(output)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the write goes into an in-memory String buffer, whose fmt::Write cannot fail, per the message"
+)]
 fn push_compiled_one_arg_prefix(output: &mut impl fmt::Write, shape: &CompiledFormatOneArg) {
     if let Some(prefix) = &shape.prefix {
         output
@@ -614,6 +642,10 @@ fn push_compiled_one_arg_prefix(output: &mut impl fmt::Write, shape: &CompiledFo
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the write goes into an in-memory String buffer, whose fmt::Write cannot fail, per the message"
+)]
 fn push_compiled_one_arg_suffix(output: &mut impl fmt::Write, shape: &CompiledFormatOneArg) {
     if let Some(suffix) = &shape.suffix {
         output

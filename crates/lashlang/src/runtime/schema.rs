@@ -418,6 +418,10 @@ enum PathSegment<'a> {
     Index(usize),
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "an index segment formats into an in-memory String buffer, per the message"
+)]
 fn format_schema_path(path: &[PathSegment<'_>]) -> String {
     let mut formatted = "$".to_string();
     for segment in path {

@@ -275,6 +275,10 @@ impl Heap {
         self.allocate_object(HeapObject::Date(DateObject { milliseconds }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "import_values returns exactly one value per pushed member, matched by has_cause and has_errors above, per each message"
+    )]
     pub(crate) fn allocate_error(
         &mut self,
         kind: ErrorKind,
@@ -442,6 +446,10 @@ impl Heap {
             .any(|(candidate, _)| same_value_zero(candidate, key)))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "import_values imports exactly the two pushed values, one key and one value, per each message"
+    )]
     pub(crate) fn map_set(
         &mut self,
         id: HeapId,

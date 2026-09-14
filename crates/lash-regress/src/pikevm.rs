@@ -364,6 +364,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the while condition above guarantees at least one state before last_mut is fetched"
+    )]
     fn try_at_pos<Dir: Direction>(
         &mut self,
         input: Input,

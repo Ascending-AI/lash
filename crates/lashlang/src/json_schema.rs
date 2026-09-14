@@ -149,6 +149,10 @@ pub fn type_expr_to_json_schema(ty: &TypeExpr) -> Value {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a lash type declaration is a struct of strings and types and always serializes to JSON, per the message"
+)]
 fn lash_type_schema(declaration: &XLashType) -> Value {
     let mut schema = Map::new();
     schema.insert(
@@ -459,6 +463,10 @@ fn import_enum(values: &Value) -> TypeExpr {
     union_type(variants)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the match on unique.len() above establishes exactly one variant"
+)]
 fn union_type(variants: Vec<TypeExpr>) -> TypeExpr {
     let mut flattened = Vec::new();
     for variant in variants {

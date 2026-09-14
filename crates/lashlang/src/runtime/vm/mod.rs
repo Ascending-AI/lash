@@ -1352,6 +1352,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Ok(VmStep::Continue)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the push item was reserved in this same slot walk above, per the thrice-repeated message"
+    )]
     async fn execute_intrinsic_instruction(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
         let start = self.profile.as_ref().map(|_| Instant::now());
         match op {

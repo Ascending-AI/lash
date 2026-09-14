@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 #[path = "support/ast.rs"]
 mod ast_support;
 #[path = "support/execute.rs"]

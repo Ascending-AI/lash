@@ -451,6 +451,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .collect())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each arm's receiver kind was checked by the match, so map_entries or set_values resolves, per each message"
+    )]
     fn execute_javascript_heap_method(
         &mut self,
         method: &str,
@@ -772,6 +776,10 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "code points were validated as valid above before from_u32, per the message"
+)]
 fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::{javascript_strict_equal, javascript_to_number};
     let args = normalized_static_arguments(method, args);
@@ -1402,6 +1410,10 @@ fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
     normalize_exponent(raw, fraction)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the raw string is Rust's own exponent formatting output, split into mantissa and digits, per both messages"
+)]
 fn normalize_exponent(raw: String, fraction: Option<usize>) -> String {
     let (mantissa, exponent) = raw.split_once('e').expect("Rust exponent formatting");
     let mut mantissa = mantissa.to_string();

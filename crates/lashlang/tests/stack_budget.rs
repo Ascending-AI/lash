@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lashlang::{
     AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
@@ -260,6 +258,10 @@ fn nested_program(depth: usize) -> String {
     format!("const tree = {literal};\nfinish({{ leaf: tree{chain} }});\n")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the probe thread is spawned with fixed explicit settings, per the builder call above"
+)]
 fn run_on_stack_budget(name: &str, test: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .name(name.to_string())

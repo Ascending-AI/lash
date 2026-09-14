@@ -58,6 +58,10 @@ struct Emitter {
 impl Emitter {
     /// Emit a ByteSet instruction.
     /// We awkwardly optimize it like so.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the match on bytes.len() above already fixes the length to the arm's width, so try_into cannot fail"
+    )]
     fn emit_byte_set_insn(&mut self, bytes: &[u8]) {
         let insn = match bytes.len() {
             0 => Insn::JustFail,
@@ -71,6 +75,10 @@ impl Emitter {
     }
 
     // Emit a nonempty byte sequence instruction. The sequence must be at most MAX_BYTE_SEQ_LENGTH bytes.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the match on seq.len() above already fixes the length to the arm's width, so try_into cannot fail"
+    )]
     fn emit_byte_sequence_insn(&mut self, seq: &[u8]) {
         const {
             assert!(

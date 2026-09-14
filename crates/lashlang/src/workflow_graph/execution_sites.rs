@@ -132,6 +132,10 @@ fn collect_execution_sites(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "execution-site expressions come from lowered core paths that always have a compiler descriptor, per the message"
+)]
 fn push_execution_site_descriptor(
     expression: &Expr,
     owner: &str,

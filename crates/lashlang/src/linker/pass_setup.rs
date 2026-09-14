@@ -333,6 +333,10 @@ impl<'module> Linker<'module> {
         Some(Binding::SchemaWitness { described_ty })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the params and output were closed from a checked signature, so the rebuilt signature remains valid, per the message"
+    )]
     pub(super) fn close_schema_type_expr(
         &self,
         ty: &TypeExpr,
@@ -421,6 +425,10 @@ impl<'module> Linker<'module> {
             .unwrap_or(TypeExpr::Any)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the original signature was checked, and only aliases are resolved on the way out, so the rebuilt signature remains valid, per the message"
+    )]
     pub(super) fn resolve_type_aliases_inner(
         &self,
         ty: &TypeExpr,

@@ -264,6 +264,10 @@ where
     map.end()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a heap Value's direct-JSON wrapper of strings and numbers always serializes, per the message"
+)]
 pub(crate) fn append_direct_json(output: &mut String, value: &Value) {
     output.push_str(
         &serde_json::to_string(&DirectJson(value))
@@ -275,6 +279,10 @@ pub(crate) fn append_direct_json(output: &mut String, value: &Value) {
 ///
 /// Fallible because a container can hold a projection: a placeholder that lost
 /// its binding refuses rather than being written as `null` (FIG-2865).
+#[expect(
+    clippy::expect_used,
+    reason = "the writes target in-memory String buffers and crate-owned plain values, which serialize, per each message"
+)]
 pub(crate) fn append_runtime_json_async<'a>(
     output: &'a mut String,
     value: &'a Value,

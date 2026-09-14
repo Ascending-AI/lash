@@ -651,6 +651,10 @@ pub(super) fn process_input_record_type(process: &ProcessDecl) -> TypeExpr {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "process declarations are validated before becoming types, so the signature forms, per the message"
+)]
 pub(super) fn process_type_for_decl(process: &ProcessDecl, output: TypeExpr) -> TypeExpr {
     TypeExpr::Process(crate::ProcessType::known(
         crate::ProcessSignature::try_new(process.params.clone(), output)

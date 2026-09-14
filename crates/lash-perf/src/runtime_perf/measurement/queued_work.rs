@@ -451,6 +451,10 @@ pub(super) fn queued_work_stress_wake(
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "a literal valid media type string is the constant attachment payload of this scenario; it parses by construction"
+)]
 pub(super) async fn run_once_turn_input_ingress_interrupt(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {

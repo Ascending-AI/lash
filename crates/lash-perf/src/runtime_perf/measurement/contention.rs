@@ -367,6 +367,10 @@ fn contention_phase_profile(
 /// `workers` turns, so those samples run at greater history depth than the
 /// corresponding sequential baseline. The scenario deliberately reports that
 /// confound instead of restructuring the reviewed contention shape.
+#[expect(
+    clippy::expect_used,
+    reason = "the scenario's configured writer count is what drove the store setup above, so the lookup succeeds, and the session read view resolves after the run commits"
+)]
 pub(crate) async fn run_once_writer_contention(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
@@ -519,6 +523,10 @@ pub(crate) async fn run_once_writer_contention(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the settlement scenario configures its child count and metric keys, which the run then writes and reads back per each site's message"
+)]
 pub(crate) async fn run_once_async_process_settlement(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
@@ -955,6 +963,10 @@ async fn run_durable_contention_worker(
 /// worker targets `chat_turns` completions. Wall-clock throughput and latency
 /// are quiet-box witnesses only. Tests assert emitted structure and counters,
 /// never latency thresholds.
+#[expect(
+    clippy::expect_used,
+    reason = "the caller provisions the SQLite root exactly once for this scenario and passes Some, which the message states"
+)]
 pub(crate) async fn run_once_durable_queued_work_contention(
     scenario: RuntimePerfScenario,
     chat_turns: usize,

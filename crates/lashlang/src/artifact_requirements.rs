@@ -105,6 +105,10 @@ impl<'program> RequirementsCollector<'program> {
         self.requirements
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the is_host_data_type_name guard above checked the named data type against the same resolved catalog"
+    )]
     fn collect_type(&mut self, ty: &TypeExpr) {
         match ty {
             TypeExpr::List(item) => self.collect_type(item),
@@ -172,6 +176,10 @@ impl<'program> RequirementsCollector<'program> {
             .unwrap_or(true)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the value constructor and trigger source binding above were each just resolved from the same catalog, so requirement recording cannot conflict with a fresh requirements set"
+    )]
     fn collect_expr(
         &mut self,
         expr: &Expr,
@@ -482,6 +490,10 @@ impl<'program> RequirementsCollector<'program> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the module instance requirement above was just recorded, so the requirements insert cannot conflict, per the message"
+    )]
     fn require_resource_ref(&mut self, resource: &ResourceRefExpr) {
         self.requirements
             .resources
@@ -492,6 +504,10 @@ impl<'program> RequirementsCollector<'program> {
             .expect("resolved resource references cannot conflict");
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "each requirement was resolved from the live catalog above before being recorded, per the messages"
+    )]
     fn require_resource_operation(
         &mut self,
         resource_type: String,

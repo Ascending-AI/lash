@@ -9,13 +9,15 @@
 //! TypeScript the model wrote — so the assertions below pin the TypeScript
 //! line, column and caret run, not a printed lashlang form.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, State, TypeExpr,
 };
 
+#[expect(
+    clippy::expect_used,
+    reason = "fixture catalog registers each operation once into a fresh catalog, per each message"
+)]
 fn environment() -> LashlangHostEnvironment {
     let mut catalog = LashlangHostCatalog::new();
     catalog
@@ -41,6 +43,10 @@ fn environment() -> LashlangHostEnvironment {
     LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture lowers a known TypeScript source and asserts the link failure, per both messages"
+)]
 fn link_diagnostic(source: &str) -> String {
     let program = lash_typescript::parse(source).expect("TypeScript source lowers");
     let error = LinkedModule::link(program, environment()).expect_err("link fails");
@@ -88,6 +94,10 @@ impl ExecutionHost for FailingOperationHost {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the fixture lowers and links a known program, then asserts the runtime failure and host failure text, per each message"
+)]
 async fn runtime_diagnostic(source: &str) -> String {
     let program = lash_typescript::parse(source).expect("TypeScript source lowers");
     let linked = LinkedModule::link(program, environment()).expect("program links");

@@ -328,6 +328,10 @@ impl ModuleArtifact {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the resolved children and output were all validated before the original signature formed, so the rebuild revalidates, per the message"
+)]
 fn resolve_artifact_type(
     ty: &TypeExpr,
     aliases: &BTreeMap<String, TypeExpr>,

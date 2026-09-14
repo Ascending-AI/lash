@@ -74,6 +74,10 @@ impl BenchmarkSettlementControl {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the semaphore owed to this completion is armed by the scenario before the call, and the duration is read under the same configured lock, per each site's message"
+    )]
     async fn hold_completion(&self) -> f64 {
         let started = Instant::now();
         self.pending.fetch_add(1, Ordering::SeqCst);
@@ -105,6 +109,10 @@ impl BenchmarkSettlementControl {
         self.releases.add_permits(count);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the durations mutex is only ever poisoned by a panicking provider thread, which the benchmark contract treats as fatal, per the message"
+    )]
     pub(crate) fn pending_durations_ms(&self) -> Vec<f64> {
         self.pending_durations_ms
             .lock()
@@ -117,6 +125,10 @@ pub(crate) fn benchmark_provider(scenario: RuntimePerfScenario) -> TestProvider 
     benchmark_provider_with_control(scenario).0
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "each scenario arms exactly the control its arm above matches, per each site's message"
+)]
 pub(crate) fn benchmark_provider_with_control(
     scenario: RuntimePerfScenario,
 ) -> (TestProvider, Option<Arc<BenchmarkProviderControl>>) {

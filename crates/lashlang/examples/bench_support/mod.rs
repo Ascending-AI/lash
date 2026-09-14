@@ -271,6 +271,10 @@ pub fn seeded_state() -> State {
     seeded_state_for(Scenario::Baseline)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the canonical benchmark seeds a literal image/png attachment, which parses by construction"
+)]
 pub fn seeded_state_for(scenario: Scenario) -> State {
     let mut globals = Record::default();
     globals.insert(

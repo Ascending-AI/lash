@@ -155,6 +155,10 @@ impl TriggerHostOperation {
     }
 
     /// The operation's output type, read back out of its declared contract.
+    #[expect(
+        clippy::expect_used,
+        reason = "the trigger contract's output schema was produced by this same module's schema functions and is a valid lash schema, per the message"
+    )]
     pub fn output_ty(self) -> TypeExpr {
         json_schema_to_type_expr(&self.output_schema())
             .expect("trigger output contracts are valid lash schemas")
@@ -218,6 +222,10 @@ fn trigger_registration_schema() -> Value {
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "TRIGGER_REGISTRATION_TYPE's schema is generated right here in trigger_registration_schema() and is a valid named data type"
+)]
 pub fn add_trigger_resource_operations(
     catalog: &mut LashlangHostCatalog,
 ) -> Result<(), LashlangHostCatalogError> {

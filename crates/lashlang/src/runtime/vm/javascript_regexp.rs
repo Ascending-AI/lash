@@ -1378,6 +1378,10 @@ fn find_string_matches(
     Ok(matches)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "the arm matched an ASCII digit above per the guard, and combined is unwrapped under the is_some_and check two lines above"
+)]
 fn expand_replacement_checked(
     heap: &Heap,
     output: &mut Vec<u16>,

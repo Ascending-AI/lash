@@ -140,6 +140,10 @@ fn decode_lashlang_segment_state(
 /// identity this build would mint for the same inputs and compare it against
 /// the one the process recorded. That is why the format manifest classifies
 /// bytecode as identity-only rather than comparable.
+#[expect(
+    clippy::expect_used,
+    reason = "the identity is a tuple of strings and integer constants serialized straight to in-memory bytes"
+)]
 pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
     let identity = serde_json::to_vec(&(
         "lashlang-bytecode",
@@ -187,6 +191,10 @@ pub(crate) fn validate_lashlang_process_for_run(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "admission accepted the host environment, which the message states and the raw_host_environment branch above establishes"
+)]
 pub async fn run_lashlang_process(
     engine: LashlangProcessEngine,
     mut context: lash_core::ProcessEngineRunContext<'_>,
@@ -648,6 +656,10 @@ impl LashlangProcessHost<'_> {
         Ok(PreparedResourceInvocation::Tool(invocation))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the TypeScript runtime receiver was checked in the match above, which the message states, and the journaled call is awaited in place"
+    )]
     async fn resource_operation(
         &self,
         operation: String,
@@ -702,6 +714,10 @@ impl LashlangProcessHost<'_> {
         protocol_tool_reply_to_lashlang_value(reply)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the TypeScript runtime receiver was checked above per site, and each batch result slot was filled by the same loop that reserved the Vec of slots"
+    )]
     async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
@@ -1528,6 +1544,10 @@ pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {
     ]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "lashlang process signal names are parser-validated before reaching this registration, which the message states"
+)]
 pub fn lashlang_process_signal_event_types(
     process: &lashlang::ProcessDecl,
 ) -> Vec<lash_core::ProcessEventType> {

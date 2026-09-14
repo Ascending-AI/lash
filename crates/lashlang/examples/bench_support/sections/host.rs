@@ -221,6 +221,10 @@ fn trigger_inputs_value(input_name: &str) -> Value {
     Value::Record(Arc::new(inputs))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the trigger source value encodes an empty descriptor payload, which always serializes"
+)]
 fn trigger_source_value(source_type: &str) -> Value {
     let encoded = HostDescriptor::encode(source_type, serde_json::json!({}))
         .expect("benchmark trigger source should encode");

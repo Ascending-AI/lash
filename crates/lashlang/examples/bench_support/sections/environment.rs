@@ -3,6 +3,10 @@ pub fn benchmark_host_environment() -> &'static LashlangHostEnvironment {
     SURFACE.get_or_init(build_benchmark_host_environment)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "fixture data types and operations are registered once each into a fresh catalog, so registration cannot fail, per each message"
+)]
 fn build_benchmark_host_environment() -> LashlangHostEnvironment {
     let mut resources = LashlangHostCatalog::tool_default(["echo", "boom", "missing_tool"]);
     lashlang::add_trigger_resource_operations(&mut resources)
@@ -122,6 +126,10 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
 /// ADR 0096 makes TypeScript the sole authored RLM dialect; lashlang names the
 /// IR and the VM the benchmarks measure.
 /// Links a benchmark scenario's program against the benchmark host surface.
+#[expect(
+    clippy::expect_used,
+    reason = "the benchmark program links against the fixture host environment; a failure would break the fixture author's assumption"
+)]
 pub fn linked_benchmark_program(scenario: Scenario) -> LinkedModule {
     LinkedModule::link(benchmark_program(scenario), benchmark_host_environment())
         .expect("benchmark program should link")

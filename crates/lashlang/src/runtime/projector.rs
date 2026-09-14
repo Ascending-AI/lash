@@ -101,6 +101,10 @@ impl BudgetedJsonProjector {
         self.config == BudgetedJsonProjectionConfig::unbounded()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a number rendered into an in-memory String buffer cannot fail write, per the message"
+    )]
     fn render_value<'a>(
         &'a self,
         value: &'a Value,
@@ -314,6 +318,10 @@ fn floor_char_boundary(text: &str, max: usize) -> usize {
     cut
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serde_json::to_string of a plain string cannot fail, per the message"
+)]
 fn json_string(text: &str) -> String {
     serde_json::to_string(text).expect("string json serialization should succeed")
 }

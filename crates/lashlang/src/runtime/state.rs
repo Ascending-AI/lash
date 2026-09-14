@@ -105,6 +105,10 @@ impl State {
         Ok(previous)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a single Remove patch can never exceed the heap byte bound, per the site's message"
+    )]
     pub fn remove_global(&mut self, name: &str) -> Option<Value> {
         let previous = self.globals.get(name).cloned();
         self.patch_globals([GlobalPatch::Remove {

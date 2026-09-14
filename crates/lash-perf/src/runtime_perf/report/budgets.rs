@@ -67,6 +67,10 @@ struct AdvisoryPhaseBudget {
     required: bool,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the pinned budgets JSON is checked into the repo at the repository root and parsed once at first use, per the message"
+)]
 fn budgets() -> &'static RuntimeBudgets {
     static BUDGETS: OnceLock<RuntimeBudgets> = OnceLock::new();
     BUDGETS.get_or_init(|| {
