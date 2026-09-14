@@ -72,6 +72,13 @@ pub async fn turn_cancel_final_commit_intent_cas_is_atomic(
     turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(factory).await;
 }
 
+/// Prove that a conflicting-disposition repeat leaves no durable trace.
+pub async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
+    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+) {
+    turn_cancel::turn_cancel_conflicting_repeat_leaves_no_durable_trace(factory).await;
+}
+
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.

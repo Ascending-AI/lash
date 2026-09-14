@@ -70,6 +70,16 @@ quality. This runbook is authored for a deliberate token-spending browser run.
    another UI Stop finds no address and reports no accepted cancellation. The separate
    exact-address controller probe must report `completion_won_race` without changing
    affected inputs, disposition, terminal evidence, or active-address state.
+9. **Repeated Stop cannot change the accepted policy.** The first cancellation the gate
+   accepts owns the undelivered-input disposition for the rest of the turn. While a Stop
+   is pending, a repeat that asks for the same disposition is idempotent and reports
+   `already_requested` with the first request's evidence; a repeat that asks for a
+   different disposition reports `policy_conflict` naming both the requested and the
+   accepted policy and changes nothing — not the terminal, not the durable request row,
+   not the queued inputs. A timing escalation (`after_step` to `immediate`) is the one
+   thing a repeat may change, and it still carries the accepted disposition. Once the
+   turn has ended, rule 8 wins over this one: the repeat is a `completion_won_race`
+   no-op even when it names a different policy.
 
 ## Working material
 
@@ -128,7 +138,11 @@ After `/api/state` no longer lists the address, another workbench Stop must retu
 address an inactive turn. Run `LASH_E2E_TURN_CONTROL_ONLY=1 just
 restate-postgres-workers-e2e` for the exact-address late-cancel proof; it requires
 `completion_won_race` and unchanged terminal, durable evidence, disposition, and
-active-address state after both normal completion and owner-crash recovery.
+active-address state after both normal completion and owner-crash recovery. The same
+run gates the repeated-request contract of golden rule 9 against real Postgres: on an
+accepted but not yet started turn it requires `already_requested` for a matching repeat,
+`policy_conflict` naming both policies for a conflicting one, and an unchanged durable
+request row and intent revision after both.
 
 ## Phase 2 — Restart the web process mid-turn, then Stop
 
@@ -236,6 +250,7 @@ Restate container are gone.
 |------|----------------|---------|----------|
 | Boot | `/healthz` 200; rendered/API session ids agree | | `00-ready.png` |
 | Normal Stop | committed Cancelled terminal + evidence | | `01-cancelled.png`, `01-cancel-receipt.json` |
+| Repeated Stop policy (rule 9) | matching repeat `already_requested`; conflicting repeat `policy_conflict` naming both policies; durable request row, intent revision and queued inputs unchanged | | `LASH_E2E_TURN_CONTROL_ONLY=1` run log |
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
@@ -248,8 +263,9 @@ Restate container are gone.
 
 **Aggregate:** did exact cooperative cancellation produce authoritative evidence
 normally, after reconstructing the entire web process, under shallow process await, and
-deep inside durable sleep (refereeing FIG-1445), and did session revocation unwind only
-the dead turn while the independent process survived?
+deep inside durable sleep (refereeing FIG-1445); did a repeated request preserve the
+first accepted policy and report a conflict instead of silently substituting it; and did
+session revocation unwind only the dead turn while the independent process survived?
 
 ---
 

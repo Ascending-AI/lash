@@ -315,8 +315,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             });
         // The first policy acceptor is immutable. A stronger same-policy
         // request advances the closure-CAS revision; its effective timing is
-        // recorded by the settled gate.
-        if request.mode.is_stronger_than(stored.record.request.mode) {
+        // recorded by the settled gate. A request that disagrees about the
+        // undelivered-input disposition is not an escalation: the gate refuses
+        // it, so it leaves the row and its revision untouched.
+        if request.escalates(&stored.record.request) {
             stored.intent_revision = crate::store::StoreError::checked_monotonic_increment(
                 "turn_cancel_intent_revision",
                 stored.intent_revision,

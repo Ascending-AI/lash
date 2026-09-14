@@ -1487,6 +1487,7 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_repair_preserves_base_across_escalation_and_reopen, "turn-cancel-repair-reopen"),
             (turn_cancel_repair_orders_intent_and_ordinary_redefer, "turn-cancel-repair-redefer"),
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
+            (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

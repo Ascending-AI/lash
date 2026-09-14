@@ -521,6 +521,19 @@ impl TurnCancelRequest {
         self
     }
 
+    /// Whether this request is a timing escalation of the `accepted` one.
+    ///
+    /// Only a repeat that already agrees with the accepted undelivered-input
+    /// disposition can escalate. A repeat that disagrees is a policy conflict
+    /// the authoritative gate refuses, so it must not advance the durable
+    /// intent revision either: a refused request has no durable effect at all,
+    /// and a store that treated it as an escalation would invalidate the
+    /// live owner's closure CAS on behalf of a request that never won.
+    #[must_use]
+    pub fn escalates(&self, accepted: &Self) -> bool {
+        self.undelivered == accepted.undelivered && self.mode.is_stronger_than(accepted.mode)
+    }
+
     fn validate(&self) -> Result<(), RuntimeError> {
         self.address.validate()?;
         if self.request_id.trim().is_empty() {
@@ -784,6 +797,30 @@ impl TurnWorkDriver {
             }
             Err(err) => return Err(err),
         }
+        // The owner seals the base gate, then commits, then publishes the
+        // terminal. The two checks above cover the last two steps, so without
+        // this one a request landing in the first window would write a
+        // provisional row for a turn whose cancellation authority has already
+        // closed against it. A request that has ended is a typed no-op with no
+        // durable effect at all, so the seal is observed before the write.
+        match resolver.peek_await_event(&key).await {
+            Ok(Some(terminal)) => {
+                if matches!(decode_gate(terminal)?, TurnGateTerminal::CompletionSealed) {
+                    return Ok(TurnCancelReceipt {
+                        outcome: TurnCancelOutcome::CompletionWonRace,
+                        record: None,
+                    });
+                }
+            }
+            Ok(None) => {}
+            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Ok(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::UnknownOrRevoked,
+                    record: None,
+                });
+            }
+            Err(err) => return Err(err),
+        }
         let _recorded_intent = store
             .record_turn_cancel_request(request.clone())
             .await
@@ -830,6 +867,12 @@ impl TurnWorkDriver {
                     Some(evidence),
                 )),
                 ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                    // The disposition comparison is deliberately the first arm:
+                    // a conflicting repeat is refused before it can reach the
+                    // escalation promise, so a stronger timing mode never
+                    // carries a different policy onto the address. Timing
+                    // escalation is only offered to a repeat that already
+                    // agrees with the accepted disposition.
                     TurnGateTerminal::CancelRequested(existing)
                         if evidence.undelivered != existing.undelivered =>
                     {
@@ -881,6 +924,19 @@ impl TurnWorkDriver {
                 })?;
             base_winner =
                 ActiveTurnControl::peek_base_cancel_evidence(resolver, &request.address).await?;
+        }
+        // No cancellation is in force for either no-op outcome, so the receipt
+        // carries no record — the same shape the pre-gate no-op returns. A row
+        // this caller provisionally wrote while racing the seal is not
+        // cancellation evidence and must not be reported as if it were.
+        if matches!(
+            outcome,
+            TurnCancelOutcome::CompletionWonRace | TurnCancelOutcome::UnknownOrRevoked
+        ) {
+            return Ok(TurnCancelReceipt {
+                outcome,
+                record: None,
+            });
         }
         let record = store
             .turn_cancel_request(&request.address)
@@ -935,6 +991,11 @@ impl TurnWorkDriver {
     /// rides a second reserved promise that the owner watches only after it
     /// observed a weaker gate. It is first-writer-wins too: a second stronger
     /// request reports the escalation that already won.
+    ///
+    /// Only a request whose undelivered-input disposition already matches the
+    /// base winner reaches here, and the reported evidence is projected back
+    /// onto that accepted disposition, so escalation can change the honoured
+    /// timing and nothing else.
     async fn escalate(
         &self,
         resolver: &dyn AwaitEventResolver,
@@ -949,7 +1010,9 @@ impl TurnWorkDriver {
                 ResolveOutcome::Accepted => TurnCancelOutcome::Escalated(evidence),
                 ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
                     TurnGateTerminal::CancelRequested(escalated) => {
-                        TurnCancelOutcome::AlreadyRequested(escalated)
+                        TurnCancelOutcome::AlreadyRequested(escalation_under_accepted_policy(
+                            &existing, escalated,
+                        ))
                     }
                     TurnGateTerminal::CompletionSealed => {
                         TurnCancelOutcome::AlreadyRequested(existing)
@@ -1117,6 +1180,29 @@ async fn escalation_key(
         .await
 }
 
+/// Project an escalation-gate winner onto the accepted undelivered-input
+/// policy.
+///
+/// Timing escalation moves *when* a cancellation is honoured. It never moves
+/// *what* the accepted request decided about undelivered active-turn input:
+/// that disposition belongs to the base-gate winner and is immutable once
+/// accepted. [`TurnWorkDriver::request_cancel`] refuses a conflicting
+/// disposition before it ever reaches the escalation promise, so every reader
+/// of that promise carries the base disposition forward rather than trusting
+/// the escalation row's own copy. The invariant then holds structurally: no
+/// escalation row — replayed from a durable journal, written by a peer
+/// process, or minted by a future writer — can silently substitute the
+/// accepted policy, which is the substitution FIG-2874 removes.
+fn escalation_under_accepted_policy(
+    base: &TurnCancellationEvidence,
+    escalated: TurnCancellationEvidence,
+) -> TurnCancellationEvidence {
+    TurnCancellationEvidence {
+        undelivered: base.undelivered,
+        ..escalated
+    }
+}
+
 /// Return the cancellation evidence that the immutable gate pair has accepted.
 ///
 /// An after-step request owns the base gate. A later immediate request can own
@@ -1146,7 +1232,9 @@ async fn effective_cancel_evidence(
         Err(err) => return Err(err),
     };
     match terminal.map(decode_gate).transpose()? {
-        Some(TurnGateTerminal::CancelRequested(escalated)) => Ok(escalated),
+        Some(TurnGateTerminal::CancelRequested(escalated)) => {
+            Ok(escalation_under_accepted_policy(&base, escalated))
+        }
         Some(TurnGateTerminal::CompletionSealed) | None => Ok(base),
     }
 }
@@ -1179,7 +1267,9 @@ async fn close_cancel_escalation(
     match outcome {
         ResolveOutcome::Accepted => Ok(Some(base)),
         ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
-            TurnGateTerminal::CancelRequested(escalated) => Ok(Some(escalated)),
+            TurnGateTerminal::CancelRequested(escalated) => {
+                Ok(Some(escalation_under_accepted_policy(&base, escalated)))
+            }
             TurnGateTerminal::CompletionSealed => Ok(Some(base)),
         },
         ResolveOutcome::UnknownOrRevoked => Ok(None),
@@ -1493,13 +1583,14 @@ impl ActiveTurnControl {
                 self.remember(evidence.clone());
                 Ok(Some(evidence))
             }
-            TurnGateTerminal::CancelRequested(evidence) => {
-                self.remember_deferred(evidence);
+            TurnGateTerminal::CancelRequested(base) => {
+                self.remember_deferred(base.clone());
                 let resolution = resolver
                     .await_await_event(&self.escalation_key, stop_wait, None)
                     .await?;
                 match decode_gate(resolution)? {
-                    TurnGateTerminal::CancelRequested(evidence) => {
+                    TurnGateTerminal::CancelRequested(escalated) => {
+                        let evidence = escalation_under_accepted_policy(&base, escalated);
                         self.remember(evidence.clone());
                         Ok(Some(evidence))
                     }
@@ -1544,6 +1635,7 @@ impl ActiveTurnControl {
             )
             .await?;
         if let Some(TurnGateTerminal::CancelRequested(escalated)) = escalation {
+            let escalated = escalation_under_accepted_policy(&evidence, escalated);
             self.remember(escalated.clone());
             return Ok(Some(escalated));
         }

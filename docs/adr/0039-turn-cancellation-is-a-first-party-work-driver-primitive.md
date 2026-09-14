@@ -146,6 +146,22 @@ same-or-weaker request still reports `AlreadyRequested`. Lash ships no
 escalation timer; "abort if the step has not finished after N seconds" is host
 policy expressed as a second request.
 
+That ordering is the whole contract for a repeated request, and it holds on
+both sides of the seam. Because the disposition comparison runs before the
+escalation promise is touched, only a matching-policy request can ever write
+one, and every reader of that promise — the driver's receipt, the owner's
+journaled peek, its live watch, and the closure that seals it at final commit
+— projects the escalation back onto the base winner's disposition. Timing
+escalation therefore changes when a cancellation is honoured and nothing else,
+whoever wrote the escalation row. Durably, a conflicting repeat is not an
+escalation either: the request row and the intent revision that fences the
+owner's closure CAS both stay where the accepted request left them, so a
+refused request has no effect a later reader could mistake for acceptance. A
+request that arrives once the base gate has sealed for completion is a typed
+no-op with no durable row at all, and its receipt carries no cancellation
+record — the gate seal is checked before the provisional write, alongside the
+committed-turn and published-terminal checks.
+
 Restate durable waits carry the gate payload. The wake an awakeable
 journals is derived from the gate resolution that settled it, so an
 `Immediate` request unwinds a parked sleep, await-event or process await at
