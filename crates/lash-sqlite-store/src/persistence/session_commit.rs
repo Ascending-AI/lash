@@ -1132,11 +1132,19 @@ impl SessionCommitStore for Store {
                         crate::session_meta::SessionMetaWrite::Insert,
                         created_at_ms,
                     )?;
-                    Ok(if inserted {
-                        lash_core::SessionAdmission::Created
-                    } else {
-                        lash_core::SessionAdmission::Rebound
-                    })
+                    if inserted {
+                        return Ok(lash_core::SessionAdmission::Created);
+                    }
+                    let recorded = crate::session_meta::load_recorded_lineage(tx, &session_id)?
+                        .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
+                            session_id: session_id.clone(),
+                        })?;
+                    lash_core::store_backend_support::guard_rebind_lineage(
+                        &session_id,
+                        &recorded,
+                        &meta.relation,
+                    )?;
+                    Ok(lash_core::SessionAdmission::Rebound)
                 })();
                 Ok(match outcome {
                     Ok(admission) => TxOutcome::Commit(Ok(admission)),

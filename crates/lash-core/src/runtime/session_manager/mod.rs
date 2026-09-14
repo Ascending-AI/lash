@@ -261,6 +261,10 @@ impl CurrentSessionCapability {
         }
     }
 
+    // The provider pin is settled typed at open and at child-create
+    // (ADR 0066, `SessionPolicy::settle_provider_pin`), so a recorded/requested
+    // mismatch can no longer arrive here; the remaining resolution failures are
+    // host wiring faults and stay as plugin errors.
     fn resolve_policy(&self) -> Result<RuntimeSessionPolicy, crate::PluginError> {
         self.host
             .resolve_session_policy(&self.session_id, self.policy.clone())

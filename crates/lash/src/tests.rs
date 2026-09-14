@@ -210,6 +210,11 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                     attempted_session_id: binding.session_id.clone(),
                 });
             }
+            lash_core::store_backend_support::guard_rebind_lineage(
+                &binding.session_id,
+                &lash_core::SessionLineage::of(&meta.relation),
+                &binding.relation,
+            )?;
             return Ok(lash_core::SessionAdmission::Rebound);
         }
         *meta = Some(lash_core::SessionMeta {
@@ -816,6 +821,11 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
                 attempted_session_id: binding.session_id.clone(),
             });
         }
+        lash_core::store_backend_support::guard_rebind_lineage(
+            &binding.session_id,
+            &lash_core::SessionLineage::of(&meta.relation),
+            &binding.relation,
+        )?;
         Ok(lash_core::SessionAdmission::Rebound)
     }
 
@@ -1075,6 +1085,14 @@ impl RecordingStoreFactory {
             .lock_recover()
             .iter()
             .map(|request| request.session_id.clone())
+            .collect()
+    }
+
+    fn provider_ids(&self) -> Vec<String> {
+        self.requests
+            .lock_recover()
+            .iter()
+            .map(|request| request.policy.recorded_provider_id().to_string())
             .collect()
     }
 }
@@ -1699,6 +1717,25 @@ fn mock_provider() -> ProviderHandle {
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
                 },
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build()
+        .into_handle()
+}
+
+/// A second provider whose kind differs from [`mock_provider`], for pinning
+/// tests that must name a provider the session did not record.
+fn other_kind_provider() -> ProviderHandle {
+    crate::testing::TestProvider::builder()
+        .kind("other-embed-test")
+        .complete(|_request| async move {
+            Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "other".to_string(),
+                    response_meta: None,
+                }],
                 response_metadata: Default::default(),
                 ..LlmResponse::default()
             })

@@ -69,6 +69,7 @@ pub mod store_backend_support {
     };
     pub use session_meta::{
         CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
+        guard_rebind_lineage,
     };
 
     /// Reserved runtime-receipt identity used as the durable completion marker
@@ -1137,9 +1138,9 @@ pub use plugin::{
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
-    SessionCreateRequest, SessionGraphService, SessionPluginSource, SessionReadView,
-    SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
-    SessionToolAccessError, SubagentSessionContext,
+    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
+    SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,

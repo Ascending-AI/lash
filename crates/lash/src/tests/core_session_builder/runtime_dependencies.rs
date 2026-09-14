@@ -776,7 +776,10 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let mut source_model = mock_model_spec();
     source_model.id = "fork-source-model".to_string();
     let policy = lash_core::SessionPolicy {
-        provider_id: "fork-source-provider".to_string(),
+        // The host and the branch point agree on the provider: a durable
+        // pin is a fact, so a host naming a different one is refused at
+        // open rather than silently discarded (FIG-1558).
+        provider_id: "embed-test".to_string(),
         model: source_model,
         session_id: Some(SessionId::from("fork-observer-source")),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -877,7 +880,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load branch config")
         .expect("branch head exists");
-    assert_eq!(branch_read.config.provider_id, "fork-source-provider");
+    assert_eq!(branch_read.config.provider_id, "embed-test");
     assert_eq!(branch_read.config.model.id, "fork-source-model");
 
     let inherited = registry
@@ -1730,7 +1733,10 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let mut source_model = mock_model_spec();
     source_model.id = "fork-source-model".to_string();
     let source_policy = lash_core::SessionPolicy {
-        provider_id: "fork-source-provider".to_string(),
+        // The host and the branch point agree on the provider: a durable
+        // pin is a fact, so a host naming a different one is refused at
+        // open rather than silently discarded (FIG-1558).
+        provider_id: "embed-test".to_string(),
         model: source_model,
         session_id: Some(SessionId::from("generation-fork-source")),
         // The branch point ran with sampling of its own. It is not a second
@@ -1782,9 +1788,8 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
         "a branch resolves the host's generation intent, like every other reopen"
     );
     assert_eq!(
-        branch_state.policy.recorded_provider_id(),
-        "fork-source-provider",
-        "the branch still records the provider that produced the history it continues"
+        branch_state.policy.model.id, "fork-source-model",
+        "the branch still records the model that produced the history it continues"
     );
     Ok(())
 }

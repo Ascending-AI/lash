@@ -339,10 +339,12 @@ impl LashCore {
             LashRuntime::resume(inner, &env, self.session_execution_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
+        let parent_session_id =
+            crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
             runtime: handle,
             binding,
-            parent_session_id: None,
+            parent_session_id,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })

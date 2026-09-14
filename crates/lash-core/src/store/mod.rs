@@ -1011,7 +1011,17 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// 4. create metadata exactly from `binding` when absent, without replacing
     ///    existing metadata, and return [`SessionAdmission::Created`];
     /// 5. leave an already-bound same-id session unchanged and return
-    ///    [`SessionAdmission::Rebound`].
+    ///    [`SessionAdmission::Rebound`];
+    /// 6. reject a rebind whose `binding.relation` declares a lineage that
+    ///    disagrees with the recorded one with
+    ///    [`StoreError::SessionRelationMismatch`], leaving the stored metadata
+    ///    unchanged. The relation is a durable fact, so the conflict is
+    ///    answered rather than absorbed. [`SessionRelation::Root`] declares no
+    ///    lineage — it is what every resume and plain reopen carries — so it
+    ///    always rebinds; causal provenance and observer inheritance are not
+    ///    compared. Use
+    ///    [`store_backend_support::guard_rebind_lineage`](crate::store_backend_support::guard_rebind_lineage)
+    ///    so all backends answer identically.
     async fn admit_and_bind_session(
         &self,
         binding: &SessionBinding,

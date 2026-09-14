@@ -676,6 +676,11 @@ impl LashRuntime {
                 RuntimeError::new(crate::RuntimeErrorCode::LlmProvider, err.to_string())
             })?
         } else {
+            // A recorded/requested provider-pin conflict is answered typed at
+            // open (ADR 0066, `SessionPolicy::settle_provider_pin`), so the
+            // only mismatch that can still reach this stringifying edge is a
+            // host resolver registered under a different id than the session's
+            // recorded pin. Keep it as a runtime error: no new plumbing.
             self.host
                 .resolve_session_policy(&self.state.session_id, turn_policy.clone())
                 .map_err(|err| {

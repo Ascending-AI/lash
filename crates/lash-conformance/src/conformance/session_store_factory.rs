@@ -14,6 +14,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
+mod admission;
 #[path = "session_store_factory_attachment_fence.rs"]
 mod attachment_fence;
 #[path = "session_store_factory_config_commands.rs"]
@@ -99,7 +100,7 @@ pub async fn session_store_factory<F>(
     drop((first, second));
     state_version::session_state_version_admission_contract(make()).await;
     super::hostile_input::session_namespace(make()).await;
-    session_admission_contract(make()).await;
+    admission::session_admission_contract(make()).await;
     session_store_binding_is_catalog_cardinality_independent(&make).await;
     session_store_factory_open_missing_returns_none(make()).await;
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
@@ -1158,114 +1159,6 @@ pub async fn attachment_reference_lifecycle_with_store(
 fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStoreCreateRequest) {
     assert_eq!(meta.session_id, request.session_id);
     assert_eq!(meta.relation, request.relation);
-}
-
-async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>) {
-    let request = session_store_request(
-        &SessionId::from("admission-created"),
-        "admission-model",
-        crate::SessionRelation::Child {
-            parent_session_id: SessionId::from("admission-parent"),
-            caused_by: None,
-        },
-    );
-    let store = factory
-        .create_store(&request)
-        .await
-        .expect("create explicitly bound admission store");
-    let empty = crate::SessionBinding::root("");
-    assert!(matches!(
-        store
-            .admit_and_bind_session(&empty)
-            .await
-            .expect_err("empty session id must be rejected"),
-        crate::StoreError::InvalidSessionId { .. }
-    ));
-
-    let binding = crate::SessionBinding {
-        session_id: request.session_id.clone(),
-        relation: request.relation.clone(),
-    };
-    assert_eq!(
-        store
-            .admit_and_bind_session(&binding)
-            .await
-            .expect("admit factory-created session"),
-        crate::SessionAdmission::Rebound
-    );
-    let created_meta = store
-        .load_session_meta()
-        .await
-        .expect("load admitted metadata")
-        .expect("admission must durably materialize metadata");
-    assert_eq!(created_meta.session_id, binding.session_id);
-    assert_eq!(created_meta.relation, binding.relation);
-
-    let changed_binding = crate::SessionBinding {
-        relation: crate::SessionRelation::Root,
-        ..binding.clone()
-    };
-    assert_eq!(
-        store
-            .admit_and_bind_session(&changed_binding)
-            .await
-            .expect("rebind same session"),
-        crate::SessionAdmission::Rebound
-    );
-    assert_eq!(
-        store
-            .load_session_meta()
-            .await
-            .expect("reload rebound metadata")
-            .expect("rebound metadata"),
-        created_meta,
-        "rebind must preserve the original durable binding"
-    );
-
-    let cross_session = crate::SessionBinding {
-        session_id: SessionId::from("admission-other"),
-        ..binding
-    };
-    assert!(matches!(
-        store
-            .admit_and_bind_session(&cross_session)
-            .await
-            .expect_err("cross-session handle reuse must fail"),
-        crate::StoreError::SessionBindingMismatch { .. }
-    ));
-
-    let deleted_request = session_store_request(
-        &SessionId::from("admission-deleted"),
-        "admission-model",
-        crate::SessionRelation::Root,
-    );
-    let deleted_store = factory
-        .create_store(&deleted_request)
-        .await
-        .expect("create admission deletion fixture");
-    factory
-        .delete_session(&deleted_request.session_id)
-        .await
-        .expect("delete admission fixture");
-    let deleted_binding = crate::SessionBinding::from_create_request(&deleted_request);
-    assert_session_id_was_used_and_deleted(
-        deleted_store
-            .admit_and_bind_session(&deleted_binding)
-            .await
-            .expect_err("deleted id admission must fail"),
-        &deleted_request.session_id,
-    );
-    deleted_store
-        .vacuum()
-        .await
-        .expect("vacuum deleted admission fixture");
-    assert_session_id_was_used_and_deleted(
-        deleted_store
-            .admit_and_bind_session(&deleted_binding)
-            .await
-            .expect_err("vacuum must preserve admission tombstone"),
-        &deleted_request.session_id,
-    );
 }
 
 /// A session handle's identity is explicit and independent of how many other

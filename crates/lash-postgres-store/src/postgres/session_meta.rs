@@ -81,6 +81,38 @@ const SELECT_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
     caused_by_subscription_revision, caused_by_node_id, source_session_id,
     source_node_id, observer_inheritance_kind";
 
+/// Read the durable lineage recorded for `session_id`, if the row exists.
+///
+/// Admission calls this inside its own transaction and needs only the lineage
+/// columns, so it avoids the observer-intent and fork-inheritance joins a full
+/// metadata load performs.
+pub(crate) async fn load_recorded_lineage_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+) -> Result<Option<lash_core::SessionLineage>, StoreError> {
+    let row = sqlx::query(
+        "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
+         FROM lash_session_meta WHERE session_id = $1",
+    )
+    .bind(session_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    SESSION_META_CODEC
+        .decode_lineage(
+            &row.get::<String, _>("relation_kind"),
+            row.get::<Option<String>, _>("parent_session_id")
+                .map(SessionId::from),
+            row.get::<Option<String>, _>("source_session_id")
+                .map(SessionId::from),
+            row.get::<Option<String>, _>("source_node_id"),
+        )
+        .map(Some)
+}
+
 pub(crate) async fn write_session_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     meta: &SessionMeta,
