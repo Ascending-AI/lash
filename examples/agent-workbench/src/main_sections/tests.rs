@@ -1643,6 +1643,21 @@ struct LiveWorkbenchRestateHarness {
     trace_path: PathBuf,
 }
 
+/// The durable trust domain the live Restate legs run under.
+///
+/// This has to be the id the E2E script exported, not a literal. The workbench
+/// host and the durable turn-control controller each derive their binding id
+/// from it independently, so a hardcoded value here disagrees with the
+/// controller the moment the script names a real authority — which is exactly
+/// what `turn-control host authority ... does not match controller authority`
+/// reports. The literal stays as the fallback so the suites that run without
+/// the script keep their stable, self-consistent domain.
+fn live_restate_authority_id() -> lash_restate::RestateAuthorityId {
+    let value = std::env::var("RESTATE_AUTHORITY_ID")
+        .unwrap_or_else(|_| "agent-workbench-tests".to_string());
+    lash_restate::RestateAuthorityId::new(value).expect("valid Restate authority id")
+}
+
 async fn live_workbench_restate_state_with_provider(
     data_dir: &std::path::Path,
     restate_ingress_url: String,
@@ -1714,7 +1729,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let model = with_workbench_model_capability(model);
     let process_deployment = lash_restate::RestateProcessDeployment::new(
         restate_ingress_url.clone(),
-        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+        live_restate_authority_id(),
         Arc::clone(&process_registry),
         process_continuations,
     );
@@ -1724,7 +1739,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
             restate_ingress_url.clone(),
             restate_http.clone(),
         ),
-        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+        live_restate_authority_id(),
     );
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
         sessions: sessions.clone(),
