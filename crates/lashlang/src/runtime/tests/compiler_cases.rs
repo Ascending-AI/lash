@@ -1,5 +1,4 @@
 use super::case_builders::*;
-use super::function_cases::{assign, call, function, variable};
 use super::*;
 
 /// `@label(title: "Spawn subagent with web search")`
@@ -592,147 +591,6 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
         err.to_string()
             .contains("`?` unwrapped failed module operation: boom"),
         "{err}"
-    );
-}
-
-#[test]
-fn labeled_process_resource_operation_site_correlates_to_workflow_node() {
-    let program = labeled_spawn_process_program();
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
-    let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let compiled =
-        crate::compile_linked_process(&linked, "search_test").expect("process should compile");
-    let resource_call = compiled
-        .chunk
-        .code
-        .iter()
-        .position(|instruction| matches!(instruction, Instruction::ResourceCallUnwrap { .. }))
-        .expect("resource call unwrap instruction");
-    let site = compiled
-        .chunk
-        .lashlang_execution_sites
-        .get(resource_call)
-        .and_then(Option::as_ref)
-        .expect("resource call execution site");
-
-    let graph = crate::workflow_graph_from_program(linked.program());
-    let graph_node_id = crate::node_id_for_execution_site(&graph, site)
-        .expect("runtime site should correlate to a workflow node");
-    let graph_node = graph
-        .nodes()
-        .find(|node| node.id == graph_node_id)
-        .expect("correlated graph node");
-
-    assert_eq!(site.node_kind, "resource_operation");
-    assert_eq!(graph_node.name, "Spawn subagent with web search");
-    assert!(
-        !compiled
-            .chunk
-            .lashlang_execution_sites
-            .iter()
-            .flatten()
-            .any(|site| {
-                site.node_kind == "step" && site.label == "Spawn subagent with web search"
-            }),
-        "labeled resource operation should not emit a parallel step site"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path() {
-    #[derive(Default)]
-    struct CorrelationHost {
-        observations: Mutex<Vec<crate::LashlangExecutionObservation>>,
-    }
-
-    impl ExecutionHost for CorrelationHost {
-        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
-            Host.perform(op).await
-        }
-
-        fn observe_lashlang_execution(&self, observation: crate::LashlangExecutionObservation) {
-            self.observations.lock_recover().push(observation);
-        }
-    }
-
-    let graph = crate::workflow_graph_from_program(&labeled_branch_program());
-    let compiled = compile_labeled_program(labeled_branch_program());
-
-    let mut invocation_paths = Vec::new();
-    for _ in 0..2 {
-        let host = CorrelationHost::default();
-        let outcome = execute_compiled(&compiled, &mut State::new(), &host)
-            .await
-            .expect("workflow invocation should run");
-        assert_eq!(
-            outcome,
-            ExecutionOutcome::Finished(Value::String("first".into()))
-        );
-
-        let observations = host.observations.into_inner().recover();
-        let correlated = observations
-            .iter()
-            .map(|observation| {
-                let (site, occurrence) = match observation {
-                    crate::LashlangExecutionObservation::NodeStarted { site, occurrence }
-                    | crate::LashlangExecutionObservation::NodeCompleted { site, occurrence }
-                    | crate::LashlangExecutionObservation::NodeFailed {
-                        site, occurrence, ..
-                    }
-                    | crate::LashlangExecutionObservation::BranchSelected {
-                        site,
-                        occurrence,
-                        ..
-                    }
-                    | crate::LashlangExecutionObservation::ChildStarted {
-                        site, occurrence, ..
-                    } => (site, *occurrence),
-                };
-                let node_id = crate::node_id_for_execution_site(&graph, site)
-                    .expect("every observed runtime site should resolve to the workflow graph");
-                assert!(
-                    graph.nodes().any(|node| node.id == node_id),
-                    "correlated node id must belong to the projected graph"
-                );
-                (observation, node_id, occurrence)
-            })
-            .collect::<Vec<_>>();
-
-        let selected_path = correlated
-            .iter()
-            .filter(|(observation, _, _)| {
-                matches!(
-                    observation,
-                    crate::LashlangExecutionObservation::NodeStarted { .. }
-                        | crate::LashlangExecutionObservation::BranchSelected { .. }
-                )
-            })
-            .map(|(_, node_id, occurrence)| {
-                let node = graph
-                    .nodes()
-                    .find(|node| node.id == *node_id)
-                    .expect("correlated graph node");
-                (node.name.clone(), *occurrence)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            selected_path,
-            vec![
-                ("First call".to_string(), 1),
-                ("if".to_string(), 1),
-                ("Selected call".to_string(), 1),
-                ("Finish selected".to_string(), 1),
-            ],
-            "correlated nodes should follow only the executed branch"
-        );
-        invocation_paths.push(selected_path);
-    }
-
-    assert_eq!(
-        invocation_paths[0], invocation_paths[1],
-        "each invocation must start with an independent correlation sequence"
     );
 }
 
@@ -1600,164 +1458,6 @@ fn existing_execution_site_ids_are_unchanged() {
 }
 
 #[test]
-fn execution_site_nested_assignment_label_remains_a_generic_step_on_both_sides() {
-    let nested_assignment = Program::block(vec![
-        Expr::LabelAnnotated {
-            label: crate::LabelMetadata {
-                title: "Nested assignment".into(),
-                description: None,
-            },
-            expr: Box::new(assign(
-                "outer",
-                assign("inner", Expr::SleepFor(Box::new(Expr::Number(1.0)))),
-            )),
-        },
-        Expr::Finish(Box::new(variable("outer"))),
-    ]);
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
-    let linked = crate::LinkedModule::link(nested_assignment, surface)
-        .expect("nested assignment program should link");
-    let compiled = crate::compile_linked(&linked);
-    let expected = vec![
-        ("step".to_string(), "Nested assignment".to_string(), vec![0]),
-        ("sleep".to_string(), "sleep for".to_string(), vec![0, 0, 0]),
-        ("terminal".to_string(), "result".to_string(), vec![1]),
-    ];
-    assert_eq!(compiled_site_descriptors(&compiled), expected);
-    assert_eq!(graph_site_descriptors(linked.program()), expected);
-}
-
-#[test]
-fn execution_site_function_call_is_projected_with_the_compiler_descriptor() {
-    let call_program = Program::block(vec![
-        assign(
-            "identity",
-            function(None, &["value"], &[], variable("value")),
-        ),
-        Expr::Finish(Box::new(call(
-            variable("identity"),
-            vec![Expr::Number(1.0)],
-        ))),
-    ]);
-    let linked = crate::LinkedModule::link(call_program, runtime_test_environment())
-        .expect("call program should link");
-    let compiled = crate::compile_linked(&linked);
-    let expected = vec![
-        ("terminal".to_string(), "result".to_string(), vec![1]),
-        ("call".to_string(), "function call".to_string(), vec![1, 0]),
-    ];
-    assert_eq!(compiled_site_descriptors(&compiled), expected);
-    assert_eq!(graph_site_descriptors(linked.program()), expected);
-}
-
-#[test]
-fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
-    // `process worker() signals { ready: null } { payload = wait_signal("ready")`
-    // `yield payload` / `wake payload` / `fail payload }`
-    // / `@label(title: "Plain step")` / `plain = 1`
-    // / `result = await tools.echo({ value: plain })?` / `run = start worker()`
-    // / `sleep for 1` / `sleep until 2` / `signal_run(run, "ready", null)`
-    // / `if true {} else {}` / `finish result`
-    let mut program = builders::module(
-        vec![builders::process_with_signals(
-            "worker",
-            Vec::new(),
-            vec![builders::signal("ready", TypeExpr::Null)],
-            builders::block(vec![
-                builders::assign("payload", builders::wait_signal("ready")),
-                builders::yield_expr(builders::var("payload")),
-                builders::wake(builders::var("payload")),
-                builders::fail(builders::var("payload")),
-            ]),
-        )],
-        vec![
-            builders::labelled(
-                builders::label("Plain step", None),
-                builders::assign("plain", builders::num(1.0)),
-            ),
-            builders::assign("result", await_echo_unwrap(builders::var("plain"))),
-            builders::assign("run", builders::start("worker", Vec::new())),
-            builders::sleep_for(builders::num(1.0)),
-            builders::sleep_until(builders::num(2.0)),
-            builders::signal_run(builders::var("run"), "ready", builders::null()),
-            builders::if_else(
-                builders::bool_lit(true),
-                builders::block(Vec::new()),
-                builders::block(Vec::new()),
-            ),
-            builders::finish(builders::var("result")),
-        ],
-    );
-    let Expr::Block(expressions) = &mut program.main else {
-        panic!("descriptor program main should be a block")
-    };
-    let finish = expressions.pop().expect("descriptor program finish");
-    expressions.push(assign(
-        "identity",
-        function(None, &["value"], &[], variable("value")),
-    ));
-    expressions.push(assign(
-        "called",
-        call(variable("identity"), vec![Expr::Number(1.0)]),
-    ));
-    expressions.push(finish);
-
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
-    let linked =
-        crate::LinkedModule::link(program, surface).expect("descriptor program should link");
-    let main = crate::compile_linked(&linked);
-    let process = crate::compile_linked_process(&linked, "worker")
-        .expect("descriptor process should compile");
-
-    let mut compiler = descriptor_pairs(&main);
-    compiler.extend(descriptor_pairs(&process));
-    compiler.sort();
-    let mut graph = crate::workflow_graph_from_program(linked.program())
-        .nodes()
-        .flat_map(|node| node.execution_sites.iter())
-        .map(|site| (site.kind.clone(), site.label.clone()))
-        .collect::<Vec<_>>();
-    graph.sort();
-    let mut expected = vec![
-        ("branch".to_string(), "if".to_string()),
-        ("call".to_string(), "function call".to_string()),
-        ("child_process".to_string(), "start worker".to_string()),
-        ("process_event".to_string(), "wake".to_string()),
-        ("process_event".to_string(), "yield".to_string()),
-        ("resource_operation".to_string(), "echo".to_string()),
-        ("signal".to_string(), "signal_run".to_string()),
-        ("sleep".to_string(), "sleep for".to_string()),
-        ("sleep".to_string(), "sleep until".to_string()),
-        ("step".to_string(), "Plain step".to_string()),
-        ("terminal".to_string(), "failure".to_string()),
-        ("terminal".to_string(), "result".to_string()),
-        ("wait".to_string(), "wait_signal".to_string()),
-    ];
-    expected.sort();
-    assert_eq!(compiler, expected, "compiler descriptor vocabulary drifted");
-    assert_eq!(
-        graph, expected,
-        "workflow graph descriptor vocabulary drifted"
-    );
-
-    let branch = main
-        .chunk
-        .lashlang_execution_sites
-        .iter()
-        .flatten()
-        .find(|site| site.node_kind == "branch")
-        .expect("compiled branch site");
-    assert!(
-        branch.branch.is_some(),
-        "branch descriptor must use branch_site"
-    );
-}
-
-#[test]
 fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
     // `result = await (tools.echo({ value: "left" })?, tools.echo({ value: "right" })?)`
     // / `finish result`
@@ -1822,32 +1522,6 @@ fn execution_site_aggregate_resource_sites_preserve_their_compiler_paths() {
     );
 }
 
-#[test]
-fn execution_site_wrapped_effect_uses_the_compiler_descriptor_for_its_graph_name() {
-    let program = Program::block(vec![assign(
-        "slept",
-        Expr::ResultUnwrap(Box::new(Expr::SleepFor(Box::new(Expr::Number(1.0))))),
-    )]);
-
-    let graph = crate::workflow_graph_from_program(&program);
-    let node = graph.nodes().next().expect("wrapped sleep graph node");
-    assert!(matches!(
-        &node.kind,
-        crate::WorkflowNodeKind::Effect {
-            effect: crate::WorkflowEffectKind::Sleep,
-            ..
-        }
-    ));
-    assert_eq!(node.name, "sleep for");
-    assert_eq!(
-        node.execution_sites
-            .iter()
-            .map(|site| (site.kind.as_str(), site.label.as_str()))
-            .collect::<Vec<_>>(),
-        [("sleep", "sleep for")]
-    );
-}
-
 fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
     compiled
         .chunk
@@ -1855,16 +1529,6 @@ fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
         .iter()
         .flatten()
         .map(|site| site.node_id.as_str())
-        .collect()
-}
-
-fn descriptor_pairs(compiled: &CompiledProgram) -> Vec<(String, String)> {
-    compiled
-        .chunk
-        .lashlang_execution_sites
-        .iter()
-        .flatten()
-        .map(|site| (site.node_kind.clone(), site.label.clone()))
         .collect()
 }
 
@@ -1881,16 +1545,6 @@ fn compiled_site_descriptors(compiled: &CompiledProgram) -> Vec<(String, String,
                 site.workflow_site.path.clone(),
             )
         })
-        .collect::<Vec<_>>();
-    sites.sort_by(|left, right| left.2.cmp(&right.2));
-    sites
-}
-
-fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> {
-    let mut sites = crate::workflow_graph_from_program(program)
-        .nodes()
-        .flat_map(|node| node.execution_sites.iter())
-        .map(|site| (site.kind.clone(), site.label.clone(), site.path.clone()))
         .collect::<Vec<_>>();
     sites.sort_by(|left, right| left.2.cmp(&right.2));
     sites

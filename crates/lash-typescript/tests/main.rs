@@ -56,3 +56,6 @@ mod runtime_promises;
 
 #[path = "console_output.rs"]
 mod console_output;
+
+#[path = "workflow_graph.rs"]
+mod workflow_graph;

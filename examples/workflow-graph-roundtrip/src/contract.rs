@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lashlang::{GraphRenderError, Span, WorkflowNodeNameSource};
+use lash_typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
+use lashlang::{Span, WorkflowNodeNameSource};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -110,9 +111,15 @@ impl ValidationKind {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ValidateRequest {
     pub kind: ValidationKind,
     pub text: String,
+    /// The identifiers live where the fragment sits. A TypeScript fragment is
+    /// parsed by the dialect's own front-end, which rejects an unknown binding,
+    /// so the editor sends the node's available variables with the text.
+    #[serde(default)]
+    pub available_vars: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -673,7 +680,7 @@ impl RenderErrorResponse {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, details)
     }
 
-    pub(crate) fn projection(error: lashlang::WorkflowGraphBuildError) -> Self {
+    pub(crate) fn projection(error: WorkflowGraphBuildError) -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "projection_failed",

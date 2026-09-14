@@ -22,133 +22,151 @@ pub(crate) struct BuiltInWorkflow {
     pub source: &'static str,
 }
 
-const BLANK_WORKFLOW: &str = r#"
-process blank() {
-  finish 0
-}
-"#;
+// Every catalog corpus is TypeScript: it is the only cell language, and the
+// lens's canonical text is TypeScript (FIG-3033). The retired Lashlang corpora
+// carried `@label(title:, description:)` on each process; TypeScript has no
+// label form yet (FIG-3047), so those processes take their derived names and
+// no title mechanism is invented here to replace them.
 
-const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"
-@label(title: "Traffic lights", description: "Cycle a three-light signal twice")
-process traffic_lights() {
-  await display.set_status({ key: "traffic", value: "running" })?
-  for cycle in [1, 2] {
-    await display.add_item({ list: "cycles", item: cycle })?
-    await display.set_light({ name: "red", state: "on" })?
-    await display.set_light({ name: "amber", state: "off" })?
-    await display.set_light({ name: "green", state: "off" })?
-    sleep for "350ms"
-    await display.set_light({ name: "red", state: "off" })?
-    await display.set_light({ name: "amber", state: "on" })?
-    sleep for "350ms"
-    await display.set_light({ name: "amber", state: "off" })?
-    await display.set_light({ name: "green", state: "on" })?
-    await display.show_message({ text: "Go" })?
-    sleep for "500ms"
+const BLANK_WORKFLOW: &str = r#"const blank = defineProcess({
+  name: "blank",
+  signals: {},
+  run: async () => {
+    return 0;
   }
-  await display.set_status({ key: "traffic", value: "complete" })?
-  finish null
-}
+});
 "#;
 
-const BRANCHING_APPROVAL_WORKFLOW: &str = r#"
-@label(title: "Branching approval", description: "Wait for a decision and reveal its branch")
-process branching_approval() signals { continue: any } {
-  await display.set_status({ key: "approval", value: "waiting" })?
-  await display.highlight({ target: "approval" })?
-  await display.show_message({ text: "Approval requested" })?
-  decision = wait_signal("continue")
-  if decision.autoFired {
-    await display.set_status({ key: "approval", value: "approved" })?
-    if true {
-      await display.set_light({ name: "approved", state: "green" })?
-      await display.show_message({ text: "Request approved" })?
-    } else {
-      await display.show_message({ text: "Approval needs review" })?
+const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"const traffic_lights = defineProcess({
+  name: "traffic_lights",
+  signals: {},
+  run: async () => {
+    await display.set_status({ key: "traffic", value: "running" });
+    for (const cycle of [1, 2]) {
+      await display.add_item({ list: "cycles", item: cycle });
+      await display.set_light({ name: "red", state: "on" });
+      await display.set_light({ name: "amber", state: "off" });
+      await display.set_light({ name: "green", state: "off" });
+      await sleep("350ms");
+      await display.set_light({ name: "red", state: "off" });
+      await display.set_light({ name: "amber", state: "on" });
+      await sleep("350ms");
+      await display.set_light({ name: "amber", state: "off" });
+      await display.set_light({ name: "green", state: "on" });
+      await display.show_message({ text: "Go" });
+      await sleep("500ms");
     }
-  } else {
-    await display.set_status({ key: "approval", value: "rejected" })?
-    await display.set_light({ name: "rejected", state: "red" })?
-    await display.show_message({ text: "Request rejected" })?
+    await display.set_status({ key: "traffic", value: "complete" });
+    return null;
   }
-  sleep for "400ms"
-  await display.highlight({ target: "result" })?
-  finish decision
-}
+});
 "#;
 
-const COUNTER_LOOP_WORKFLOW: &str = r#"
-@label(title: "Counter loop", description: "Combine structured while and for containers")
-process counter_loop() {
-  await display.set_status({ key: "counter", value: "running" })?
-  await display.set_progress({ pct: 5 })?
-  state = { count: 0 }
-  while state.count < 3 {
-    await display.add_item({ list: "counts", item: state.count })?
-    await display.set_progress({ pct: state.count * 20 + 20 })?
-    state.count = state.count + 1
-    sleep for "250ms"
+const BRANCHING_APPROVAL_WORKFLOW: &str = r#"const branching_approval = defineProcess({
+  name: "branching_approval",
+  signals: { continue: null },
+  run: async () => {
+    await display.set_status({ key: "approval", value: "waiting" });
+    await display.highlight({ target: "approval" });
+    await display.show_message({ text: "Approval requested" });
+    const decision = await waitSignal("continue");
+    if (decision.autoFired) {
+      await display.set_status({ key: "approval", value: "approved" });
+      if (true) {
+        await display.set_light({ name: "approved", state: "green" });
+        await display.show_message({ text: "Request approved" });
+      } else {
+        await display.show_message({ text: "Approval needs review" });
+      }
+    } else {
+      await display.set_status({ key: "approval", value: "rejected" });
+      await display.set_light({ name: "rejected", state: "red" });
+      await display.show_message({ text: "Request rejected" });
+    }
+    await sleep("400ms");
+    await display.highlight({ target: "result" });
+    return decision;
   }
-  for pct in [70, 85, 100] {
-    await display.set_progress({ pct: pct })?
-    sleep for "300ms"
+});
+"#;
+
+const COUNTER_LOOP_WORKFLOW: &str = r#"const counter_loop = defineProcess({
+  name: "counter_loop",
+  signals: {},
+  run: async () => {
+    await display.set_status({ key: "counter", value: "running" });
+    await display.set_progress({ pct: 5 });
+    const state = { count: 0 };
+    while (state.count < 3) {
+      await display.add_item({ list: "counts", item: state.count });
+      await display.set_progress({ pct: state.count * 20 + 20 });
+      state.count = state.count + 1;
+      await sleep("250ms");
+    }
+    for (const pct of [70, 85, 100]) {
+      await display.set_progress({ pct: pct });
+      await sleep("300ms");
+    }
+    await display.highlight({ target: "progress" });
+    await display.set_status({ key: "counter", value: "complete" });
+    await display.show_message({ text: "Counter complete" });
+    return state.count;
   }
-  await display.highlight({ target: "progress" })?
-  await display.set_status({ key: "counter", value: "complete" })?
-  await display.show_message({ text: "Counter complete" })?
-  finish state.count
-}
+});
 "#;
 
-const SUMMARIZE_EMAILS_WORKFLOW: &str = r#"
-@label(title: "Summarize my top 5 emails", description: "Read and summarize the latest important messages")
-process summarize_top_emails() {
-  emails = await gmail.list_recent({ count: 5 })?
-  summaries = [
-    await llm.query({
-      task: "Summarize this email in one sentence",
-      inputs: { from: email.from, subject: email.subject, snippet: email.snippet }
-    })?
-    for email in emails
-  ]
-  digest = await llm.query({
-    task: "Format these five summaries as a concise numbered email digest",
-    inputs: { summaries: summaries }
-  })?
-  await display.show_message({ text: digest })?
-  finish digest
-}
+const SUMMARIZE_EMAILS_WORKFLOW: &str = r#"const summarize_top_emails = defineProcess({
+  name: "summarize_top_emails",
+  signals: {},
+  run: async () => {
+    const emails = await gmail.list_recent({ count: 5 });
+    for (const email of emails) {
+      await llm.query({
+        task: "Summarize this email in one sentence",
+        inputs: { sender: email["from"], subject: email.subject, snippet: email.snippet }
+      });
+    }
+    const digest = await llm.query({
+      task: "Format these five summaries as a concise numbered email digest",
+      inputs: { summaries: emails }
+    });
+    await display.show_message({ text: digest });
+    return digest;
+  }
+});
 "#;
 
-const RESEARCH_NVIDIA_WORKFLOW: &str = r#"
-@label(title: "Research NVIDIA stock", description: "Collect a concise stock outlook and key risks")
-process research_nvidia_stock() {
-  search = await web.search({ query: "NVIDIA stock outlook" })?
-  research = await agents.spawn({
-    capability: "explore",
-    task: "Research NVIDIA's stock outlook from the supplied web search results",
-    seed: { search_results: search.results },
-    output: Type { summary: str, risks: str }
-  })?
-  await display.show_message({ text: research.summary })?
-  finish research
-}
+const RESEARCH_NVIDIA_WORKFLOW: &str = r#"const research_nvidia_stock = defineProcess({
+  name: "research_nvidia_stock",
+  signals: {},
+  run: async () => {
+    const search = await web.search({ query: "NVIDIA stock outlook" });
+    const research = await agents.spawn({
+      capability: "explore",
+      task: "Research NVIDIA's stock outlook from the supplied web search results",
+      seed: { search_results: search.results }
+    });
+    await display.show_message({ text: research.summary });
+    return research;
+  }
+});
 "#;
 
-const TEAM_STANDUP_WORKFLOW: &str = r#"
-@label(title: "Team standup digest", description: "Combine Slack and GitHub activity into a daily brief")
-process team_standup_digest() {
-  messages = await slack.recent({ channel: "team-platform", since: "yesterday" })?
-  activity = await github.recent({ repo: "acme/widgets", since: "yesterday" })?
-  standup = await agents.spawn({
-    capability: "peer",
-    task: "Synthesize a concise team standup digest and call out blockers",
-    seed: { slack_messages: messages, github_activity: activity },
-    output: Type { digest: str, blockers: list[str] }
-  })?
-  await display.show_message({ text: standup.digest })?
-  finish standup
-}
+const TEAM_STANDUP_WORKFLOW: &str = r#"const team_standup_digest = defineProcess({
+  name: "team_standup_digest",
+  signals: {},
+  run: async () => {
+    const messages = await slack.recent({ channel: "team-platform", since: "yesterday" });
+    const activity = await github.recent({ repo: "acme/widgets", since: "yesterday" });
+    const standup = await agents.spawn({
+      capability: "peer",
+      task: "Synthesize a concise team standup digest and call out blockers",
+      seed: { slack_messages: messages, github_activity: activity }
+    });
+    await display.show_message({ text: standup.digest });
+    return standup.digest;
+  }
+});
 "#;
 
 pub(crate) const BUILT_IN_WORKFLOWS: &[BuiltInWorkflow] = &[

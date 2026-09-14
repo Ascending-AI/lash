@@ -17,7 +17,9 @@ pub(crate) const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 mod access;
 mod cache;
 mod compiler;
-pub(crate) use compiler::is_pure_expr;
+pub use compiler::{
+    RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+};
 mod entry_points;
 mod error;
 pub use error::{ErrorTaxonomy, FormatError, RuntimeError};

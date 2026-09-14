@@ -3,7 +3,7 @@ use super::*;
 use std::borrow::Cow;
 
 pub(crate) const BRANCH_EXECUTION_SITE_KIND: &str = "branch";
-pub(crate) const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
+pub const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
 pub(crate) const STEP_EXECUTION_SITE_KIND: &str = "step";
 
 pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
@@ -133,7 +133,7 @@ fn collect_lashlang_execution_paths(
     }
 }
 
-pub(crate) fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {
+pub fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {
     Some(match expr {
         Expr::ReceiverCall { operation, .. } => (
             RESOURCE_OPERATION_EXECUTION_SITE_KIND,
@@ -230,7 +230,7 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
     }
 }
 
-pub(crate) fn is_pure_expr(expr: &Expr) -> bool {
+pub fn is_pure_expr(expr: &Expr) -> bool {
     match expr {
         Expr::LabelAnnotated { expr, .. } => is_pure_expr(expr),
         Expr::Null

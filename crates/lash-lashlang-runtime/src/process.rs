@@ -1326,7 +1326,8 @@ fn trace_lashlang_process_map(
     artifact: &lashlang::ModuleArtifact,
     process_name: &str,
 ) -> TraceLanguageExecutionMap {
-    let graph = lashlang::workflow_graph_from_program(&artifact.canonical_ir);
+    let graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
     let Some(process) = graph.process(process_name) else {
         return TraceLanguageExecutionMap::default();
     };
@@ -1345,7 +1346,8 @@ fn trace_lashlang_process_map(
 
 /// Builds the trace runtime's read-only foreground skeleton from the workflow graph.
 pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
-    let graph = lashlang::workflow_graph_from_program(&artifact.canonical_ir);
+    let graph =
+        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut primary_runtime_ids = BTreeMap::new();

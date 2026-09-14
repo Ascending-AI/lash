@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn analyze_workflow_program(
+pub fn analyze_workflow_program(
     program: &Program,
     surface: &LashlangHostEnvironment,
 ) -> WorkflowLinkAnalysis {

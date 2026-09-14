@@ -773,6 +773,7 @@ mod tests {
             ("lower/binding.rs", include_str!("lower/binding.rs")),
             ("lower/calls.rs", include_str!("lower/calls.rs")),
             ("lower/constructs.rs", include_str!("lower/constructs.rs")),
+            ("lower/entry.rs", include_str!("lower/entry.rs")),
             ("lower/loops.rs", include_str!("lower/loops.rs")),
             ("lower/regex.rs", include_str!("lower/regex.rs")),
             ("lower/spans.rs", include_str!("lower/spans.rs")),

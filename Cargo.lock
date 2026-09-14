@@ -2158,6 +2158,7 @@ dependencies = [
  "lash-internal-remote-protocol",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "lash-internal-typescript",
  "serde",
  "serde_json",
  "thiserror",
@@ -2585,6 +2586,7 @@ dependencies = [
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",
+ "thiserror",
  "tokio",
 ]
 
@@ -5902,6 +5904,7 @@ dependencies = [
  "axum",
  "compact_str 0.9.1",
  "lash-internal-lashlang",
+ "lash-internal-typescript",
  "lash-runtime",
  "reqwest 0.13.4",
  "serde",

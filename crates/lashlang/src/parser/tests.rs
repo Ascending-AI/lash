@@ -491,52 +491,6 @@ fn declarative_trigger_syntax_is_rejected() {
 }
 
 #[test]
-fn workflow_graph_includes_process_calls_containers_and_terminals() {
-    let source = r#"
-        type EmailInput = { source: "gmail" | "manual", message_id: string? }
-        process triage(gmail: Gmail, input: EmailInput) -> null {
-          if input.source == "gmail" {
-            msg = await gmail.get_message(input.message_id)?
-          } else {
-            msg = null
-          }
-          finish msg
-        }
-        source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" })
-        handle = await triggers.register({
-          source: source,
-          target: triage,
-          inputs: { input: trigger.event, gmail: gmail.work },
-          name: "daily_digest"
-        })?
-        finish handle
-        "#;
-    let graph = crate::workflow_graph_from_source(source).expect("module should project");
-    assert!(graph.process("triage").is_some());
-    assert!(
-        graph
-            .nodes()
-            .any(|node| matches!(node.kind, crate::WorkflowNodeKind::Call { .. }))
-    );
-    assert!(graph.nodes().any(|node| matches!(
-        node.kind,
-        crate::WorkflowNodeKind::Container(crate::WorkflowContainer::If { .. })
-    )));
-    assert!(
-        graph
-            .nodes()
-            .any(|node| matches!(node.kind, crate::WorkflowNodeKind::Terminal { .. }))
-    );
-    assert!(
-        graph
-            .main
-            .edges
-            .iter()
-            .any(|edge| matches!(edge.kind, crate::WorkflowEdgeKind::Sequence))
-    );
-}
-
-#[test]
 fn process_body_parses_passed_authority_calls() {
     parse(
         r#"

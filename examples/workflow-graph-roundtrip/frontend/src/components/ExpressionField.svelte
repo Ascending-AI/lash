@@ -92,6 +92,9 @@
   const showRaw = $derived(mode.power || (!showEnum && (userRaw ?? autoRaw)));
 
   // --- inline validation -----------------------------------------------------
+  function scopeNames() {
+    return (availableVars ?? []).map((variable) => variable?.name ?? variable);
+  }
   async function runValidate(text) {
     const trimmed = (text ?? '').trim();
     if (!trimmed) {
@@ -99,7 +102,7 @@
       return;
     }
     const mine = (seq += 1);
-    const res = await validateFragment(kind, trimmed);
+    const res = await validateFragment(kind, trimmed, scopeNames());
     if (mine !== seq) return;
     error = res.ok ? null : (res.error?.message ?? 'invalid');
   }

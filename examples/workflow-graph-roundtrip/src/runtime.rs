@@ -9,7 +9,7 @@ use lashlang::{
     LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkedModule, OutputFromInputBinding, ResourceOperation,
     ResourceOperationBatchResult, ResourceOperationBinding, ResourceOperationResult, Sleep, State,
-    Value, WorkflowGraph, compile_linked_process, from_json, node_id_for_execution_site, parse,
+    Value, WorkflowGraph, compile_linked_process, from_json, node_id_for_execution_site,
 };
 use tokio::sync::mpsc;
 
@@ -39,7 +39,7 @@ pub(crate) struct PreparedRun {
 
 impl PreparedRun {
     pub(crate) fn new(graph: WorkflowGraph, source: &str, workflow_version: u64) -> Result<Self> {
-        let program = parse(source).context("parse saved workflow")?;
+        let program = lash_typescript::parse(source).context("parse saved workflow")?;
         let linked = LinkedModule::link(program, host_environment()).context("link toy tools")?;
         let process_name = graph
             .declarations

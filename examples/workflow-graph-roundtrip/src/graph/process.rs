@@ -7,7 +7,7 @@ use lashlang::{
 
 use crate::{EditableProcessField, NodeData, RenderErrorResponse};
 
-use super::{parse_assignment_target_fragment, workflow_node_id};
+use super::{FragmentScope, parse_assignment_target_fragment, parse_fragment, workflow_node_id};
 
 pub(super) fn process_from_data(
     id: &str,
@@ -59,7 +59,7 @@ pub(super) fn seeded_process_body(
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Terminal {
                 terminal: WorkflowTerminalKind::Finish,
-                expression: "finish 0".to_string(),
+                expression: "return 0;".to_string(),
             },
             available_variables: params.iter().map(|param| param.name.to_string()).collect(),
             type_facets: None,
@@ -100,9 +100,35 @@ fn process_signal_from_data(
     field: &EditableProcessField,
 ) -> Result<ProcessSignalDecl, RenderErrorResponse> {
     Ok(ProcessSignalDecl {
-        name: editable_identifier(process_id, "signals.name", &field.name)?.into(),
+        name: editable_signal_name(process_id, &field.name)?.into(),
         ty: editable_process_type(process_id, "signals.type", &field.field_type)?,
     })
+}
+
+/// A signal name is an object key in `signals: { <name>: <type> }`, and a
+/// TypeScript key may be a reserved word such as `continue`. So it is read
+/// back as a key rather than as an identifier expression.
+fn editable_signal_name(node_id: &str, value: &str) -> Result<String, RenderErrorResponse> {
+    let reject = || {
+        RenderErrorResponse::invalid_node_payload(
+            node_id,
+            "`data.signals.name` must be a single property name",
+        )
+    };
+    let record = parse_fragment(&format!("({{ {value}: null }})"), &FragmentScope::default())
+        .map_err(|message| {
+            RenderErrorResponse::invalid_node_payload(
+                node_id,
+                format!("`data.signals.name` must be a property name: {message}"),
+            )
+        })?;
+    let lashlang::Expr::Record(entries) = record else {
+        return Err(reject());
+    };
+    let [(name, _)] = entries.as_slice() else {
+        return Err(reject());
+    };
+    Ok(name.to_string())
 }
 
 fn editable_identifier(
@@ -110,12 +136,13 @@ fn editable_identifier(
     field: &str,
     value: &str,
 ) -> Result<String, RenderErrorResponse> {
-    let target = parse_assignment_target_fragment(value).map_err(|message| {
-        RenderErrorResponse::invalid_node_payload(
-            node_id,
-            format!("`data.{field}` must be an identifier: {message}"),
-        )
-    })?;
+    let target =
+        parse_assignment_target_fragment(value, &FragmentScope::default()).map_err(|message| {
+            RenderErrorResponse::invalid_node_payload(
+                node_id,
+                format!("`data.{field}` must be an identifier: {message}"),
+            )
+        })?;
     target
         .is_simple()
         .then(|| target.root.to_string())

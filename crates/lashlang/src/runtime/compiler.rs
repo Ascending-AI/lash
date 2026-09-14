@@ -124,3 +124,6 @@ mod entry;
 mod expr;
 mod helpers;
 pub(crate) use helpers::*;
+pub use helpers::{
+    RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
+};

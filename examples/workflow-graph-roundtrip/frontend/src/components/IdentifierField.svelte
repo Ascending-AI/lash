@@ -32,7 +32,7 @@
       return;
     }
     const mine = (seq += 1);
-    const res = await validateFragment('identifier', trimmed);
+    const res = await validateFragment('identifier', trimmed, options ?? []);
     if (mine !== seq) return;
     error = res.ok ? null : (res.error?.message ?? 'invalid identifier');
   }
