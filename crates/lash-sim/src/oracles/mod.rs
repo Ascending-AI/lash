@@ -142,8 +142,8 @@ pub use live_provider::{
 };
 use mini_scenarios::*;
 pub use mini_scenarios::{
-    ScenarioContractGeneratedFact, scenario_contract_generated_facts,
-    scenario_contract_generated_facts_for_semantic, scenario_contract_mini_oracles,
+    ScenarioContractGeneratedFact, ScenarioFactMemo, scenario_contract_generated_facts,
+    scenario_contract_generated_facts_for_semantic, scenario_contract_generated_facts_with_memo,
     scenario_contract_oracles,
 };
 use recovery_and_scheduling::*;
@@ -205,12 +205,24 @@ pub enum OracleSlot<'a> {
 }
 
 impl OracleSlot<'_> {
-    /// The verdict id this slot produces. Every generated-workload oracle has a
-    /// fixed id: a battery entry declares the constant it reports under, and a
-    /// scenario-contract entry derives its id from the static contract. The
-    /// walk debug-asserts the evaluated verdict against this, so a slot whose
-    /// oracle grows a second id fails the crate's own tests rather than
-    /// silently making a caller's skip decision wrong.
+    /// Whether this slot reports under `oracle_id`. Every generated-workload
+    /// oracle has a fixed id: a battery entry declares the constant it reports
+    /// under, and a scenario-contract entry derives its id from the static
+    /// contract. Answering the question directly keeps a caller that asks it
+    /// once per slot per candidate — the minimizer — from allocating the id.
+    pub fn declares_oracle_id(&self, oracle_id: &str) -> bool {
+        match self {
+            Self::Battery(declared) => *declared == oracle_id,
+            Self::ScenarioContract(contract) => oracle_id
+                .strip_prefix(contract.oracle_id)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .is_some_and(|test_name| test_name == contract.test_name),
+        }
+    }
+
+    /// The verdict id this slot produces. The walk debug-asserts the evaluated
+    /// verdict against this, so a slot whose oracle grows a second id fails the
+    /// crate's own tests rather than silently making a skip decision wrong.
     pub fn declared_oracle_id(&self) -> String {
         match self {
             Self::Battery(oracle_id) => (*oracle_id).to_string(),
@@ -232,6 +244,7 @@ pub fn walk_generated_trace_oracles<S, V>(
     summary: &AbstractWorldSummary,
     durable_writes: &[CheckpointWriteEvent],
     expectations: &WorkloadExpectations,
+    memo: &ScenarioFactMemo,
     mut skip: S,
     mut visit: V,
 ) where
@@ -380,13 +393,10 @@ pub fn walk_generated_trace_oracles<S, V>(
         crate::state_checker::INDEPENDENT_CHECKPOINT_STATE_ORACLE,
         crate::state_checker::checkpoint_state_consistency(events, durable_writes, expectations)
     );
-    // Same oracles, in the same order, as `scenario_contract_mini_oracles`;
-    // spelled out one slot at a time so each declares the id it reports under.
-    debug_assert_eq!(
-        scenario_contract_mini_oracles(events, summary).len(),
-        13,
-        "mini scenario-contract oracles changed shape without updating this walk"
-    );
+    // The mini scenario-contract oracles, one slot at a time so each declares
+    // the id it reports under. This walk is their only list: evaluation order
+    // decides which failure `combine_oracles` reports, so a second list would
+    // be a second answer.
     battery!(
         SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE,
         mini_runtime_queued_input_hidden(events)
@@ -443,7 +453,7 @@ pub fn walk_generated_trace_oracles<S, V>(
         if skip(&OracleSlot::ScenarioContract(contract)) {
             continue;
         }
-        let verdict = scenario_contract_oracle(contract, events, summary);
+        let verdict = scenario_contract_oracle(contract, events, summary, memo);
         debug_assert_eq!(
             verdict.oracle_id,
             scenario_contract_oracle_id(contract),
@@ -455,7 +465,9 @@ pub fn walk_generated_trace_oracles<S, V>(
     }
 }
 
-/// [`walk_generated_trace_oracles`] with nothing skipped.
+/// [`walk_generated_trace_oracles`] with nothing skipped, against a fresh fact
+/// memo. A caller that walks one trace repeatedly should hold its own memo and
+/// call the walk directly.
 pub fn visit_generated_trace_oracles<V>(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
@@ -470,6 +482,7 @@ pub fn visit_generated_trace_oracles<V>(
         summary,
         durable_writes,
         expectations,
+        &ScenarioFactMemo::default(),
         |_| false,
         visit,
     )

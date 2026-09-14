@@ -3,9 +3,23 @@ use super::*;
 pub(super) fn agent_contract_execution_fact(
     events: &[DeliveredBoundary],
     contract: &'static str,
+    memo: &ScenarioFactMemo,
+) -> Result<ScenarioContractGeneratedFact, String> {
+    let proof_event = contract_execution_event(events, contract)?;
+    // Which event proves the contract depends on the candidate's event list, so
+    // the lookup always runs; what the fact says about that event does not, so
+    // it is derived once per proof event for the life of the memo.
+    let boundary_id = proof_event.boundary_id.clone();
+    memo.fact_from_proof_event(contract, &boundary_id, || {
+        agent_contract_execution_fact_from_proof_event(proof_event, contract)
+    })
+}
+
+fn agent_contract_execution_fact_from_proof_event(
+    proof_event: &DeliveredBoundary,
+    contract: &'static str,
 ) -> Result<ScenarioContractGeneratedFact, String> {
     let (scenario, fact, assertion) = agent_contract_metadata(contract)?;
-    let proof_event = contract_execution_event(events, contract)?;
     let execution = contract_execution_payload_matches_observed(proof_event, contract, scenario)?;
     let result = execution
         .get("result")

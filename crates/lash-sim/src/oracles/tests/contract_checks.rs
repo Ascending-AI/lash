@@ -109,7 +109,12 @@ fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
         ),
         (
             "agent",
-            agent_contract_semantics("agent.brand_new_contract", &[], &summary),
+            agent_contract_semantics(
+                "agent.brand_new_contract",
+                &[],
+                &summary,
+                &ScenarioFactMemo::default(),
+            ),
         ),
     ] {
         assert!(
@@ -1053,4 +1058,70 @@ fn process_wake_at_most_once_fails_on_duplicate_runtime_turns() {
             .message
             .contains("no runtime-turn materialization id")
     );
+}
+
+#[test]
+fn every_battery_slot_declares_the_one_oracle_id_its_verdict_uses() {
+    let summary = semantic_summary();
+    let events = semantic_events();
+    let expectations = WorkloadExpectations::default();
+
+    // The minimizer skips a slot on its declared id alone, so that id has to be
+    // the id the slot's verdict actually reports under, and no two slots may
+    // claim the same one — otherwise skipping the "wrong" slot could skip past
+    // a verdict that matches the target.
+    let mut declared_ids = Vec::new();
+    walk_generated_trace_oracles(
+        &events,
+        &summary,
+        &[],
+        &expectations,
+        &ScenarioFactMemo::default(),
+        |slot| {
+            declared_ids.push(slot.declared_oracle_id());
+            false
+        },
+        |_| true,
+    );
+
+    let mut evaluated_ids = Vec::new();
+    walk_generated_trace_oracles(
+        &events,
+        &summary,
+        &[],
+        &expectations,
+        &ScenarioFactMemo::default(),
+        |_| false,
+        |verdict| {
+            evaluated_ids.push(verdict.oracle_id);
+            true
+        },
+    );
+
+    assert_eq!(
+        declared_ids, evaluated_ids,
+        "each slot must declare exactly the oracle id its verdict reports under"
+    );
+
+    let unique = declared_ids.iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        declared_ids.len(),
+        "two battery slots declaring one oracle id would make a skip decision ambiguous"
+    );
+}
+
+#[test]
+fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
+    for contract in all_scenario_contracts() {
+        let slot = OracleSlot::ScenarioContract(contract);
+        let declared = slot.declared_oracle_id();
+        assert!(slot.declares_oracle_id(&declared));
+        assert!(!slot.declares_oracle_id(contract.oracle_id));
+        assert!(!slot.declares_oracle_id(&format!("{declared}-suffix")));
+    }
+
+    let slot = OracleSlot::Battery(CANCELLATION_ORACLE);
+    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE));
+    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE));
 }

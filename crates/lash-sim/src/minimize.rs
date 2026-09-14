@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::generator::generate_workload;
 use crate::oracles::{
-    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, combine_oracles, generated_trace_oracles,
-    passed_battery_verdict, walk_generated_trace_oracles,
+    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, ScenarioFactMemo, combine_oracles,
+    generated_trace_oracles, passed_battery_verdict, walk_generated_trace_oracles,
 };
 use crate::replay::{ReplayError, replay_trace};
 use crate::runner::run_generated_workload_for_fixture;
@@ -237,6 +237,10 @@ pub fn minimize_trace(
             target.oracle_id
         )));
     }
+    // One memo for the whole run: every candidate is this trace minus some
+    // events, so a contract fact derived from a surviving proof event is the
+    // same fact each time it is asked for.
+    let fact_memo = ScenarioFactMemo::default();
     let mut best = trace.clone();
     let mut operation_family_reductions = Vec::new();
     for kind in operation_families(&best) {
@@ -251,7 +255,8 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.retain(|event| event.kind != kind);
         renumber_events(&mut candidate);
-        let target_preserved = candidate_preserves_target(&mut candidate, target).unwrap_or(false);
+        let target_preserved =
+            candidate_preserves_target(&mut candidate, target, &fact_memo).unwrap_or(false);
         let accepted = target_preserved
             && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate-family.trace.json"), &candidate).is_ok();
@@ -270,7 +275,8 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.remove(index);
         renumber_events(&mut candidate);
-        let target_preserved = candidate_preserves_target(&mut candidate, target).unwrap_or(false);
+        let target_preserved =
+            candidate_preserves_target(&mut candidate, target, &fact_memo).unwrap_or(false);
         if target_preserved
             && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate.trace.json"), &candidate).is_ok()
@@ -476,6 +482,7 @@ fn refresh_trace_verdicts(
 fn candidate_preserves_target(
     trace: &mut SimulationTrace,
     target: TargetFailure<'_>,
+    memo: &ScenarioFactMemo,
 ) -> Result<bool, MinimizeError> {
     let carried_live_provider_oracle = trace
         .oracles
@@ -514,9 +521,10 @@ fn candidate_preserves_target(
             &final_summary,
             &trace.durable_writes,
             &trace.expectations,
+            memo,
             |slot| {
                 search.borrow().first_failure.is_some()
-                    && slot.declared_oracle_id() != target.oracle_id
+                    && !slot.declares_oracle_id(target.oracle_id)
             },
             consider,
         );

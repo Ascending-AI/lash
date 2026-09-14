@@ -8,9 +8,57 @@ pub fn scenario_contract_oracles(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
 ) -> Vec<OracleVerdict> {
+    let memo = ScenarioFactMemo::default();
     all_scenario_contracts()
-        .map(|contract| scenario_contract_oracle(contract, events, summary))
+        .map(|contract| scenario_contract_oracle(contract, events, summary, &memo))
         .collect()
+}
+
+/// Derived contract facts, keyed by the proof event they were derived from.
+///
+/// A contract's generated fact is a pure function of one `contract_execution`
+/// proof event: the contract finds its event, then reads only that event's
+/// payload and observed execution. Deriving it costs a deep JSON comparison of
+/// the whole execution payload, which for the `agent.*` contracts is the
+/// dominant cost of the oracle battery.
+///
+/// The minimizer evaluates the battery once per reduction candidate over event
+/// lists that differ only by removed events — it never edits an event — so
+/// within one minimize run the fact derived from a given proof event is the
+/// same every time. Holding one memo for the run turns those re-derivations
+/// into lookups. A memo must therefore not outlive one trace: boundary ids are
+/// unique within a trace, not across traces, so every entry point that does not
+/// take a memo builds a fresh one.
+/// A derived fact, or the reason its contract rejected the proof event.
+type DerivedFact = Result<ScenarioContractGeneratedFact, String>;
+
+#[derive(Default)]
+pub struct ScenarioFactMemo {
+    facts: std::cell::RefCell<std::collections::BTreeMap<(&'static str, String), DerivedFact>>,
+}
+
+impl ScenarioFactMemo {
+    /// The fact `contract` derives from the proof event `boundary_id`, deriving
+    /// it with `derive` on the first ask and reusing it afterwards.
+    pub fn fact_from_proof_event(
+        &self,
+        contract: &'static str,
+        boundary_id: &str,
+        derive: impl FnOnce() -> DerivedFact,
+    ) -> DerivedFact {
+        if let Some(known) = self
+            .facts
+            .borrow()
+            .get(&(contract, boundary_id.to_string()))
+        {
+            return known.clone();
+        }
+        let derived = derive();
+        self.facts
+            .borrow_mut()
+            .insert((contract, boundary_id.to_string()), derived.clone());
+        derived
+    }
 }
 
 pub(super) fn all_scenario_contracts() -> impl Iterator<Item = &'static ScenarioContractSpec> {
@@ -22,27 +70,6 @@ pub(super) fn all_scenario_contracts() -> impl Iterator<Item = &'static Scenario
     ]
     .into_iter()
     .flat_map(|contracts| contracts.iter())
-}
-
-pub fn scenario_contract_mini_oracles(
-    events: &[DeliveredBoundary],
-    summary: &AbstractWorldSummary,
-) -> Vec<OracleVerdict> {
-    vec![
-        mini_runtime_queued_input_hidden(events),
-        mini_runtime_cancellation_prevents_idle_claim(events),
-        mini_runtime_process_wake_duplicate_rejected(events),
-        mini_runtime_stale_lease_commit_rejected(events, summary),
-        mini_standard_streamed_text_finalizes_once(events),
-        mini_standard_provider_error_without_checkpoint(events),
-        mini_standard_tool_loop_reenters(events),
-        mini_rlm_finish_required_prose_repair(events, summary),
-        mini_rlm_schema_mismatch_repair(events),
-        mini_rlm_lashlang_cell_exec_continues(events),
-        mini_agent_durable_input_resolution(events),
-        mini_agent_child_failure_graph(events, summary),
-        mini_agent_parallel_spawn_join(events, summary),
-    ]
 }
 
 pub(super) fn mini_runtime_queued_input_hidden(events: &[DeliveredBoundary]) -> OracleVerdict {
@@ -446,6 +473,7 @@ pub(super) fn scenario_contract_oracle(
     contract: &ScenarioContractSpec,
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
+    memo: &ScenarioFactMemo,
 ) -> OracleVerdict {
     let missing = contract
         .required_sim_evidence
@@ -454,7 +482,7 @@ pub(super) fn scenario_contract_oracle(
         .filter(|evidence| !scenario_evidence_satisfied(evidence, events, summary))
         .collect::<Vec<_>>();
     let oracle_id = scenario_contract_oracle_id(contract);
-    let semantic = scenario_contract_semantics(contract, events, summary);
+    let semantic = scenario_contract_semantics(contract, events, summary, memo);
     if missing.is_empty() && semantic.passed {
         OracleVerdict::passed(
             oracle_id,
@@ -702,21 +730,41 @@ pub fn scenario_contract_generated_facts(
     scenario_contract_generated_facts_for_semantic(contract.semantic_oracle, events)
 }
 
+/// Derive a contract's generated facts against a fresh memo. Callers that
+/// evaluate many contracts over one trace should hold a memo and use
+/// [`scenario_contract_generated_facts_with_memo`] instead.
 pub fn scenario_contract_generated_facts_for_semantic(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
 ) -> Result<Vec<ScenarioContractGeneratedFact>, String> {
+    scenario_contract_generated_facts_with_memo(
+        semantic_oracle,
+        events,
+        &ScenarioFactMemo::default(),
+    )
+}
+
+pub fn scenario_contract_generated_facts_with_memo(
+    semantic_oracle: &str,
+    events: &[DeliveredBoundary],
+    memo: &ScenarioFactMemo,
+) -> Result<Vec<ScenarioContractGeneratedFact>, String> {
     let facts = match semantic_oracle {
         "standard.initial_request_projection" => Ok(vec![
-            standard_protocol_execution_fact(events, "standard.initial_request_projection")?,
+            standard_protocol_execution_fact(events, "standard.initial_request_projection", memo)?,
             initial_provider_projection_fact(events)?,
         ]),
         "standard.empty_response_finishes" => Ok(vec![standard_protocol_execution_fact(
             events,
             "standard.empty_response_finishes",
+            memo,
         )?]),
         "standard.provider_error_without_checkpoint" => Ok(vec![
-            standard_protocol_execution_fact(events, "standard.provider_error_without_checkpoint")?,
+            standard_protocol_execution_fact(
+                events,
+                "standard.provider_error_without_checkpoint",
+                memo,
+            )?,
             provider_mutation_semantic_fact(
                 events,
                 "rate_limit_error_envelope",
@@ -725,13 +773,18 @@ pub fn scenario_contract_generated_facts_for_semantic(
             )?,
         ]),
         "standard.native_tool_loop_reenters_model" => Ok(vec![
-            standard_protocol_execution_fact(events, "standard.native_tool_loop_reenters_model")?,
+            standard_protocol_execution_fact(
+                events,
+                "standard.native_tool_loop_reenters_model",
+                memo,
+            )?,
             tool_reentry_fact(events, "standard_native_tool_reenters_model", false)?,
         ]),
         "standard.parallel_tool_results_checkpoint_once" => Ok(vec![
             standard_protocol_execution_fact(
                 events,
                 "standard.parallel_tool_results_checkpoint_once",
+                memo,
             )?,
             parallel_tool_results_checkpoint_once_fact(events)?,
         ]),
@@ -739,6 +792,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
             standard_protocol_execution_fact(
                 events,
                 "standard.tool_failure_feedback_reenters_model",
+                memo,
             )?,
             tool_reentry_fact(events, "standard_tool_feedback_reenters_model", false)?,
             provider_mutation_semantic_fact(
@@ -749,7 +803,11 @@ pub fn scenario_contract_generated_facts_for_semantic(
             )?,
         ]),
         "standard.streamed_text_finalizes_once" => Ok(vec![
-            standard_protocol_execution_fact(events, "standard.streamed_text_finalizes_once")?,
+            standard_protocol_execution_fact(
+                events,
+                "standard.streamed_text_finalizes_once",
+                memo,
+            )?,
             streamed_text_finalizes_once_fact(events)?,
         ]),
         "standard.max_turns_after_tool_result" => {
@@ -758,17 +816,20 @@ pub fn scenario_contract_generated_facts_for_semantic(
         "rlm.natural_prose_finalizes" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.natural_prose_finalizes",
+            memo,
         )?]),
         "rlm.typed_prose_requires_finish" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.typed_prose_requires_finish",
+            memo,
         )?]),
         "rlm.finish_required_max_turn_stop" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.finish_required_max_turn_stop",
+            memo,
         )?]),
         "rlm.exec_error_max_turn_stop" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.exec_error_max_turn_stop")?,
+            rlm_protocol_execution_fact(events, "rlm.exec_error_max_turn_stop", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_exec_error_max_turn_stop",
@@ -778,13 +839,15 @@ pub fn scenario_contract_generated_facts_for_semantic(
         "rlm.finish_required_diagnostic_counts" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.finish_required_diagnostic_counts",
+            memo,
         )?]),
         "rlm.natural_diagnostic_counts" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.natural_diagnostic_counts",
+            memo,
         )?]),
         "rlm.cell_diagnostic_counts" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.cell_diagnostic_counts")?,
+            rlm_protocol_execution_fact(events, "rlm.cell_diagnostic_counts", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_cell_diagnostic_exec_counts",
@@ -792,7 +855,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
             )?,
         ]),
         "rlm.retired_marker_plain_lashlang_text" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.retired_marker_plain_lashlang_text")?,
+            rlm_protocol_execution_fact(events, "rlm.retired_marker_plain_lashlang_text", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_retired_marker_plain_lashlang_text",
@@ -800,7 +863,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
             )?,
         ]),
         "rlm.lashlang_cell_exec_continues" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.lashlang_cell_exec_continues")?,
+            rlm_protocol_execution_fact(events, "rlm.lashlang_cell_exec_continues", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_lashlang_cell_exec_continues",
@@ -811,6 +874,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
             rlm_protocol_execution_fact(
                 events,
                 "rlm.streamed_lashlang_cell_exec_persists_trajectory",
+                memo,
             )?,
             exec_semantic_fact(
                 events,
@@ -821,9 +885,10 @@ pub fn scenario_contract_generated_facts_for_semantic(
         "rlm.empty_options_natural_default" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.empty_options_natural_default",
+            memo,
         )?]),
         "rlm.exec_result_no_tool_call_replay" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.exec_result_no_tool_call_replay")?,
+            rlm_protocol_execution_fact(events, "rlm.exec_result_no_tool_call_replay", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_exec_result_no_tool_call_replay",
@@ -831,7 +896,11 @@ pub fn scenario_contract_generated_facts_for_semantic(
             )?,
         ]),
         "rlm.exec_tool_control_frame_switch_terminal" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.exec_tool_control_frame_switch_terminal")?,
+            rlm_protocol_execution_fact(
+                events,
+                "rlm.exec_tool_control_frame_switch_terminal",
+                memo,
+            )?,
             exec_semantic_fact(
                 events,
                 "rlm_exec_tool_control_frame_switch_terminal",
@@ -840,7 +909,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
             trigger_then_provider_fact(events, "rlm_exec_tool_control_frame_switch_trigger")?,
         ]),
         "rlm.exec_tool_control_fail_terminal" => Ok(vec![
-            rlm_protocol_execution_fact(events, "rlm.exec_tool_control_fail_terminal")?,
+            rlm_protocol_execution_fact(events, "rlm.exec_tool_control_fail_terminal", memo)?,
             exec_semantic_fact(
                 events,
                 "rlm_exec_tool_control_fail_terminal",
@@ -851,10 +920,12 @@ pub fn scenario_contract_generated_facts_for_semantic(
         "rlm.typed_finish_emits_outcome_and_done" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.typed_finish_emits_outcome_and_done",
+            memo,
         )?]),
         "rlm.natural_allows_finish_value" => Ok(vec![rlm_protocol_execution_fact(
             events,
             "rlm.natural_allows_finish_value",
+            memo,
         )?]),
         "rlm.typed_schema_mismatch_repair_loop" => Ok(vec![
             provider_mutation_semantic_fact(
@@ -863,7 +934,7 @@ pub fn scenario_contract_generated_facts_for_semantic(
                 "rlm_typed_schema_mismatch_feedback",
                 "typed schema mismatch repair uses generated malformed provider payload feedback",
             )?,
-            rlm_protocol_execution_fact(events, "rlm.typed_schema_mismatch_repair_loop")?,
+            rlm_protocol_execution_fact(events, "rlm.typed_schema_mismatch_repair_loop", memo)?,
         ]),
         "rlm.typed_schema_any_of_mismatch" => Ok(vec![
             provider_mutation_semantic_fact(
@@ -872,49 +943,58 @@ pub fn scenario_contract_generated_facts_for_semantic(
                 "rlm_typed_schema_anyof_feedback",
                 "typed anyOf mismatch package carries generated parser-classified feedback",
             )?,
-            rlm_protocol_execution_fact(events, "rlm.typed_schema_any_of_mismatch")?,
+            rlm_protocol_execution_fact(events, "rlm.typed_schema_any_of_mismatch", memo)?,
         ]),
         "agent.foreground_tool_call_round_trip" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.foreground_tool_call_round_trip")?,
+            agent_contract_execution_fact(events, "agent.foreground_tool_call_round_trip", memo)?,
             tool_reentry_fact(events, "agent_foreground_tool_call_round_trip", false)?,
         ]),
         "agent.started_process_tool_call_graph" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.started_process_tool_call_graph")?,
+            agent_contract_execution_fact(events, "agent.started_process_tool_call_graph", memo)?,
             process_wake_fact(events, "agent_started_process_graph")?,
             tool_reentry_fact(events, "agent_started_process_tool_call", false)?,
         ]),
         "agent.durable_input_suspension_resolution" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.durable_input_suspension_resolution")?,
+            agent_contract_execution_fact(
+                events,
+                "agent.durable_input_suspension_resolution",
+                memo,
+            )?,
             durable_replay_fact(events, "agent_durable_input_first_and_replay")?,
             process_wake_fact(events, "agent_durable_input_process_wake")?,
             observer_reconnect_fact(events, "agent_durable_input_observer_reconnect")?,
         ]),
         "agent.started_process_subagent_spawn" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.started_process_subagent_spawn")?,
+            agent_contract_execution_fact(events, "agent.started_process_subagent_spawn", memo)?,
             process_wake_fact(events, "agent_started_process_subagent_spawn")?,
         ]),
         "agent.nested_process_start_await" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.nested_process_start_await")?,
+            agent_contract_execution_fact(events, "agent.nested_process_start_await", memo)?,
             process_wake_fact(events, "agent_nested_process_start_await")?,
         ]),
         "agent.session_turn_process_child" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.session_turn_process_child")?,
+            agent_contract_execution_fact(events, "agent.session_turn_process_child", memo)?,
             process_wake_fact(events, "agent_session_turn_process_child_wake")?,
             agent_session_turn_child_provider_fact(events)?,
         ]),
         "agent.failed_child_preserves_failure_graph" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.failed_child_preserves_failure_graph")?,
+            agent_contract_execution_fact(
+                events,
+                "agent.failed_child_preserves_failure_graph",
+                memo,
+            )?,
             worker_stale_fact(events, "agent_failed_child_worker_graph")?,
             backend_retry_terminalization_fact(events, "agent_failed_child_backend_graph")?,
         ]),
         "agent.parallel_spawn_and_join" => Ok(vec![
-            agent_contract_execution_fact(events, "agent.parallel_spawn_and_join")?,
+            agent_contract_execution_fact(events, "agent.parallel_spawn_and_join", memo)?,
             process_wake_fact(events, "agent_parallel_spawn_process_wakes")?,
             worker_stale_fact(events, "agent_parallel_spawn_join_worker_order")?,
         ]),
         "agent.tuple_values_finish_as_json_arrays" => Ok(vec![agent_contract_execution_fact(
             events,
             "agent.tuple_values_finish_as_json_arrays",
+            memo,
         )?]),
         other => Err(format!(
             "{} scenario contract `{other}` has no per-contract semantic adapter; add distinct evidence instead of a generic fallback",
@@ -932,12 +1012,13 @@ pub(super) fn scenario_contract_semantics(
     contract: &ScenarioContractSpec,
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,
+    memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
     match contract.suite {
         "runtime" => runtime_contract_semantics(contract.semantic_oracle, events, summary),
         "standard" => standard_contract_semantics(contract.semantic_oracle, events, summary),
         "rlm" => rlm_contract_semantics(contract.semantic_oracle, events, summary),
-        "agent" => agent_contract_semantics(contract.semantic_oracle, events, summary),
+        "agent" => agent_contract_semantics(contract.semantic_oracle, events, summary, memo),
         other => ScenarioSemanticVerdict::failed(format!(
             "suite `{other}` has no per-contract semantic adapter dispatcher"
         )),
@@ -1041,8 +1122,9 @@ pub(super) fn agent_contract_semantics(
     semantic_oracle: &str,
     events: &[DeliveredBoundary],
     _summary: &AbstractWorldSummary,
+    memo: &ScenarioFactMemo,
 ) -> ScenarioSemanticVerdict {
-    match scenario_contract_generated_facts_for_semantic(semantic_oracle, events) {
+    match scenario_contract_generated_facts_with_memo(semantic_oracle, events, memo) {
         Ok(facts) => ScenarioSemanticVerdict::passed(format!(
             "generated contract facts held: {}",
             fact_names(&facts)
