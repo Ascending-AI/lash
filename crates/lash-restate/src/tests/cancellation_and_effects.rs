@@ -427,12 +427,11 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                     Ok(RuntimeEffectOutcome::ToolAttempt {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Done {
                             record: Box::new(completed_tool_record("call-fast", "fast_tool")),
-                            intents: lash_core::ToolIntents::v2(vec![
+                            intents: lash_core::ToolIntents::v3(vec![
                                 lash_core::ToolIntent::StartProcess(Box::new(
                                     lash_core::StartProcessIntent {
                                         session_id: SessionId::from("session"),
-                                        request: lash_core::ProcessStartRequest::external(
-                                            "positional-replay-child",
+                                        declaration: lash_core::ProcessStartDeclaration::external(
                                             lash_core::ProcessOriginator::host_scoped(
                                                 "restate-positional-law",
                                             ),

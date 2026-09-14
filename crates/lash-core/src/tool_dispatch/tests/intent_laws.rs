@@ -1,10 +1,10 @@
 use super::*;
 use crate::ProcessId;
 use crate::SessionId;
-use crate::{ProcessEventLog as _, ProcessLifecycle as _};
+use crate::{ProcessEventLog as _, ProcessLifecycle as _, ProcessQuery as _};
 
 fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
-    crate::ToolIntents::v2(
+    crate::ToolIntents::v3(
         event_types
             .iter()
             .enumerate()
@@ -199,6 +199,104 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
     }
 }
 
+fn recorded_start_intents() -> crate::ToolIntents {
+    crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
+        crate::StartProcessIntent {
+            session_id: SessionId::from("session"),
+            declaration: crate::ProcessStartDeclaration::external(
+                crate::ProcessOriginator::host_scoped("intent-law"),
+                json!({"step": "start"}),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            ),
+        },
+    ))])
+}
+
+fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId, ProcessId) {
+    match outcome {
+        crate::ToolIntentExecutionOutcome::Executed {
+            identity, result, ..
+        } => (
+            ProcessId::from(
+                result
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("a start outcome names its process id")
+                    .to_string(),
+            ),
+            ProcessId::from_intent_identity(identity),
+        ),
+        other => panic!("expected an executed start intent, got {other:?}"),
+    }
+}
+
+/// FIG-2994: the id the attempt can derive from its own intent identity and
+/// the id the executor starts under are one value, on the first drain and on
+/// the redrive of the same attempt after a crash. Replacing the executor's
+/// `ProcessId::from_intent_identity` call with a freshly minted id fails the
+/// first assertion; carrying the id in the declaration instead of deriving it
+/// fails the redrive equality.
+#[tokio::test]
+async fn crash_redrive_of_a_start_declaration_derives_the_same_process_id() {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(Some(
+        IntentPausePoint::AfterProcessCommandCommit(1),
+    )));
+    let context = fixed_intent_dispatch_context(
+        Arc::clone(&controller),
+        Arc::clone(&registry),
+        recorded_start_intents(),
+        Arc::clone(&calls),
+    );
+
+    let crashed_context = context.clone();
+    let crashed =
+        crate::task::spawn(async move { run_fixed_intent_attempt(&crashed_context).await });
+    controller.wait_until_paused().await;
+    crashed.abort();
+    assert!(
+        crashed
+            .await
+            .expect_err("the injected crash aborts the first drain")
+            .is_cancelled(),
+        "the first coordinator task must stop after the start command commits"
+    );
+
+    let redriven = run_fixed_intent_attempt(&context).await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the attempt result replays rather than re-running the tool body"
+    );
+    let outcome = redriven
+        .intent_outcomes
+        .first()
+        .expect("the redrive reports the start declaration");
+    let (started, derived) = started_process_id(outcome);
+    assert_eq!(
+        started, derived,
+        "the executor must start under the id the attempt identity derives"
+    );
+
+    let live = registry
+        .list_processes(&crate::ProcessListFilter::default())
+        .await
+        .expect("list the started processes")
+        .into_iter()
+        .map(|record| record.id)
+        .filter(|id| *id == derived)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        live,
+        vec![derived],
+        "the crash and its redrive must converge on exactly one process row"
+    );
+}
+
 #[tokio::test]
 async fn crash_after_result_commit_redrives_the_recorded_intent_batch() {
     Box::pin(crash_redrive_law(IntentPausePoint::AfterToolAttemptCommit)).await;
@@ -224,7 +322,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None));
-    let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::SignalProcess(
+    let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
             session_id: SessionId::from("session"),
             process_id: ProcessId::from("intent-law-target"),
@@ -349,7 +447,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None));
-    let intents = crate::ToolIntents::v2(vec![
+    let intents = crate::ToolIntents::v3(vec![
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
             session_id: SessionId::from("session"),
             process_id: ProcessId::from("intent-law-target"),
@@ -832,7 +930,7 @@ async fn register_trigger_intent_subscription_with_schema(
 }
 
 fn recorded_trigger_intents() -> crate::ToolIntents {
-    crate::ToolIntents::v2(vec![crate::ToolIntent::EmitTrigger(
+    crate::ToolIntents::v3(vec![crate::ToolIntent::EmitTrigger(
         crate::EmitTriggerIntent {
             session_id: SessionId::from("session"),
             request: crate::TriggerOccurrenceRequest::new(
@@ -1100,7 +1198,7 @@ async fn recorded_trigger_occurrence_identity_follows_the_declaration_replay_key
     let mut context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
         Arc::clone(&registry),
-        crate::ToolIntents::v2(vec![declaration.clone(), declaration]),
+        crate::ToolIntents::v3(vec![declaration.clone(), declaration]),
         Arc::clone(&calls),
     );
     let (process_env_store, _) = crate::testing::process_execution_env_fixture();

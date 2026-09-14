@@ -2250,10 +2250,10 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         let runtime = writer.lock().await;
         runtime.process_service()?
     };
-    let intents = lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
+    let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
         lash_core::StartProcessIntent {
             session_id: SessionId::from(SESSION_ID),
-            request: start_request,
+            declaration: start_request.into_declaration(),
         },
     ))]);
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();

@@ -186,7 +186,10 @@ pub use usage_activity::*;
 // (`RemoteDeclaredProcessIdentity`) because a definition reference is derived by
 // the engine registry, never asserted by a caller. A window-74 peer writes the
 // untyped definition blob and is refused, so peers must adopt 75.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 75;
+// Window 76: FIG-2994 adds `register_process_definition` and `register_trigger`
+// to the tool-intent kind vocabulary. A window-75 peer refuses both tags when
+// decoding a turn report that carries either outcome, so peers must adopt 76.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 76;
 
 /// One versioned remote-protocol message.
 ///

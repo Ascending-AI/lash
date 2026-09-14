@@ -32,27 +32,52 @@ pub struct ToolCallRecord {
     pub duration_ms: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolIntentKind {
-    StartProcess,
-    SignalProcess,
-    CancelProcess,
-    EmitProcessEvent,
-    EmitTrigger,
+/// The canonical tool-intent variant set.
+///
+/// This list is the single source of truth for both [`ToolIntentKind`] here and
+/// `ToolIntent` in lash-core: each generates itself by invoking this macro with
+/// its own generator, so neither can carry a variant the other lacks. Adding a
+/// declaration means adding one line here.
+#[macro_export]
+macro_rules! tool_intent_variants {
+    ($generator:ident) => {
+        $generator! {
+            StartProcess "start_process",
+            SignalProcess "signal_process",
+            CancelProcess "cancel_process",
+            EmitProcessEvent "emit_process_event",
+            EmitTrigger "emit_trigger",
+            RegisterProcessDefinition "register_process_definition",
+            RegisterTrigger "register_trigger",
+        }
+    };
 }
 
-impl ToolIntentKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::StartProcess => "start_process",
-            Self::SignalProcess => "signal_process",
-            Self::CancelProcess => "cancel_process",
-            Self::EmitProcessEvent => "emit_process_event",
-            Self::EmitTrigger => "emit_trigger",
+macro_rules! define_tool_intent_kind {
+    ($($variant:ident $wire:literal,)*) => {
+        /// Literal command kind of one recorded declaration.
+        ///
+        /// Generated from [`tool_intent_variants!`]; never hand-edited.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum ToolIntentKind {
+            $($variant,)*
         }
-    }
+
+        impl ToolIntentKind {
+            /// Every kind the generated variant set declares, in declaration order.
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
+
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $wire,)*
+                }
+            }
+        }
+    };
 }
+
+tool_intent_variants!(define_tool_intent_kind);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolIntentIdentity {
@@ -70,16 +95,18 @@ pub struct ToolIntentIdentity {
     pub minting_emission_replay_key: Option<String>,
 }
 
-impl ToolIntentIdentity {
-    /// Process id a recorded start intent realizes under.
+impl ProcessId {
+    /// The process id a start declaration made under `identity` realizes as.
     ///
     /// The declaration's replay key *is* the process id, so a re-submitted
-    /// declaration starts the same process instead of a second one. Both
-    /// realization routes project it here — core's recorded-intent seam in
-    /// `tool_dispatch/intent_executor.rs` and the host facade's
-    /// `ProcessCommand` front door — so the two cannot drift apart (FIG-2876).
-    pub fn recorded_process_id(&self) -> ProcessId {
-        ProcessId::from(self.replay_key.clone())
+    /// declaration starts the same process instead of a second one, and an
+    /// attempt can name its child before the start commits. This is the only
+    /// constructor on the start-declaration path: both realization routes —
+    /// core's recorded-intent seam in `tool_dispatch/intent_executor.rs` and
+    /// the host facade's `ProcessCommand` front door — derive the id here, so
+    /// the executor and the attempt cannot drift apart (FIG-2876, FIG-2994).
+    pub fn from_intent_identity(identity: &ToolIntentIdentity) -> Self {
+        Self::from(identity.replay_key.clone())
     }
 }
 

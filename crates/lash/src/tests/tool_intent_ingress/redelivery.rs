@@ -169,7 +169,7 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
     let lash_core::ToolIntent::StartProcess(intent) = &mut changed else {
         unreachable!("fixture is a start intent")
     };
-    intent.request.input = lash_core::ProcessInput::External {
+    intent.declaration.input = lash_core::ProcessInput::External {
         metadata: serde_json::json!({"law": "changed-under-a-bound-identity"}),
     };
     let refused = ingress_of(&changed_invocation)?.submit(key, changed).await;

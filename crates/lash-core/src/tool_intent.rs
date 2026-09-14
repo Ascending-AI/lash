@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
 ///
-/// Version 2 binds `EmitTrigger` occurrence idempotency to the declaration's
-/// replay key. Version-1 batches and host submissions are refused before any
-/// declaration effect so an occurrence committed under the former caller-key
-/// semantics cannot be emitted again under the new key.
+/// Version 3 replaces the start declaration's full `ProcessStartRequest` with
+/// an id-less [`crate::ProcessStartDeclaration`]: the process id is derived
+/// from the declaring attempt's intent identity instead of being carried and
+/// then overwritten. A v2 batch or durable submission row therefore decodes to
+/// a shape this build cannot realize, so both are refused before any
+/// declaration effect rather than reinterpreted — the same treatment version 1
+/// received when version 2 rebound `EmitTrigger` occurrence idempotency to the
+/// declaration replay key.
 /// **Integrator class 3: protocol and process-engine implementors.**
-pub const TOOL_INTENT_PROTOCOL_V2: u16 = 2;
+pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
 /// Maximum declarations accepted from one recorded attempt.
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
@@ -33,15 +37,15 @@ pub struct ToolIntents {
 
 impl Default for ToolIntents {
     fn default() -> Self {
-        Self::v2(Vec::new())
+        Self::v3(Vec::new())
     }
 }
 
 impl ToolIntents {
-    /// Construct a version-2 declaration batch for protocol and process-engine implementors.
-    pub fn v2(intents: Vec<ToolIntent>) -> Self {
+    /// Construct a version-3 declaration batch for protocol and process-engine implementors.
+    pub fn v3(intents: Vec<ToolIntent>) -> Self {
         Self {
-            protocol_version: TOOL_INTENT_PROTOCOL_V2,
+            protocol_version: TOOL_INTENT_PROTOCOL_V3,
             intents,
         }
     }
@@ -54,41 +58,54 @@ impl ToolIntents {
     }
 }
 
-/// Durable follow-on work a recorded leaf attempt may request.
-/// **Integrator class 3: protocol and process-engine implementors.**
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "intent", rename_all = "snake_case")]
-pub enum ToolIntent {
-    StartProcess(Box<StartProcessIntent>),
-    SignalProcess(SignalProcessIntent),
-    CancelProcess(CancelProcessIntent),
-    EmitProcessEvent(EmitProcessEventIntent),
-    EmitTrigger(EmitTriggerIntent),
+/// The payload type each generated [`ToolIntent`] variant carries.
+///
+/// One arm per variant of [`lash_sansio::tool_intent_variants!`]: a variant
+/// added to that list without a payload here is a compile error, so the enum
+/// and the kind set cannot diverge.
+macro_rules! tool_intent_payload {
+    (StartProcess) => { Box<StartProcessIntent> };
+    (SignalProcess) => { SignalProcessIntent };
+    (CancelProcess) => { CancelProcessIntent };
+    (EmitProcessEvent) => { EmitProcessEventIntent };
+    (EmitTrigger) => { EmitTriggerIntent };
+    (RegisterProcessDefinition) => { Box<RegisterProcessDefinitionIntent> };
+    (RegisterTrigger) => { Box<RegisterTriggerIntent> };
 }
 
-impl ToolIntent {
-    /// Return the literal command kind used by protocol and process-engine implementors.
-    pub fn kind(&self) -> ToolIntentKind {
-        match self {
-            Self::StartProcess(_) => ToolIntentKind::StartProcess,
-            Self::SignalProcess(_) => ToolIntentKind::SignalProcess,
-            Self::CancelProcess(_) => ToolIntentKind::CancelProcess,
-            Self::EmitProcessEvent(_) => ToolIntentKind::EmitProcessEvent,
-            Self::EmitTrigger(_) => ToolIntentKind::EmitTrigger,
+macro_rules! define_tool_intent {
+    ($($variant:ident $wire:literal,)*) => {
+        /// Durable follow-on work a recorded leaf attempt may request.
+        ///
+        /// Generated from [`lash_sansio::tool_intent_variants!`] together with
+        /// [`ToolIntentKind`], so `kind()` is a projection of one list rather
+        /// than a hand-kept mirror.
+        /// **Integrator class 3: protocol and process-engine implementors.**
+        #[derive(Clone, Debug, Serialize, Deserialize)]
+        #[serde(tag = "kind", content = "intent", rename_all = "snake_case")]
+        pub enum ToolIntent {
+            $($variant(tool_intent_payload!($variant)),)*
         }
-    }
 
-    /// Return the session binding checked by protocol and process-engine implementors.
-    pub fn session_id(&self) -> &str {
-        match self {
-            Self::StartProcess(intent) => &intent.session_id,
-            Self::SignalProcess(intent) => &intent.session_id,
-            Self::CancelProcess(intent) => &intent.session_id,
-            Self::EmitProcessEvent(intent) => &intent.session_id,
-            Self::EmitTrigger(intent) => &intent.session_id,
+        impl ToolIntent {
+            /// Return the literal command kind used by protocol and process-engine implementors.
+            pub fn kind(&self) -> ToolIntentKind {
+                match self {
+                    $(Self::$variant(_) => ToolIntentKind::$variant,)*
+                }
+            }
+
+            /// Return the session binding checked by protocol and process-engine implementors.
+            pub fn session_id(&self) -> &str {
+                match self {
+                    $(Self::$variant(intent) => &intent.session_id,)*
+                }
+            }
         }
-    }
+    };
 }
+
+lash_sansio::tool_intent_variants!(define_tool_intent);
 
 /// Durable first-submission row for one runtime-owned tool-intent identity.
 ///
@@ -121,11 +138,11 @@ impl ToolIntentSubmissionRecord {
     ) -> Result<Self, serde_json::Error> {
         let kind = intent.kind();
         let payload_hash = crate::stable_hash::blake3_hex(
-            "lash-tool-intent-payload/v2",
+            "lash-tool-intent-payload/v3",
             &serde_json::to_vec(&intent)?,
         );
         Ok(Self {
-            protocol_version: TOOL_INTENT_PROTOCOL_V2,
+            protocol_version: TOOL_INTENT_PROTOCOL_V3,
             identity,
             kind,
             payload_hash,
@@ -180,11 +197,69 @@ pub enum ToolIntentSubmissionAdmission {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Start declaration consumed by protocol and process-engine implementors.
+///
+/// The declaration carries no process id. Realization derives it with
+/// [`ProcessId::from_intent_identity`] from this declaration's own intent
+/// identity, so the id a leaf attempt returns before commit and the id the
+/// executor starts under are the same value on the first run and on every
+/// redrive (FIG-2994).
 pub struct StartProcessIntent {
     /// Session whose authority owns the child.
     pub session_id: SessionId,
-    /// Complete durable process-start request.
-    pub request: crate::ProcessStartRequest,
+    /// Durable process-start declaration, minus the derived id.
+    pub declaration: crate::ProcessStartDeclaration,
+}
+
+impl StartProcessIntent {
+    /// Bind this declaration to the process id its identity derives.
+    ///
+    /// Both realization routes call this and nothing else, so neither can
+    /// substitute a freshly minted id.
+    pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
+        self.declaration
+            .clone()
+            .into_request(ProcessId::from_intent_identity(identity))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Process-definition registration declaration consumed by protocol and
+/// process-engine implementors.
+///
+/// The definition registry table is a separate child of FIG-2990; until it
+/// lands this declaration is admitted, identified and journaled like any other
+/// intent and its realization is refused with a typed
+/// `process_definition_registry_unavailable` command failure rather than
+/// silently succeeding. The declaration shape is what a leaf `register` tool
+/// binds against, which is why it exists ahead of its table.
+pub struct RegisterProcessDefinitionIntent {
+    /// Session whose authority owns the registration.
+    pub session_id: SessionId,
+    /// Engine that owns the definition, e.g. the value an engine registry keys on.
+    pub engine_kind: String,
+    /// Engine-owned definition value.
+    pub definition: serde_json::Value,
+    /// Immutable execution environment the definition resolves against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_spec: Option<crate::ProcessExecutionEnvSpec>,
+    /// Host-facing label, never part of the definition's identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Trigger-registration declaration consumed by protocol and process-engine
+/// implementors.
+///
+/// Distinct from [`EmitTriggerIntent`], which fires an occurrence: this one
+/// installs the subscription. A leaf attempt cannot register synchronously for
+/// the same reason it cannot emit synchronously — a subscription that outlived
+/// a failed attempt would wake a target the attempt never committed.
+pub struct RegisterTriggerIntent {
+    /// Session whose authority owns the subscription.
+    pub session_id: SessionId,
+    /// Complete validated subscription draft.
+    pub draft: crate::TriggerSubscriptionDraft,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -267,8 +342,8 @@ const TOOL_INTENT_IDENTITY_FAMILY_VERSION: u8 = 2;
 /// The public identity seam for host-submitted intents.
 ///
 /// Runtime-minted declarations use the same v2 family through
-/// [`derive_tool_intent_identity_for_emission`], which additionally binds the
-/// identity to the durable invocation that minted the declaration.
+/// [`derive_tool_intent_identity_under`], which additionally binds the identity
+/// to the durable invocation that minted the declaration.
 pub fn derive_tool_intent_identity(
     session_id: &SessionId,
     execution_scope_id: &str,
@@ -284,19 +359,27 @@ pub fn derive_tool_intent_identity(
     )
 }
 
-pub(crate) fn derive_tool_intent_identity_for_emission(
+/// The one derivation every runtime-side declaration site uses.
+///
+/// A declaration minted under a durable invocation binds that invocation's
+/// replay key; one minted outside any invocation binds nothing. Both the
+/// attempt's own `AttemptContext::intent_identity` and the intent executor's
+/// realization pass their parent invocation here, so the identity an attempt
+/// reports and the identity the executor realizes under cannot be derived by
+/// two rules (FIG-2994).
+pub fn derive_tool_intent_identity_under(
     session_id: &SessionId,
     execution_scope_id: &str,
     tool_call_id: Option<&str>,
     intent_index: usize,
-    minting_emission_replay_key: &str,
+    parent_invocation: Option<&crate::RuntimeInvocation>,
 ) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
     derive_tool_intent_identity_inner(
         session_id,
         execution_scope_id,
         tool_call_id,
         intent_index,
-        Some(minting_emission_replay_key),
+        parent_invocation.and_then(crate::RuntimeInvocation::replay_key),
     )
 }
 
@@ -460,6 +543,115 @@ impl ToolAttemptOutcome {
 mod tests {
     use super::*;
 
+    fn sample_intent(kind: ToolIntentKind) -> ToolIntent {
+        let session_id = SessionId::from("session");
+        // An exhaustive match, so a variant added to the generated kind set
+        // without a matching `ToolIntent` payload fails to compile here.
+        match kind {
+            ToolIntentKind::StartProcess => {
+                ToolIntent::StartProcess(Box::new(StartProcessIntent {
+                    session_id,
+                    declaration: crate::ProcessStartDeclaration::external(
+                        crate::ProcessOriginator::host(),
+                        serde_json::Value::Null,
+                        crate::ProcessLifecyclePolicy::new(
+                            crate::ParentScope::Host,
+                            crate::OnParentEnd::Abandon,
+                        ),
+                    ),
+                }))
+            }
+            ToolIntentKind::SignalProcess => ToolIntent::SignalProcess(SignalProcessIntent {
+                session_id,
+                process_id: ProcessId::from("process"),
+                signal_name: "go".to_string(),
+                payload: serde_json::Value::Null,
+            }),
+            ToolIntentKind::CancelProcess => ToolIntent::CancelProcess(CancelProcessIntent {
+                session_id,
+                process_id: ProcessId::from("process"),
+            }),
+            ToolIntentKind::EmitProcessEvent => {
+                ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
+                    session_id,
+                    process_id: ProcessId::from("process"),
+                    event_type: "note".to_string(),
+                    payload: serde_json::Value::Null,
+                })
+            }
+            ToolIntentKind::EmitTrigger => ToolIntent::EmitTrigger(EmitTriggerIntent {
+                session_id,
+                request: crate::TriggerOccurrenceRequest::new(
+                    "source",
+                    "source-key",
+                    serde_json::Value::Null,
+                    "idempotency-key",
+                ),
+            }),
+            ToolIntentKind::RegisterProcessDefinition => {
+                ToolIntent::RegisterProcessDefinition(Box::new(RegisterProcessDefinitionIntent {
+                    session_id,
+                    engine_kind: "engine".to_string(),
+                    definition: serde_json::Value::Null,
+                    env_spec: None,
+                    label: None,
+                }))
+            }
+            ToolIntentKind::RegisterTrigger => {
+                ToolIntent::RegisterTrigger(Box::new(RegisterTriggerIntent {
+                    session_id,
+                    draft: crate::TriggerSubscriptionDraft::for_process(
+                        "subscription",
+                        crate::ProcessExecutionEnvRef::new("env-ref"),
+                        "source",
+                        "source-key",
+                        crate::ProcessInput::External {
+                            metadata: serde_json::Value::Null,
+                        },
+                        crate::ProcessIdentity::new("engine"),
+                    ),
+                }))
+            }
+        }
+    }
+
+    /// `ToolIntentKind` is generated from the same variant list as `ToolIntent`
+    /// rather than mirrored by hand: every generated kind is produced by a real
+    /// declaration, the projection is injective, and the wire spelling the kind
+    /// prints is the tag serde writes for the declaration (FIG-2994).
+    #[test]
+    fn every_generated_kind_is_produced_by_exactly_one_tool_intent_variant() {
+        let mut seen = std::collections::HashSet::new();
+        for kind in ToolIntentKind::ALL.iter().copied() {
+            let intent = sample_intent(kind);
+            assert_eq!(intent.kind(), kind, "kind projection is not the identity");
+            assert!(seen.insert(kind), "two samples claim the same kind");
+            let encoded = serde_json::to_value(&intent).expect("declarations encode");
+            assert_eq!(
+                encoded.get("kind").and_then(serde_json::Value::as_str),
+                Some(kind.as_str()),
+                "the serde tag and `as_str` disagree for {kind:?}"
+            );
+        }
+        assert_eq!(
+            seen.len(),
+            ToolIntentKind::ALL.len(),
+            "the generated kind set and the declaration set have different sizes"
+        );
+    }
+
+    /// The new declarations of FIG-2994 are members of the protocol, not just
+    /// types: they carry a session binding the batch admitter can check.
+    #[test]
+    fn the_registration_declarations_carry_their_session_authority() {
+        for kind in [
+            ToolIntentKind::RegisterProcessDefinition,
+            ToolIntentKind::RegisterTrigger,
+        ] {
+            assert_eq!(sample_intent(kind).session_id(), "session");
+        }
+    }
+
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
         let identity = derive_tool_intent_identity(
@@ -484,20 +676,20 @@ mod tests {
 
     #[test]
     fn emitted_intent_identity_is_scoped_by_the_minting_replay_key() {
-        let first = derive_tool_intent_identity_for_emission(
+        let first = derive_tool_intent_identity_inner(
             &SessionId::from("session"),
             "process",
             Some("call"),
             0,
-            "turn:7:child:0:call:attempt:1",
+            Some("turn:7:child:0:call:attempt:1"),
         )
         .expect("first emission identity");
-        let second = derive_tool_intent_identity_for_emission(
+        let second = derive_tool_intent_identity_inner(
             &SessionId::from("session"),
             "process",
             Some("call"),
             0,
-            "turn:8:child:0:call:attempt:1",
+            Some("turn:8:child:0:call:attempt:1"),
         )
         .expect("second emission identity");
 
@@ -535,8 +727,7 @@ mod tests {
 
     #[test]
     fn start_process_intent_without_a_lifecycle_policy_is_refused() {
-        let request = crate::ProcessStartRequest::external(
-            "child",
+        let declaration = crate::ProcessStartDeclaration::external(
             crate::ProcessOriginator::host(),
             serde_json::Value::Null,
             crate::ProcessLifecyclePolicy::new(
@@ -544,16 +735,16 @@ mod tests {
                 crate::OnParentEnd::Abandon,
             ),
         );
-        let mut payload = serde_json::to_value(request).expect("serialize start request");
+        let mut payload = serde_json::to_value(declaration).expect("serialize start declaration");
         assert!(
             payload
                 .as_object_mut()
-                .expect("request object")
+                .expect("declaration object")
                 .remove("lifecycle")
                 .is_some()
         );
         let error = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
-            "session_id": "session", "request": payload,
+            "session_id": "session", "declaration": payload,
         }))
         .expect_err("lifecycle absence must be refused");
         assert!(error.to_string().contains("lifecycle"));

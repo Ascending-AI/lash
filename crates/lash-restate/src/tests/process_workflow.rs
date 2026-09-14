@@ -717,7 +717,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         });
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({ "echo": line })),
-            lash_core::ToolIntents::v2(vec![intent]),
+            lash_core::ToolIntents::v3(vec![intent]),
         )
     }
 }

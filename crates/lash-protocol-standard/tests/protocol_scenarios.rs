@@ -812,11 +812,10 @@ impl lash_core::ToolProvider for StandardIntentProvider {
         let session_id = call.context.session_id().to_string();
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"provider": "done"})),
-            lash_core::ToolIntents::v2(vec![
+            lash_core::ToolIntents::v3(vec![
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
-                    request: lash_core::ProcessStartRequest::external(
-                        "standard-intent-child",
+                    declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("standard-scenario"),
                         serde_json::json!({"kind": "start"}),
                         lash_core::ProcessLifecyclePolicy::new(

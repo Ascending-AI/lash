@@ -957,8 +957,9 @@ symbols = [
 # pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
 # LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
 # SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
-# TOOL_INTENT_PROTOCOL_V2 is a permanently named v2 discriminator, not a mutable
-# current-version constant.
+# TOOL_INTENT_PROTOCOL_V3 is a permanently named v3 discriminator, not a mutable
+# current-version constant: each protocol version keeps its own named constant
+# and the predecessors are refused by number, never rewritten in place.
 
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"

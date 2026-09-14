@@ -61,10 +61,10 @@ pub use model::{
     ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
     ProcessProvenance, ProcessRecord, ProcessRef, ProcessRegistration,
     ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessSessionDeleteReport,
-    ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone, RecoveryContract,
-    SessionId, SessionScope, SessionScopeId, StoreRealization, WaitKind, WaitState,
-    artifact_owner_is_permanently_retired, ensure_process_lease_schema_version,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
+    RecoveryContract, SessionId, SessionScope, SessionScopeId, StoreRealization, WaitKind,
+    WaitState, artifact_owner_is_permanently_retired, ensure_process_lease_schema_version,
     load_process_execution_env, process_runtime_session_ids, publish_process_execution_env,
 };
 pub use observation::{

@@ -7135,7 +7135,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -7265,7 +7265,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/001"
@@ -7288,7 +7287,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -8289,7 +8288,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -8419,7 +8418,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/001"
@@ -8442,7 +8440,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -8873,7 +8871,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -9003,7 +9001,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/002"
@@ -9026,7 +9023,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -9215,7 +9212,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -9345,7 +9342,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/002"
@@ -9368,7 +9364,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -10038,7 +10034,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -10168,7 +10164,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/001"
@@ -10191,7 +10186,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -10563,7 +10558,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -10693,7 +10688,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/001"
@@ -10716,7 +10710,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -11065,7 +11059,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -11195,7 +11189,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/002"
@@ -11218,7 +11211,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -11313,7 +11306,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -11443,7 +11436,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/002"
@@ -11466,7 +11458,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -13263,7 +13255,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -13393,7 +13385,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/003"
@@ -13416,7 +13407,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -13511,7 +13502,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -13641,7 +13632,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/003"
@@ -13664,7 +13654,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -17336,7 +17326,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -17466,7 +17456,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/001"
@@ -17489,7 +17478,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -17584,7 +17573,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -17714,7 +17703,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/001"
@@ -17737,7 +17725,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -18409,7 +18397,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -18539,7 +18527,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/002"
@@ -18562,7 +18549,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -18657,7 +18644,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -18787,7 +18774,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/002"
@@ -18810,7 +18796,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -20490,7 +20476,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -20620,7 +20606,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/002"
@@ -20643,7 +20628,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -20738,7 +20723,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -20868,7 +20853,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/003"
@@ -20891,7 +20875,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -21756,7 +21740,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -21886,7 +21870,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/001"
@@ -21909,7 +21892,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -22254,7 +22237,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -22384,7 +22367,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/002:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/002"
@@ -22407,7 +22389,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -22502,7 +22484,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -22632,7 +22614,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/004"
@@ -22655,7 +22636,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -22750,7 +22731,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -22880,7 +22861,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/001:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/001"
@@ -22903,7 +22883,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -22998,7 +22978,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -23128,7 +23108,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/003"
@@ -23151,7 +23130,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -23246,7 +23225,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -23376,7 +23355,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/004"
@@ -23399,7 +23377,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -23556,7 +23534,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -23686,7 +23664,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/003"
@@ -23709,7 +23686,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -23804,7 +23781,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -23934,7 +23911,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/003"
@@ -23957,7 +23933,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -25429,7 +25405,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -25559,7 +25535,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/004"
@@ -25582,7 +25557,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -25677,7 +25652,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -25807,7 +25782,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/004"
@@ -25830,7 +25804,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -25925,7 +25899,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -26055,7 +26029,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/003"
@@ -26078,7 +26051,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -26173,7 +26146,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -26303,7 +26276,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/003:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/003"
@@ -26326,7 +26298,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -27480,7 +27452,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -27610,7 +27582,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/005"
@@ -27633,7 +27604,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -27728,7 +27699,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -27858,7 +27829,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/005"
@@ -27881,7 +27851,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -28375,7 +28345,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -28505,7 +28475,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/006:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/006"
@@ -28528,7 +28497,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -28623,7 +28592,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -28753,7 +28722,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/006:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/006"
@@ -28776,7 +28744,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -29160,7 +29128,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -29290,7 +29258,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/004"
@@ -29313,7 +29280,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -29408,7 +29375,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -29538,7 +29505,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/004"
@@ -29561,7 +29527,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -29926,7 +29892,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -30056,7 +30022,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/004"
@@ -30079,7 +30044,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -30174,7 +30139,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -30304,7 +30269,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/004:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/004"
@@ -30327,7 +30291,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -31152,7 +31116,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -31282,7 +31246,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/007:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/007"
@@ -31305,7 +31268,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -31400,7 +31363,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -31530,7 +31493,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/007:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/007"
@@ -31553,7 +31515,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -32967,7 +32929,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -33097,7 +33059,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/005"
@@ -33120,7 +33081,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -33215,7 +33176,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -33345,7 +33306,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-001/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-001/005"
@@ -33368,7 +33328,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -34481,7 +34441,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -34611,7 +34571,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/005"
@@ -34634,7 +34593,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -34729,7 +34688,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -34859,7 +34818,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/005"
@@ -34882,7 +34840,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -34977,7 +34935,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -35107,7 +35065,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/008:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/008"
@@ -35130,7 +35087,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -35225,7 +35182,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -35355,7 +35312,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/008:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/008"
@@ -35378,7 +35334,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -35473,7 +35429,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -35603,7 +35559,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/006:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/006"
@@ -35626,7 +35581,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -35721,7 +35676,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -35851,7 +35806,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/006:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/006"
@@ -35874,7 +35828,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -36347,7 +36301,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -36477,7 +36431,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/009:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/009"
@@ -36500,7 +36453,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -36595,7 +36548,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -36725,7 +36678,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/009:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/009"
@@ -36748,7 +36700,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -37279,7 +37231,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -37409,7 +37361,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/007:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/007"
@@ -37432,7 +37383,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -37527,7 +37478,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -37657,7 +37608,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/007:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/007"
@@ -37680,7 +37630,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -37943,7 +37893,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -38073,7 +38023,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/008:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/008"
@@ -38096,7 +38045,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -38191,7 +38140,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -38321,7 +38270,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/008:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/008"
@@ -38344,7 +38292,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -38954,7 +38902,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -39084,7 +39032,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/009:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/009"
@@ -39107,7 +39054,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -39202,7 +39149,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -39332,7 +39279,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-004/009:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-004/009"
@@ -39355,7 +39301,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -40004,7 +39950,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -40134,7 +40080,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/010:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/010"
@@ -40157,7 +40102,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -40252,7 +40197,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -40382,7 +40327,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-002/010:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-002/010"
@@ -40405,7 +40349,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -41160,7 +41104,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -41290,7 +41234,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/005"
@@ -41313,7 +41256,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -41408,7 +41351,7 @@
               "intents": [
                 {
                   "intent": {
-                    "request": {
+                    "declaration": {
                       "disposition": "externally_owned",
                       "event_types": [
                         {
@@ -41538,7 +41481,6 @@
                           }
                         }
                       ],
-                      "id": "effect/sleep/session-003/005:intent-child",
                       "input": {
                         "metadata": {
                           "durable_key": "sleep/session-003/005"
@@ -41561,7 +41503,7 @@
                   "kind": "start_process"
                 }
               ],
-              "protocol_version": 2
+              "protocol_version": 3
             },
             "record": {
               "args": null,
@@ -61847,7 +61789,7 @@
       "status": "passed",
       "oracle_id": "sim.oracle.process-never-double-started.v1",
       "observation_class": "real_observation",
-      "message": "every started OwnerBound process stayed non-rerun while a Rerunnable sibling was re-run — the sweep can re-execute but never re-runs started OwnerBound work"
+      "message": "every started OwnerBound process stayed non-rerun while a Rerunnable sibling was re-run \u2014 the sweep can re-execute but never re-runs started OwnerBound work"
     },
     {
       "status": "passed",

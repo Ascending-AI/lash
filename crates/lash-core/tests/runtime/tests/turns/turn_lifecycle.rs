@@ -1598,7 +1598,7 @@ impl lash_core::ToolProvider for CasSurvivorIntentTools {
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),
-            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::EmitProcessEvent(
+            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from("cas-survivor-intent-target"),

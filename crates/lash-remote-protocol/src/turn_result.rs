@@ -358,6 +358,15 @@ pub struct RemoteToolIntentIdentity {
     pub minting_emission_replay_key: Option<String>,
 }
 
+/// Wire mirror of the core tool-intent kind set.
+///
+/// Deliberately spelled out rather than generated from
+/// `lash_sansio::tool_intent_variants!`: the version-bump gate projects this
+/// enum's literal text, so generating it would move the variant list out of
+/// the `REMOTE_PROTOCOL_VERSION` guard's sight. The two `From` impls in
+/// `core_conversions::turn_result` are generated from that list instead, so a
+/// variant added to the core set fails to compile until it is added here and
+/// the wire version is bumped (FIG-2994).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteToolIntentKind {
@@ -366,6 +375,8 @@ pub enum RemoteToolIntentKind {
     CancelProcess,
     EmitProcessEvent,
     EmitTrigger,
+    RegisterProcessDefinition,
+    RegisterTrigger,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

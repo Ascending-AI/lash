@@ -252,14 +252,13 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         assert_eq!(call.context.max_attempts(), 1);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"ok": true})),
-            lash_core::ToolIntents::v2(
+            lash_core::ToolIntents::v3(
                 (0..2)
                     .map(|index| {
                         lash_core::ToolIntent::StartProcess(Box::new(
                             lash_core::StartProcessIntent {
                                 session_id: SessionId::from(SURFACE_SESSION.to_string()),
-                                request: lash_core::ProcessStartRequest::external(
-                                    format!("ignored-derived-intent-id-{index}"),
+                                declaration: lash_core::ProcessStartDeclaration::external(
                                     ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
                                     serde_json::json!({
                                         "source": "literal-intent-row",

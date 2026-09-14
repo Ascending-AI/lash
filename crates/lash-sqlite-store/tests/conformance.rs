@@ -2130,7 +2130,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
                 })),
                 duration_ms: 7,
             }),
-            intents: lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::EmitProcessEvent(
+            intents: lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from("sqlite-intent-session"),
                     process_id: ProcessId::from("sqlite-intent-target"),

@@ -726,11 +726,10 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         "intent-drain",
     ));
 
-    let intents = lash_core::ToolIntents::v2(vec![
+    let intents = lash_core::ToolIntents::v3(vec![
         lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
-            request: lash_core::ProcessStartRequest::external(
-                "ignored-by-stable-intent-id",
+            declaration: lash_core::ProcessStartDeclaration::external(
                 lash_core::ProcessOriginator::host_scoped("intent-test"),
                 serde_json::json!({"step": "start"}),
                 lash_core::ProcessLifecyclePolicy::new(
@@ -814,7 +813,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = lash_core::ToolIntents::v2(
+    let intents = lash_core::ToolIntents::v3(
         (0..=lash_core::TOOL_INTENT_MAX_COUNT)
             .map(|index| {
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
@@ -981,7 +980,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         .as_ref()
         .map(|context| context.as_ref().clone())
         .expect("runtime dispatch context");
-    let intents = lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::SignalProcess(
+    let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
         lash_core::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
             process_id: ProcessId::from(LIVE_PROCESS.to_string()),

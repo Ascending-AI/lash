@@ -59,6 +59,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-stable-identity/v2",
     "lash-tool-catalog-authority/v2",
     "lash-tool-intent-payload/v2",
+    "lash-tool-intent-payload/v3",
     "lash-tool-output-spill/v2",
     "lash-tool-schema-cache/v2",
     "lash-turn-input/v2",
@@ -406,7 +407,9 @@ mod blake3_domain_tests {
     // admitted effect addresses; rolling-history compaction v1 predates binding
     // the identity to request content; the v2 usage payload after FIG-2765 moved
     // it to a disposition-carrying encoding; and the v3 payload after the same
-    // ticket's fix round replaced the hole *count* with per-attempt descriptors.
+    // ticket's fix round replaced the hole *count* with per-attempt descriptors;
+    // and the v2 tool-intent payload after FIG-2994 moved the start intent from a
+    // caller-minted request to an id-less declaration.
     const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
         "lash-process-env/v4",
         "lash-process-env/v5",
@@ -416,6 +419,7 @@ mod blake3_domain_tests {
         "lash-runtime-effect-envelope/v2",
         "lash-runtime-usage-payload/v2",
         "lash-runtime-usage-payload/v3",
+        "lash-tool-intent-payload/v2",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {

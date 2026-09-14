@@ -173,7 +173,7 @@ impl ToolProvider for OrderedBatchIntentTools {
             .expect("ordered batch calls carry ids");
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"completed": call.name})),
-            crate::ToolIntents::v2(
+            crate::ToolIntents::v3(
                 [0, 1]
                     .into_iter()
                     .map(|intent_index| {
@@ -485,7 +485,7 @@ impl ToolProvider for RetryingIntentTools {
 
     async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        let intents = crate::ToolIntents::v2(vec![crate::ToolIntent::EmitProcessEvent(
+        let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
                 session_id: SessionId::from("session"),
                 process_id: ProcessId::from("retry-intent-target"),
@@ -600,11 +600,10 @@ impl ToolProvider for AttemptIntentTools {
         );
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"provider": "done"})),
-            crate::ToolIntents::v2(vec![
+            crate::ToolIntents::v3(vec![
                 crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
                     session_id: SessionId::from("session"),
-                    request: crate::ProcessStartRequest::external(
-                        "provider-supplied-id-is-replaced",
+                    declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
                         json!({"source": "recorded-attempt"}),
                         crate::ProcessLifecyclePolicy::new(
@@ -2451,7 +2450,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
 #[tokio::test]
 async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal() {
     let context = dispatch_context();
-    for recorded in [0, 1, 3] {
+    for recorded in [0, 1, 2, 4] {
         let outcomes = execute_final_tool_intents(
             &context,
             Some("empty-version-call"),

@@ -513,8 +513,7 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
             PublicIntentKind::ParentEnd => {
                 lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                     session_id: lash_core::SessionId::from(call.context.session_id()),
-                    request: lash_core::ProcessStartRequest::external(
-                        "pg-public-parent-end-child",
+                    declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
                             lash_core::SessionId::from(call.context.session_id()),
                         )),
@@ -529,7 +528,7 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         };
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"signal": "recorded"})),
-            lash_core::ToolIntents::v2(vec![intent]),
+            lash_core::ToolIntents::v3(vec![intent]),
         )
     }
 }
@@ -1135,11 +1134,10 @@ fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
                 output: lash_core::ToolCallOutput::success(serde_json::json!(value)),
                 duration_ms: 0,
             }),
-            intents: lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(
+            intents: lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(
                 Box::new(lash_core::StartProcessIntent {
                     session_id: SessionId::from(SESSION.to_string()),
-                    request: lash_core::ProcessStartRequest::external(
-                        format!("{call_id}:recorded-child"),
+                    declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("pg-attempt-atomicity"),
                         serde_json::json!({"value": value}),
                         lash_core::ProcessLifecyclePolicy::new(
