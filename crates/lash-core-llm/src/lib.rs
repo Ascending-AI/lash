@@ -12,6 +12,7 @@ pub mod model;
 pub mod provider;
 pub mod session_model;
 pub mod trace;
+pub mod turn_vocabulary;
 
 /// Items `lash-core` reaches for across the crate boundary that are not part
 /// of a module's published surface. Nothing outside the kernel uses them and
@@ -29,7 +30,7 @@ pub(crate) use lash_sansio::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
     GenerationOptions, GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64,
-    ProviderReplayDrop,
+    ProviderFailureKind, ProviderReplayDrop,
 };
 pub(crate) use session_model::ChargeSafetyPolicy;
 
