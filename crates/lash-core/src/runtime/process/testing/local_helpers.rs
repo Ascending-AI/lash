@@ -50,7 +50,7 @@ impl TestLocalProcessRegistry {
                     existing.record.clone(),
                 ));
             }
-            return Err(PluginError::Session(format!(
+            return Err(crate::durable_identity_conflict(format!(
                 "process `{}` registration fingerprint conflict: existing {}, new {}",
                 registration.id, existing.record.registration_fingerprint, registration_fingerprint
             )));

@@ -44,7 +44,7 @@ pub use actions::{
     PluginOperationReceipt, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
     PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
 };
-pub use error::PluginError;
+pub use error::{PluginError, durable_identity_conflict, is_durable_identity_conflict};
 pub use history::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, SessionReadView,
     TurnContextTransform, TurnTransformContext,

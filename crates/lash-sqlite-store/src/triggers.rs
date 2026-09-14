@@ -499,7 +499,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         if !lash_core::facade_support::trigger_occurrence_request_matches_record(
                             &request, &record,
                         ) {
-                            return Err(lash_core::PluginError::Session(format!(
+                            return Err(lash_core::durable_identity_conflict(format!(
                                 "trigger occurrence idempotency conflict for `{}`",
                                 request.idempotency_key
                             )));

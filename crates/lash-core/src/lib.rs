@@ -1163,7 +1163,8 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
-    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
+    AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError, durable_identity_conflict,
+    is_durable_identity_conflict,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
