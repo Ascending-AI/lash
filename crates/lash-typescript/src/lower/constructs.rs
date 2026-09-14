@@ -8,7 +8,7 @@ pub(super) enum PatternMode {
 
 pub(super) fn pattern_names(pattern: &Pattern, output: &mut Vec<String>) {
     match pattern {
-        Pattern::Ident(name) => output.push(name.clone()),
+        Pattern::Ident(name, _) => output.push(name.clone()),
         Pattern::Rest(target) => pattern_names(target, output),
         Pattern::Member { .. } => {}
         Pattern::Assign { target, .. } => pattern_names(target, output),
@@ -33,7 +33,7 @@ pub(super) fn pattern_names(pattern: &Pattern, output: &mut Vec<String>) {
 
 pub(super) fn single_pattern_name(pattern: &Pattern) -> Option<&str> {
     match pattern {
-        Pattern::Ident(name) => Some(name),
+        Pattern::Ident(name, _) => Some(name),
         Pattern::Rest(target) => single_pattern_name(target),
         _ => None,
     }
@@ -549,7 +549,7 @@ impl Lowerer {
         mode: PatternMode,
     ) -> Result<Vec<LashExpr>, Diagnostic> {
         match pattern {
-            Pattern::Ident(name) => {
+            Pattern::Ident(name, _) => {
                 let target = match mode {
                     PatternMode::Initialize => {
                         let internal = self.binding(name)?.internal.clone();

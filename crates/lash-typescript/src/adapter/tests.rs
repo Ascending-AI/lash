@@ -41,7 +41,7 @@ fn assert_field_census<'a>(
 
 fn default_pattern(field: &str) -> Pattern {
     Pattern::Assign {
-        target: Box::new(Pattern::Ident("value".into())),
+        target: Box::new(Pattern::Ident("value".into(), None)),
         default: Box::new(marker(field)),
     }
 }

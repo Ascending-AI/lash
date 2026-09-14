@@ -4,7 +4,7 @@ impl Pattern {
     pub(crate) fn child_expressions(&self) -> Box<dyn Iterator<Item = &Expr> + '_> {
         let mut children = Vec::new();
         match self {
-            Pattern::Ident(_) => {}
+            Pattern::Ident(..) => {}
             Pattern::Rest(target) => children.extend(target.child_expressions()),
             Pattern::Member { object, property } => {
                 children.push(object.as_ref());

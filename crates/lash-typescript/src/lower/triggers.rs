@@ -209,7 +209,7 @@ impl Lowerer {
                 "the `inputs` arrow is a template the compiler erases, so it cannot be `async`",
             ));
         }
-        let [Pattern::Ident(parameter)] = function.params.as_slice() else {
+        let [Pattern::Ident(parameter, _)] = function.params.as_slice() else {
             return Err(inputs_shape_diagnostic(
                 "the `inputs` arrow takes exactly one plain parameter, the fired event",
             ));

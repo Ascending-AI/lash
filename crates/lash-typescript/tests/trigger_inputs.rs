@@ -415,3 +415,119 @@ fn an_aliased_trigger_target_is_still_refused() {
         DiagnosticCode::ProcessTargetStaticRequired
     );
 }
+
+/// The declared type of a `run` parameter is the process's durable input
+/// shape, so the linker has to carry it rather than drop it: it is what a
+/// registration is checked against before any foreground effect runs
+/// (FIG-3071).
+fn process_params(source: &str) -> Vec<(String, lashlang::TypeExpr)> {
+    let linked = lash_typescript::link(source, &environment()).expect("this program must link");
+    linked
+        .artifact
+        .canonical_ir
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            lashlang::Declaration::Process(process) => Some(process.params.clone()),
+            _ => None,
+        })
+        .expect("the program declares a process")
+        .into_iter()
+        .map(|param| (param.name.to_string(), param.ty))
+        .collect()
+}
+
+#[test]
+fn a_declared_parameter_type_reaches_the_process_signature() {
+    assert_eq!(
+        process_params(&program(
+            "tick: timer.Tick, label: string, retries: number, ok: boolean",
+            "(event) => ({ tick: event, label: \"daily\", retries: 1, ok: true })",
+        )),
+        vec![
+            (
+                "tick".to_string(),
+                lashlang::TypeExpr::Ref("timer.Tick".into())
+            ),
+            ("label".to_string(), lashlang::TypeExpr::Str),
+            ("retries".to_string(), lashlang::TypeExpr::Float),
+            ("ok".to_string(), lashlang::TypeExpr::Bool),
+        ]
+    );
+}
+
+/// An object literal, an array and a union of string literals are the three
+/// composite shapes the runtime's type language carries; the enumeration is
+/// one type there rather than a union of single-value types.
+#[test]
+fn composite_declared_parameter_types_lower_to_their_runtime_shapes() {
+    assert_eq!(
+        process_params(&program(
+            "tick: timer.Tick, record: { id: string; note?: string }, tags: string[], mode: \"fast\" | \"slow\"",
+            "(event) => ({ tick: event, record: { id: \"a\" }, tags: [\"a\"], mode: \"fast\" })",
+        )),
+        vec![
+            (
+                "tick".to_string(),
+                lashlang::TypeExpr::Ref("timer.Tick".into())
+            ),
+            (
+                "record".to_string(),
+                lashlang::TypeExpr::Object(vec![
+                    lashlang::TypeField {
+                        name: "id".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: false,
+                    },
+                    lashlang::TypeField {
+                        name: "note".into(),
+                        ty: lashlang::TypeExpr::Str,
+                        optional: true,
+                    },
+                ])
+            ),
+            (
+                "tags".to_string(),
+                lashlang::TypeExpr::List(Box::new(lashlang::TypeExpr::Str))
+            ),
+            (
+                "mode".to_string(),
+                lashlang::TypeExpr::Enum(vec!["fast".into(), "slow".into()])
+            ),
+        ]
+    );
+}
+
+/// Existing programs must not move: an unannotated parameter, and one written
+/// `unknown`, both stay gradual, so their canonical IR and module ref are the
+/// bytes they already were.
+#[test]
+fn an_unannotated_parameter_stays_gradual() {
+    assert_eq!(
+        process_params(&program(
+            "tick, label: unknown",
+            "(event) => ({ tick: event, label: \"daily\" })",
+        )),
+        vec![
+            ("tick".to_string(), lashlang::TypeExpr::Any),
+            ("label".to_string(), lashlang::TypeExpr::Any),
+        ]
+    );
+}
+
+/// Widening an undeclarable type to `Any` would let a mismatched registration
+/// through silently, so it is refused — naming the process, the parameter and
+/// the construct, at the annotation.
+#[test]
+fn a_parameter_type_the_runtime_cannot_carry_is_refused() {
+    let diagnostic = reject(&program(
+        "tick: [string, number]",
+        "(event) => ({ tick: event })",
+    ));
+    assert_eq!(diagnostic.code, DiagnosticCode::ProcessParamTypeUnsupported);
+    assert_eq!(
+        diagnostic.message,
+        "process `remember` parameter `tick` declares a tuple type, which has no durable type"
+    );
+    assert!(diagnostic.span.is_some(), "{diagnostic:?}");
+}

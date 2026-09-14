@@ -559,6 +559,52 @@ pub(super) fn typescript_register_trigger_executes_end_to_end() {
     });
 }
 
+/// A registration the target cannot accept is refused before the cell's
+/// foreground code continues.
+///
+/// This is the retired lashlang test
+/// `trigger_registration_failure_prevents_foreground_execution`, re-authored
+/// over TypeScript: the property needed a target whose declared input type
+/// disagrees with the source's event, and until a declared `run` parameter
+/// type reached the process signature (FIG-3071) every TypeScript process
+/// accepted everything. `timer.Schedule` emits a `timer.Tick` record, which a
+/// `string` parameter cannot receive.
+#[test]
+fn trigger_registration_failure_prevents_foreground_execution() {
+    block_on(async {
+        let response = execute_with_trigger_environment(
+            r#"
+                const remember = defineProcess({
+                  name: "remember", signals: {},
+                  run: async (tick: string) => { return true; }
+                });
+                const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
+                await registerTrigger({
+                  source,
+                  target: remember,
+                  inputs: (event) => ({ tick: event }),
+                  name: "remembered"
+                });
+                console.log("the foreground must not reach here");
+                finish("should not run");
+                "#,
+        )
+        .await;
+
+        let error = response
+            .error
+            .as_ref()
+            .expect("an event type mismatch must refuse the registration");
+        assert!(
+            error.message.contains("trigger source emits"),
+            "{}",
+            error.message
+        );
+        assert!(response.observations.is_empty());
+        assert!(response.terminal_finish.is_none());
+    });
+}
+
 #[test]
 pub(super) fn trigger_registry_operations_execute_foreground_code() {
     block_on(async {
@@ -1666,6 +1712,12 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 /// `compilation_dialect` field, and every hash derived from those bytes moved
 /// with it. Nothing else in the capture changed, so the arrow form still
 /// reproduces the retired record form structure for structure.
+///
+/// They were re-pinned again by FIG-3071: this source annotates both `run`
+/// parameters, so their declared types now reach the process signature, and
+/// `LASHLANG_SEMANTIC_HASH_VERSION` moved to `v10` to announce that identity
+/// computation changed. Both moves are visible here — the parameter types in
+/// the canonical IR, and every hash derived from the artifact.
 #[test]
 fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
