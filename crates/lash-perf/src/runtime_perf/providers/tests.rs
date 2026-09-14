@@ -1,4 +1,4 @@
-use super::profiles::{empty_request, high_traffic_stream_profile, lashlang_block};
+use super::profiles::{empty_request, high_traffic_stream_profile, typescript_block};
 use super::tools::{
     GMAIL_LIKE_TOOL_NAMES, benchmark_oblique_search_tool_definition,
     benchmark_oblique_tool_definitions, oblique_search_output_schema,
@@ -134,18 +134,18 @@ fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lashlang() {
 #[test]
 fn streamed_paired_lashlang_profile_splits_tags_and_trailing_suffix() {
     let profile = benchmark_stream_profile(RuntimePerfScenario::RlmStreamedPairedLashlang);
-    assert_eq!(profile.full_text.matches("<lashlang>").count(), 1);
-    assert_eq!(profile.full_text.matches("</lashlang>").count(), 1);
+    assert_eq!(profile.full_text.matches("<typescript>").count(), 1);
+    assert_eq!(profile.full_text.matches("</typescript>").count(), 1);
     assert!(
         profile
             .full_text
             .ends_with("This suffix must be ignored after the close tag.")
     );
     assert_eq!(profile.deltas.len(), 4);
-    assert!(profile.deltas[0].ends_with("<lash"));
-    assert!(profile.deltas[1].starts_with("lang>"));
-    assert!(profile.deltas[2].ends_with("</lash"));
-    assert!(profile.deltas[3].starts_with("lang>"));
+    assert!(profile.deltas[0].ends_with("<type"));
+    assert!(profile.deltas[1].starts_with("script>"));
+    assert!(profile.deltas[2].ends_with("</type"));
+    assert!(profile.deltas[3].starts_with("script>"));
     assert!(profile.deltas[3].contains("This suffix must be ignored"));
     assert!(profile.parts.is_empty());
 }
@@ -166,7 +166,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         unmarked_profile.full_text,
-        lashlang_block(r#"print("checkpoint before projection")"#)
+        typescript_block(r#"print("checkpoint before projection");"#)
     );
 
     let mut marked_request = empty_request();
@@ -183,7 +183,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         marked_profile.full_text,
-        lashlang_block(r#"finish "runtime perf benchmark ok""#)
+        typescript_block(r#"finish("runtime perf benchmark ok");"#)
     );
 
     let mut historical_marker_request = marked_request;
@@ -200,7 +200,7 @@ fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         historical_marker_profile.full_text,
-        lashlang_block(r#"print("checkpoint before projection")"#)
+        typescript_block(r#"print("checkpoint before projection");"#)
     );
 }
 

@@ -51,15 +51,6 @@ pub(super) fn range_has_next(start: i64, end: i64, step: i64) -> bool {
     (step > 0 && start < end) || (step < 0 && start > end)
 }
 
-impl<'a, H: ExecutionHost> Vm<'a, H> {
-    pub(super) fn deep_copy_loop_binding(&mut self, binding: usize) -> Result<(), RuntimeError> {
-        let source = self.load_slot(binding)?.clone();
-        self.slots
-            .assign_loop_binding(binding, self.heap.isolate_value(&source)?)?;
-        Ok(())
-    }
-}
-
 /// Re-binds restored projections held by live iterators (FIG-2865).
 pub(super) fn refresh_iterators(
     iterators: &mut [IterState],

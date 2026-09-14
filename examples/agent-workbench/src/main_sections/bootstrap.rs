@@ -81,17 +81,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
-    // The ambient default for the boot session and for any session the roster
-    // does not know; a per-session choice made in the UI overrides it.
     let rlm_channel = match std::env::var("LASH_RLM_CHANNEL") {
         Ok(value) => value.parse().map_err(anyhow::Error::msg)?,
         Err(std::env::VarError::NotPresent) => lash::rlm::RlmChannel::Cell,
         Err(error) => return Err(error.into()),
     };
-    let rlm_dialect = lash::rlm::RlmDialect::from_env()
-        .map_err(|refusal| anyhow!(refusal))?
-        // Unset is the Lashlang default, stated like any named id.
-        .unwrap_or_default();
     validate_provider_credentials(dev_provider_scenario, &api_key)?;
 
     let addr: SocketAddr = std::env::var("AGENT_WORKBENCH_ADDR")
@@ -147,11 +141,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
     let provider = if let Some(scenario) = dev_provider_scenario {
         eprintln!(
-            "warning: agent-workbench development provider scenario enabled: {} ({})",
-            scenario.as_str(),
-            rlm_dialect.language_id()
+            "warning: agent-workbench development provider scenario enabled: {}",
+            scenario.as_str()
         );
-        scenario.provider(rlm_dialect)
+        scenario.provider()
     } else {
         ProviderHandle::new(
             OpenAiCompatibleProvider::new(api_key, OPENROUTER_BASE_URL)
@@ -184,11 +177,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
-    // The boot session joins the roster on the ambient dialect, so the selector
-    // lists it and every later open asks for the same dialect it was created
-    // with. A roster row that already exists wins: it is what the session's
-    // durable pin was created from.
-    sessions.ensure(&sessions.current(), rlm_dialect);
+    // The boot session joins the roster so the selector lists it. A roster row
+    // that already exists wins.
+    sessions.ensure(&sessions.current());
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)?;
     let restate_http = lash_http_transport::build_http_client();
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))?;
@@ -413,7 +404,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
         let state = AppState {
             core,
-            rlm_dialect,
             attachment_store,
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store,
@@ -447,7 +437,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "trace_path": trace_path_display,
                 "lashlang_execution_path": lashlang_execution_path.display().to_string(),
                 "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
-                "rlm_dialect": rlm_dialect.language_id(),
+                "rlm_dialect": RLM_LANGUAGE_ID,
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,
                 "restate_endpoint_addr": restate_endpoint_addr.to_string(),

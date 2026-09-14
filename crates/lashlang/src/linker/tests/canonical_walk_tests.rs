@@ -3,8 +3,7 @@ use super::*;
 fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
     let surface = full_host_environment();
     let empty_program = Program::block(Vec::new());
-    let linker =
-        Linker::new(&empty_program, &surface).with_dialect(crate::CompilationDialect::Typescript);
+    let linker = Linker::new(&empty_program, &surface);
     let mut scope = Scope::new(false, None);
     for name in &surface.globals {
         scope.bind(name, any_binding());
@@ -21,12 +20,8 @@ fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
         },
         Expr::Print(Box::new(Expr::Variable("value".into()))),
     ]);
-    LinkedModule::link_with_dialect(
-        program.clone(),
-        full_host_environment(),
-        crate::CompilationDialect::Typescript,
-    )
-    .expect("the canonical walk must link the expression");
+    LinkedModule::link(program.clone(), full_host_environment())
+        .expect("the canonical walk must link the expression");
 
     let analysis = analyze_workflow_program(&program, &full_host_environment());
     let Expr::Block(nodes) = &program.main else {

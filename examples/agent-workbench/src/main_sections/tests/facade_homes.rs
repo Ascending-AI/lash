@@ -282,7 +282,7 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
                 async move {
                     requests.lock_recover().push(request);
                     Ok(text_response(
-                        "<lashlang>\nfinish \"context shaped\"\n</lashlang>",
+                        "<typescript>\nfinish(\"context shaped\");\n</typescript>",
                     ))
                 }
             })

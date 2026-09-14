@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{RlmDialect, RlmFinalAnswerFormat, RlmTurnBuilderExt as _};
+use crate::rlm::{RlmFinalAnswerFormat, RlmTurnBuilderExt as _};
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
 use lash_sansio::sync::MutexExt;
@@ -16,7 +16,7 @@ mod config_settlement;
 #[cfg(test)]
 mod prompt_reopen_authority;
 #[cfg(all(test, feature = "rlm"))]
-mod rlm_dialect;
+mod rlm_session_facts;
 #[cfg(test)]
 mod runtime_dependencies;
 #[cfg(test)]

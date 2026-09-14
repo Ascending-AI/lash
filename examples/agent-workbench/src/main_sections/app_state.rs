@@ -3,56 +3,7 @@ use lash::SessionId;
 use lash::TurnId;
 
 impl AppState {
-    /// The dialect this session is opened with: its roster row's, or the
-    /// ambient default for a session the roster never recorded.
-    pub(crate) fn requested_dialect(&self, session_id: &SessionId) -> lash::rlm::RlmDialect {
-        self.sessions
-            .dialect_for(session_id)
-            .unwrap_or(self.rlm_dialect)
-    }
-
-    /// The dialect this session *recorded*, which is the one every label reads.
-    ///
-    /// A session that has recorded nothing reads as `None` from the typed
-    /// config (ADR 0066) — no raw-payload peek needed to tell absence from the
-    /// Lashlang default — and what it will be pinned to is the honest answer
-    /// for it, so that is what a fresh session's badge shows.
-    ///
-    /// The decode is strict (FIG-1979): a recorded bag that does not decode is
-    /// reported, never smoothed into the default dialect. Absence is a
-    /// different answer from malformed and keeps its fallback.
-    pub(crate) async fn recorded_dialect(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<lash::rlm::RlmDialect, AppError> {
-        use lash::rlm::RlmSessionExt as _;
-
-        let Ok(session) = self.open_session_for_observation(session_id).await else {
-            return Ok(self.requested_dialect(session_id));
-        };
-        let recorded = session.rlm_config().map_err(AppError::internal)?.dialect;
-        drop(session);
-        Ok(recorded.unwrap_or_else(|| self.requested_dialect(session_id)))
-    }
-
-    /// A builder that *states* the dialect this session is meant to run.
-    ///
-    /// The statement rides the plugin-agnostic options seam and is applied as a
-    /// guarded set-if-unset write (ADR 0066): it lands on a session that
-    /// recorded nothing, is a no-op on one that recorded the same dialect, and
-    /// refuses on one that recorded another. Nothing catches that refusal.
-    ///
-    /// It is stated on *every* open, not only where a session is created: the
-    /// pin becomes durable at the session's first commit, and both of the
-    /// create call sites open and drop without running a turn. An earlier
-    /// version stated it at create only, so the pin evaporated with the handle
-    /// and the first real turn committed `lashlang` permanently — a workbench
-    /// told to serve TypeScript served Lashlang.
-    ///
-    /// Which dialect is asked for is per session, not per process: a session the
-    /// operator created with a dialect asks for that one for the rest of its
-    /// life (FIG-1306), and a session the roster does not know asks for the
-    /// ambient `LASH_RUNBOOK_DIALECT`.
+    /// A builder for ordinary opens: it states the host's model selection.
     pub(crate) fn session_builder(&self, session_id: impl Into<SessionId>) -> lash::SessionBuilder {
         let session_id = session_id.into();
         let model = model_spec_from_selection(self.selected_model());
@@ -70,9 +21,7 @@ impl AppState {
     /// A spec-stated model is durable authority — the open seed is settled
     /// against the head (seed-then-write, FIG-1875) — so a GET projection
     /// that restated the process-wide selection would *write* config over
-    /// whatever the session last settled. Observation must never mutate; the
-    /// dialect statement stays because it is a guarded set-if-unset write
-    /// that is a no-op once recorded.
+    /// whatever the session last settled. Observation must never mutate.
     pub(crate) fn observer_session_builder(
         &self,
         session_id: impl Into<SessionId>,
@@ -85,22 +34,11 @@ impl AppState {
         session_id: SessionId,
         spec: lash::SessionSpec,
     ) -> lash::SessionBuilder {
-        let dialect = self.requested_dialect(&session_id);
-        self.core
-            .session(session_id)
-            .session_spec(spec)
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(dialect),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )
-            .expect("the typed RLM session options must serialize")
+        self.core.session(session_id).session_spec(spec)
     }
 
     /// Opens a session through [`Self::session_builder`], so every open states
-    /// the dialect this workbench means that session to run.
+    /// the model this workbench means that session to run.
     pub(crate) async fn open_session(
         &self,
         session_id: &SessionId,
@@ -134,14 +72,11 @@ impl AppState {
         *self.selected_model.lock_recover() = model;
     }
 
-    /// The settings panel for one session, labelled with the dialect that
-    /// session *recorded* rather than the one this process is configured with —
-    /// the two differ exactly when the label matters (FIG-1306, ADR 0063).
-    pub(crate) fn settings_for_session(
-        &self,
-        session_id: SessionId,
-        rlm_dialect: lash::rlm::RlmDialect,
-    ) -> Settings {
+    /// The settings panel for one session.
+    ///
+    /// TypeScript is the sole RLM language (ADR 0096), so the language label is
+    /// the same for every session.
+    pub(crate) fn settings_for_session(&self, session_id: SessionId) -> Settings {
         let selected_model = self.selected_model();
         Settings {
             model: selected_model.model,
@@ -152,7 +87,7 @@ impl AppState {
                 .entry(&session_id)
                 .map(|entry| entry.name)
                 .unwrap_or_else(|| session_id.to_string()),
-            rlm_dialect: rlm_dialect.language_id(),
+            rlm_dialect: RLM_LANGUAGE_ID,
             session_id,
         }
     }
@@ -725,19 +660,11 @@ pub(crate) fn trace_work_item(item: &WorkItem) -> Value {
 }
 
 /// One row of the workbench's durable session roster.
-///
-/// `dialect` is the dialect the session was *created with*, which is what every
-/// later open has to ask for again — the pin only becomes durable at the
-/// session's first commit, so a roster that forgot it would let the ambient
-/// default overwrite an operator's choice on the very first turn. What a
-/// session actually *recorded* is read back from its own read view, never from
-/// this row (FIG-1306).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct WorkbenchSessionEntry {
     pub(crate) session_id: SessionId,
     /// The operator's name for this session, or the id when they gave none.
     pub(crate) name: String,
-    pub(crate) dialect: lash::rlm::RlmDialect,
     pub(crate) created_at_ms: i64,
     pub(crate) last_active_ms: i64,
 }
@@ -748,12 +675,10 @@ pub(crate) struct WorkbenchSessionEntry {
 /// load-bearing for every driver in the battery: `session-id` stays exactly
 /// what it was — the plain-text id a query-less `/api/` call resolves to, which
 /// the runbooks read and write directly — and `sessions.json` beside it is the
-/// roster the session list renders, one row per session with the dialect it was
-/// created with.
+/// roster the session list renders, one row per session.
 ///
-/// A session the roster does not know still resolves: it is served on the
-/// ambient `LASH_RUNBOOK_DIALECT`, which is how every pre-roster deployment and
-/// every ad-hoc `?session_id=` tab reads.
+/// A session the roster does not know still resolves, which is how every
+/// pre-roster deployment and every ad-hoc `?session_id=` tab reads.
 #[derive(Clone, Debug)]
 pub(crate) struct WorkbenchSessions {
     pub(crate) current: Arc<Mutex<SessionId>>,
@@ -813,11 +738,7 @@ impl WorkbenchSessions {
 
     /// Replace one retired roster slot without disturbing a session selected
     /// while the durable delete was settling.
-    pub(crate) fn replace(
-        &self,
-        retired_session_id: &SessionId,
-        fallback_dialect: lash::rlm::RlmDialect,
-    ) -> (SessionId, bool) {
+    pub(crate) fn replace(&self, retired_session_id: &SessionId) -> (SessionId, bool) {
         let replacement_session_id = new_session_id();
         // Roster then current is the shared lock order with `select`: removing
         // the retired row and conditionally moving the pointer are one local
@@ -825,16 +746,15 @@ impl WorkbenchSessions {
         // those halves.
         let mut roster = self.roster.lock_recover();
         let carried = roster.remove(retired_session_id);
-        let (name, dialect) = carried
-            .map(|entry| (entry.name, entry.dialect))
-            .unwrap_or_else(|| (retired_session_id.to_string(), fallback_dialect));
+        let name = carried
+            .map(|entry| entry.name)
+            .unwrap_or_else(|| retired_session_id.to_string());
         let now_ms = chrono::Utc::now().timestamp_millis();
         roster.insert(
             replacement_session_id.clone(),
             WorkbenchSessionEntry {
                 session_id: replacement_session_id.clone(),
                 name,
-                dialect,
                 created_at_ms: now_ms,
                 last_active_ms: now_ms,
             },
@@ -856,21 +776,13 @@ impl WorkbenchSessions {
     #[cfg(test)]
     pub(crate) fn rotate(&self) -> (SessionId, SessionId) {
         let old = self.current();
-        let dialect = self
-            .dialect_for(&old)
-            .unwrap_or(lash::rlm::RlmDialect::Lashlang);
-        let (new, replaced_current) = self.replace(&old, dialect);
+        let (new, replaced_current) = self.replace(&old);
         debug_assert!(replaced_current);
         (old, new)
     }
 
     /// Add a session to the roster, or refresh the row of one already there.
-    pub(crate) fn record(
-        &self,
-        session_id: SessionId,
-        name: String,
-        dialect: lash::rlm::RlmDialect,
-    ) -> WorkbenchSessionEntry {
+    pub(crate) fn record(&self, session_id: SessionId, name: String) -> WorkbenchSessionEntry {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut roster = self.roster.lock_recover();
         let entry = roster
@@ -882,7 +794,6 @@ impl WorkbenchSessions {
             .or_insert(WorkbenchSessionEntry {
                 session_id,
                 name,
-                dialect,
                 created_at_ms: now_ms,
                 last_active_ms: now_ms,
             })
@@ -893,14 +804,13 @@ impl WorkbenchSessions {
 
     /// Register a session the roster has not seen, keeping any row it has.
     ///
-    /// This is how the boot session joins the roster: its dialect is the
-    /// ambient one, and a row that already exists wins, because that row is
-    /// what the session's durable pin was created from.
-    pub(crate) fn ensure(&self, session_id: &SessionId, dialect: lash::rlm::RlmDialect) {
+    /// This is how the boot session joins the roster: a row that already
+    /// exists wins.
+    pub(crate) fn ensure(&self, session_id: &SessionId) {
         if self.roster.lock_recover().contains_key(session_id) {
             return;
         }
-        self.record(session_id.clone(), session_id.to_string(), dialect);
+        self.record(session_id.clone(), session_id.to_string());
     }
 
     pub(crate) fn touch(&self, session_id: &SessionId) {
@@ -915,15 +825,10 @@ impl WorkbenchSessions {
 
     /// A row for a session the roster never recorded, so the selector can show
     /// it without the read side writing to the roster.
-    pub(crate) fn unrostered_entry(
-        &self,
-        session_id: SessionId,
-        dialect: lash::rlm::RlmDialect,
-    ) -> WorkbenchSessionEntry {
+    pub(crate) fn unrostered_entry(&self, session_id: SessionId) -> WorkbenchSessionEntry {
         WorkbenchSessionEntry {
             name: session_id.to_string(),
             session_id,
-            dialect,
             created_at_ms: 0,
             last_active_ms: 0,
         }
@@ -931,11 +836,6 @@ impl WorkbenchSessions {
 
     pub(crate) fn entry(&self, session_id: &SessionId) -> Option<WorkbenchSessionEntry> {
         self.roster.lock_recover().get(session_id).cloned()
-    }
-
-    /// The dialect this session must be opened with, if the roster knows it.
-    pub(crate) fn dialect_for(&self, session_id: &SessionId) -> Option<lash::rlm::RlmDialect> {
-        self.entry(session_id).map(|entry| entry.dialect)
     }
 
     /// The roster, oldest first, which is the order the selector renders.

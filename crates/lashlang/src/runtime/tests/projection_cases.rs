@@ -521,7 +521,13 @@ async fn projected_list_len_and_index_are_lazy() {
     };
     assert_eq!(record["n"], Value::Number(2.0));
     assert_eq!(record["first"], Value::String("first".into()));
-    assert_eq!(record["missing"], Value::Null);
+    // An index past the end reads `undefined`, the one ECMA answer now that
+    // TypeScript is the only RLM language (ADR 0096); the projected wrapper is
+    // kept so the path still says where the read came from.
+    assert_eq!(
+        record["missing"],
+        Value::Projected(ProjectedValue::scalar("history[9]", Value::Undefined))
+    );
     assert_eq!(list.get_count.load(Ordering::SeqCst), 1);
     assert_eq!(list.materialize_count.load(Ordering::SeqCst), 0);
 }
@@ -1245,8 +1251,12 @@ async fn false_if_branch_and_finish_inside_loop_are_covered() {
     assert_eq!(value, Value::Number(1.0));
 }
 
+/// Awaiting a list of process starts joins each handle through the durable
+/// process-await seam and never reaches the tool batch. The record form this
+/// replaces settled its fields recursively, which was the retired surface
+/// dialect's rule: settlement is shallow over element positions (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
-async fn await_record_process_starts_and_joins_handles() {
+async fn await_list_process_starts_and_joins_handles() {
     struct BatchHost {
         calls: AtomicUsize,
         batches: AtomicUsize,
@@ -1292,11 +1302,11 @@ async fn await_record_process_starts_and_joins_handles() {
     let program = crate::parse(
         r#"
         process echo(value: str) { finish value }
-        result = await {
-          left: start echo(value: "a"),
-          right: start echo(value: "b")
-        }
-        finish [result.left?, result.right?]
+        result = await [
+          start echo(value: "a"),
+          start echo(value: "b")
+        ]
+        finish [result[0]?, result[1]?]
         "#,
     )
     .expect("program should parse");

@@ -12,7 +12,6 @@ impl Compiler {
         for capture in &function.captures {
             let slot = self.push_slot(capture);
             self.code.push(Instruction::LoadName(slot));
-            self.emit_isolation();
         }
         self.code.push(Instruction::MakeClosure {
             function: function_index,
@@ -48,7 +47,6 @@ impl Compiler {
         });
         for arg in args {
             self.compile_expr(arg);
-            self.emit_isolation();
         }
         self.code.push(Instruction::Call { argc: args.len() });
     }
@@ -192,7 +190,6 @@ impl Compiler {
             ("push", 2) => {
                 self.compile_expr(&args[0]);
                 self.compile_expr(&args[1]);
-                self.emit_isolation();
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Push));
             }
             ("range", 1..=3) => {
@@ -213,14 +210,6 @@ impl Compiler {
     }
 
     pub(super) fn compile_expr(&mut self, expr: &Expr) {
-        if self.dialect == CompilationDialect::Lashlang
-            && !contains_type_literal(expr)
-            && let Some(value) = self.fold_compile_time_expr(expr)
-        {
-            self.emit_push_value(value);
-            return;
-        }
-
         match expr {
             Expr::LabelAnnotated { label, expr } => {
                 if self.try_compile_label_as_effect_step(expr, label, true) {
@@ -295,19 +284,14 @@ impl Compiler {
             Expr::Tuple(items) => {
                 for item in items {
                     self.compile_expr(item);
-                    self.emit_isolation();
                 }
                 self.code.push(Instruction::BuildTuple(items.len()));
             }
             Expr::List(items) => {
                 for item in items {
                     self.compile_expr(item);
-                    self.emit_isolation();
                 }
-                self.code.push(match self.dialect {
-                    CompilationDialect::Lashlang => Instruction::BuildList(items.len()),
-                    CompilationDialect::Typescript => Instruction::BuildHeapList(items.len()),
-                });
+                self.code.push(Instruction::BuildHeapList(items.len()));
             }
             Expr::ListComprehension { element, clauses } => {
                 self.compile_list_comprehension(
@@ -318,13 +302,9 @@ impl Compiler {
             Expr::Record(entries) => {
                 for (_, value) in entries {
                     self.compile_expr(value);
-                    self.emit_isolation();
                 }
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
-                self.code.push(match self.dialect {
-                    CompilationDialect::Lashlang => Instruction::BuildRecord(keys),
-                    CompilationDialect::Typescript => Instruction::BuildHeapRecord(keys),
-                });
+                self.code.push(Instruction::BuildHeapRecord(keys));
             }
             Expr::StartProcess(process) => {
                 let instruction = self.compile_start_process_expr(process);
@@ -402,12 +382,9 @@ impl Compiler {
             Expr::Function(function) => {
                 self.emit_function(
                     function,
-                    match self.dialect {
-                        CompilationDialect::Lashlang => ClosureParameterModel::Exact,
-                        CompilationDialect::Typescript => ClosureParameterModel::TypeScript {
-                            required_count: function.params.len(),
-                            accepts_rest: false,
-                        },
+                    ClosureParameterModel::TypeScript {
+                        required_count: function.params.len(),
+                        accepts_rest: false,
                     },
                 );
             }
@@ -415,7 +392,6 @@ impl Compiler {
                 self.compile_expr(function);
                 for arg in args {
                     self.compile_expr(arg);
-                    self.emit_isolation();
                 }
                 let instruction = self.code.len();
                 self.code.push(Instruction::Call { argc: args.len() });

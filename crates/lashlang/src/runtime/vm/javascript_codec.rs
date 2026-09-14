@@ -10,12 +10,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         codec: JavaScriptUriCodec,
     ) -> Result<(), RuntimeError> {
-        if !self.reference_semantics {
-            return Err(RuntimeError::ValidationFailed {
-                reason: "TYPESCRIPT_REFERENCE_SEMANTICS_REQUIRED: URI codecs are unavailable in Lashlang"
-                    .to_string(),
-            });
-        }
         let input = self.pop_stack()?;
         let input = self.heap.javascript_to_string(&input)?;
         let result = match codec {

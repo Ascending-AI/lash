@@ -426,11 +426,10 @@ async fn execute_code_inner(
             // TypeScript is parsed here rather than by the cache, so the cache
             // is asked first: otherwise every cell would pay a full parse even
             // when its linked program is already cached.
-            SourceDialect::Typescript => match state.linked_programs.cached_linked_program(
-                code,
-                &host_environment,
-                lashlang::CompilationDialect::Typescript,
-            ) {
+            SourceDialect::Typescript => match state
+                .linked_programs
+                .cached_linked_program(code, &host_environment)
+            {
                 Some(program) => Ok(program),
                 // Parsed with the session's live globals, so a cell can read
                 // what an earlier cell bound. Lashlang gets this for free by
@@ -455,12 +454,7 @@ async fn execute_code_inner(
                 .and_then(|program| {
                     state
                         .linked_programs
-                        .get_or_compile_ast(
-                            code,
-                            program,
-                            &host_environment,
-                            lashlang::CompilationDialect::Typescript,
-                        )
+                        .get_or_compile_ast(code, program, &host_environment)
                         .map_err(|error| {
                             (
                                 lashlang_link_feedback_kind(&error),

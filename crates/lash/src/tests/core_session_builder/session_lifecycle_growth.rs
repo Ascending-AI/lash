@@ -116,25 +116,25 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         let mut programs = Vec::new();
         for index in 0..LARGE_BINDINGS {
             let value = format!("{index:02}{}", "x".repeat(VALUE_BYTES - 2));
-            let mut source = format!("large_{index:02} = {value:?}\n");
+            let mut source = format!("let large_{index:02} = {value:?};\n");
             if index == 0 {
                 for small in 0..SMALL_BINDINGS {
-                    source.push_str(&format!("small_{small:02} = 100\n"));
+                    source.push_str(&format!("let small_{small:02} = 100;\n"));
                 }
             }
-            source.push_str("finish \"stored\"");
-            programs.push(lashlang_block(&source));
+            source.push_str("finish(\"stored\");");
+            programs.push(typescript_block(&source));
         }
         for index in 0..DIRTY_TURNS {
-            programs.push(lashlang_block(&format!(
-                "small_{index:02} = 101\nfinish \"stored\""
+            programs.push(typescript_block(&format!(
+                "let small_{index:02} = 101;\nfinish(\"stored\");"
             )));
         }
         let replacement = format!("00{}y", "x".repeat(VALUE_BYTES - 3));
-        programs.push(lashlang_block(&format!(
-            "large_00 = {replacement:?}\nfinish \"stored\""
+        programs.push(typescript_block(&format!(
+            "let large_00 = {replacement:?};\nfinish(\"stored\");"
         )));
-        programs.push(lashlang_block("small_00 = 102\nfinish \"stored\""));
+        programs.push(typescript_block("let small_00 = 102;\nfinish(\"stored\");"));
         let core = explicit_ephemeral_facets(rlm_core_builder())
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
@@ -270,10 +270,10 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
     run_async_test_on_stack_budget("growing-checkpoint-witness", || async {
         const GROWING_TURNS: usize = 4;
         let samples = Arc::new(Mutex::new(Vec::new()));
-        let mut programs = vec![lashlang_block("growing = \"\"\nfinish \"stored\"")];
+        let mut programs = vec![typescript_block("let growing = \"\";\nfinish(\"stored\");")];
         for turn in 1..=GROWING_TURNS {
-            programs.push(lashlang_block(&format!(
-                "growing = {:?}\nfinish \"stored\"",
+            programs.push(typescript_block(&format!(
+                "let growing = {:?};\nfinish(\"stored\");",
                 "x".repeat(turn * 256)
             )));
         }

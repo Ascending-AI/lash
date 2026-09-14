@@ -44,6 +44,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v9 carries VM continuation v14. TypeScript is the only RLM language
+/// (ADR 0096), so the instruction set loses the deep-copy instructions the
+/// retired surface compiled to: a segment parked before the cutover holds a
+/// continuation over an instruction stream this reader cannot reproduce, so the
+/// boundary is a version rather than a decode failure.
+/// v8 is held by the in-flight process-definition codec change (FIG-2962), so
+/// this cutover takes the next generation rather than sharing one.
 /// v7 pins the attempt bound this segment stamps onto the children it starts,
 /// so a redrive after a host config change re-registers the recorded bound
 /// instead of conflicting with the fingerprint the first attempt wrote.
@@ -51,7 +58,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 7;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 9;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

@@ -52,9 +52,15 @@ pub struct RlmDriver {
 }
 
 impl RlmDriver {
+    /// A driver on TypeScript, because it is the only language a session can be
+    /// served (ADR 0096).
+    ///
+    /// This used to answer with the retired surface. With the dialect selector
+    /// gone, a default that still named lashlang would be the compatibility
+    /// reader this cutover exists to remove.
     pub fn new() -> Self {
         Self {
-            dialect: Arc::new(LashlangDialect::prompt_only(
+            dialect: Arc::new(crate::dialect::TypescriptDialect::prompt_only(
                 lash_lashlang_runtime::LashlangSurface::default(),
             )),
         }

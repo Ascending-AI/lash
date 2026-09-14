@@ -7,6 +7,11 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v21 carries VM continuation v14 and bytecode v15. TypeScript is the only RLM
+// language (ADR 0096), so the instruction set loses the deep-copy instructions
+// the retired surface compiled to: a snapshot written before the cutover parks
+// a continuation over an instruction stream this reader cannot reproduce, so
+// the boundary is a version rather than a decode failure.
 // v20 pins the attempt bound this execution stamps onto the children its code
 // starts. An older reader would drop the pin and let a redrive re-resolve the
 // host default, which re-registers an existing child with a different
@@ -38,7 +43,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 20;
+pub const RLM_SNAPSHOT_VERSION: u32 = 21;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

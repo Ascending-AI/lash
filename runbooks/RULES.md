@@ -55,15 +55,14 @@ language. A standard-mode host using `LashCore::standard_builder` is one example
 predicate is whether the scenario opens an RLM session, and the claim is checkable in its
 runbook binary or driver.
 
-Until [FIG-3022](https://linear.app/ascending-ai/issue/FIG-3022) removes the host-side
-selector, hosts still *default* an unpinned session to the retired surface. So every RLM
-row sets `LASH_RUNBOOK_DIALECT=typescript` explicitly and the host passes that value in
-the RLM session-creation contract; absence is not allowed on any row, and a row that
-served anything but a TypeScript prompt, cell tag, execution event or restored engine id
-is a contract violation that triggers the normal Abort/RCA rule. This includes a
-subagent's prompt: children inherit the parent's session language. When the selector goes,
-the variable goes with it and this paragraph retires; nothing else in this section moves,
-because the pin is no longer a choice.
+There is nothing to pin. The RLM session-creation contract carries no language, so
+`LASH_RUNBOOK_DIALECT` is inert: nothing reads it, and the runbooks and drivers that
+still name it are cleaned up with [FIG-3055](https://linear.app/ascending-ai/issue/FIG-3055)
+and [FIG-3022](https://linear.app/ascending-ai/issue/FIG-3022). A row that served anything but a
+TypeScript prompt, cell tag, execution event or restored engine id is still a contract
+violation that triggers the normal Abort/RCA rule — it just cannot be caused by
+configuration any more. This includes a subagent's prompt: children read the same
+TypeScript prompt their parent does.
 
 Confirm the served language from the row's **own evidence** — prompt, cell tag, execution
 events — never from the environment. The environment is what you asked for; the evidence

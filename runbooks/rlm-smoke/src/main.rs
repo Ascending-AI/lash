@@ -23,6 +23,9 @@ const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 const MAX_FILE_BYTES: usize = 64 * 1024;
 const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// TypeScript is the sole RLM language (ADR 0096).
+const RLM_LANGUAGE_ID: &str = "typescript";
+
 #[derive(Debug, Parser)]
 #[command(about = "Live-model RLM smoke host with workspace-jailed tools")]
 struct Args {
@@ -349,9 +352,6 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&args.artifact_dir)
         .with_context(|| format!("create artifact directory {}", args.artifact_dir.display()))?;
     let workspace = WorkspaceTools::new(&args.workspace, args.sandbox_image.clone())?;
-    let dialect = lash::rlm::RlmDialect::from_env()
-        .map_err(anyhow::Error::msg)?
-        .unwrap_or_default();
     let prompt = std::fs::read_to_string(args.scenario_dir.join("prompt.md"))
         .context("read scenario prompt")?;
     let _port_guard = std::net::TcpListener::bind(("127.0.0.1", args.port))
@@ -422,12 +422,9 @@ async fn main() -> Result<()> {
         .session(&args.session_id)
         .plugin_option(
             lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash::rlm::RlmCreateExtras {
-                dialect: Some(dialect),
-                ..lash::rlm::RlmCreateExtras::default()
-            },
+            lash::rlm::RlmCreateExtras::default(),
         )
-        .context("encode dialect session option")?
+        .context("encode RLM session option")?
         .open()
         .await
         .context("open RLM smoke session")?;
@@ -474,16 +471,16 @@ async fn main() -> Result<()> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    // TypeScript is the sole RLM language (ADR 0096).
     ensure!(
-        code_languages == vec![dialect.language_id().to_string()],
-        "row emitted code languages {code_languages:?}, expected only `{}`",
-        dialect.language_id()
+        code_languages == vec![RLM_LANGUAGE_ID.to_string()],
+        "row emitted code languages {code_languages:?}, expected only `{RLM_LANGUAGE_ID}`"
     );
     core.flush_trace_sink().context("flush row trace")?;
 
     let evidence = HostEvidence {
         scenario: args.scenario,
-        dialect: dialect.language_id().to_string(),
+        dialect: RLM_LANGUAGE_ID.to_string(),
         requested_model: args.model,
         served_models,
         session_id: args.session_id,

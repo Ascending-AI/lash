@@ -25,23 +25,6 @@ use crate::world::World;
 
 const DEFAULT_MODEL: &str = "z-ai/glm-5.3-flash";
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum DialectSelection {
-    Both,
-    Lashlang,
-    Typescript,
-}
-
-impl DialectSelection {
-    fn dialects(self) -> &'static [lash::rlm::RlmDialect] {
-        match self {
-            Self::Both => &lash::rlm::RlmDialect::ALL,
-            Self::Lashlang => &[lash::rlm::RlmDialect::Lashlang],
-            Self::Typescript => &[lash::rlm::RlmDialect::Typescript],
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum ChannelSelection {
     Cell,
@@ -92,7 +75,7 @@ struct Args {
     pack: Pack,
     #[arg(long, env = "LASH_RLM_CHANNEL", value_enum, default_value_t = ChannelSelection::Cell)]
     channel: ChannelSelection,
-    /// Pair the same task/model/dialect in randomized channel order.
+    /// Pair the same task/model in randomized channel order.
     #[arg(long)]
     paired: bool,
     #[arg(long, alias = "runs", default_value_t = 1)]
@@ -123,9 +106,6 @@ struct Args {
     channel_set: ChannelSet,
     #[arg(long, value_enum, default_value_t = ReasoningEffort::None)]
     reasoning_effort: ReasoningEffort,
-    /// Run both dialects or select one.
-    #[arg(long, value_enum, default_value_t = DialectSelection::Both)]
-    dialect: DialectSelection,
     /// Run only these task ids; repeat --task to select a subset.
     #[arg(long)]
     task: Vec<String>,
@@ -212,7 +192,6 @@ async fn main() -> Result<()> {
     let mut random = std::fs::File::open("/dev/urandom").context("open random order source")?;
     let mut template = build_work_list(
         &tasks,
-        args.dialect.dialects(),
         args.repetitions,
         args.paired || args.channel_set == ChannelSet::All,
         args.channel,
@@ -225,7 +204,6 @@ async fn main() -> Result<()> {
     if args.channel_set == ChannelSet::All {
         template.extend(build_work_list(
             &tasks,
-            args.dialect.dialects(),
             args.repetitions,
             false,
             ChannelSelection::Standard,
@@ -243,7 +221,6 @@ async fn main() -> Result<()> {
                 .map(move |channel| WorkItem {
                     model_index,
                     run: 0,
-                    dialect: args.dialect.dialects()[0],
                     task_index: 0,
                     channel,
                 })
@@ -256,7 +233,7 @@ async fn main() -> Result<()> {
         let writer = &writer;
         async move {
             let model = &args.model[item.model_index];
-            let (outcome, probes) = runtime::preflight(&tasks[0], item.dialect, model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
+            let (outcome, probes) = runtime::preflight(&tasks[0], model, api_key, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
             let mut file = writer.lock().await;
             let mut all_attempts = Vec::new();
             for (repetition, probe) in probes.iter().enumerate() {
@@ -295,7 +272,7 @@ async fn main() -> Result<()> {
         async move {
             let task = &tasks[item.task_index];
             let model = &args.model[item.model_index];
-            let (final_world, evidence) = runtime::run_task(task, item.dialect, model, api_key, item.run, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
+            let (final_world, evidence) = runtime::run_task(task, model, api_key, item.run, item.channel, args.reasoning_effort, args.turn_wall_limit_secs, args.provider_retries, args.dump_requests.as_deref()).await;
             let grade = grade(task, &final_world, &evidence, args.max_task_cost_usd);
             let usage = summary::Usage::from_attempts(&evidence.attempts);
             let mut file = writer.lock().await;
@@ -362,24 +339,24 @@ fn write_row(file: &mut std::fs::File, row: &Value) -> Result<()> {
 struct WorkItem {
     model_index: usize,
     run: usize,
-    dialect: lash::rlm::RlmDialect,
     task_index: usize,
     channel: ChannelSelection,
 }
 
 impl WorkItem {
+    /// The RLM channels run TypeScript, the sole RLM language (ADR 0096); the
+    /// standard channel runs no RLM language at all.
     fn dialect_name(&self) -> &'static str {
         if self.channel == ChannelSelection::Standard {
             "none"
         } else {
-            self.dialect.language_id()
+            "typescript"
         }
     }
 }
 
 fn build_work_list(
     tasks: &[Task],
-    dialects: &[lash::rlm::RlmDialect],
     runs: usize,
     paired: bool,
     channel: ChannelSelection,
@@ -387,29 +364,22 @@ fn build_work_list(
 ) -> Result<Vec<WorkItem>> {
     let mut work = Vec::new();
     for run in 1..=runs {
-        for &dialect in if !paired && channel == ChannelSelection::Standard {
-            &dialects[..1]
-        } else {
-            dialects
-        } {
-            for task_index in 0..tasks.len() {
-                let channels = if paired {
-                    if reverse_pair()? {
-                        vec![ChannelSelection::Native, ChannelSelection::Cell]
-                    } else {
-                        vec![ChannelSelection::Cell, ChannelSelection::Native]
-                    }
+        for task_index in 0..tasks.len() {
+            let channels = if paired {
+                if reverse_pair()? {
+                    vec![ChannelSelection::Native, ChannelSelection::Cell]
                 } else {
-                    vec![channel]
-                };
-                work.extend(channels.into_iter().map(|channel| WorkItem {
-                    model_index: 0,
-                    run,
-                    dialect,
-                    task_index,
-                    channel,
-                }));
-            }
+                    vec![ChannelSelection::Cell, ChannelSelection::Native]
+                }
+            } else {
+                vec![channel]
+            };
+            work.extend(channels.into_iter().map(|channel| WorkItem {
+                model_index: 0,
+                run,
+                task_index,
+                channel,
+            }));
         }
     }
     Ok(work)
@@ -483,7 +453,7 @@ mod tests {
     fn key(item: &WorkItem) -> (usize, &str, usize, &str) {
         (
             item.run,
-            item.dialect.language_id(),
+            item.dialect_name(),
             item.task_index,
             item.channel.name(),
         )
@@ -530,14 +500,9 @@ mod tests {
         assert_eq!(args.model, ["a", "b"]);
         assert_eq!(args.repetitions, 2);
         assert_eq!(args.reasoning_effort, ReasoningEffort::Medium);
-        let work = build_work_list(
-            &task_pack(),
-            args.dialect.dialects(),
-            1,
-            false,
-            ChannelSelection::Standard,
-            || Ok(false),
-        )
+        let work = build_work_list(&task_pack(), 1, false, ChannelSelection::Standard, || {
+            Ok(false)
+        })
         .unwrap();
         assert_eq!(work.len(), 28);
         assert!(work.iter().all(|item| item.dialect_name() == "none"));
@@ -574,23 +539,14 @@ mod tests {
         let args = Args::parse_from(["toolbench", "--paired", "--repetitions", "2"]);
         let tasks = task_pack();
         let mut coins = 0;
-        let work = build_work_list(
-            &tasks,
-            args.dialect.dialects(),
-            args.repetitions,
-            args.paired,
-            args.channel,
-            || {
-                coins += 1;
-                Ok(coins % 2 == 0)
-            },
-        )
+        let work = build_work_list(&tasks, args.repetitions, args.paired, args.channel, || {
+            coins += 1;
+            Ok(coins % 2 == 0)
+        })
         .unwrap();
         assert_eq!(args.concurrency, 1);
-        assert_eq!(
-            work.len(),
-            tasks.len() * 2 * args.dialect.dialects().len() * 2
-        );
+        // One RLM language remains (ADR 0096): tasks x repetitions x paired channels.
+        assert_eq!(work.len(), tasks.len() * args.repetitions * 2);
         assert_eq!(coins, work.len() / 2);
         for (index, pair) in work.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(key(&pair[0]).0, key(&pair[1]).0);
@@ -620,7 +576,6 @@ mod tests {
         ]);
         let work = build_work_list(
             &task_pack(),
-            args.dialect.dialects(),
             args.repetitions,
             args.paired,
             args.channel,

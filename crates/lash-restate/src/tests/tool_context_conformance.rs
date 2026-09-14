@@ -40,20 +40,20 @@ fn args_for(tool_name: &str) -> serde_json::Value {
     }
 }
 
-fn lashlang_source_for(tool_name: &str) -> &'static str {
+fn typescript_source_for(tool_name: &str) -> &'static str {
     match tool_name {
         "llm_query" => {
-            r#"<lashlang>
-result = await llm.query({
+            r#"<typescript>
+const result = await llm.query({
   task: "Return the covered answer",
   inputs: { answer: "covered" },
-  output: Type { answer: str }
-})?
-finish result
-</lashlang>"#
+  output: { answer: "str" }
+});
+finish(result);
+</typescript>"#
         }
         other => panic!(
-            "first-party tool `{other}` was registered without a production Lashlang fixture; add its caller path before merging"
+            "first-party tool `{other}` was registered without a production TypeScript fixture; add its caller path before merging"
         ),
     }
 }
@@ -115,7 +115,7 @@ impl ProductionToolCell {
         let plugin_factories = vec![rlm_plugin, tool_plugin];
 
         let llm_provider_calls = Arc::new(AtomicUsize::new(0));
-        let source = lashlang_source_for(tool_name).to_string();
+        let source = typescript_source_for(tool_name).to_string();
         let provider = lash_core::testing::TestProvider::builder()
             .kind("stub")
             .complete({

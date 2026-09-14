@@ -91,35 +91,41 @@ pub mod conformance {
         }
 
         const TRIGGER_SOURCE: &str = r#"
-process remember(tick: clock.Tick) {
-  wake { id: tick.id, scheduled_at: tick.scheduled_at }
-  finish { id: tick.id, ok: true }
-}
+const remember = defineProcess({
+  name: "remember",
+  signals: {},
+  run: async (tick: clock.Tick) => {
+    wake({ id: tick.id, scheduled_at: tick.scheduled_at });
+    return { id: tick.id, ok: true };
+  }
+});
 
-source = clock.Alarm({ at: "08:00" })
-handle = await triggers.register({
-  source: source,
+const handle = await registerTrigger({
+  source: clock.Alarm({ at: "08:00" }),
   target: remember,
-  inputs: { tick: trigger.event },
+  inputs: (event) => ({ tick: event }),
   name: "remembered"
-})?
-finish "registered"
+});
+finish("registered");
 "#;
 
         const BUTTON_TRIGGER_SOURCE: &str = r#"
-process remember_button(event: ui.button.Pressed) {
-  wake { button: event.button, message: event.message }
-  finish { button: event.button, ok: true }
-}
+const remember_button = defineProcess({
+  name: "remember_button",
+  signals: {},
+  run: async (event: ui.button.Pressed) => {
+    wake({ button: event.button, message: event.message });
+    return { button: event.button, ok: true };
+  }
+});
 
-source = ui.button.pressed({})
-handle = await triggers.register({
-  source: source,
+const handle = await registerTrigger({
+  source: ui.button.pressed({}),
   target: remember_button,
-  inputs: { event: trigger.event },
+  inputs: (event) => ({ event: event }),
   name: "button remembered"
-})?
-finish "registered"
+});
+finish("registered");
 "#;
 
         const SESSION_ID: &str = "rebuild-conformance";
@@ -284,8 +290,8 @@ finish "registered"
                 .expect("model spec")
         }
 
-        fn lashlang_block(source: &str) -> String {
-            format!("<lashlang>\n{}\n</lashlang>", source.trim())
+        fn typescript_block(source: &str) -> String {
+            format!("<typescript>\n{}\n</typescript>", source.trim())
         }
 
         /// Provider used both to register the trigger route through a normal RLM
@@ -297,11 +303,11 @@ finish "registered"
                 .complete(|req| async move {
                     let rendered_messages = format!("{:?}", req.messages);
                     let text = if rendered_messages.contains("run child") {
-                        lashlang_block("finish \"child done\"")
+                        typescript_block("finish(\"child done\");")
                     } else if rendered_messages.contains("register rebuild button trigger") {
-                        lashlang_block(BUTTON_TRIGGER_SOURCE)
+                        typescript_block(BUTTON_TRIGGER_SOURCE)
                     } else {
-                        lashlang_block(TRIGGER_SOURCE)
+                        typescript_block(TRIGGER_SOURCE)
                     };
                     Ok(crate::provider::LlmResponse {
                         parts: vec![crate::direct::LlmOutputPart::Text {

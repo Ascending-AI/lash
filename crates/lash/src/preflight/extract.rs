@@ -545,9 +545,12 @@ mod tests {
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
         .expect("frozen fixture should be JSON");
-        raw.as_object_mut()
-            .expect("artifact should be an object")
-            .remove("trigger_key_manifest");
+        let object = raw.as_object_mut().expect("artifact should be an object");
+        object.remove("trigger_key_manifest");
+        // The retired `compilation_dialect` field is refused ahead of the
+        // identity fence now that TypeScript is the only RLM language
+        // (ADR 0096); drop it so this test still reaches the fence it is about.
+        object.remove("compilation_dialect");
         raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,

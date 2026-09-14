@@ -13,7 +13,7 @@ pub(crate) fn catalog_lifecycle_provider() -> lash::provider::ProviderHandle {
                     call => panic!("unexpected workbench provider call {call}"),
                 };
                 Ok(text_response(&format!(
-                    "<lashlang>\nresult = await inbox.{account}.send({{ title: \"Hi\", text: \"Yo\" }})?\nfinish result.id\n</lashlang>"
+                    "<typescript>\nconst result = await inbox.{account}.send({{ title: \"Hi\", text: \"Yo\" }});\nfinish(result.id);\n</typescript>"
                 )))
             }
         })

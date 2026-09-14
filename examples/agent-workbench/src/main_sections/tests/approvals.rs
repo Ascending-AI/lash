@@ -92,10 +92,10 @@ fn approval_approve_resumes_parked_lashlang_instruction_with_success() {
             .kind("workbench-approval-approve")
             .complete(|_| async {
                 Ok(text_response(
-                    r#"<lashlang>
-result = await ops.apply_change({ target: "demo-cluster", change: "enable safe mode" })?
-finish result
-</lashlang>"#,
+                    r#"<typescript>
+const result = await ops.apply_change({ target: "demo-cluster", change: "enable safe mode" });
+finish(result);
+</typescript>"#,
                 ))
             })
             .build()
@@ -229,10 +229,14 @@ fn approval_denial_preserves_typed_failure_fields_through_lashlang_bridge() {
             .kind("workbench-approval-deny")
             .complete(|_| async {
                 Ok(text_response(
-                    r#"<lashlang>
-result = await ops.apply_change({ target: "demo-cluster", change: "disable audit log" })
-finish result
-</lashlang>"#,
+                    r#"<typescript>
+try {
+  const value = await ops.apply_change({ target: "demo-cluster", change: "disable audit log" });
+  finish({ ok: true, value: value });
+} catch (error) {
+  finish({ ok: false, error: error.message, cause: error.cause });
+}
+</typescript>"#,
                 ))
             })
             .build()
@@ -316,10 +320,10 @@ fn approval_restart_reopens_the_ledger_and_durable_effect_host() {
             .kind("workbench-approval-restart")
             .complete(|_| async {
                 Ok(text_response(
-                    r#"<lashlang>
-result = await ops.apply_change({ target: "restart-demo", change: "rotate workers" })?
-finish result.status
-</lashlang>"#,
+                    r#"<typescript>
+const result = await ops.apply_change({ target: "restart-demo", change: "rotate workers" });
+finish(result.status);
+</typescript>"#,
                 ))
             })
             .build()
@@ -409,10 +413,14 @@ async fn async_completion_reopen_and_redrive(resolution: lash::Resolution) {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 async {
                     Ok(text_response(
-                        r#"<lashlang>
-result = await ops.apply_change({ target: "async-demo", change: "reopen-redrive" })
-finish result
-</lashlang>"#,
+                        r#"<typescript>
+try {
+  const value = await ops.apply_change({ target: "async-demo", change: "reopen-redrive" });
+  finish({ ok: true, value: value });
+} catch (error) {
+  finish({ ok: false, error: error.message, cause: error.cause });
+}
+</typescript>"#,
                     ))
                 }
             }
@@ -528,8 +536,18 @@ finish result
         }
         lash::Resolution::Cancelled => {
             assert_eq!(value["ok"], false);
-            let cancellation: Value =
-                serde_json::from_str(value["error"].as_str().unwrap()).unwrap();
+            // ADR 0096: TypeScript rejects with an `Error` rather than handing
+            // back the Lashlang result wrapper, so the cancellation fields are
+            // read off the rejection instead of a JSON-encoded error string.
+            // ADR 0096: TypeScript rejects with an `Error` rather than handing
+            // back the Lashlang result wrapper, so the cancellation payload
+            // arrives inside the rejection message. The fields asserted are the
+            // same ones the wrapper carried.
+            let message = value["error"].as_str().expect("cancellation message");
+            let encoded = &message[message
+                .find('{')
+                .expect("the rejection carries the cancellation payload")..];
+            let cancellation: Value = serde_json::from_str(encoded).unwrap();
             assert_eq!(cancellation["message"], "pending tool completion cancelled");
             assert_eq!(cancellation["source"], "cancellation");
         }

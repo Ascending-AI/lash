@@ -92,10 +92,10 @@ fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerEr
         Some(1),
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block("missing_name"))]),
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("missing_name"))]),
             RlmContractStep::Exec(rlm_exec_response(
                 &[],
-                Some("unknown variable `missing_name`"),
+                Some("unknown binding `missing_name`"),
                 None,
             )),
         ],
@@ -125,8 +125,8 @@ fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScr
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "finish { ok: true }",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "finish({ ok: true });",
             ))]),
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
             RlmContractStep::Checkpoint,
@@ -184,7 +184,7 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
         vec![
             RlmContractStep::Llm(vec![
                 rlm_reasoning_part("Checking state."),
-                rlm_text_part(&rlm_lashlang_block_with_prose("Ready.", "print \"hi\"")),
+                rlm_text_part(&rlm_typescript_block_with_prose("Ready.", "print(\"hi\");")),
             ]),
             RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
         ],
@@ -199,7 +199,7 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
 
 fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScriptRunnerError> {
     let assistant_prose = "First.";
-    let code = "text = \"%%lashlang is just source here\"\nprint text";
+    let code = "const text = \"%%lashlang is just source here\";\nprint(text);";
     let result = run_rlm_protocol_contract(
         "rlm retired marker plain LashLang text",
         "run some code",
@@ -207,7 +207,7 @@ fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScri
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part(
-            &rlm_lashlang_block_with_prose(assistant_prose, code),
+            &rlm_typescript_block_with_prose(assistant_prose, code),
         )])],
     )?;
     contract_execution_payload(
@@ -226,9 +226,9 @@ fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunn
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block_with_prose(
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block_with_prose(
                 "Quick check.\n",
-                "print \"hi\"",
+                "print(\"hi\");",
             ))]),
             RlmContractStep::Exec(rlm_exec_response(&["hi\n"], None, None)),
             RlmContractStep::Checkpoint,
@@ -251,9 +251,9 @@ fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
         None,
         None,
         vec![
-            RlmContractStep::StreamedLlm(vec![rlm_text_part(&rlm_lashlang_block_with_prose(
+            RlmContractStep::StreamedLlm(vec![rlm_text_part(&rlm_typescript_block_with_prose(
                 "Streaming check.\n",
-                "print \"streamed\"",
+                "print(\"streamed\");",
             ))]),
             RlmContractStep::Exec(rlm_exec_response(&["streamed\n"], None, None)),
             RlmContractStep::Checkpoint,
@@ -275,7 +275,9 @@ fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRun
         None,
         Some(lash_core::ProtocolTurnOptions::empty()),
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block("finish \"done\""))]),
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "finish(\"done\");",
+            ))]),
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!("done")))),
             RlmContractStep::Checkpoint,
         ],
@@ -296,8 +298,8 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "x = await tools.read_file({ path: \"foo\" })?",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "const x = await tools.read_file({ path: \"foo\" });",
             ))]),
             RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
                 &[],
@@ -334,8 +336,8 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "x = await tools.custom_frame_switch({})?",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "const x = await tools.custom_frame_switch({});",
             ))]),
             RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
                 &[],
@@ -376,8 +378,8 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "x = await tools.custom_fail({})?",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "const x = await tools.custom_fail({});",
             ))]),
             RlmContractStep::Exec(rlm_exec_response_with_tool_calls(
                 &[],
@@ -419,8 +421,8 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "finish { ok: true }",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "finish({ ok: true });",
             ))]),
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!({ "ok": true })))),
             RlmContractStep::Checkpoint,
@@ -450,8 +452,8 @@ fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScrip
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block(
-                "finish { missing: true }",
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
+                "finish({ missing: true });",
             ))]),
             RlmContractStep::Exec(rlm_exec_response(
                 &[],
@@ -484,7 +486,7 @@ fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunn
         None,
         None,
         vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_lashlang_block("finish true"))]),
+            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("finish(true);"))]),
             RlmContractStep::Exec(rlm_exec_response(&[], None, Some(json!(true)))),
         ],
     )?;
@@ -795,12 +797,12 @@ fn rlm_full_text(parts: &[LlmOutputPart]) -> String {
         .join("")
 }
 
-fn rlm_lashlang_block(code: &str) -> String {
-    format!("<lashlang>\n{code}\n</lashlang>")
+fn rlm_typescript_block(code: &str) -> String {
+    format!("<typescript>\n{code}\n</typescript>")
 }
 
-fn rlm_lashlang_block_with_prose(prose: &str, code: &str) -> String {
-    format!("{prose}\n{}", rlm_lashlang_block(code))
+fn rlm_typescript_block_with_prose(prose: &str, code: &str) -> String {
+    format!("{prose}\n{}", rlm_typescript_block(code))
 }
 
 fn rlm_exec_response(

@@ -65,10 +65,11 @@ async fn every_boundary_of_a_caught_throw_stays_capturable() {
     assert!(captured > 5, "the probe captured {captured} boundaries");
 }
 
-/// The catch binding holds a copy, so mutating it cannot reach back into the
-/// slot the value was thrown from.
+/// The catch binding names the same object that was thrown, so writing through
+/// it is visible at the slot the value came from. This pins ECMA reference
+/// semantics (ADR 0096): the binding is an alias, not a copy.
 #[tokio::test(flavor = "current_thread")]
-async fn mutating_the_catch_binding_leaves_the_thrown_slot_alone() {
+async fn mutating_the_catch_binding_is_visible_at_the_thrown_slot() {
     let program = Program::block(vec![
         Expr::Assign {
             target: crate::AssignTarget::variable("x".into()),
@@ -97,7 +98,7 @@ async fn mutating_the_catch_binding_leaves_the_thrown_slot_alone() {
     assert_eq!(
         run_exception_program(program, &Host).await,
         Ok(ExecutionOutcome::Finished(Value::List(
-            vec![Value::Number(1.0)].into()
+            vec![Value::Number(1.0), Value::Number(99.0)].into()
         )))
     );
 }

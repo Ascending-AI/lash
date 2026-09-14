@@ -137,7 +137,6 @@ async fn store_maintenance_fixture(
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: Arc::clone(&attachment_store),
         session_store_factory: Arc::clone(&store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -371,7 +370,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
         .kind("workbench-store-maintenance")
         .complete(|_request| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"attachment retained\"\n</lashlang>",
+                "<typescript>\nfinish(\"attachment retained\");\n</typescript>",
             ))
         })
         .build()

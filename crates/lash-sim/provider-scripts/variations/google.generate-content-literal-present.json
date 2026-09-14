@@ -22,7 +22,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<lashlang>\\nfinish \\\"settled\\\"\\n</lashlang>\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":7}}}"
+      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<typescript>\\nfinish(\\\"settled\\\");\\n</typescript>\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":7}}}"
     },
     {
       "at": 21,

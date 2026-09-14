@@ -57,25 +57,15 @@ use tracing_subscriber::layer::{Context as LayerContext, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
 const TURN_PROMPT: &str = "commit one turn";
-/// The scripted cell, in the dialect the row is running.
+/// The scripted cell this harness replies with.
 ///
 /// This harness commits real turns, so its reply has to be a cell the session
-/// can execute. Hard-coded Lashlang meant the TypeScript row of
-/// `session-lease-triage` never committed a turn in the dialect it claimed:
-/// the session refuses a foreign cell, so the phase's "a turn commits" evidence
-/// was produced by a Lashlang session under a TypeScript label.
+/// can execute; a foreign cell is refused and the phase's "a turn commits"
+/// evidence would never be produced.
 fn scripted_program() -> String {
-    lash_restate_postgres_workers_e2e::scripted_finish_cell(runbook_dialect(), "\"ok\"")
+    lash_restate_postgres_workers_e2e::scripted_finish_cell("\"ok\"")
 }
 
-/// Read once, so a bad value fails the phase rather than one backend.
-fn runbook_dialect() -> lash::rlm::RlmDialect {
-    static DIALECT: std::sync::OnceLock<lash::rlm::RlmDialect> = std::sync::OnceLock::new();
-    *DIALECT.get_or_init(|| {
-        lash_restate_postgres_workers_e2e::runbook_rlm_dialect()
-            .expect("LASH_RUNBOOK_DIALECT names a registered dialect")
-    })
-}
 /// Renewals land often enough that a healthy holder is provably renewing within
 /// a phase, and the TTL is long enough that it never lapses on its own: every
 /// lease loss in this harness is injected, never a timing accident.
@@ -369,14 +359,6 @@ impl TurnCore {
     async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
         self.core
             .session(session_id)
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(runbook_dialect()),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )
-            .context("state the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))
@@ -584,7 +566,7 @@ async fn provider_hang(
 
     Ok(json!({
         "checkpoint": "provider_hang_shape",
-        "dialect": runbook_dialect().language_id(),
+        "dialect": "typescript",
         "backend": backend.name,
         "session_id": session_id,
         "expected_holder_owner_id": holder.owner_id,
@@ -692,7 +674,7 @@ async fn lease_takeover(
 
     Ok(json!({
         "checkpoint": "lease_takeover",
-        "dialect": runbook_dialect().language_id(),
+        "dialect": "typescript",
         "backend": backend.name,
         "session_id": session_id,
         "abandoned_owner_id": abandoned_by.owner_id,
@@ -904,7 +886,7 @@ async fn commit_cas_livelock(
 
     Ok(json!({
         "checkpoint": "commit_cas_livelock",
-        "dialect": runbook_dialect().language_id(),
+        "dialect": "typescript",
         "backend": backend.name,
         "session_id": session_id,
         "shared_owner_id": shared.owner_id,
@@ -1062,7 +1044,7 @@ async fn direct_turn_recovery(
 
     Ok(json!({
         "checkpoint": "direct_turn_recovery",
-        "dialect": runbook_dialect().language_id(),
+        "dialect": "typescript",
         "backend": backend.name,
         "session_id": session_id,
         "abandoned_owner_id": abandoned_by.owner_id,

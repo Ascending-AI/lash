@@ -656,7 +656,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                 async move {
                     provider_calls.fetch_add(1, Ordering::SeqCst);
                     Ok(crate::tests::text_response(
-                        "<lashlang>\nfinish \"ownership answer\"\n</lashlang>",
+                        "<typescript>\nfinish(\"ownership answer\");\n</typescript>",
                     ))
                 }
             })

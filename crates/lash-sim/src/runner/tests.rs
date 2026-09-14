@@ -64,7 +64,8 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         ),
     ] {
         let responses = vec![
-            "<lashlang>\nscratch_note = \"saved\"\nprint scratch_note\n</lashlang>".to_string(),
+            "<typescript>\nconst scratch_note = \"saved\";\nprint(scratch_note);\n</typescript>"
+                .to_string(),
             "RLM work is complete.".to_string(),
         ];
         let mut scripts = runtime_provider_scripts_for_texts(OPENAI_COMPATIBLE, &responses)

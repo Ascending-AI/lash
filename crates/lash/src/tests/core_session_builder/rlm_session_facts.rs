@@ -1,18 +1,22 @@
 use super::*;
 
-// Facade-level tests for the RLM source-dialect layer: how a session's dialect
-// is selected on the production path, what makes it durable, and what cannot
-// change it once it is.
+// Facade-level tests for the durable RLM session facts: what a session records
+// on the production path, what makes those facts durable, and what cannot
+// change them once they are recorded. TypeScript is the sole RLM language
+// (ADR 0096), so no fact here names one.
 
-/// State a session's dialect through the plugin-agnostic options seam, which
-/// applies it as a guarded set-if-unset write (ADR 0066).
+/// State a session's termination through the plugin-agnostic options seam,
+/// which applies it as a guarded set-if-unset write (ADR 0066).
 #[cfg(feature = "rlm")]
-fn stating_dialect(builder: crate::SessionBuilder, dialect: RlmDialect) -> crate::SessionBuilder {
+fn stating_termination(
+    builder: crate::SessionBuilder,
+    termination: crate::rlm::RlmTermination,
+) -> crate::SessionBuilder {
     builder
         .plugin_option(
             crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
             crate::rlm::RlmCreateExtras {
-                dialect: Some(dialect),
+                termination: Some(termination),
                 ..crate::rlm::RlmCreateExtras::default()
             },
         )
@@ -60,8 +64,7 @@ impl lash_core::ToolProvider for RefreshableDialectTool {
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn typescript_dialect_is_selected_on_the_production_session_path_and_survives_resume()
--> Result<()> {
+async fn typescript_is_served_on_the_production_session_path_and_survives_resume() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
@@ -92,12 +95,7 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
         ))
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = stating_dialect(
-        core.session("rlm-typescript-production"),
-        RlmDialect::Typescript,
-    )
-    .open()
-    .await?;
+    let session = core.session("rlm-typescript-production").open().await?;
     let first = session
         .turn(TurnInput::text("compute"))
         .require_finish()?
@@ -152,7 +150,7 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Result<()> {
+async fn queued_session_command_restores_the_recorded_typescript_session() -> Result<()> {
     let tools = Arc::new(RefreshableDialectTool::new("before_refresh"));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("rlm-typescript-queued-session-command")
@@ -169,12 +167,10 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
         ))
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = stating_dialect(
-        core.session("rlm-typescript-queued-session-command"),
-        RlmDialect::Typescript,
-    )
-    .open()
-    .await?;
+    let session = core
+        .session("rlm-typescript-queued-session-command")
+        .open()
+        .await?;
     session
         .turn(TurnInput::text("create a typescript execution snapshot"))
         .require_finish()?
@@ -194,8 +190,8 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
         .admin()
         .commands()
         .refresh_tool_catalog(
-            "restore the recorded typescript dialect",
-            "typescript-dialect-refresh",
+            "restore the recorded typescript session",
+            "typescript-session-refresh",
         )
         .await?;
 
@@ -218,20 +214,19 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
     Ok(())
 }
 
-/// A per-turn protocol override cannot rewrite the session's recorded dialect.
+/// A per-turn protocol override naming the retired `dialect` field cannot
+/// re-point the language a turn is served in, and never reaches durable state.
 ///
 /// `TurnBuilder::protocol_turn_options` is public host surface and the merge
 /// behind it is a shallow key merge, so a host-supplied `{"dialect":"..."}` is
-/// a write that reaches the protocol without passing through the create-time
-/// resolution that enforces the pin. It does not reach durable state — the
-/// commit persists the session-level options, not the turn-scoped merge — but
-/// nothing pinned that, and the difference between "cannot" and "happens not
-/// to" is one refactor. A session that could be re-pointed mid-life would
-/// produce a bundle whose prompt and recorded dialect disagree, which is the
+/// a write that reaches the protocol without passing through create-time
+/// resolution. TypeScript is now the only language (ADR 0096), so the field
+/// cannot select anything — but a turn that silently accepted it would leave a
+/// bundle whose prompt and recorded options disagree, which is the
 /// mislabeled-evidence class this layer exists to close.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn a_per_turn_protocol_override_cannot_rewrite_the_recorded_dialect() -> Result<()> {
+async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("rlm-dialect-turn-override")
@@ -256,19 +251,14 @@ async fn a_per_turn_protocol_override_cannot_rewrite_the_recorded_dialect() -> R
         .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = stating_dialect(
-        core.session("rlm-dialect-turn-override"),
-        RlmDialect::Typescript,
-    )
-    .open()
-    .await?;
+    let session = core.session("rlm-dialect-turn-override").open().await?;
     session
-        .turn(TurnInput::text("pin the dialect"))
+        .turn(TurnInput::text("open the session"))
         .require_finish()?
         .run()
         .await?;
 
-    // The attack: a host-supplied per-turn override naming the other dialect.
+    // The attack: a host-supplied per-turn override naming the retired field.
     let attack = lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({
         "dialect": "lashlang"
     }));
@@ -297,25 +287,28 @@ async fn a_per_turn_protocol_override_cannot_rewrite_the_recorded_dialect() -> R
     for prompt in &prompts {
         assert!(
             prompt.contains("## TypeScript execution") && !prompt.contains("<lashlang>"),
-            "a per-turn override must not re-point the served dialect: {prompt}"
+            "a per-turn override must not re-point the served language: {prompt}"
         );
     }
 
-    // And the durable pin is unchanged, so the next open still serves
-    // TypeScript.
+    // And the durable bag never took the field, so the next open is not
+    // refused as a pre-cutover record.
     let reopened = core.session("rlm-dialect-turn-override").open().await?;
-    let recorded = reopened.read_view().protocol_turn_options().payload["dialect"].clone();
-    assert_eq!(
-        recorded,
-        serde_json::json!("typescript"),
-        "the recorded dialect must survive a per-turn override"
+    assert!(
+        reopened
+            .read_view()
+            .protocol_turn_options()
+            .payload
+            .get("dialect")
+            .is_none(),
+        "a per-turn override must not write the retired field into durable state"
     );
     Ok(())
 }
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn unknown_rlm_dialect_fails_during_session_creation() -> Result<()> {
+async fn create_options_naming_a_dialect_fail_during_session_creation() -> Result<()> {
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -332,107 +325,89 @@ async fn unknown_rlm_dialect_fails_during_session_creation() -> Result<()> {
         .open()
         .await
     {
-        Ok(_) => panic!("an unregistered dialect must fail at session creation"),
+        Ok(_) => panic!("the create contract carries no language choice"),
         Err(error) => error,
     };
     assert!(error.to_string().contains("invalid RLM create options"));
-    assert!(error.to_string().contains("python"));
+    assert!(
+        error.to_string().contains("dialect"),
+        "the refusal names the field the host stated: {error}"
+    );
     Ok(())
 }
 
 /// The read-only-variables block reaches a served prompt **once**, spelled in
-/// the session's own dialect.
+/// the session's language.
 ///
 /// Session-scoped projected bindings are rendered once in the vocabulary of
-/// the session that owns them.
+/// the session that owns them. The two-dialect loop this used to run went with
+/// the second dialect (ADR 0096); the once-not-twice claim is what it measured.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect() -> Result<()> {
+async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
     use lash_protocol_rlm::RlmProjectedBindings;
 
-    for (dialect, own_tag, foreign_tag) in [
-        (
-            lash_rlm_types::RlmDialect::Lashlang,
-            "<lashlang>",
-            "<typescript>",
-        ),
-        (
-            lash_rlm_types::RlmDialect::Typescript,
-            "<typescript>",
-            "<lashlang>",
-        ),
-    ] {
-        let served: Arc<std::sync::Mutex<Vec<String>>> =
-            Arc::new(std::sync::Mutex::new(Vec::new()));
-        let provider = {
-            let served = Arc::clone(&served);
-            crate::testing::TestProvider::builder()
-                .kind("projected-prompt")
-                .complete(move |request: crate::provider::LlmRequest| {
-                    let served = Arc::clone(&served);
-                    async move {
-                        served.lock_recover().push(format!("{request:?}"));
-                        Ok(LlmResponse {
-                            parts: vec![LlmOutputPart::Text {
-                                text: "done".to_string(),
-                                response_meta: None,
-                            }],
-                            ..LlmResponse::default()
-                        })
-                    }
-                })
-                .build()
-                .into_handle()
-        };
-        let core = explicit_ephemeral_facets(rlm_core_builder())
-            .provider(provider)
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())?;
-        let session = stating_dialect(
-            core.session(format!("projected-{}", dialect.language_id())),
-            dialect,
-        )
-        .open()
+    let served: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let provider = {
+        let served = Arc::clone(&served);
+        crate::testing::TestProvider::builder()
+            .kind("projected-prompt")
+            .complete(move |request: crate::provider::LlmRequest| {
+                let served = Arc::clone(&served);
+                async move {
+                    served.lock_recover().push(format!("{request:?}"));
+                    Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "done".to_string(),
+                            response_meta: None,
+                        }],
+                        ..LlmResponse::default()
+                    })
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("projected-typescript").open().await?;
+
+    session
+        .admin()
+        .protocol()
+        .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
+            RlmProjectedBindings::new()
+                .bind_json("current_file", serde_json::json!("src/lib.rs"))
+                .expect("bind"),
+        ))
+        .await?;
+    session
+        .turn(TurnInput::text("read the projected binding"))
+        .run()
         .await?;
 
-        session
-            .admin()
-            .protocol()
-            .apply_session_extension(lash_protocol_rlm::rlm_session_projection_extension(
-                RlmProjectedBindings::new()
-                    .bind_json("current_file", serde_json::json!("src/lib.rs"))
-                    .expect("bind"),
-            ))
-            .await?;
-        session
-            .turn(TurnInput::text("read the projected binding"))
-            .run()
-            .await?;
-
-        let prompts = served.lock_recover().clone();
-        let prompt = prompts
-            .first()
-            .expect("the turn reached the provider")
-            .clone();
-        assert_eq!(
-            prompt
-                .matches("These read-only values are already in scope")
-                .count(),
-            1,
-            "the read-only block must be assembled once, not once per storage route ({})",
-            dialect.language_id()
-        );
-        assert!(
-            prompt.contains(&format!("Access them directly in `{own_tag}`")),
-            "{} must be pointed at its own cells",
-            dialect.language_id()
-        );
-        assert!(
-            !prompt.contains(&format!("Access them directly in `{foreign_tag}`")),
-            "{} must not be pointed at the other dialect's cells",
-            dialect.language_id()
-        );
-    }
+    let prompts = served.lock_recover().clone();
+    let prompt = prompts
+        .first()
+        .expect("the turn reached the provider")
+        .clone();
+    assert_eq!(
+        prompt
+            .matches("These read-only values are already in scope")
+            .count(),
+        1,
+        "the read-only block must be assembled once, not once per storage route"
+    );
+    assert!(
+        prompt.contains("Access them directly in `<typescript>`"),
+        "the session must be pointed at its own cells"
+    );
+    assert!(
+        !prompt.contains("Access them directly in `<lashlang>`"),
+        "the retired dialect's cells must not be named"
+    );
     Ok(())
 }
 
@@ -448,12 +423,9 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_dialect(core.session("rlm-typed-read"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = core.session("rlm-typed-read").open().await?;
 
     let recorded = session.rlm_config().expect("recorded config decodes");
-    assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
     assert_eq!(
         recorded.final_answer_format,
         Some(crate::rlm::RlmFinalAnswerFormat::Markdown)
@@ -465,10 +437,11 @@ async fn the_typed_read_reports_what_the_session_recorded_and_restating_it_is_a_
 
     let unchanged = session
         .set_rlm_config_if_unset(
-            crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript),
+            crate::rlm::RlmSessionConfig::new()
+                .final_answer_format(crate::rlm::RlmFinalAnswerFormat::Markdown),
         )
         .await
-        .expect("restating the recorded dialect is a no-op");
+        .expect("restating the recorded final-answer format is a no-op");
     assert_eq!(unchanged, recorded);
     Ok(())
 }
@@ -484,9 +457,7 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_dialect(core.session("rlm-guarded-write"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = core.session("rlm-guarded-write").open().await?;
 
     let written = session
         .set_rlm_config_if_unset(
@@ -499,7 +470,11 @@ async fn a_guarded_write_lands_on_an_unrecorded_fact_and_leaves_the_rest_alone()
         written.termination,
         Some(crate::rlm::RlmTermination::FinishRequired { schema: None })
     );
-    assert_eq!(written.dialect, Some(RlmDialect::Typescript));
+    assert_eq!(
+        written.final_answer_format,
+        Some(crate::rlm::RlmFinalAnswerFormat::Markdown),
+        "the fact the session already recorded is untouched"
+    );
     assert_eq!(
         session.rlm_config().expect("recorded config decodes"),
         written,
@@ -518,12 +493,7 @@ async fn guarded_rlm_fact_set_emits_its_committed_revision() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_dialect(
-        core.session("rlm-resident-publication"),
-        RlmDialect::Typescript,
-    )
-    .open()
-    .await?;
+    let session = core.session("rlm-resident-publication").open().await?;
     let before = session.observe().current_observation();
 
     session
@@ -560,31 +530,39 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = stating_dialect(core.session("rlm-refused-write"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = stating_termination(
+        core.session("rlm-refused-write"),
+        crate::rlm::RlmTermination::FinishRequired { schema: None },
+    )
+    .open()
+    .await?;
 
     let error = session
-        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
+        .set_rlm_config_if_unset(
+            crate::rlm::RlmSessionConfig::new().termination(crate::rlm::RlmTermination::Natural),
+        )
         .await
-        .expect_err("a recorded dialect cannot be set to another one");
+        .expect_err("a recorded termination cannot be set to another one");
     let crate::rlm::RlmSessionConfigError::Conflict(
-        crate::rlm::RlmSessionConfigConflict::Dialect {
+        crate::rlm::RlmSessionConfigConflict::Termination {
             recorded,
             requested,
         },
     ) = error
     else {
-        panic!("a dialect disagreement must refuse as the typed dialect conflict");
+        panic!("a termination disagreement must refuse as the typed termination conflict");
     };
-    assert_eq!(recorded, RlmDialect::Typescript);
-    assert_eq!(requested, RlmDialect::Lashlang);
+    assert_eq!(
+        recorded,
+        Box::new(crate::rlm::RlmTermination::FinishRequired { schema: None })
+    );
+    assert_eq!(requested, Box::new(crate::rlm::RlmTermination::Natural));
     assert_eq!(
         session
             .rlm_config()
             .expect("recorded config decodes")
-            .dialect,
-        Some(RlmDialect::Typescript),
+            .termination,
+        Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
         "a refused write leaves the recorded fact exactly as it was"
     );
     Ok(())
@@ -721,61 +699,9 @@ async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config()
     Ok(())
 }
 
-/// A host that states no dialect still gets one: the first open records the
-/// default, and that default is a pin like any other. A post-open statement is
-/// compared against the dialect the session is running and never written, so
-/// the recorded fact cannot drift away from the plugin that is executing.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn a_post_open_dialect_is_compared_against_the_running_default_never_written() -> Result<()> {
-    use crate::rlm::RlmSessionExt as _;
-
-    let core = explicit_ephemeral_facets(rlm_core_builder())
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-unrecorded-dialect").open().await?;
-    assert_eq!(
-        session
-            .rlm_config()
-            .expect("recorded config decodes")
-            .dialect,
-        Some(RlmDialect::Lashlang),
-        "a host that states no dialect gets the default recorded at its first open"
-    );
-
-    let agreed = session
-        .set_rlm_config_if_unset(crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Lashlang))
-        .await
-        .expect("stating the dialect the session is running is a no-op");
-    assert_eq!(
-        agreed,
-        session.rlm_config().expect("recorded config decodes")
-    );
-
-    let error = session
-        .set_rlm_config_if_unset(
-            crate::rlm::RlmSessionConfig::new().dialect(RlmDialect::Typescript),
-        )
-        .await
-        .expect_err("an open session cannot be moved onto another dialect");
-    let crate::rlm::RlmSessionConfigError::Conflict(
-        crate::rlm::RlmSessionConfigConflict::Dialect {
-            recorded,
-            requested,
-        },
-    ) = error
-    else {
-        panic!("a dialect disagreement must refuse as the typed dialect conflict");
-    };
-    assert_eq!(
-        recorded,
-        RlmDialect::Lashlang,
-        "the conflict names the dialect the session is running, not an absent one"
-    );
-    assert_eq!(requested, RlmDialect::Typescript);
-    Ok(())
-}
+// `a_post_open_dialect_is_compared_against_the_running_default_never_written`
+// was deleted with the session language pin (ADR 0096): there is no dialect to
+// default, compare, or drift away from the running plugin.
 
 /// A guarded write is durable: the fact it lands on is still recorded when the
 /// session is closed and reopened cold.
@@ -791,9 +717,7 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
         .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = stating_dialect(core.session("rlm-write-roundtrip"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = core.session("rlm-write-roundtrip").open().await?;
     session
         .set_rlm_config_if_unset(
             crate::rlm::RlmSessionConfig::new()
@@ -810,15 +734,18 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
         Some(crate::rlm::RlmTermination::FinishRequired { schema: None }),
         "the written termination is still recorded after a cold reopen"
     );
-    assert_eq!(recorded.dialect, Some(RlmDialect::Typescript));
     Ok(())
 }
 
-/// The same refusal reaches a host that states a disagreeing dialect at open:
-/// the open fails rather than quietly running the session in its old dialect.
+/// A host that still states a language at open is refused rather than having
+/// the statement silently dropped.
+///
+/// The create contract has no such field since ADR 0096, and `RlmCreateExtras`
+/// denies unknown keys, so a pre-cutover host learns at its next open instead
+/// of running a session it believes is pinned to something.
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn stating_a_disagreeing_dialect_at_open_refuses_instead_of_falling_back() -> Result<()> {
+async fn stating_a_dialect_at_open_refuses_instead_of_being_dropped() -> Result<()> {
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
@@ -826,22 +753,26 @@ async fn stating_a_disagreeing_dialect_at_open_refuses_instead_of_falling_back()
         .store_factory(store_factory)
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = stating_dialect(core.session("rlm-open-refusal"), RlmDialect::Typescript)
-        .open()
-        .await?;
+    let session = core.session("rlm-open-refusal").open().await?;
     Box::pin(session.close()).await?;
 
-    let Err(error) = stating_dialect(core.session("rlm-open-refusal"), RlmDialect::Lashlang)
+    let mut options = lash_core::PluginOptions::default();
+    options.plugins.insert(
+        lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        serde_json::json!({ "dialect": "lashlang" }),
+    );
+    let Err(error) = core
+        .session("rlm-open-refusal")
+        .plugin_options(options)
         .open()
         .await
     else {
-        panic!("a recorded dialect cannot be reopened as another one");
+        panic!("a session cannot be opened with a stated language");
     };
     assert!(
-        error.to_string().contains(
-            "RLM session dialect is durably pinned to `typescript` and cannot be set to `lashlang`"
-        ),
-        "the refusal must render the one typed message: {error}"
+        error.to_string().contains("invalid RLM create options")
+            && error.to_string().contains("dialect"),
+        "the refusal must name the retired field: {error}"
     );
     Ok(())
 }

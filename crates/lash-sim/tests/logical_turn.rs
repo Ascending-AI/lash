@@ -846,19 +846,19 @@ async fn rlm_continue_as_seed_materializes_in_the_new_frame() {
                     let text = match call_index.fetch_add(1, Ordering::SeqCst) {
                         0 => {
                             r#"
-<lashlang>
+<typescript>
 await control.continue_as({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
-})?
-</lashlang>
+});
+</typescript>
 "#
                         }
                         1 => {
                             r#"
-<lashlang>
-finish { baton: baton }
-</lashlang>
+<typescript>
+finish({ baton: baton });
+</typescript>
 "#
                         }
                         index => panic!("unexpected RLM provider call {index}"),

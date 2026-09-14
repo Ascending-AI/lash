@@ -75,7 +75,6 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -282,7 +281,6 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),
@@ -1065,7 +1063,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),

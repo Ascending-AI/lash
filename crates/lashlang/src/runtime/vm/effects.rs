@@ -358,9 +358,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
         // Phase two: process handles written into the aggregate settle after
         // the tool batch, in written order, through the same durable
-        // process-await seam a direct `await` uses. Lashlang values may be
-        // bound containers, so walk those recursively; TypeScript deliberately
-        // retains Promise's shallow element semantics. Reaching this point
+        // process-await seam a direct `await` uses. Settlement is shallow:
+        // only a handle written at an element position settles, matching
+        // Promise's element semantics (ADR 0096). Reaching this point
         // means no tool leaf rejected, so the first failing process is the
         // rejection an unwrapping aggregate reports.
         let mut process_positions = Vec::new();
@@ -370,17 +370,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 return Err(RuntimeError::AggregateAwaitValueOutOfRange);
             };
             let handle = value.clone();
-            values[index] = if self.reference_semantics {
-                if !is_runtime_process_handle(&handle) {
-                    continue;
-                }
-                match process_leaves {
-                    ProcessLeafSettlement::Unwrap => self.await_value_unwrap(handle).await?,
-                    ProcessLeafSettlement::Result => self.await_value(handle).await?,
-                }
-            } else {
-                self.settle_lashlang_process_leaves(handle, process_leaves)
-                    .await?
+            if !is_runtime_process_handle(&handle) {
+                continue;
+            }
+            values[index] = match process_leaves {
+                ProcessLeafSettlement::Unwrap => self.await_value_unwrap(handle).await?,
+                ProcessLeafSettlement::Result => self.await_value(handle).await?,
             };
         }
 
@@ -390,58 +385,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         self.stack.push(value);
         Ok(())
-    }
-
-    /// Settles only process handles inside a Lashlang aggregate value. Unlike
-    /// a direct `await`, ordinary leaves are retained because a runtime-bound
-    /// container may deliberately mix handles with already-settled values.
-    fn settle_lashlang_process_leaves(
-        &self,
-        value: Value,
-        settlement: ProcessLeafSettlement,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            match value {
-                handle if is_runtime_process_handle(&handle) => match settlement {
-                    ProcessLeafSettlement::Unwrap => self.await_value_unwrap(handle).await,
-                    ProcessLeafSettlement::Result => self.await_value(handle).await,
-                },
-                Value::Tuple(items) => {
-                    let mut settled = Vec::with_capacity(items.len());
-                    for item in items.iter().cloned() {
-                        settled.push(
-                            self.settle_lashlang_process_leaves(item, settlement)
-                                .await?,
-                        );
-                    }
-                    Ok(Value::Tuple(settled.into()))
-                }
-                Value::List(items) => {
-                    let mut settled = Vec::with_capacity(items.len());
-                    for item in items.iter().cloned() {
-                        settled.push(
-                            self.settle_lashlang_process_leaves(item, settlement)
-                                .await?,
-                        );
-                    }
-                    Ok(Value::List(settled.into()))
-                }
-                Value::Record(record) => {
-                    let mut settled = record_with_capacity(record.len());
-                    for entry in record.entries.iter() {
-                        settled.insert_symbolized(
-                            entry.symbol,
-                            entry.name.clone(),
-                            self.settle_lashlang_process_leaves(entry.value.clone(), settlement)
-                                .await?,
-                        );
-                    }
-                    Ok(Value::Record(Arc::new(settled)))
-                }
-                settled => Ok(settled),
-            }
-        })
     }
 
     /// Phase one of an aggregate await: every tool leaf as one host batch.
@@ -644,9 +587,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// value and records its rejection, a wrapped leaf becomes a result record.
     /// The first rejection in the batch's selection order fails the aggregate.
     ///
-    /// `Promise.all` reports the rejection that settled first; Lashlang's own
-    /// aggregates report the first one written. Both scan the same per-leaf
-    /// rejections, in different orders.
+    /// `Promise.all` reports the rejection that settled first (ADR 0096), so a
+    /// batch that can propagate a rejection scans the host's settlement order;
+    /// `allSettled` never propagates one and keeps leaf order.
     fn settle_resource_operation_leaves(
         &mut self,
         leaves: impl Iterator<Item = (bool, Option<Span>)>,

@@ -412,9 +412,16 @@ pub(crate) struct DialectPromptVocabulary {
 }
 
 impl Default for DialectPromptVocabulary {
-    /// The default dialect's words, matching `RlmDialect::default()`.
+    /// TypeScript's words, because they are the only ones a session can be
+    /// served (ADR 0096).
+    ///
+    /// This used to answer with the retired surface's vocabulary, which was
+    /// correct only while `RlmDialect::default()` named it. With the selector
+    /// gone, a defaulted vocabulary that still spoke the retired surface would
+    /// be the compatibility reader this cutover exists to remove. FIG-3021
+    /// deletes the lashlang vocabulary itself.
     fn default() -> Self {
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+        crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY
     }
 }
 
@@ -724,43 +731,6 @@ mod tests {
                 .expect("typescript is registered")
                 .language_id(),
             "typescript"
-        );
-    }
-
-    /// `RlmDialect::ALL` is what every host offers a dialect choice from, so it
-    /// has to name exactly the dialects this registry can activate. Checked
-    /// against the dialect implementations themselves rather than against a
-    /// second list of names: a dialect the registry gains and the array lacks
-    /// is a create form that cannot select it, and a name the array gains
-    /// without a dialect is a create form that offers one the executor refuses.
-    #[test]
-    fn the_public_dialect_array_names_every_registered_dialect() {
-        let registry = RlmDialectRegistry::new([
-            Arc::new(lashlang_test_dialect()) as Arc<dyn RlmDialect>,
-            Arc::new(typescript_test_dialect()) as Arc<dyn RlmDialect>,
-        ]);
-
-        let mut registered = registry.dialects.keys().copied().collect::<Vec<_>>();
-        registered.sort_unstable();
-        let mut published = lash_rlm_types::RlmDialect::ALL
-            .iter()
-            .map(|dialect| dialect.language_id())
-            .collect::<Vec<_>>();
-        published.sort_unstable();
-
-        assert_eq!(published, registered);
-        for language_id in registered {
-            assert_eq!(
-                lash_rlm_types::RlmDialect::from_language_id(language_id)
-                    .expect("a registered language id resolves to a typed dialect")
-                    .language_id(),
-                language_id
-            );
-        }
-        assert_eq!(
-            lash_rlm_types::RlmDialect::from_language_id("lashscript"),
-            None,
-            "an unregistered language id must refuse rather than default"
         );
     }
 }

@@ -4,8 +4,11 @@
 //! Every case here is a program a reviewer wrote to break the heap
 //! representation: a container that kept a live alias to a value stored
 //! elsewhere, or a snapshot the encoder emitted outside the language its own
-//! decoder accepts. They assert the pre-heap tree language's value semantics —
-//! a store copies — and that an emitted snapshot always decodes.
+//! decoder accepts. They now assert ECMA reference semantics — a store
+//! aliases, and a mutation is visible through every name that reaches the
+//! object (ADR 0096) — and that an emitted snapshot always decodes. The
+//! decoding half is what these probes were written to break, and it is
+//! unchanged: sharing is exactly the shape the reported failures produced.
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Snapshot, State,
@@ -66,10 +69,11 @@ fn number(value: f64) -> Value {
 
 /// Sol probe 1: the optimized single-item concat across three cells.
 ///
-/// `acc = acc + [x]` inserts a copy, so mutating `x` afterwards leaves `acc`
-/// alone. The reported failure produced `[[1, 2]]`.
+/// `acc = acc + [x]` inserts the object `x` names, so a later mutation of `x`
+/// is visible through `acc`, and the snapshot carrying both roots still
+/// decodes.
 #[tokio::test(flavor = "current_thread")]
-async fn optimized_concat_insertion_copies_the_appended_binding() {
+async fn optimized_concat_insertion_shares_the_appended_binding() {
     let mut state = State::new();
     run(&mut state, "x = [1]\nacc = []\nfinish 0").await;
     let mut state = round_trip(&state);
@@ -77,19 +81,19 @@ async fn optimized_concat_insertion_copies_the_appended_binding() {
     let mut state = round_trip(&state);
     let value = run(&mut state, "x = push(x, 2)\nfinish acc").await;
 
-    assert_eq!(value, list(vec![list(vec![number(1.0)])]));
+    assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
 /// Sol probe 1, single cell: the same concat without a snapshot boundary.
 #[tokio::test(flavor = "current_thread")]
-async fn optimized_concat_insertion_copies_within_one_cell() {
+async fn optimized_concat_insertion_shares_within_one_cell() {
     let value = run(
         &mut State::new(),
         "x = [1]\nacc = []\nacc = acc + [x]\nx = push(x, 2)\nfinish acc",
     )
     .await;
 
-    assert_eq!(value, list(vec![list(vec![number(1.0)])]));
+    assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
 /// The general concat form copies the right operand's members too.
@@ -122,9 +126,10 @@ async fn slot_concat_copies_the_right_operand_members() {
 
 /// Sol probe 2: a root holding a nested container, then aliased.
 ///
-/// The two roots must not share the nested object. The reported failure encoded
-/// successfully and then failed its own decoder with "heap roots `alias` and
-/// `pair` must not share object 5".
+/// The two roots share the nested object, and the snapshot carrying that shape
+/// must still decode: the reported failure encoded successfully and then failed
+/// its own decoder with "heap roots `alias` and `pair` must not share object
+/// 5". Sharing is now ordinary (ADR 0096); the decode is the assertion.
 #[tokio::test(flavor = "current_thread")]
 async fn aliased_root_with_a_nested_container_round_trips() {
     let mut state = State::new();
@@ -140,7 +145,7 @@ async fn aliased_root_with_a_nested_container_round_trips() {
     )
     .await;
 
-    let pair = Value::Tuple(vec![list(vec![number(1.0)])].into());
+    let pair = Value::Tuple(vec![list(vec![number(1.0), number(2.0)])].into());
     assert_eq!(
         value,
         list(vec![
@@ -151,13 +156,18 @@ async fn aliased_root_with_a_nested_container_round_trips() {
     );
 }
 
-/// Sol probe 3: self insertion stays a copy rather than a cycle.
+/// Sol probe 3: self insertion now builds a cycle, because a store aliases
+/// (ADR 0096). A cycle is representable on the heap, so the failure is at the
+/// host boundary — a value handed out must be finite — and it is typed, not a
+/// hang or a stack overflow.
 #[tokio::test(flavor = "current_thread")]
-async fn self_insertion_stores_a_copy() {
+async fn self_insertion_builds_a_cycle_the_host_boundary_refuses() {
+    let compiled = compile("a = []\na = push(a, a)\nfinish a").expect("probe cell should compile");
     let mut state = State::new();
-    let value = run(&mut state, "a = []\na = push(a, a)\nfinish a").await;
-
-    assert_eq!(value, list(vec![list(Vec::new())]));
+    let error = execute(&compiled, &mut state, &ProbeHost)
+        .await
+        .expect_err("a cyclic value cannot cross the host boundary");
+    assert!(error.to_string().contains("contains a cycle"), "{error}");
     round_trip(&state);
 }
 
@@ -182,9 +192,10 @@ async fn accumulated_rows_aliased_to_a_second_root_round_trip() {
     assert_eq!(value, list(vec![rows.clone(), rows]));
 }
 
-/// Opus N1, mutation form: the aliased root must not observe later appends.
+/// Opus N1, mutation form: the aliased root names the same list, so it
+/// observes later appends (ADR 0096), and the snapshot still decodes.
 #[tokio::test(flavor = "current_thread")]
-async fn aliased_accumulator_does_not_observe_later_appends() {
+async fn aliased_accumulator_observes_later_appends() {
     let value = run(
         &mut State::new(),
         "acc = []\nfor i in range(0, 2) { acc = push(acc, [i]) }\nb = acc\nacc = push(acc, [9])\nfinish b",
@@ -193,14 +204,19 @@ async fn aliased_accumulator_does_not_observe_later_appends() {
 
     assert_eq!(
         value,
-        list(vec![list(vec![number(0.0)]), list(vec![number(1.0)])])
+        list(vec![
+            list(vec![number(0.0)]),
+            list(vec![number(1.0)]),
+            list(vec![number(9.0)])
+        ])
     );
 }
 
 /// A descendant reached through a path read, stored elsewhere, then mutated in
-/// place through the original binding.
+/// place through the original binding: every name reaches the same object, so
+/// the mutation is visible everywhere (ADR 0096) and the state still decodes.
 #[tokio::test(flavor = "current_thread")]
-async fn descendant_read_into_a_new_binding_is_isolated() {
+async fn descendant_read_into_a_new_binding_shares_the_descendant() {
     let mut state = State::new();
     let value = run(
         &mut state,
@@ -221,7 +237,10 @@ async fn descendant_read_into_a_new_binding_is_isolated() {
             Value::Record(std::sync::Arc::new(
                 [(
                     "rows".to_string(),
-                    list(vec![list(vec![number(1.0)]), list(vec![number(2.0)])])
+                    list(vec![
+                        list(vec![number(1.0), number(99.0)]),
+                        list(vec![number(7.0)])
+                    ])
                 )]
                 .into_iter()
                 .collect()
@@ -230,7 +249,10 @@ async fn descendant_read_into_a_new_binding_is_isolated() {
             Value::Record(std::sync::Arc::new(
                 [(
                     "rows".to_string(),
-                    list(vec![list(vec![number(1.0)]), list(vec![number(7.0)])])
+                    list(vec![
+                        list(vec![number(1.0), number(99.0)]),
+                        list(vec![number(7.0)])
+                    ])
                 )]
                 .into_iter()
                 .collect()
@@ -240,8 +262,9 @@ async fn descendant_read_into_a_new_binding_is_isolated() {
     round_trip(&state);
 }
 
-/// Every binding a multi-root program leaves behind is independently owned, so
-/// the state it persists always decodes.
+/// A multi-root program leaves behind bindings that share objects, and the
+/// state it persists must still decode — including after a later append that
+/// every alias observes (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
 async fn multi_root_program_state_always_decodes() {
     let mut state = State::new();
@@ -266,7 +289,11 @@ async fn multi_root_program_state_always_decodes() {
 
     assert_eq!(
         restored.globals().get("alias").cloned(),
-        Some(list(vec![list(vec![number(1.0)]), list(vec![number(2.0)])]))
+        Some(list(vec![
+            list(vec![number(1.0)]),
+            list(vec![number(2.0)]),
+            list(vec![number(3.0)])
+        ]))
     );
 }
 

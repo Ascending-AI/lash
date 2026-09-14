@@ -96,7 +96,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -112,7 +112,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -136,7 +136,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]
@@ -224,7 +224,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -240,7 +240,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -264,7 +264,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]
@@ -352,7 +352,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -368,7 +368,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -392,7 +392,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]
@@ -494,7 +494,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -510,7 +510,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -534,7 +534,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]
@@ -612,7 +612,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -628,7 +628,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -652,7 +652,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]
@@ -730,7 +730,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<lashlang>\nfinish \"settled\"\n</lashlang>\n"
+                    "delta": "<typescript>\nfinish(\"settled\");\n</typescript>\n"
                   }
                 },
                 {
@@ -746,7 +746,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                          "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                           "annotations": []
                         }
                       ]
@@ -770,7 +770,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<lashlang>\nfinish \"settled\"\n</lashlang>\n",
+                              "text": "<typescript>\nfinish(\"settled\");\n</typescript>\n",
                               "annotations": []
                             }
                           ]

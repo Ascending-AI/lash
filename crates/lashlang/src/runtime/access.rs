@@ -97,21 +97,6 @@ pub(crate) fn value_contains_tool_handle(value: &Value) -> bool {
     }
 }
 
-pub(crate) fn read_field_direct(value: Value, field: &Name) -> Result<Value, RuntimeError> {
-    match value {
-        Value::Record(record) => Ok(record
-            .get_symbol(field.symbol)
-            .cloned()
-            .unwrap_or(Value::Null)),
-        Value::Image(image) => read_image_field(&image, field),
-        Value::Null => Ok(Value::Null),
-        _ => Err(RuntimeError::CannotReadField {
-            field: field.text.to_string(),
-            actual: value_type_name(&value).to_string(),
-        }),
-    }
-}
-
 pub(crate) fn read_image_field(image: &ImageValue, field: &Name) -> Result<Value, RuntimeError> {
     match field.text.as_ref() {
         "id" => Ok(Value::String(image.id.clone().into())),
@@ -127,10 +112,6 @@ pub(crate) fn read_image_field(image: &ImageValue, field: &Name) -> Result<Value
             .unwrap_or(Value::Null)),
         _ => Ok(Value::Null),
     }
-}
-
-pub(crate) fn read_index_direct(target: Value, index: Value) -> Result<Value, RuntimeError> {
-    read_index_ref_direct(&target, &index)
 }
 
 pub(crate) fn read_index_ref_direct(target: &Value, index: &Value) -> Result<Value, RuntimeError> {
@@ -180,6 +161,10 @@ pub(crate) fn read_javascript_field_direct(
         Value::String(value) if field.text.as_ref() == "length" => {
             Ok(Value::Number(value.encode_utf16().count() as f64))
         }
+        // An image is a host-supplied descriptor with a fixed, read-only
+        // metadata surface. That surface is a lash value-model fact, not a
+        // language one, so it survives the single-language cutover (ADR 0096).
+        Value::Image(image) => read_image_field(&image, field),
         Value::Null | Value::Undefined => Err(RuntimeError::CannotReadField {
             field: field.text.to_string(),
             actual: value_type_name(&value).to_string(),

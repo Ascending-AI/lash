@@ -37,12 +37,6 @@ pub(crate) async fn app_state(
         turn_input_applications,
         usage,
     } = read_state_projection(&state, &session_id, !active_turns.is_empty()).await?;
-    // The badge reads the dialect this session recorded, from the same read
-    // view the transcript labels its cells from (FIG-1306).
-    // Strict (FIG-1979): a recorded bag that does not decode is an error the
-    // operator sees, never a default dialect quietly labelling the transcript.
-    let recorded_dialect = lash::rlm::rlm_session_dialect(read_view.protocol_turn_options())
-        .map_err(AppError::internal)?;
     let active_turn_ids = active_turns
         .iter()
         .map(|address| address.turn_id.clone())
@@ -93,7 +87,6 @@ pub(crate) async fn app_state(
     } = project_chat(
         &state,
         &read_view,
-        recorded_dialect,
         &active_turns,
         &committed_input_turn_ids,
         &current_frame_input_turn_ids,
@@ -109,7 +102,7 @@ pub(crate) async fn app_state(
     Ok(Json(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
-            settings: state.settings_for_session(session_id.clone(), recorded_dialect),
+            settings: state.settings_for_session(session_id.clone()),
             messages,
             observation,
             product_events,
@@ -754,9 +747,7 @@ pub(crate) async fn reset_chat(
         .await?;
     retire_session(&state, &old_session_id).await?;
     state.event_tx.remove(&old_session_id);
-    let retired_dialect = state.requested_dialect(&old_session_id);
-    let (new_session_id, replaced_current) =
-        state.sessions.replace(&old_session_id, retired_dialect);
+    let (new_session_id, replaced_current) = state.sessions.replace(&old_session_id);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -787,12 +778,8 @@ pub(crate) async fn reset_chat(
         state.lashlang_execution.clear();
         state.mail_world.clear();
     }
-    // The rotated session has committed nothing yet, so it has recorded no
-    // dialect: the badge shows the dialect it will be opened with, which the
-    // rotation carried over from the session it replaced.
-    let rotated_dialect = state.requested_dialect(&new_session_id);
     Ok(Json(StateSnapshot {
-        settings: state.settings_for_session(new_session_id.clone(), rotated_dialect),
+        settings: state.settings_for_session(new_session_id.clone()),
         messages: Vec::new(),
         observation: session.observe().current_remote_observation(),
         product_events: ProductEventSnapshot::default(),

@@ -85,7 +85,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
     code: &str,
     break_retention: bool,
 ) -> Result<ParkedCellEvidence, String> {
-    use lashlang::{CompilationDialect, GlobalPatch, Vm, VmRunOutcome};
+    use lashlang::{GlobalPatch, Vm, VmRunOutcome};
 
     let mut host_environment = LashlangSurface::default()
         .host_environment(ctx.tool_catalog().as_ref())
@@ -103,23 +103,17 @@ pub(crate) async fn execute_parked_cell_for_tests(
             .linked_programs
             .get_or_compile(code, &host_environment)
             .map_err(|error| error.to_string())?,
-        "typescript" => match state.linked_programs.cached_linked_program(
-            code,
-            &host_environment,
-            CompilationDialect::Typescript,
-        ) {
+        "typescript" => match state
+            .linked_programs
+            .cached_linked_program(code, &host_environment)
+        {
             Some(program) => program,
             None => {
                 let program = lash_typescript::parse_with_globals(code, &host_environment.globals)
                     .map_err(|error| error.to_string())?;
                 state
                     .linked_programs
-                    .get_or_compile_ast(
-                        code,
-                        program,
-                        &host_environment,
-                        CompilationDialect::Typescript,
-                    )
+                    .get_or_compile_ast(code, program, &host_environment)
                     .map_err(|error| error.to_string())?
             }
         },

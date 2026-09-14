@@ -180,7 +180,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .kind("workbench-successor-persistence")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"replacement completed\"\n</lashlang>",
+                "<typescript>\nfinish(\"replacement completed\");\n</typescript>",
             ))
         })
         .build()
@@ -625,7 +625,7 @@ pub(super) fn gated_first_call_provider(
                     release.notified().await;
                 }
                 Ok(text_response(&format!(
-                    "<lashlang>\nfinish \"answer {call}\"\n</lashlang>"
+                    "<typescript>\nfinish(\"answer {call}\");\n</typescript>"
                 )))
             }
         })
@@ -1005,7 +1005,6 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     state.sessions.record(
         SessionId::from(selected_session_id.to_string()),
         "selected".to_string(),
-        lash::rlm::RlmDialect::Lashlang,
     );
     state
         .sessions
@@ -1532,7 +1531,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         .kind("workbench-dropped-send")
         .complete(|_| async {
             Ok(text_response(
-                "<lashlang>\nfinish \"request completed\"\n</lashlang>",
+                "<typescript>\nfinish(\"request completed\");\n</typescript>",
             ))
         })
         .build()

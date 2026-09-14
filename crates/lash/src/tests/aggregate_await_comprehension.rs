@@ -50,30 +50,30 @@ fn retail_order_definition() -> lash_core::ToolDefinition {
 }
 
 const TICKET_CELL: &str = r#"
-ids = ["o-17", "o-22", "o-37"]
-orders = await [retail.order({ id: id })? for id in ids]
-delivered = [o.id for o in orders if o.status == "delivered"]
-print(format("delivered: {}", delivered))
+const ids = ["o-17", "o-22", "o-37"];
+const orders = await Promise.all(ids.map((id) => retail.order({ id: id })));
+const delivered = orders.filter((o) => o.status == "delivered").map((o) => o.id);
+print(`delivered: ${delivered}`);
 "#;
 
 const IMPERATIVE_CELL: &str = r#"
-ids = ["o-17", "o-22", "o-37"]
-delivered = []
-for id in ids {
-  o = await retail.order({ id: id })?
-  if o.status == "delivered" {
-    delivered = push(delivered, o.id)
+const ids = ["o-17", "o-22", "o-37"];
+const delivered = [];
+for (const id of ids) {
+  const o = await retail.order({ id: id });
+  if (o.status == "delivered") {
+    delivered.push(o.id);
   }
 }
-print(format("delivered: {}", delivered))
+print(`delivered: ${delivered}`);
 "#;
 
 async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let captured = Arc::clone(&requests);
     let cells = Arc::new(TokioMutex::new(VecDeque::from(vec![
-        lashlang_block(cell),
-        lashlang_block(r#"finish "done""#),
+        typescript_block(cell),
+        typescript_block(r#"finish("done");"#),
     ])));
     let provider = crate::testing::TestProvider::builder()
         .kind("fig2764-comprehension")

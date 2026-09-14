@@ -64,27 +64,26 @@ pub use linker::{
 };
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
 pub use runtime::{
-    AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector,
-    CompilationDialect, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
-    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCache, CompiledProgramCacheStats,
-    ContinuationError, ErrorTaxonomy, ExecutableProgram, ExecutionBound, ExecutionBounds,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
-    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
-    ListValue, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport,
-    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedFuture,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
+    AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
+    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
+    CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ErrorTaxonomy,
+    ExecutableProgram, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
+    GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
+    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
+    LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
+    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
     ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
     SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value, ValueProjectionContext,
     ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome, compile, compile_ast,
-    compile_ast_with_dialect, compile_linked, compile_linked_process, compile_linked_with_dialect,
-    compile_module_artifact_process, compile_process, compile_process_with_dialect, execute,
-    from_json, is_process_handle, prewarm, unwrap_type_value,
+    compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
+    execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
 #[doc(hidden)]
 pub use runtime::{
@@ -102,7 +101,7 @@ pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 14;
+pub const BYTECODE_FORMAT_VERSION: u32 = 15;
 pub use source::{
     CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
     canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,
@@ -509,22 +508,15 @@ mod tests {
                 source,
                 crate::parse(source).expect("source parses"),
                 &environment,
-                CompilationDialect::Typescript,
             )
             .expect("link first program");
 
         let cached = cache
-            .cached_linked_program(source, &environment, CompilationDialect::Typescript)
+            .cached_linked_program(source, &environment)
             .expect("the linked program is cached");
 
         assert!(std::sync::Arc::ptr_eq(&first, &cached));
         assert_eq!(cache.stats().hits, 1);
-        assert!(
-            cache
-                .cached_linked_program(source, &environment, CompilationDialect::Lashlang)
-                .is_none(),
-            "a lookup must not cross dialects"
-        );
     }
 
     #[test]
@@ -626,12 +618,15 @@ mod tests {
                 "`len` requires a string, tuple, list, record, or null",
                 "finish len(true)",
             ),
+            // Reading an absent property off a string or a number is
+            // `undefined`, not a failure (ADR 0096); null and undefined are
+            // the values that still refuse to be read through.
             (
-                "x = 1\nfinish \"text\".field",
-                "can't read `.field` from string",
-                "finish \"text\".field",
+                "x = null\nfinish x.field",
+                "can't read `.field` from null",
+                "finish x.field",
             ),
-            ("x = 1\nfinish 7[0]", "can't index number", "finish 7[0]"),
+            ("x = null\nfinish x[0]", "can't index null", "finish x[0]"),
         ];
 
         for (source, expected_error, expected_snippet) in cases {

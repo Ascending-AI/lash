@@ -33,7 +33,6 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         .expect("process observer configured");
     let state = AppState {
         core,
-        rlm_dialect: lash::rlm::RlmDialect::Lashlang,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store: in_memory_trigger_store(),

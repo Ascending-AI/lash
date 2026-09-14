@@ -201,9 +201,25 @@ impl Heap {
         names: &[Name],
     ) -> Result<(), RuntimeError> {
         let &Value::Ref(mut target_id) = root else {
-            return Err(RuntimeError::CannotAssignField {
-                field: "path".to_string(),
-                actual: super::super::value_type_name(root).to_string(),
+            // An image is a host-supplied descriptor, not a heap object: it
+            // has no mutable slot at any depth, and saying so by name beats
+            // reporting it as an unassignable path.
+            if matches!(root, Value::Image(_)) {
+                return Err(RuntimeError::ImmutableImageFields);
+            }
+            // Nothing else has a writable slot. Name the step that was
+            // written so the diagnostic points at the program's own syntax
+            // rather than at "path".
+            let actual = super::super::value_type_name(root).to_string();
+            return Err(match path.steps.first() {
+                Some(CompiledAssignPathStep::Field(field)) => RuntimeError::CannotAssignField {
+                    field: names[*field].text.to_string(),
+                    actual,
+                },
+                Some(CompiledAssignPathStep::Index) => RuntimeError::CannotAssignIndex { actual },
+                None => RuntimeError::MissingAssignmentField {
+                    field: "path".to_string(),
+                },
             });
         };
         let Some((leaf, parents)) = path.steps.split_last() else {

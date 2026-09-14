@@ -6,13 +6,14 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
     run_async_test_on_stack_budget("rlm-leaf-append-stale-rollback-test", || async {
         let retained_payload =
             "x".repeat(lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES * 2);
-        let source =
-            format!("retained = [{{ payload: {retained_payload:?} }}]\nfinish \"committed\"");
+        let source = format!(
+            "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
+        );
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
             crate::TurnBudget::Unbounded,
             rlm_factory(),
         ))
-        .provider(queued_text_provider(vec![lashlang_block(&source)]))
+        .provider(queued_text_provider(vec![typescript_block(&source)]))
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
@@ -157,11 +158,13 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
             checkpoint_writes.clone(),
         ),
     );
-    let abandoned_value = "x".repeat(abandoned_global_bytes);
+    // The retired surface inlined the whole abandoned payload as a literal; the
+    // TypeScript compiler refuses a cell over 64 KiB of source (ADR 0096), so
+    // the same global is built at runtime instead of spelled out.
     let switch_source = format!(
-        r#"abandoned_global = {abandoned_value:?}
-probe_result = await fixture.probe({{}})?
-await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_seed: "seed:survives" }} }})?"#
+        r#"const abandoned_global = "x".repeat({abandoned_global_bytes});
+const probe_result = await fixture.probe({{}});
+await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_seed: "seed:survives" }} }});"#
     );
     let first_factory =
         rlm_factory().with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
@@ -169,7 +172,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         crate::TurnBudget::Unbounded,
         first_factory,
     ))
-    .provider(queued_text_provider(vec![lashlang_block(&switch_source)]))
+    .provider(queued_text_provider(vec![typescript_block(&switch_source)]))
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
     .tools(Arc::new(FrameStateDeferredTools))
@@ -276,8 +279,8 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .complete(move |request| {
             captured_follow_on_requests.lock_recover().push(request);
             async move {
-                Ok(text_response(&lashlang_block(
-                    r#"finish "completed after real SQLite cold reopen""#,
+                Ok(text_response(&typescript_block(
+                    r#"finish("completed after real SQLite cold reopen");"#,
                 )))
             }
         })
@@ -405,9 +408,9 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block(r#"await control.continue_as({ task: "switch again" })?"#),
-        lashlang_block(r#"await control.continue_as({ task: "finish chain" })?"#),
-        lashlang_block(r#"finish "done after chained handoffs""#),
+        typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
+        typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
+        typescript_block(r#"finish("done after chained handoffs");"#),
     ]))
     .model(mock_model_spec())
     .store_factory(store_factory.clone())
@@ -586,15 +589,19 @@ pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
+    .provider(queued_text_provider(vec![typescript_block(
         r#"
-process lookup(tools: Tools) {
-  value = await tools.app_lookup({})?
-  finish value
-}
-h = start lookup(tools: tools)
-value = await h
-finish value"#,
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => {
+    const value = await tools.app_lookup({});
+    return value;
+  }
+});
+const h = start(lookup);
+const value = await h;
+finish(value);"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
@@ -633,12 +640,13 @@ finish value"#,
 
     release_tx.send(()).expect("release tool provider");
     let result = turn.await.expect("turn task")?;
+    // `await handle` on the retired surface yielded the `{ ok, value }`
+    // settlement envelope; TypeScript's await yields the process's own return
+    // and throws on failure (ADR 0096). The process value reaching the turn's
+    // final value is what this asserts, and that is unchanged.
     assert_eq!(
         result.final_value(),
-        Some(&serde_json::json!({
-            "ok": true,
-            "value": { "answer": "ready" },
-        }))
+        Some(&serde_json::json!({ "answer": "ready" }))
     );
     Ok(())
 }
@@ -663,15 +671,19 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
+    .provider(queued_text_provider(vec![typescript_block(
         r#"
-process lookup(tools: Tools) {
-  value = await tools.app_lookup({})?
-  finish value
-}
-h = start lookup(tools: tools)
-value = await h
-finish value"#,
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => {
+    const value = await tools.app_lookup({});
+    return value;
+  }
+});
+const h = start(lookup);
+const value = await h;
+finish(value);"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
@@ -774,8 +786,8 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
         crate::TurnBudget::Unbounded,
         rlm_factory(),
     ))
-    .provider(queued_text_provider(vec![lashlang_block(
-        r#"finish "done via finish""#,
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"finish("done via finish");"#,
     )]))
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -820,8 +832,8 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
         rlm_factory(),
     ))
     .provider(queued_text_provider(vec![
-        lashlang_block("this is not valid lashlang"),
-        lashlang_block(r#"finish "recovered""#),
+        typescript_block("this is not valid typescript"),
+        typescript_block(r#"finish("recovered");"#),
     ]))
     .model(mock_model_spec())
     .tools(Arc::new(AppTools))
@@ -1303,18 +1315,7 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
     .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("rlm-process-definition-filter")
-        .plugin_option(
-            crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            crate::rlm::RlmCreateExtras {
-                dialect: Some(lash_rlm_types::RlmDialect::Typescript),
-                ..crate::rlm::RlmCreateExtras::default()
-            },
-        )
-        .expect("the typed RLM session options must serialize")
-        .open()
-        .await?;
+    let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&turn_session.session_id());
     let turn = tokio::spawn(async move {

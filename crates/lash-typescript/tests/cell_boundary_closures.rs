@@ -41,9 +41,8 @@ fn run_cell(state: &mut State, source: &str) -> ExecutionOutcome {
         .collect::<std::collections::BTreeSet<_>>();
     let ast = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("cell `{source}` should lower: {error}"));
-    let program =
-        lashlang::compile_ast_with_dialect(&ast, lashlang::CompilationDialect::Typescript)
-            .unwrap_or_else(|error| panic!("cell `{source}` should compile: {error}"));
+    let program = lashlang::compile_ast(&ast)
+        .unwrap_or_else(|error| panic!("cell `{source}` should compile: {error}"));
     futures::executor::block_on(lashlang::execute(&program, state, &Host))
         .unwrap_or_else(|error| panic!("cell `{source}` should execute: {error}"))
 }

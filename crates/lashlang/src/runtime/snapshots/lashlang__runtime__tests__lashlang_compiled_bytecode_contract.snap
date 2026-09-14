@@ -1,6 +1,6 @@
 ---
 source: crates/lashlang/src/runtime/tests.rs
-assertion_line: 498
+assertion_line: 509
 expression: compiled_program_snapshot(GOLDEN_CONTRACT_SOURCE)
 ---
 compile_stats: total=1 const_folded=1 dynamic=0 refs=0
@@ -10,44 +10,37 @@ constants:
   c0: ","
   c1: "beta"
   c2: "beta"
-  c3: {}
-  c4: ","
-  c5: {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
+  c3: ","
+  c4: {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
 code:
   0000: load_name 1:history
   0001: push_const c0 ","
   0002: intrinsic join argc=2
-  0003: deep_copy
-  0004: store_name 0:source
-  0005: load_name 0:source
-  0006: push_const c1 "beta"
-  0007: intrinsic find argc=2
-  0008: deep_copy
-  0009: store_name 2:beta_index
-  0010: load_name 0:source
-  0011: push_const c2 "beta"
-  0012: intrinsic grep_text argc=2
-  0013: deep_copy
-  0014: store_name 3:matches
-  0015: store_const 4:counts c3 {}
-  0016: load_name 0:source
-  0017: push_const c4 ","
-  0018: intrinsic split argc=2
-  0019: begin_iter 5:token
-  0020: iter_next 24
-  0021: deep_copy_loop_binding $5
-  0022: add_assign_index_slot_number 4:counts 5:token 1
-  0023: jump 20
-  0024: end_iter
-  0025: push_const c5 {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
-  0026: deep_copy
-  0027: store_name 6:Payload
-  0028: load_name 2:beta_index
-  0029: deep_copy
-  0030: load_name 3:matches
-  0031: deep_copy
-  0032: load_name 4:counts
-  0033: deep_copy
-  0034: build_record [beta_index, matches, counts]
-  0035: intrinsic validate_compiled schema#0
-  0036: finish
+  0003: store_name 0:source
+  0004: load_name 0:source
+  0005: push_const c1 "beta"
+  0006: intrinsic find argc=2
+  0007: store_name 2:beta_index
+  0008: load_name 0:source
+  0009: push_const c2 "beta"
+  0010: intrinsic grep_text argc=2
+  0011: store_name 3:matches
+  0012: build_heap_record []
+  0013: store_name 4:counts
+  0014: load_name 0:source
+  0015: push_const c3 ","
+  0016: intrinsic split argc=2
+  0017: begin_iter 5:token
+  0018: iter_next 21
+  0019: add_assign_index_slot_number 4:counts 5:token 1
+  0020: jump 18
+  0021: end_iter
+  0022: push_const c4 {"$lash_type":{"additionalProperties":false,"properties":{"beta_index":{"anyOf":[{"type":"integer"},{"type":"null"}]},"counts":{"type":"object"},"matches":{"items":{"type":"object"},"type":"array"}},"required":["beta_index","matches","counts"],"type":"object"}}
+  0023: store_name 6:Payload
+  0024: load_name 2:beta_index
+  0025: load_name 3:matches
+  0026: load_name 4:counts
+  0027: build_heap_record [beta_index, matches, counts]
+  0028: load_name 6:Payload
+  0029: intrinsic validate argc=2
+  0030: finish

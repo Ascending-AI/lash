@@ -312,12 +312,12 @@ pub(crate) fn reasoning_part(text: &str) -> LlmOutputPart {
     }
 }
 
-pub(crate) fn lashlang_block(code: &str) -> String {
-    format!("<lashlang>\n{code}\n</lashlang>")
+pub(crate) fn typescript_block(code: &str) -> String {
+    format!("<typescript>\n{code}\n</typescript>")
 }
 
-pub(crate) fn lashlang_block_with_prose(prose: &str, code: &str) -> String {
-    format!("{prose}\n<lashlang>\n{code}\n</lashlang>")
+pub(crate) fn typescript_block_with_prose(prose: &str, code: &str) -> String {
+    format!("{prose}\n<typescript>\n{code}\n</typescript>")
 }
 
 pub(crate) fn rlm_response(parts: Vec<LlmOutputPart>) -> LlmResponse {

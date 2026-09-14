@@ -13,10 +13,9 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
   selected pack. `--task` IDs must belong to that selection.
 
 - `--channel cell|native|standard` selects one channel (default: cell).
-- `--paired` pairs cell and native in randomized order for each task/dialect.
+- `--paired` pairs cell and native in randomized order for each task.
 - `--channel-set all` includes both paired RLM channels plus standard, even
   without `--paired`. Standard runs once per task, with `dialect: "none"`.
-- `--dialect both|lashlang|typescript` selects RLM dialects; standard ignores it.
 - Repeat `--model` to compare models in the same run. Default:
   `z-ai/glm-5.3-flash`. Models share the concurrency budget and their work is
   interleaved, so cohorts run concurrently.
@@ -29,13 +28,14 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
 - Repeat `--task ID` to select tasks; duplicate selections run once and unknown
   IDs are errors. `--allow-partial` permits failed tasks or excluded cohorts.
 
-All channels, one repetition, both dialects: easy gives 80 rows/model, hard
-gives 60, and the default combined pack gives 140. The two-model default
-comparison uses medium reasoning and 280 task rows:
+The RLM channels run TypeScript, the sole RLM language; standard runs none.
+All channels, one repetition: easy gives 48 rows/model, hard gives 36, and the
+default combined pack gives 84. The two-model default comparison uses medium
+reasoning and 168 task rows:
 
 ```sh
 timeout 1h target/debug/toolbench --model z-ai/glm-5.3-flash --model openai/gpt-5.6-sol \
-  --paired --repetitions 1 --dialect both --channel-set all \
+  --paired --repetitions 1 --channel-set all \
   --reasoning-effort medium --concurrency 8 --allow-partial \
   --results-file /tmp/toolbench.jsonl
 ```
@@ -158,7 +158,7 @@ pin refusal atomicity, payment/return/dependency policies and strict arguments.
 
 Calibration uses both requested models, standard plus native/TypeScript with
 two repetitions (four observations/model/task). Acceptance targets are Sol
-≥3/4 and GLM ≥1/4, followed by all five cohorts with one repetition. Do not
+≥3/4 and GLM ≥1/4, followed by all three cohorts with one repetition. Do not
 interpret correct multi-step executions as trivial solely because both models
 succeed; inspect the observed dependent tool use.
 
@@ -254,12 +254,14 @@ be compared with that baseline to measure round-by-round growth.
 The RLM host explicitly disables image/type-literal/decomposition prompt
 features, label annotations, processes, sleep, process signals and triggers,
 and disables continuation soft warnings. This removes what the current
-renderer gates; the `control.continue_as` catalogue entry and the lashlang
+renderer gates; the `control.continue_as` catalogue entry and the
 label/process/sleep teaching are gated separately by FIG-2750 (#1172) and
 still appear on renderers before that change.
 
 One-task `kv-read` smoke on `z-ai/glm-5.3-flash`, medium reasoning, paired all
-channels and both dialects, one repetition, concurrency 8 (2026-09-09):
+channels, one repetition, concurrency 8 (2026-09-09). This measurement predates
+ADR 0096 and is kept as-is; the `lashlang` rows are historical only and that
+language can no longer be run:
 
 | Cohort | First-call prompt before | First-call prompt after | Change |
 |---|---:|---:|---:|
@@ -309,7 +311,7 @@ their sockets. This avoids pretending a normalized request is wire evidence.
 
 ```sh
 target/debug/toolbench --model z-ai/glm-5.3-flash --paired --channel-set all \
-  --dialect both --reasoning-effort medium --concurrency 8 --allow-partial \
+  --reasoning-effort medium --concurrency 8 --allow-partial \
   --results-file results.jsonl --dump-requests requests
 target/debug/toolbench --reconcile results.jsonl
 ```

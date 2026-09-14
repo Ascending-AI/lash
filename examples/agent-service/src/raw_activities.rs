@@ -302,9 +302,9 @@ mod tests {
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-raw-activity-script")
             .complete(|_request| async {
-                let text = r#"<lashlang>
-finish "done through raw activities"
-</lashlang>"#;
+                let text = r#"<typescript>
+finish("done through raw activities");
+</typescript>"#;
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
@@ -376,7 +376,6 @@ finish "done through raw activities"
             "scripted-model".to_string(),
             None,
             durability,
-            lash::rlm::RlmDialect::Lashlang,
         );
         #[cfg(feature = "restate")]
         let state = AppStateData::from_shared_db(
@@ -388,10 +387,6 @@ finish "done through raw activities"
             "scripted-model".to_string(),
             None,
             durability,
-            // The scripted provider in this fixture answers with a
-            // `<lashlang>` cell, so the fixture is a Lashlang one by
-            // construction rather than by omission.
-            lash::rlm::RlmDialect::Lashlang,
             None,
             None,
         );

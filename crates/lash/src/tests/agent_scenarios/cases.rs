@@ -2,17 +2,16 @@
 use super::super::*;
 #[cfg(feature = "rlm")]
 use super::contracts::{
-    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_failed_code_block_present,
-    assert_graph_lineage_connected, assert_labeled_resource_operation,
-    assert_no_duplicate_label_step, assert_no_false_finishted_success,
+    GraphContract, assert_all_processes_terminal, assert_failed_code_block_present,
+    assert_graph_lineage_connected, assert_no_false_finishted_success,
     assert_no_forbidden_error_text, assert_subagent_bridge_exec_graphs,
 };
 #[cfg(feature = "rlm")]
 use super::harness::{
-    AgentScenario, lashlang_block, run_agent_direct_completion_attempt_retry_scenario,
+    AgentScenario, run_agent_direct_completion_attempt_retry_scenario,
     run_agent_durable_input_request_scenario, run_agent_process_llm_query_scenario,
     run_agent_session_turn_process_scenario, run_agent_turn_scenario,
-    run_agent_turn_scenario_without_success_assertions,
+    run_agent_turn_scenario_without_success_assertions, typescript_block,
 };
 #[cfg(feature = "rlm")]
 use super::plugin_operations::agent_scenario_plugin_task_query_command;
@@ -172,31 +171,35 @@ fn agent_scenario_process_tool_composition() -> Result<()> {
                 "Exercise process cancellation, subagent spawn/await, and protocol batch.",
             )
             .responses([
-                lashlang_block(
+                typescript_block(
                     r#"
-process worker() {
-  sleep for "1s"
-  finish { done: true }
-}
-running = start worker()
-cancelled = await processes.cancel({ process_id: running.id })?
-child = await agents.spawn({
+const worker = defineProcess({
+  name: "worker",
+  signals: {},
+  run: async () => {
+    await sleep(1000);
+    return { done: true };
+  }
+});
+const running = start(worker);
+const cancelled = await processes.cancel({ process_id: running.id });
+const child = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-batched = await tools.batch({ tool_calls: [
+  output: { len: "int" }
+});
+const batched = await tools.batch({ tool_calls: [
   { tool: "app_lookup", parameters: {} },
   { tool: "app_lookup", parameters: {} }
-] })?
-finish {
+] });
+finish({
   cancel_status: cancelled.status,
   child_len: child.len,
-  batch_count: len(batched.results)
-}"#,
+  batch_count: batched.results.length
+});"#,
                 ),
-                lashlang_block("finish { len: len(chunk) }"),
+                typescript_block("finish({ len: chunk.length });"),
             ])
             .expected_final_value(serde_json::json!({
                 "cancel_status": "cancelled",
@@ -220,15 +223,13 @@ fn agent_scenario_foreground_labeled_tool_call() -> Result<()> {
             FOREGROUND_LABELED_TOOL_CALL.scenario_name,
             "Call the app lookup tool and finish its value.",
         )
-        .response(lashlang_block(
+        .response(typescript_block(
             r#"
-@label(title: "Lookup app state")
-value = await tools.app_lookup({})?
-finish value"#,
+const value = await tools.app_lookup({});
+finish(value);"#,
         ))
         .expected_final_value(serde_json::json!({ "ok": true }))
-        .tool_provider(Arc::new(AppTools))
-        .labeled_resource("Lookup app state");
+        .tool_provider(Arc::new(AppTools));
 
         let run = run_agent_turn_scenario(case).await?;
         assert_eq!(run.prompt_captures.len(), 1);
@@ -245,16 +246,19 @@ fn agent_scenario_started_process_labeled_tool_call() -> Result<()> {
                 STARTED_PROCESS_LABELED_TOOL_CALL.scenario_name,
                 "Start a process that calls the app lookup tool.",
             )
-            .response(lashlang_block(
+            .response(typescript_block(
                 r#"
-process lookup(tools: Tools) {
-  @label(title: "Lookup app state in process")
-  value = await tools.app_lookup({})?
-  finish value
-}
-handle = start lookup(tools: tools)
-result = (await handle)?
-finish result"#,
+const lookup = defineProcess({
+  name: "lookup",
+  signals: {},
+  run: async () => {
+    const value = await tools.app_lookup({});
+    return value;
+  }
+});
+const handle = start(lookup);
+const result = await handle;
+finish(result);"#,
             ))
             .response_usage(LlmUsage {
                 input_tokens: 11,
@@ -265,7 +269,6 @@ finish result"#,
             })
             .expected_final_value(serde_json::json!({ "ok": true }))
             .tool_provider(Arc::new(AppTools))
-            .labeled_resource("Lookup app state in process")
             .completed_process("lookup")
             .min_completed_process_graphs(1),
         )
@@ -274,12 +277,12 @@ finish result"#,
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
-        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.start              lang="typescript"
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=2 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
-        root                     turn_state            stored logical=374B
+        root                     turn_state            stored logical=357B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
@@ -306,11 +309,11 @@ fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Res
                 AWAITED_PROCESS_ATTACHMENT_RETENTION.scenario_name,
                 "Return the attachment produced by a child process.",
             )
-            .response(lashlang_block(
+            .response(typescript_block(
                 r#"
-handle = { __handle__: "process", id: "awaited-attachment-child", incarnation: 1 }
-attachment = (await handle)?
-finish attachment"#,
+const handle = { __handle__: "process", id: "awaited-attachment-child", incarnation: 1 };
+const attachment = await handle;
+finish(attachment);"#,
             ))
             .seeded_attachment_write(
                 lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id"),
@@ -379,30 +382,32 @@ fn agent_scenario_started_process_labeled_subagent_spawn() -> Result<()> {
         let run = run_agent_turn_scenario(
             AgentScenario::new(
                 STARTED_PROCESS_SUBAGENT.scenario_name,
-                "Run a Lashlang process that spawns a subagent and returns its value.",
+                "Run a durable process that spawns a subagent and returns its value.",
             )
             .responses([
-                lashlang_block(
+                typescript_block(
                     r#"
-process spawn_child() {
-  @label(title: "Spawn subagent with web search")
-  result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start spawn_child()
-result = (await handle)?
-finish result"#,
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    const result = await agents.spawn({
+      capability: "default",
+      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["a", "b"] },
+      output: { len: "int" }
+    });
+    return result;
+  }
+});
+const handle = start(spawnChild);
+const result = await handle;
+finish(result);"#,
                 ),
-                lashlang_block("finish { len: len(chunk) }"),
+                typescript_block("finish({ len: chunk.length });"),
             ])
             .expected_final_value(serde_json::json!({ "len": 2 }))
             .install_subagents()
-            .labeled_resource("Spawn subagent with web search")
             .completed_process("spawn_child")
             .min_completed_child_session_exec_graphs(1)
             .min_completed_process_graphs(1),
@@ -412,23 +417,23 @@ finish result"#,
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
-        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.start              lang="typescript"
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=244B
+        root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=371B
+        session-001              turn_state            stored logical=354B
         session-001              tool_state            stored logical=<opaque>
         session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=371B
+        session-001              turn_state            stored logical=354B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
         session-001              execution_state       stored logical=unknown
@@ -448,28 +453,36 @@ fn agent_scenario_nested_process_start_await() -> Result<()> {
                 NESTED_PROCESS_START_AWAIT.scenario_name,
                 "Start a parent process that starts and awaits a child process.",
             )
-            .response(lashlang_block(
+            .response(typescript_block(
                 r#"
-process grandchild() {
-  finish { grandchild: "done" }
-}
-process child() {
-  handle = start grandchild()
-  result = (await handle)?
-  finish { child: result.grandchild }
-}
-process parent() {
-  @label(title: "Start nested child process")
-  handle = start child()
-  result = (await handle)?
-  finish { parent: result.child }
-}
-handle = start parent()
-result = (await handle)?
-finish result"#,
+const grandchild = defineProcess({
+  name: "grandchild",
+  signals: {},
+  run: async () => {
+    return { grandchild: "done" };
+  }
+});
+const child = defineProcess({
+  name: "child",
+  signals: {},
+  run: async () => {
+    const inner = await start(grandchild);
+    return { child: inner.grandchild };
+  }
+});
+const parent = defineProcess({
+  name: "parent",
+  signals: {},
+  run: async () => {
+    const inner = await start(child);
+    return { parent: inner.child };
+  }
+});
+const handle = start(parent);
+const result = await handle;
+finish(result);"#,
             ))
             .expected_final_value(serde_json::json!({ "parent": "done" }))
-            .labeled_node("Start nested child process")
             .completed_process("parent")
             .completed_process("child")
             .completed_process("grandchild")
@@ -483,12 +496,12 @@ finish result"#,
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
-        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.start              lang="typescript"
         root         exec      cell.ok                 calls=1
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=244B
+        root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
@@ -522,19 +535,20 @@ fn agent_scenario_failed_child_preserves_failure_graph() -> Result<()> {
                 "Spawn a child that fails and preserve its execution graph.",
             )
             .responses([
-                lashlang_block(
+                typescript_block(
                     r#"
-@label(title: "Spawn failing subagent")
-result = await agents.spawn({
+const result = await agents.spawn({
   capability: "default",
   task: "Fail with reason child boom.",
   seed: {},
-  output: Type { reason: str }
-})?
-finish result"#,
+  output: { reason: "str" }
+});
+finish(result);"#,
                 ),
-                lashlang_block(r#"await task.fail({ reason: "child boom" })?"#),
-                lashlang_block(r#"await task.fail({ reason: "parent observed child failure" })?"#),
+                typescript_block(r#"await task.fail({ reason: "child boom" });"#),
+                typescript_block(
+                    r#"await task.fail({ reason: "parent observed child failure" });"#,
+                ),
             ])
             .install_subagents()
             .max_turns(1),
@@ -548,24 +562,24 @@ finish result"#,
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
-        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.start              lang="typescript"
         root         tool      tool.start              name="spawn_agent" call=call-001
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
-        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed --…"
+        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=244B
+        root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=376B
+        session-001              turn_state            stored logical=359B
         session-001              tool_state            stored logical=<opaque>
         session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        session-001              turn_state            stored logical=376B
+        session-001              turn_state            stored logical=359B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
         session-001              execution_state       stored logical=unknown
@@ -604,12 +618,6 @@ finish result"#,
         assert_no_false_finishted_success(&run);
         assert_all_processes_terminal(&run.final_process_list);
         let contract = GraphContract::from_graphs(&run.graph_snapshots);
-        assert_labeled_resource_operation(
-            &contract,
-            "Spawn failing subagent",
-            NodeStatusFact::Failed,
-        );
-        assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
         assert_graph_lineage_connected(&contract, &run.final_process_list);
         assert_subagent_bridge_exec_graphs(
             &run,
@@ -629,22 +637,22 @@ fn agent_scenario_parallel_spawn_and_join() -> Result<()> {
                 PARALLEL_SPAWN_AND_JOIN.scenario_name,
                 "Start two processes, await both, and finish their joined result.",
             )
-            .response(lashlang_block(
+            .response(typescript_block(
                 r#"
-process child(value: str) {
-  finish value
-}
-@label(title: "Start left process")
-left = start child(value: "left")
-@label(title: "Start right process")
-right = start child(value: "right")
-left_value = (await left)?
-right_value = (await right)?
-finish { joined: [left_value, right_value] }"#,
+const child = defineProcess({
+  name: "child",
+  signals: {},
+  run: async (value) => {
+    return value;
+  }
+});
+const left = start(child, { value: "left" });
+const right = start(child, { value: "right" });
+const leftValue = await left;
+const rightValue = await right;
+finish({ joined: [leftValue, rightValue] });"#,
             ))
             .expected_final_value(serde_json::json!({ "joined": ["left", "right"] }))
-            .labeled_node("Start left process")
-            .labeled_node("Start right process")
             .completed_process("child")
             .min_completed_process_graphs(2),
         )
@@ -656,12 +664,12 @@ finish { joined: [left_value, right_value] }"#,
         root         ingress   turn.start
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
-        root         exec      cell.start              lang="lashlang"
+        root         exec      cell.start              lang="typescript"
         root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
-        root                     turn_state            stored logical=244B
+        root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
         root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
@@ -683,21 +691,21 @@ fn agent_scenario_tuple_values_finish_as_json_arrays() -> Result<()> {
                 TUPLE_VALUES_AS_JSON_ARRAYS.scenario_name,
                 "Use tuple values and finish the derived result.",
             )
-            .response(lashlang_block(
+            .response(typescript_block(
                 r#"
-pair = "left", "right"
-tail = slice(pair, 1, null)
-seen = []
-for item in pair {
-  seen = push(seen, item)
+const pair = ["left", "right"];
+const tail = pair.slice(1);
+const seen = [];
+for (const item of pair) {
+  seen.push(item);
 }
-finish {
+finish({
   first: pair[0],
   tail: tail,
   seen: seen,
   tuple: pair,
   nested: { pair: pair }
-}"#,
+});"#,
             ))
             .expected_final_value(serde_json::json!({
                 "first": "left",

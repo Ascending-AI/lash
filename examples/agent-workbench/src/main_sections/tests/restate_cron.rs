@@ -14,18 +14,22 @@ pub(crate) fn live_restate_cron_tick_wait() -> Duration {
 fn test_cron_trigger_source(expr: &str) -> String {
     format!(
         r#"
-        process remember_tick(tick: cron.Tick) {{
-          wake {{ kind: "cron_tick", fired_at: tick.fired_at }}
-          finish {{ fired_at: tick.fired_at }}
-        }}
+        const remember_tick = defineProcess({{
+          name: "remember_tick",
+          signals: {{}},
+          run: async (tick: unknown) => {{
+            wake({{ kind: "cron_tick", fired_at: tick.fired_at }});
+            return {{ fired_at: tick.fired_at }};
+          }}
+        }});
 
-        handle = await triggers.register({{
+        const handle = await registerTrigger({{
           source: cron.Schedule({{ expr: "{expr}", tz: "UTC" }}),
           target: remember_tick,
-          inputs: {{ tick: trigger.event }},
+          inputs: (tick) => ({{ tick: tick }}),
           name: "cron smoke"
-        }})?
-        finish "cron registered"
+        }});
+        finish("cron registered");
         "#
     )
 }
@@ -41,7 +45,7 @@ pub(crate) fn live_restate_cron_provider(expr: String) -> ProviderHandle {
             async move {
                 match response_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => Ok(text_response(&format!(
-                        "<lashlang>\n{}\n</lashlang>",
+                        "<typescript>\n{}\n</typescript>",
                         test_cron_trigger_source(&expr).trim()
                     ))),
                     other => panic!(
@@ -78,7 +82,7 @@ pub(crate) fn gated_live_restate_cron_provider() -> (
                 }
                 Ok(if call == 0 {
                     text_response(&format!(
-                        "<lashlang>\n{}\n</lashlang>",
+                        "<typescript>\n{}\n</typescript>",
                         test_cron_trigger_source(&format!(
                             "*/{} * * * * *",
                             LIVE_RESTATE_CRON_SCHEDULE_INTERVAL.as_secs()
@@ -86,7 +90,7 @@ pub(crate) fn gated_live_restate_cron_provider() -> (
                         .trim()
                     ))
                 } else {
-                    text_response("<lashlang>\nfinish \"cron tick observed\"\n</lashlang>")
+                    text_response("<typescript>\nfinish(\"cron tick observed\");\n</typescript>")
                 })
             }
         })

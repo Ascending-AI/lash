@@ -540,7 +540,7 @@ impl ChannelTurnEvents {
         }
         // Keep persisted message order tied to event start order. The browser
         // only renders completed code/tool rows, but reload should still
-        // reconstruct "thinking -> lashlang -> tools -> assistant".
+        // reconstruct "thinking -> cell -> tools -> assistant".
         if let TurnEvent::ReasoningDelta { text } = &event {
             let update = {
                 let mut state = self.turn_state.lock_recover();
@@ -889,9 +889,9 @@ mod tests {
         let provider = lash::testing::TestProvider::builder()
             .kind("agent-service-route-mock")
             .complete(|_request| async {
-                let text = r#"<lashlang>
-finish "done through route"
-</lashlang>"#;
+                let text = r#"<typescript>
+finish("done through route");
+</typescript>"#;
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
@@ -965,9 +965,6 @@ finish "done through route"
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Local,
-            // The scripted provider answers with a `<lashlang>` cell, so this
-            // fixture is Lashlang by construction rather than by omission.
-            lash::rlm::RlmDialect::Lashlang,
             None,
             None,
         );

@@ -703,64 +703,11 @@ fn list_comprehension_compiles_to_iterator_and_append_bytecode() {
     );
 }
 
-#[test]
-fn every_container_insertion_lowering_emits_value_isolation() {
-    let compiled = compile_source(
-        r#"
-        source = []
-        target = {}
-        target.plain = source
-        target.effect = await tools.echo({ value: source })?
-        copied = [item for item in [source]]
-        acc = []
-        acc = push(acc, source)
-        finish copied
-        "#,
-    )
-    .expect("container insertion program should compile");
-    let code = &compiled.chunk.code;
-    let listing = compiled_instruction_listing(&compiled);
-
-    let isolated_paths = code
-        .windows(2)
-        .filter(|pair| {
-            matches!(
-                pair,
-                [Instruction::DeepCopy, Instruction::PathAssign { .. }]
-            )
-        })
-        .count();
-    assert_eq!(
-        isolated_paths, 2,
-        "plain and forced-effect paths must both copy:\n{listing}"
-    );
-    assert!(
-        code.windows(2)
-            .any(|pair| matches!(pair, [Instruction::DeepCopy, Instruction::ListAppend])),
-        "comprehension accumulation must copy:\n{listing}"
-    );
-    assert!(
-        code.windows(2).any(|pair| matches!(
-            pair,
-            [
-                Instruction::DeepCopy,
-                Instruction::Intrinsic(IntrinsicOp::PushAssign(_))
-            ]
-        )),
-        "push insertion must copy:\n{listing}"
-    );
-    assert!(
-        code.windows(2).any(|pair| matches!(
-            pair,
-            [
-                Instruction::IterNext { .. },
-                Instruction::DeepCopyLoopBinding(_)
-            ]
-        )),
-        "iterator bindings must copy:\n{listing}"
-    );
-}
-
+// `every_container_insertion_lowering_emits_value_isolation` was deleted with
+// the Lashlang value-isolation opcodes it pinned (`DeepCopy`,
+// `DeepCopyLoopBinding`). TypeScript is the sole RLM dialect (ADR 0096), so
+// container insertion shares heap references by ECMA rules and there is no
+// isolation lowering left to assert.
 #[test]
 fn effectful_loop_bodies_compile_to_generic_iterator_bytecode() {
     let program = crate::parse(
@@ -1104,55 +1051,43 @@ async fn field_index_unary_and_boolean_paths_are_covered() {
     assert_eq!(value, Value::Bool(true));
 }
 
+/// Member and index reads follow ECMA reference semantics (ADR 0096): a missing
+/// property or an out-of-range index is `undefined` rather than a typed refusal
+/// or a null, and only a read *through* `undefined` throws. The refusals this
+/// test pinned before the cutover -- `CannotReadField` on a number, `CannotIndex`
+/// on a non-container, `InvalidIndex` on a fractional subscript, and the
+/// from-the-end negative index -- were Lashlang value semantics and are gone
+/// with the dialect.
 #[tokio::test(flavor = "current_thread")]
 async fn field_index_and_type_errors_are_covered() {
-    let err = exec("n = 1 finish n.name")
-        .await
-        .expect_err("field access should fail");
-    assert!(matches!(err, RuntimeError::CannotReadField { .. }));
+    for (source, expected) in [
+        ("n = 1 finish n.name", Value::Undefined),
+        ("rec = {} finish rec.name", Value::Undefined),
+        ("finish 1[0]", Value::Undefined),
+        ("finish [1][2]", Value::Undefined),
+        ("finish \"a\"[2]", Value::Undefined),
+        ("finish [1][1.5]", Value::Undefined),
+        ("finish [1][-1]", Value::Undefined),
+        ("finish not 1", Value::Bool(false)),
+        ("finish not 0", Value::Bool(true)),
+    ] {
+        assert_eq!(
+            exec(source).await.expect("program should run"),
+            expected,
+            "{source}"
+        );
+    }
 
-    let value = exec("rec = {} finish rec.name")
+    let err = exec("rec = { ok: false } finish len(rec.value.items)")
         .await
-        .expect("missing field should yield null");
-    assert_eq!(value, Value::Null);
-
-    let err = exec("finish 1[0]")
-        .await
-        .expect_err("bad index target should fail");
-    assert!(matches!(err, RuntimeError::CannotIndex { .. }));
-
-    let value = exec("finish [1][2]")
-        .await
-        .expect("list oob should yield null");
-    assert_eq!(value, Value::Null);
-
-    let value = exec("finish \"a\"[2]")
-        .await
-        .expect("string oob should yield null");
-    assert_eq!(value, Value::Null);
-
-    let err = exec("finish [1][1.5]")
-        .await
-        .expect_err("fractional index should fail");
-    assert!(matches!(err, RuntimeError::InvalidIndex));
-
-    let value = exec("finish [1][-1]")
-        .await
-        .expect("negative index should resolve from the end");
-    assert_eq!(value, Value::Number(1.0));
-
-    let value = exec("finish not 1")
-        .await
-        .expect("not should use truthiness");
-    assert_eq!(value, Value::Bool(false));
-
-    let value = exec("finish not 0").await.expect("zero should be falsy");
-    assert_eq!(value, Value::Bool(true));
-
-    let value = exec("rec = { ok: false } finish len(rec.value.items)")
-        .await
-        .expect("null chain should work");
-    assert_eq!(value, Value::Number(0.0));
+        .expect_err("reading a field through undefined should throw");
+    assert!(
+        matches!(
+            &err,
+            RuntimeError::CannotReadField { field, actual } if field == "items" && actual == "undefined"
+        ),
+        "{err:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2290,19 +2225,16 @@ fn compile_labeled_source_with_historical_context(
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
     let current = crate::compile_linked(&linked);
-    let dialect = linked.artifact.compilation_dialect;
-    let (chunk, compile_stats) = Compiler::compile_linked_program_with_dialect(
+    let (chunk, compile_stats) = Compiler::compile_linked_program(
         linked.program(),
         (&linked.artifact).into(),
         crate::tracking::LashlangExecutionContext::main(historical_module_ref(
             historical_module_hash,
         )),
-        dialect,
     );
     let historical = CompiledProgram {
         chunk,
         compile_stats,
-        dialect,
     };
     (current, historical)
 }
@@ -2332,7 +2264,6 @@ fn compile_labeled_process_with_historical_context(
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     };
-    let dialect = linked.artifact.compilation_dialect;
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
         (&linked.artifact).into(),
@@ -2344,12 +2275,10 @@ fn compile_labeled_process_with_historical_context(
             ),
             process_name,
         ),
-        dialect,
     );
     let historical = CompiledProgram {
         chunk,
         compile_stats,
-        dialect,
     };
     (current, historical)
 }

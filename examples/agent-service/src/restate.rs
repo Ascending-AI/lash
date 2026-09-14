@@ -817,20 +817,23 @@ mod restate_tests {
         let provider = lash::testing::TestProvider::builder()
             .kind("mock-provider")
             .complete(|_request| async {
-                let text = r#"<lashlang>
-process play_center_once(board_tool: Board) {
-  state = await board_tool.read({})?
-  if state.turn == "O" and contains(state.legal_moves, 4) {
-    move = await board_tool.play({ cell: 4 })?
-    finish { before: state, move: move, played: true }
-  } else {
-    finish { before: state, played: false }
+                let text = r#"<typescript>
+const play_center_once = defineProcess({
+  name: "play_center_once",
+  signals: {},
+  run: async () => {
+    const state = await board.read({});
+    if (state.turn == "O" && state.legal_moves.includes(4)) {
+      const move = await board.play({ cell: 4 });
+      return { before: state, move: move, played: true };
+    }
+    return { before: state, played: false };
   }
-}
-handle = start play_center_once(board_tool: board)
-result = (await handle)?
-finish "done via Restate E2E"
-</lashlang>"#;
+});
+const handle = start(play_center_once);
+const result = await handle;
+finish("done via Restate E2E");
+</typescript>"#;
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
@@ -918,9 +921,6 @@ finish "done via Restate E2E"
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Restate,
-            // The scripted provider answers with a `<lashlang>` cell, so this
-            // fixture is Lashlang by construction rather than by omission.
-            lash::rlm::RlmDialect::Lashlang,
             std::env::var("RESTATE_INGRESS_URL").ok(),
             Some(lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap()),
         );

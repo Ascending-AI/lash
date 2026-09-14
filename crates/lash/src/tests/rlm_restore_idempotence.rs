@@ -135,8 +135,8 @@ fn seed_nodes(label: &str) -> Vec<SessionAppendNode> {
     rlm_seed_initial_nodes(seed(label))
 }
 
-fn lashlang_block(code: &str) -> String {
-    format!("<lashlang>\n{code}\n</lashlang>")
+fn typescript_block(code: &str) -> String {
+    format!("<typescript>\n{code}\n</typescript>")
 }
 
 /// The persisted RLM snapshot root, decoded far enough to name its globals and
@@ -428,10 +428,9 @@ impl Backend {
         });
         let initial = RuntimeSessionState {
             session_id: session_id.clone(),
-            protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-                dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
-                ..Default::default()
-            })
+            protocol_turn_options: ProtocolTurnOptions::typed(
+                lash_rlm_types::RlmCreateExtras::default(),
+            )
             .expect("rlm options"),
             ..RuntimeSessionState::new(policy())
         };
@@ -510,7 +509,7 @@ fn continue_as_response() -> String {
     // `projected_original` is a projected binding on the parent frame; the
     // seed-preserving projection policy carries it into the new frame as the
     // projected entry `carried`.
-    "<lashlang>\nawait control.continue_as({task: \"next\", seed: {baton: \"switched\", carried: projected_original}})?\n</lashlang>".to_string()
+    "<typescript>\nawait control.continue_as({task: \"next\", seed: {baton: \"switched\", carried: projected_original}});\n</typescript>".to_string()
 }
 
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
@@ -690,7 +689,7 @@ async fn reopen_seed_receipt_replay(backend: Backend) {
 /// execution result, or the next durable checkpoint.
 async fn faulted_append_rollback(backend: Backend) {
     let script = Arc::new(Script {
-        responses: vec![lashlang_block("finish baton")],
+        responses: vec![typescript_block("finish(baton);")],
         ..Script::default()
     });
     let SeededSession {
@@ -819,8 +818,8 @@ async fn follow_on_failure_discards_the_uncommitted_execution(backend: Backend) 
     let script = Arc::new(Script {
         responses: vec![
             continue_as_response(),
-            lashlang_block("baton = \"UNCOMMITTED-FOLLOW-ON\"\nfinish baton"),
-            lashlang_block("finish baton"),
+            typescript_block("let baton = \"UNCOMMITTED-FOLLOW-ON\";\nfinish(baton);"),
+            typescript_block("finish(baton);"),
         ],
         ..Script::default()
     });
@@ -1002,11 +1001,11 @@ fn assert_final_value(
 }
 
 fn establish_response() -> String {
-    lashlang_block("accumulated = \"COMMITTED\"\nfinish accumulated")
+    typescript_block("let accumulated = \"COMMITTED\";\nfinish(accumulated);")
 }
 
 fn read_response() -> String {
-    lashlang_block("finish accumulated")
+    typescript_block("finish(accumulated);")
 }
 
 /// A seeded session whose first turn committed the global `accumulated`, with
@@ -1097,10 +1096,9 @@ async fn storeless_runtime(
             "fig2521-storeless-{}",
             uuid::Uuid::new_v4().simple()
         )),
-        protocol_turn_options: ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
-            dialect: Some(lash_rlm_types::RlmDialect::Lashlang),
-            ..Default::default()
-        })
+        protocol_turn_options: ProtocolTurnOptions::typed(
+            lash_rlm_types::RlmCreateExtras::default(),
+        )
         .expect("rlm options"),
         ..RuntimeSessionState::new(policy())
     };
@@ -1561,7 +1559,7 @@ fn refuse_second_turn_finalize() -> Arc<dyn PluginFactory> {
 }
 
 fn reassign_response() -> String {
-    lashlang_block("accumulated = \"REJECTED\"\nfinish accumulated")
+    typescript_block("let accumulated = \"REJECTED\";\nfinish(accumulated);")
 }
 
 /// Runs the rejected turn: the executor has already assigned `REJECTED` when

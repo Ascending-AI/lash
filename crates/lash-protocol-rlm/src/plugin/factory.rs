@@ -357,22 +357,12 @@ impl PluginFactory for RlmProtocolPluginFactory {
             Arc::new(TypescriptDialect::new(lashlang_surface, services));
         let dialect_registry =
             RlmDialectRegistry::new([Arc::clone(&lashlang), Arc::clone(&typescript)]);
-        let selected = match ctx.materialization {
-            lash_core::plugin::PluginSessionMaterialization::Creation => {
-                super::protocol_session::resolve_new_rlm_session_dialect(
-                    &ctx.protocol_turn_options,
-                    &ctx.plugin_options,
-                )
-                .map_err(|error| PluginError::Session(error.to_string()))?
-            }
-            lash_core::plugin::PluginSessionMaterialization::Rematerialization => {
-                super::protocol_session::resolve_recorded_rlm_session_dialect(
-                    &ctx.protocol_turn_options,
-                )?
-            }
-        };
+        // TypeScript is the only RLM language (ADR 0096), so there is nothing to
+        // resolve from the session: the create contract and the durable record
+        // carry no language pin, and a pre-cutover record that still does is
+        // refused by `rlm_session_config` rather than read here.
         let dialect = dialect_registry
-            .resolve(selected.language_id())
+            .resolve(crate::dialect::typescript::LANGUAGE_ID)
             .map_err(|error| PluginError::Session(error.to_string()))?;
         if config.channel == super::RlmChannel::NativeTool {
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {

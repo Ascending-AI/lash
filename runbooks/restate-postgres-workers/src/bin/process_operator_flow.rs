@@ -214,23 +214,10 @@ fn process_json(record: &ProcessRecord) -> Value {
     })
 }
 
-/// Read once: a bad `LASH_RUNBOOK_DIALECT` must fail the phase, not one turn.
-fn runbook_dialect() -> lash::rlm::RlmDialect {
-    static DIALECT: std::sync::OnceLock<lash::rlm::RlmDialect> = std::sync::OnceLock::new();
-    *DIALECT.get_or_init(|| {
-        lash_restate_postgres_workers_e2e::runbook_rlm_dialect()
-            .expect("LASH_RUNBOOK_DIALECT names a registered dialect")
-    })
-}
-
-/// The scripted cell, in the dialect the row is running. A foreign cell cannot
-/// execute, so the turn never reaches a terminal state and the row hangs
-/// instead of failing.
+/// The scripted cell. A cell the session cannot execute never reaches a
+/// terminal state, so the row would hang instead of failing.
 fn scripted_response(value: &str) -> LlmResponse {
-    let text = lash_restate_postgres_workers_e2e::scripted_finish_cell(
-        runbook_dialect(),
-        &format!("\"{value}\""),
-    );
+    let text = lash_restate_postgres_workers_e2e::scripted_finish_cell(&format!("\"{value}\""));
     LlmResponse {
         parts: vec![lash_core::LlmOutputPart::Text {
             text,
@@ -484,18 +471,7 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
             .into_handle();
     let attachments = tempfile::tempdir().context("selected-drain attachment directory")?;
     let core = core(storage, provider, &attachments)?;
-    let session = core
-        .session(SESSION_ID)
-        .plugin_option(
-            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-            lash::rlm::RlmCreateExtras {
-                dialect: Some(runbook_dialect()),
-                ..lash::rlm::RlmCreateExtras::default()
-            },
-        )
-        .context("state the row's dialect")?
-        .open()
-        .await?;
+    let session = core.session(SESSION_ID).open().await?;
     let store_factory = storage.session_store_factory_with_shared_process_registry();
     let store = store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
@@ -655,19 +631,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let provider_handle = provider.handle.clone();
     let attachments = tempfile::tempdir().context("drain attachment directory")?;
     let core = core(storage, provider.handle.clone(), &attachments)?;
-    let session = {
-        core.session(TURN_SESSION_ID)
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(runbook_dialect()),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )
-            .context("state the row's dialect")?
-            .open()
-            .await?
-    };
+    let session = { core.session(TURN_SESSION_ID).open().await? };
     let journal = Arc::new(JournalController::default());
     let task_journal = Arc::clone(&journal);
     let turn = tokio::spawn(async move {
@@ -713,7 +677,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_drain_deployment",
-        "dialect": runbook_dialect().language_id(),
+        "dialect": "typescript",
         "seeded_session_id": TURN_SESSION_ID,
         "in_flight_turn_id": "graceful-drain-in-flight",
         "provider_calls": provider.calls.load(Ordering::SeqCst),

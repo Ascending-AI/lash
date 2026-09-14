@@ -64,7 +64,6 @@ pub struct State {
     pub(super) globals: Record,
     pub(super) runtime_globals: Record,
     pub(super) heap: Heap,
-    pub(super) reference_semantics: bool,
 }
 
 impl PartialEq for State {
@@ -72,7 +71,6 @@ impl PartialEq for State {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
-            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -189,7 +187,6 @@ impl State {
             globals: self.globals.clone(),
             runtime_globals: self.runtime_globals.clone(),
             heap,
-            reference_semantics: self.reference_semantics,
         }
     }
 
@@ -198,7 +195,6 @@ impl State {
             globals: snapshot.globals,
             runtime_globals: snapshot.runtime_globals,
             heap: snapshot.heap,
-            reference_semantics: snapshot.reference_semantics,
         }
     }
 
@@ -217,21 +213,6 @@ impl State {
         let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
         self.heap.collect(root_values.iter());
         self.heap.validate_closures(&program.chunk.functions)?;
-        if program.dialect == super::CompilationDialect::Lashlang {
-            let mut roots = PersistedRoots::default();
-            roots.durable_all(
-                self.runtime_globals
-                    .iter()
-                    .map(|(name, value)| (name.to_string(), value)),
-            );
-            self.heap
-                .validate_persisted_forest(&roots)
-                .map_err(|reason| RuntimeError::ValidationFailed {
-                    reason: format!(
-                        "Lashlang state cannot contain a shared TypeScript heap graph: {reason}"
-                    ),
-                })?;
-        }
         Ok(())
     }
 
@@ -310,7 +291,6 @@ pub struct Snapshot {
     globals: Record,
     runtime_globals: Record,
     heap: Heap,
-    reference_semantics: bool,
 }
 
 impl PartialEq for Snapshot {
@@ -318,7 +298,6 @@ impl PartialEq for Snapshot {
         self.globals == other.globals
             && self.runtime_globals == other.runtime_globals
             && self.heap == other.heap
-            && self.reference_semantics == other.reference_semantics
     }
 }
 
@@ -328,7 +307,6 @@ impl Snapshot {
             globals,
             runtime_globals: Record::new(),
             heap: Heap::default(),
-            reference_semantics: false,
         }
     }
 
@@ -544,21 +522,19 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
         // restore — and it can never be written to durable storage at all.
         let mut forest_roots = PersistedRoots::default();
         forest_roots.durable_all(runtime_globals.iter());
+        // `reference_semantics` on the wire says whether this heap is a shared
+        // graph rather than a forest. Reference semantics make sharing ordinary
+        // (ADR 0096), so a heap the forest form cannot hold is written in the
+        // graph form instead of being refused.
         let reference_semantics = match heap.validate_persisted_forest(&forest_roots) {
             Ok(()) => false,
-            Err(_) if snapshot.reference_semantics => {
+            Err(_) => {
                 heap.validate_persisted_graph(&forest_roots)
                     .map_err(|reason| ContinuationError::UnserializableValue {
                         location: format!("snapshot heap: {reason}"),
                         variant: "shared heap object",
                     })?;
                 true
-            }
-            Err(reason) => {
-                return Err(ContinuationError::UnserializableValue {
-                    location: format!("snapshot heap: {reason}"),
-                    variant: "shared heap object",
-                });
             }
         };
         drop(forest_roots);
@@ -609,7 +585,6 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 globals: bindings_into_record(globals, "globals", false)?,
                 runtime_globals: Record::new(),
                 heap: Heap::default(),
-                reference_semantics: false,
             }),
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
@@ -675,7 +650,6 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     globals,
                     runtime_globals,
                     heap,
-                    reference_semantics,
                 })
             }
             _ => Err(SnapshotDecodeError::InvalidEncoding(

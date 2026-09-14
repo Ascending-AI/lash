@@ -33,9 +33,9 @@ for item in items {
 }
 lookup_handle = start echo(value: join(labels, ","))
 stats_handle = start echo(value: { total: total, count: len(items), seen: len(history), index_count: len(all_indexes) })
-fanout = await { lookup: lookup_handle, stats: stats_handle }
-lookup_value = fanout.lookup?
-stats_value = validate(fanout.stats?, Type { total: int, count: int, seen: int, index_count: int })
+fanout = await [lookup_handle, stats_handle]
+lookup_value = fanout[0]?
+stats_value = validate(fanout[1]?, Type { total: int, count: int, seen: int, index_count: int })
 summary = format(
   "user={0};attempt={1};active={2};total={3};count={4};seen={5};indexes={6}",
   ctx.user,
@@ -91,11 +91,11 @@ positional_results = await [
   start echo(value: len(tokens))
 ]
 positional = [positional_results[0]?, positional_results[1], positional_results[2]?]
-named_results = await {
-  lookup: start echo(value: source),
-  summary: start echo(value: format("{0}:{1}", trimmed_user, count))
-}
-named = { lookup: named_results.lookup, summary: named_results.summary? }
+named_results = await [
+  start echo(value: source),
+  start echo(value: format("{0}:{1}", trimmed_user, count))
+]
+named = { lookup: named_results[0]?, summary: named_results[1]? }
 cancelled = start echo(value: "cancelled")
 cancel cancelled
 handle = start echo(value: "awaited")
@@ -113,9 +113,11 @@ state = {
   line_matches: line_matches
 }
 state.tags[1] = "beta"
+counts = {}
 for token in state.tags {
-  state.counts[token] = state.counts[token] + 1
+  counts[token] = counts[token] + 1
 }
+state.counts = counts
 for token in keys(state.counts) {
   if token == "beta" {
     continue
@@ -149,7 +151,7 @@ finish {
   direct: direct,
   awaited: awaited,
   positional: positional,
-  lookup: named.lookup?,
+  lookup: named.lookup,
   summary: named.summary,
   values: values(state.counts),
   beta_index: beta_index,
@@ -162,13 +164,13 @@ finish {
         }
         Scenario::AsyncAwait => {
             r#"
-handles = {
-  alpha: start echo(value: "alpha"),
-  beta: start echo(value: "beta"),
-  gamma: start echo(value: "gamma")
-}
+handles = [
+  start echo(value: "alpha"),
+  start echo(value: "beta"),
+  start echo(value: "gamma")
+]
 results = await handles
-formatted = [results.alpha?, results.beta?, results.gamma?]
+formatted = [results[0]?, results[1]?, results[2]?]
 finish join(formatted, ",")
 "#
         }
@@ -183,11 +185,11 @@ finish third
         Scenario::GeneralFanout => {
             r#"
 seed = ["alpha", "beta", "gamma"]
-results = await {
-  left: start echo(value: format("{0}:{1}", seed[0], len(seed))),
-  right: start echo(value: format("{0}:{1}", seed[1], len(seed)))
-}
-finish format("{0}|{1}", results.left?, results.right?)
+results = await [
+  start echo(value: format("{0}:{1}", seed[0], len(seed))),
+  start echo(value: format("{0}:{1}", seed[1], len(seed)))
+]
+finish format("{0}|{1}", results[0]?, results[1]?)
 "#
         }
         Scenario::LoopControl => {
@@ -428,18 +430,13 @@ second = start spawn_child(task: "inspect api", capability: "explore")
 llm = start query_llm(prompt: "summarize benchmark", model: "gpt-5.4-mini")
 probe = start echo(value: "app log")
 handles = await processes.list({})?
-results = await {
-  first: first,
-  second: second,
-  llm: llm,
-  probe: probe
-}
+results = await [first, second, llm, probe]
 cancel second
 finish {
-  first: results.first.value.claim,
-  second: results.second.value.claim,
-  llm: results.llm.value.text,
-  probe: results.probe.value,
+  first: results[0].value.claim,
+  second: results[1].value.claim,
+  llm: results[2].value.text,
+  probe: results[3].value,
   tools: len(handles)
 }
 "#
@@ -575,7 +572,7 @@ second_beta = find(text, "beta", first_beta + 1)
 finish {
   count: len(items),
   first: items[0],
-  last: items[-1],
+  last: items[len(items) - 1],
   forward: forward,
   backward: backward,
   stride: stride,
@@ -597,18 +594,18 @@ left = await tools.echo({ value: "left" })
 right = await tools.echo({ value: "right" })
 computed = len(history) + 39
 discarded = ["branch_a", 40 + 2, len(history)]
-batched_results = await {
-  first: start echo(value: left.value),
-  second: start echo(value: right.value)
-}
-batched = { first: batched_results.first, second: batched_results.second, computed: computed }
+batched_results = await [
+  start echo(value: left.value),
+  start echo(value: right.value)
+]
+batched = { first: batched_results[0]?, second: batched_results[1]?, computed: computed }
 finish {
   left: left.value,
   right: right.value,
   computed: computed,
   discarded: discarded,
-  first: batched.first?,
-  second: batched.second?,
+  first: batched.first,
+  second: batched.second,
   batched_computed: batched.computed
 }
 "#
@@ -687,7 +684,7 @@ finish { kept: len(kept) }
             // Repeated writes to a descendant reached through a path, which is
             // the shape that walks reverse parent edges.
             r#"
-tree = { level: { rows: [[0], [1], [2]], counters: {} } }
+tree = { level: { rows: [[0], [1], [2]], counters: { c: 0 } } }
 for n in range(0, 150) {
   tree.level.rows[n % 3] = [n]
   tree.level.counters["c"] = tree.level.counters["c"] + 1

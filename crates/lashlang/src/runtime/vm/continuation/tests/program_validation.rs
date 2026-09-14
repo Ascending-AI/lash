@@ -39,49 +39,46 @@ fn callback_program() -> CompiledProgram {
             Expr::Return(Box::new(Expr::Variable("value".into()))),
         ])),
     }));
-    crate::runtime::entry_points::compile_ast_with_dialect(
-        &Program::block(vec![
-            Expr::Assign {
-                target: AssignTarget::variable("callback".into()),
-                expr: Box::new(callback),
-            },
-            Expr::If {
-                condition: Box::new(Expr::Bool(false)),
-                then_block: Box::new(Expr::Map {
-                    items: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
-                    function: Box::new(Expr::Variable("callback".into())),
-                }),
-                else_block: Box::new(Expr::Undefined),
-            },
-            Expr::If {
-                condition: Box::new(Expr::Bool(false)),
-                then_block: Box::new(private_builtin(
-                    "__typescript_async_map",
-                    vec![
-                        Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
-                        Expr::Variable("callback".into()),
-                    ],
-                )),
-                else_block: Box::new(Expr::Undefined),
-            },
-            private_builtin(
-                "__typescript_stdlib",
+    crate::runtime::entry_points::compile_ast(&Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("callback".into()),
+            expr: Box::new(callback),
+        },
+        Expr::If {
+            condition: Box::new(Expr::Bool(false)),
+            then_block: Box::new(Expr::Map {
+                items: Box::new(Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)])),
+                function: Box::new(Expr::Variable("callback".into())),
+            }),
+            else_block: Box::new(Expr::Undefined),
+        },
+        Expr::If {
+            condition: Box::new(Expr::Bool(false)),
+            then_block: Box::new(private_builtin(
+                "__typescript_async_map",
                 vec![
-                    Expr::String("forEach".into()),
-                    private_builtin(
-                        "__typescript_heap_new",
-                        vec![
-                            Expr::String("Set".into()),
-                            Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
-                        ],
-                    ),
+                    Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
                     Expr::Variable("callback".into()),
                 ],
-            ),
-            Expr::Finish(Box::new(Expr::Null)),
-        ]),
-        crate::CompilationDialect::Typescript,
-    )
+            )),
+            else_block: Box::new(Expr::Undefined),
+        },
+        private_builtin(
+            "__typescript_stdlib",
+            vec![
+                Expr::String("forEach".into()),
+                private_builtin(
+                    "__typescript_heap_new",
+                    vec![
+                        Expr::String("Set".into()),
+                        Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+                    ],
+                ),
+                Expr::Variable("callback".into()),
+            ],
+        ),
+        Expr::Finish(Box::new(Expr::Null)),
+    ]))
     .expect("compile callback driver program")
 }
 
@@ -95,22 +92,19 @@ fn dynamic_call_program() -> CompiledProgram {
             Expr::Return(Box::new(Expr::Variable("value".into()))),
         ])),
     }));
-    crate::runtime::entry_points::compile_ast_with_dialect(
-        &Program::block(vec![
-            Expr::Assign {
-                target: AssignTarget::variable("callback".into()),
-                expr: Box::new(callback),
-            },
-            Expr::Finish(Box::new(private_builtin(
-                "__typescript_call_dynamic",
-                vec![
-                    Expr::Variable("callback".into()),
-                    Expr::List(vec![Expr::Number(1.0)]),
-                ],
-            ))),
-        ]),
-        crate::CompilationDialect::Typescript,
-    )
+    crate::runtime::entry_points::compile_ast(&Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("callback".into()),
+            expr: Box::new(callback),
+        },
+        Expr::Finish(Box::new(private_builtin(
+            "__typescript_call_dynamic",
+            vec![
+                Expr::Variable("callback".into()),
+                Expr::List(vec![Expr::Number(1.0)]),
+            ],
+        ))),
+    ]))
     .expect("compile dynamic call program")
 }
 

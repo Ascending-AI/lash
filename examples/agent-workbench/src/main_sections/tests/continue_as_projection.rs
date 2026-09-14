@@ -14,14 +14,14 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
             async move {
                 Ok(match call {
                     0 => text_response(
-                        "<lashlang>\nawait control.continue_as({ task: \"enter the middle follow frame\", seed: { middle_marker: \"hidden-middle-seed\" } })?\n</lashlang>",
+                        "<typescript>\nawait control.continue_as({ task: \"enter the middle follow frame\", seed: { middle_marker: \"hidden-middle-seed\" } });\n</typescript>",
                     ),
                     1 => text_response(
-                        "<lashlang>\nawait control.continue_as({ task: \"enter the final follow frame\", seed: { final_marker: \"hidden-final-seed\" } })?\n</lashlang>",
+                        "<typescript>\nawait control.continue_as({ task: \"enter the final follow frame\", seed: { final_marker: \"hidden-final-seed\" } });\n</typescript>",
                     ),
-                    2 => text_response("<lashlang>\nfinish \"third frame answer\"\n</lashlang>"),
+                    2 => text_response("<typescript>\nfinish(\"third frame answer\");\n</typescript>"),
                     3 => text_response(
-                        "<lashlang>\nfinish \"ordinary follow-frame answer\"\n</lashlang>",
+                        "<typescript>\nfinish(\"ordinary follow-frame answer\");\n</typescript>",
                     ),
                     other => panic!("unexpected multi-frame provider call {other}"),
                 })
@@ -258,9 +258,9 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
             async move {
                 Ok(match call {
                     0 => text_response(
-                        "<lashlang>\nawait control.continue_as({ task: \"continue in the next frame\", seed: { marker: \"protocol-only\" } })?\n</lashlang>",
+                        "<typescript>\nawait control.continue_as({ task: \"continue in the next frame\", seed: { marker: \"protocol-only\" } });\n</typescript>",
                     ),
-                    1 => text_response("<lashlang>\nfinish \"switched frame answer\"\n</lashlang>"),
+                    1 => text_response("<typescript>\nfinish(\"switched frame answer\");\n</typescript>"),
                     other => panic!("unexpected frame-switch provider call {other}"),
                 })
             }

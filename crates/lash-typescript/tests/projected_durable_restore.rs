@@ -18,9 +18,9 @@
 use std::collections::BTreeSet;
 
 use lashlang::{
-    AbilityOp, AbilityResult, CompilationDialect, ExecutionHost, ExecutionHostError, ExecutionMode,
-    ExecutionOutcome, ProjectedBindings, ProjectedValue, Record, RuntimeError, Snapshot, State,
-    Value, Vm, VmContinuation, VmRunOutcome,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    ProjectedBindings, ProjectedValue, Record, RuntimeError, Snapshot, State, Value, Vm,
+    VmContinuation, VmRunOutcome,
 };
 
 /// Runs cells in process mode, answers the one tool call the park test makes,
@@ -69,7 +69,7 @@ fn compile(source: &str) -> lashlang::CompiledProgram {
     let globals = BTreeSet::from(["report".to_string(), "rows".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-    lashlang::compile_ast_with_dialect(&program, CompilationDialect::Typescript)
+    lashlang::compile_ast(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"))
 }
 

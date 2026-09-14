@@ -23,7 +23,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"choices\":[{\"delta\":{\"content\":\"<lashlang>\\nfinish \\\"settled\\\"\\n</lashlang>\\n\"}}]}"
+      "data": "{\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nfinish(\\\"settled\\\");\\n</typescript>\\n\"}}]}"
     },
     {
       "at": 21,

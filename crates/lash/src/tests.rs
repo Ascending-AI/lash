@@ -1814,8 +1814,8 @@ fn text_response(text: &str) -> LlmResponse {
 }
 
 #[cfg(feature = "rlm")]
-fn lashlang_block(source: &str) -> String {
-    format!("<lashlang>\n{}\n</lashlang>", source.trim())
+fn typescript_block(source: &str) -> String {
+    format!("<typescript>\n{}\n</typescript>", source.trim())
 }
 
 #[cfg(feature = "rlm")]
@@ -2018,7 +2018,7 @@ fn recording_request_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> Provi
             let seen = Arc::clone(&seen);
             async move {
                 seen.lock_recover().push(request_text(&request));
-                Ok(text_response(&lashlang_block("finish \"ok\"")))
+                Ok(text_response(&typescript_block("finish(\"ok\");")))
             }
         })
         .build()

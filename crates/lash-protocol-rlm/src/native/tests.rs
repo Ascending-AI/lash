@@ -211,9 +211,9 @@ fn run(
         None if native => vec![call(
             "provider-id",
             "execute_code",
-            r#"{"code":"finish 1"}"#,
+            r#"{"code":"finish(1);"}"#,
         )],
-        None => vec![text("<lashlang>\nfinish 1\n</lashlang>")],
+        None => vec![text("<typescript>\nfinish(1);\n</typescript>")],
     };
     let attempted_finish =
         matches!(&exec, Some(Ok(response)) if response.terminal_finish.is_some());
@@ -477,11 +477,13 @@ fn native_driver_stops_at_budget_before_queued_provider_response() {
 fn cell_driver_stops_at_budget_before_queued_provider_response() {
     assert_driver_stops_before_queued_provider_response(
         false,
-        vec![text("<lashlang>\nprint \"cell-allowed\"\n</lashlang>")],
         vec![text(
-            "<lashlang>\nprint \"cell-forbidden-iteration-one\"\n</lashlang>",
+            "<typescript>\nprint(\"cell-allowed\");\n</typescript>",
         )],
-        r#"print "cell-allowed""#,
+        vec![text(
+            "<typescript>\nprint(\"cell-forbidden-iteration-one\");\n</typescript>",
+        )],
+        r#"print("cell-allowed");"#,
         "cell-forbidden-iteration-one",
     );
 }
@@ -688,9 +690,13 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     assert_eq!(schema["required"], serde_json::json!(["code"]));
     assert_eq!(schema["additionalProperties"], false);
     assert!(!preamble.execution_prompt.contains("### Response shape"));
-    assert!(!preamble.execution_prompt.contains("<lashlang>"));
+    assert!(!preamble.execution_prompt.contains("<typescript>"));
     let response = LlmResponse {
-        parts: vec![call("native-id", "execute_code", r#"{"code":"finish 1"}"#)],
+        parts: vec![call(
+            "native-id",
+            "execute_code",
+            r#"{"code":"finish(1);"}"#,
+        )],
         ..Default::default()
     };
     let transforms = session
@@ -705,7 +711,10 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(names, ["rlm_lashlang_cell_start", "rlm_lashlang_cell_end"]);
+    assert_eq!(
+        names,
+        ["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
+    );
 }
 
 #[test]
@@ -849,7 +858,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
 
 #[test]
 fn output_limit_calls_repair_without_execution_until_stall_budget() {
-    for arguments in [r#"{"code":"finish 1"}"#, r#"{"code":"finish"#] {
+    for arguments in [r#"{"code":"finish(1);"}"#, r#"{"code":"finish"#] {
         let mut machine = TurnMachine::new(
             config(true, RlmTermination::Natural),
             Vec::new(),

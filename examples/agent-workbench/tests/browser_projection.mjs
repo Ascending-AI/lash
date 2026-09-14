@@ -1303,7 +1303,7 @@ test("Rust durable tool summaries render success, failure, and explicit omission
 
   const codeBlock = timeline.children[0];
   const renderedTools = codeBlock.children.filter((child) => child.className.startsWith("tool"));
-  assert.equal(codeBlock.querySelector("summary").textContent, "lashlang completed · 5 tools · 3 omitted");
+  assert.equal(codeBlock.querySelector("summary").textContent, "typescript completed · 5 tools · 3 omitted");
   assert.equal(renderedTools.length, 3);
   assert.deepEqual(
     renderedTools.slice(0, 2).map((tool) => ({

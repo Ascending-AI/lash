@@ -1156,9 +1156,9 @@ async fn prompt_fanout_example_unwraps_spawn_and_wait_results_with_question() {
         r#"process inspect_chunk(task: str, capability: str) { finish task }
 a = start inspect_chunk(task: "chunk_1", capability: "explore")
 b = start inspect_chunk(task: "chunk_2", capability: "explore")
-results = await { a: a, b: b }
-a_result = results.a?
-b_result = results.b?
+results = await [a, b]
+a_result = results[0]?
+b_result = results[1]?
 finish [a_result.claim, b_result.claim]"#,
     ) else {
         panic!("expected list");

@@ -11,8 +11,8 @@ Run the three-row gate with:
 just rlm-smoke-e2e
 ```
 
-The runner executes every scenario once with `LASH_RUNBOOK_DIALECT=typescript`, the only
-RLM dialect ([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
+The runner executes every scenario once: TypeScript is the sole RLM language
+([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
 directory, session id, reserved port, trace offset, and artifact directory. The configured
 driver model is recorded separately from provider-reported served-model evidence.
 

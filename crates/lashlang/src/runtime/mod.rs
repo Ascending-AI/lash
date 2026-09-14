@@ -17,7 +17,6 @@ pub(crate) const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 mod access;
 mod cache;
 mod compiler;
-pub use compiler::CompilationDialect;
 pub(crate) use compiler::is_pure_expr;
 mod entry_points;
 mod error;
@@ -46,9 +45,8 @@ pub use cache::{
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
 pub use entry_points::{
-    ExecutableProgram, compile, compile_ast, compile_ast_with_dialect, compile_linked,
-    compile_linked_process, compile_linked_with_dialect, compile_module_artifact_process,
-    compile_process, compile_process_with_dialect, execute, prewarm,
+    ExecutableProgram, compile, compile_ast, compile_linked, compile_linked_process,
+    compile_module_artifact_process, compile_process, execute, prewarm,
 };
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
@@ -101,11 +99,10 @@ pub(crate) use access::{
     add_assign_index_number, add_assign_value_number, assign_index, assign_path, assign_path_steps,
     assign_record_field, descend_index, descend_record_field, ensure_no_prototype_chain_wire_key,
     is_prototype_chain_key, next_assign_index, prototype_chain_data_key_error,
-    prototype_chain_key_error, read_field_direct, read_field_ref_direct, read_image_field,
-    read_index_direct, read_index_ref_direct, read_javascript_field_direct,
-    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct,
-    read_javascript_index_direct_with_key, resolve_existing_list_assignment_index, resolve_index,
-    unwrap_tool_result,
+    prototype_chain_key_error, read_field_ref_direct, read_image_field, read_index_ref_direct,
+    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
+    read_javascript_index_direct, read_javascript_index_direct_with_key,
+    resolve_existing_list_assignment_index, resolve_index, unwrap_tool_result,
 };
 pub(crate) use access::{
     is_runtime_process_handle, is_tool_handle_record, value_contains_tool_handle,
@@ -168,7 +165,6 @@ pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 pub struct CompiledProgram {
     pub(crate) chunk: Chunk,
     pub(crate) compile_stats: CompileStats,
-    pub(crate) dialect: CompilationDialect,
 }
 
 impl std::fmt::Debug for CompiledProgram {
@@ -176,7 +172,6 @@ impl std::fmt::Debug for CompiledProgram {
         f.debug_struct("CompiledProgram")
             .field("instruction_count", &self.chunk.code.len())
             .field("compile_stats", &self.compile_stats)
-            .field("dialect", &self.dialect)
             .finish()
     }
 }

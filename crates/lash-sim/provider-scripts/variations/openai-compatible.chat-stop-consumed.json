@@ -6,7 +6,7 @@
   "request_match": {
     "body": {
       "stream": { "equals": true },
-      "stop": { "equals": ["</lashlang>"] }
+      "stop": { "equals": ["</typescript>"] }
     },
     "headers": {
       "authorization": { "present": true },
@@ -23,7 +23,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"choices\":[{\"delta\":{\"content\":\"<lashlang>\\nfinish \\\"settled\\\"\\n\"}}]}"
+      "data": "{\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nfinish(\\\"settled\\\");\\n\"}}]}"
     },
     {
       "at": 21,

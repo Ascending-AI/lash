@@ -3,16 +3,15 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+/// The RLM language every session runs.
+///
+/// TypeScript is the sole RLM language (ADR 0096); the UI still reports a
+/// language id so the settings panel and the session list keep their shape.
+pub(crate) const RLM_LANGUAGE_ID: &str = "typescript";
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) core: LashCore,
-    /// The dialect new sessions are created with, from `LASH_RUNBOOK_DIALECT`.
-    ///
-    /// A plain field rather than a `cfg(test)` fork: forking it meant the
-    /// production and test builds of `session_builder` differed by
-    /// construction, so no test could ever reach the TypeScript branch of the
-    /// code that ships.
-    pub(crate) rlm_dialect: lash::rlm::RlmDialect,
     pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     /// The deployment's session-store factory, retained beside the core it was
     /// built with because it is also this host's attachment **root authority**
@@ -50,7 +49,8 @@ pub(crate) struct Settings {
     pub(crate) session_id: SessionId,
     /// The operator's name for this session, or its id when they gave none.
     pub(crate) session_name: String,
-    /// The language id this session recorded, for the dialect badge.
+    /// The RLM language id this session runs. TypeScript is the sole RLM
+    /// language (ADR 0096), so this is always `"typescript"`.
     pub(crate) rlm_dialect: &'static str,
 }
 
@@ -398,14 +398,14 @@ impl SessionQuery {
     }
 }
 
-/// The create-a-session request: a name the operator can read, and the dialect
-/// the session is pinned to for its durable lifetime.
+/// The create-a-session request: a name the operator can read, and the RLM
+/// language the session runs.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct SessionCreateRequest {
     #[serde(default)]
     pub(crate) name: Option<String>,
-    /// A registered RLM language id. Absent means the deployment's ambient
-    /// `LASH_RUNBOOK_DIALECT`; an unregistered id is refused, never defaulted.
+    /// An RLM language id. TypeScript is the sole RLM language (ADR 0096), so
+    /// absence means TypeScript and any other id is refused, never defaulted.
     #[serde(default)]
     pub(crate) dialect: Option<String>,
 }
@@ -420,7 +420,7 @@ pub(crate) struct SessionSelectRequest {
 pub(crate) struct SessionSummary {
     pub(crate) session_id: SessionId,
     pub(crate) name: String,
-    /// The dialect this session recorded, read back from the session itself.
+    /// The RLM language this session runs; always `"typescript"` (ADR 0096).
     pub(crate) dialect: &'static str,
     pub(crate) created_at_ms: i64,
     pub(crate) last_active_ms: i64,
@@ -432,10 +432,9 @@ pub(crate) struct SessionSummary {
 pub(crate) struct SessionListResponse {
     pub(crate) sessions: Vec<SessionSummary>,
     pub(crate) current_session_id: SessionId,
-    /// Every registered RLM language id, from the substrate's own dialect
-    /// enumeration rather than a list this host writes down.
+    /// Every RLM language id. TypeScript is the sole one (ADR 0096).
     pub(crate) dialects: Vec<&'static str>,
-    /// The dialect a session gets when the create form offers no choice.
+    /// The RLM language a session gets when the create form offers no choice.
     pub(crate) default_dialect: &'static str,
 }
 
