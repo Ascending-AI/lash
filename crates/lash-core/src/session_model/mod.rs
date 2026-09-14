@@ -194,6 +194,36 @@ impl SessionPolicy {
         self.provider_id.trim()
     }
 
+    /// Settle the durable provider pin against the id a host names at this open.
+    ///
+    /// The recorded id is a durable fact: it is read and guarded, never
+    /// smoothed over (ADR 0066). A session with no recorded pin adopts the
+    /// host's id; an open that names nothing inherits the recorded pin; an
+    /// open naming the recorded provider keeps it; an open naming a
+    /// *different* provider is refused with
+    /// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
+    /// rather than having its request silently discarded and the conflict
+    /// deferred to the first turn.
+    pub fn settle_provider_pin(
+        session_id: &SessionId,
+        recorded: &str,
+        requested: &str,
+    ) -> Result<String, crate::SessionError> {
+        let recorded = recorded.trim();
+        let requested = requested.trim();
+        if recorded.is_empty() {
+            return Ok(requested.to_string());
+        }
+        if requested.is_empty() || requested == recorded {
+            return Ok(recorded.to_string());
+        }
+        Err(crate::SessionError::ProviderMismatch {
+            expected: recorded.to_string(),
+            actual: requested.to_string(),
+            session_id: session_id.clone(),
+        })
+    }
+
     /// Exposes model id to protocol and process-engine implementors while materializing
     /// protocol-specific session and turn state.
     pub fn model_id(&self) -> &str {

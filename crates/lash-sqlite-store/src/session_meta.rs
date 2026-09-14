@@ -194,6 +194,43 @@ pub(crate) fn write_session_meta(
     Ok(true)
 }
 
+/// Read the durable lineage recorded for `session_id`, if the row exists.
+///
+/// Admission uses this inside its own transaction, so it must not open a
+/// nested one: it selects the four lineage columns and nothing else.
+pub(crate) fn load_recorded_lineage(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<lash_core::SessionLineage>, StoreError> {
+    let row = conn
+        .query_row(
+            "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
+             FROM session_meta WHERE session_id = ?1",
+            params![session_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    row.map(
+        |(relation_kind, parent_session_id, source_session_id, source_node_id)| {
+            SESSION_META_CODEC.decode_lineage(
+                &relation_kind,
+                parent_session_id.map(SessionId::from),
+                source_session_id.map(SessionId::from),
+                source_node_id,
+            )
+        },
+    )
+    .transpose()
+}
+
 pub(crate) fn load_session_meta(
     conn: &Connection,
     selected_session_id: Option<&SessionId>,

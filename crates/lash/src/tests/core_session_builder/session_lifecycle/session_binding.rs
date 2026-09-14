@@ -347,3 +347,72 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
     );
     Ok(())
 }
+
+/// FIG-1559: the handle reports the relation the store recorded, and a rebind
+/// that renames the parent is a typed refusal rather than silent absorption.
+#[tokio::test]
+async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
+    let store: Arc<dyn lash_core::RuntimePersistence> =
+        Arc::new(lash_core::facade_support::InMemorySessionStore::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let child = core
+        .session("relation-child")
+        .store(Arc::clone(&store))
+        .parent("relation-parent")
+        .open()
+        .await?;
+    assert_eq!(child.parent_session_id(), Some("relation-parent"));
+    drop(child);
+
+    // A reopen that names no parent still reports the recorded relation: the
+    // handle reads the durable fact, not the request it was built from.
+    let reopened = core
+        .session("relation-child")
+        .store(Arc::clone(&store))
+        .open()
+        .await?;
+    assert_eq!(reopened.parent_session_id(), Some("relation-parent"));
+    drop(reopened);
+
+    let error = match core
+        .session("relation-child")
+        .store(Arc::clone(&store))
+        .parent("other-parent")
+        .open()
+        .await
+    {
+        Ok(_) => panic!("a rebind naming a different parent must be refused"),
+        Err(error) => error,
+    };
+    match &error {
+        crate::EmbedError::Store(lash_core::store::StoreError::SessionRelationMismatch {
+            session_id,
+            recorded,
+            requested,
+        }) => {
+            assert_eq!(session_id.as_str(), "relation-child");
+            assert_eq!(
+                **recorded,
+                lash_core::SessionLineage::Child {
+                    parent_session_id: "relation-parent".into()
+                }
+            );
+            assert_eq!(
+                **requested,
+                lash_core::SessionLineage::Child {
+                    parent_session_id: "other-parent".into()
+                }
+            );
+        }
+        other => panic!("expected a typed relation-mismatch refusal, got: {other:?}"),
+    }
+
+    // The refusal left the recorded relation intact.
+    let after = core.session("relation-child").store(store).open().await?;
+    assert_eq!(after.parent_session_id(), Some("relation-parent"));
+    Ok(())
+}

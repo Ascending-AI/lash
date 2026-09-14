@@ -35,7 +35,8 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
 
     let parent_session_id = request.relation.parent_session_id().map(ToOwned::to_owned);
     let start_state = resolve_start_state(managed, current, &request, &session_id).await?;
-    let policy = resolve_session_policy(current, &request, &start_state, &session_id);
+    let policy = resolve_session_policy(current, &request, &start_state, &session_id)
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     request.policy = Some(policy.clone());
     let initial_runtime_state = build_runtime_state(
         session_id.clone(),
@@ -104,23 +105,35 @@ async fn resolve_start_state(
     }
 }
 
+/// Resolve the new session's policy, honoring the provider pin recorded on the
+/// state this session starts from.
+///
+/// The recorded provider id is a durable fact (ADR 0066), so a create request
+/// that carries no policy inherits it and a request whose policy names a
+/// *different* provider is refused with
+/// [`SessionError::ProviderMismatch`](crate::SessionError::ProviderMismatch)
+/// rather than silently overwriting the pin the root open established.
 fn resolve_session_policy(
     current: &CurrentSessionCapability,
     request: &SessionCreateRequest,
     start_state: &RuntimeSessionState,
     session_id: &SessionId,
-) -> SessionPolicy {
-    let mut policy = request
-        .policy
-        .clone()
-        .unwrap_or_else(|| match &request.start {
-            SessionStartPoint::Empty => current.policy.clone(),
-            _ => start_state.policy.clone(),
-        });
+) -> Result<SessionPolicy, crate::SessionError> {
+    let inherited = match &request.start {
+        SessionStartPoint::Empty => &current.policy,
+        _ => &start_state.policy,
+    };
+    let recorded_provider_id = inherited.recorded_provider_id().to_string();
+    let mut policy = request.policy.clone().unwrap_or_else(|| inherited.clone());
+    policy.provider_id = SessionPolicy::settle_provider_pin(
+        session_id,
+        &recorded_provider_id,
+        policy.recorded_provider_id(),
+    )?;
     if request.relation.parent_session_id().is_some() {
         policy.session_id = Some(SessionId::from(session_id.to_string()));
     }
-    policy
+    Ok(policy)
 }
 
 fn build_runtime_state(

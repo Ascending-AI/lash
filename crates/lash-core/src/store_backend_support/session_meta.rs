@@ -2,7 +2,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use crate::{
-    CausalRef, ObserverInheritance, SessionMeta, SessionObserverIntent,
+    CausalRef, ObserverInheritance, SessionLineage, SessionMeta, SessionObserverIntent,
     SessionObserverIntentAttribution, SessionRelation, StoreError,
 };
 
@@ -394,6 +394,32 @@ impl SessionMetaCodec {
             .map_err(|_| self.corrupt(format!("{field} must be non-negative, got {value}")))
     }
 
+    /// Decode the durable lineage columns of an existing `session_meta` row.
+    ///
+    /// Admission compares this against the lineage a rebind declares, so it
+    /// reads only the columns that carry lineage: no causal provenance, no
+    /// observer-inheritance list, and therefore no extra queries inside the
+    /// admission transaction.
+    pub fn decode_lineage(
+        self,
+        relation_kind: &str,
+        parent_session_id: Option<SessionId>,
+        source_session_id: Option<SessionId>,
+        source_node_id: Option<String>,
+    ) -> Result<SessionLineage, StoreError> {
+        Ok(match relation_kind {
+            "root" => SessionLineage::Root,
+            "child" => SessionLineage::Child {
+                parent_session_id: self.required(parent_session_id, "parent_session_id")?,
+            },
+            "fork" => SessionLineage::Fork {
+                source_session_id: self.required(source_session_id, "source_session_id")?,
+                source_node_id: self.required(source_node_id, "source_node_id")?,
+            },
+            other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),
+        })
+    }
+
     /// Construct the canonical stored-session-metadata corruption error.
     pub fn corrupt(self, message: impl Into<String>) -> StoreError {
         StoreError::StoredDataCorrupt {
@@ -434,6 +460,27 @@ impl SessionMetaCodec {
             .parse()
             .map_err(|_| self.corrupt(format!("{field} is not an unsigned integer: `{value}`")))
     }
+}
+
+/// Refuse a rebind whose declared lineage disagrees with the recorded one.
+///
+/// Every `SessionCommitStore::admit_and_bind_session` implementation calls this
+/// on the rebind branch so all backends answer the same conflict with the same
+/// typed error (rule 6 of the admission contract).
+pub fn guard_rebind_lineage(
+    session_id: &SessionId,
+    recorded: &SessionLineage,
+    requested: &SessionRelation,
+) -> Result<(), StoreError> {
+    let requested = SessionLineage::of(requested);
+    if recorded.rebind_conflicts_with_recorded(&requested) {
+        return Err(StoreError::SessionRelationMismatch {
+            session_id: session_id.clone(),
+            recorded: Box::new(recorded.clone()),
+            requested: Box::new(requested),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -93,6 +93,24 @@ pub enum StoreError {
         bound_session_id: SessionId,
         attempted_session_id: SessionId,
     },
+    /// A rebind declared a lineage that disagrees with the one durably
+    /// recorded for this session.
+    ///
+    /// Admission reads the recorded relation and refuses the conflict instead
+    /// of absorbing it as a plain [`SessionAdmission::Rebound`](crate::SessionAdmission::Rebound):
+    /// the relation is a durable fact, so a binding that renames a parent — or
+    /// claims one for a session recorded as a root — is answered, never
+    /// smoothed. A binding that declares no lineage still rebinds.
+    #[error(
+        "session `{session_id}` is durably recorded as {} and cannot be rebound as {}",
+        .recorded.label(),
+        .requested.label()
+    )]
+    SessionRelationMismatch {
+        session_id: SessionId,
+        recorded: Box<crate::SessionLineage>,
+        requested: Box<crate::SessionLineage>,
+    },
     /// A session-scoped operation was attempted on a store handle that is not bound to a session.
     #[error("store handle is not bound to a session")]
     SessionNotBound,
@@ -618,6 +636,7 @@ impl StoreError {
             }
             Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
+            Self::SessionRelationMismatch { .. } => "SessionRelationMismatch",
             Self::SessionNotBound => "SessionNotBound",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",

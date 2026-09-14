@@ -988,12 +988,22 @@ impl SessionCommitStore for PostgresSessionStore {
             created_at_ms,
         )
         .await?;
+        if inserted {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(lash_core::SessionAdmission::Created);
+        }
+        let recorded = crate::session_meta::load_recorded_lineage_tx(&mut tx, session_id)
+            .await?
+            .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
+                session_id: SessionId::from(session_id.to_string()),
+            })?;
+        lash_core::store_backend_support::guard_rebind_lineage(
+            session_id,
+            &recorded,
+            &binding.relation,
+        )?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(if inserted {
-            lash_core::SessionAdmission::Created
-        } else {
-            lash_core::SessionAdmission::Rebound
-        })
+        Ok(lash_core::SessionAdmission::Rebound)
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {

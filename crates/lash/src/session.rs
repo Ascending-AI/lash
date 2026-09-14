@@ -176,7 +176,7 @@ impl SessionBuilder {
             Some(&supplied_model),
             self.spec.generation.as_ref(),
             Some(&supplied_generation),
-        );
+        )?;
         Box::pin(self.open_resolved(state, resolved, None)).await
     }
 
@@ -224,7 +224,7 @@ impl SessionBuilder {
                     Some(&loaded.config.model),
                     self.spec.generation.as_ref(),
                     Some(&loaded.config.generation),
-                );
+                )?;
                 return Ok((state, Some(loaded.config)));
             }
             None => empty_runtime_session_state(self.session_id.clone(), policy.clone()),
@@ -313,10 +313,12 @@ impl SessionBuilder {
             runtime,
             Arc::clone(&self.core.live_replay_store),
         );
+        let recorded_parent_session_id =
+            crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
             runtime: handle,
             binding,
-            parent_session_id: self.parent_session_id,
+            parent_session_id: recorded_parent_session_id,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
@@ -358,6 +360,24 @@ impl SessionBuilder {
             catalog: Some(Arc::clone(factory)),
         })
     }
+}
+
+/// Read the parent named by this session's durable relation.
+///
+/// The relation is written once at admission and guarded thereafter, so this
+/// is the honest read-back the facade handle reports.
+pub(crate) async fn recorded_parent_session_id(
+    store: &dyn RuntimePersistence,
+) -> Result<Option<SessionId>> {
+    Ok(store
+        .load_session_meta()
+        .await
+        .map_err(EmbedError::Store)?
+        .and_then(|meta| {
+            meta.relation
+                .parent_session_id()
+                .map(|parent_session_id| SessionId::from(parent_session_id.to_string()))
+        }))
 }
 
 async fn drive_process_on_open(
@@ -407,7 +427,7 @@ pub(crate) async fn load_state_from_store(
         Some(&loaded.config.model),
         None,
         Some(&loaded.config.generation),
-    );
+    )?;
     Ok(state)
 }
 
@@ -426,7 +446,11 @@ pub(crate) async fn load_state_from_store(
 /// options: merge preserves unspecified options, while replace/clear explicitly
 /// discard them. The already-resolved core defaults are not reopen intent.
 ///
-/// The recorded `provider_id` always survives. A present host prompt wins;
+/// The recorded `provider_id` is a durable fact, not host-wins config (ADR
+/// 0066): an open that names no provider inherits it, and an open naming a
+/// *different* provider is refused here with
+/// [`SessionError::ProviderMismatch`] instead of having its request discarded
+/// and the conflict deferred to the first turn. A present host prompt wins;
 /// otherwise a present persisted prompt fills the gap. Legacy heads with no
 /// prompt field keep the host/core reconstruction, and explicit persisted
 /// empty layers remain authoritative when the host supplies no replacement.
@@ -443,12 +467,14 @@ fn reconcile_loaded_state_policy(
     persisted_model: Option<&lash_core::ModelSpec>,
     host_generation: Option<&lash_core::facade_support::GenerationOverlay>,
     persisted_generation: Option<&lash_core::GenerationOptions>,
-) {
-    let recorded_provider_id = state.policy.recorded_provider_id().to_string();
+) -> Result<()> {
+    let settled_provider_id = SessionPolicy::settle_provider_pin(
+        &state.session_id,
+        state.policy.recorded_provider_id(),
+        policy.recorded_provider_id(),
+    )?;
     state.policy = policy.clone();
-    if !recorded_provider_id.is_empty() {
-        state.policy.provider_id = recorded_provider_id;
-    }
+    state.policy.provider_id = settled_provider_id;
     if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
         state.policy.prompt = persisted_prompt.clone();
     }
@@ -464,6 +490,7 @@ fn reconcile_loaded_state_policy(
             None => persisted_generation.clone(),
         };
     }
+    Ok(())
 }
 
 async fn load_persisted_state_admitted(
@@ -654,7 +681,13 @@ impl LashSession {
         }
     }
 
-    /// Returns the parent session identifier, if present.
+    /// Returns the parent session identifier recorded in this session's
+    /// durable metadata, if any.
+    ///
+    /// This is the store's answer, read at open, not the `.parent(..)` request
+    /// this handle was built from: a reopen that named no parent still reports
+    /// the recorded one, and a conflicting `.parent(..)` is refused at open
+    /// rather than shadowing the durable relation.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.parent_session_id.as_deref()
     }
@@ -1612,7 +1645,9 @@ mod reconcile_tests {
             ))
         };
         let host = SessionPolicy {
-            provider_id: "host-provider".to_string(),
+            // This open names the provider the session already recorded; the
+            // pin is unaffected and the other fields reconcile as usual.
+            provider_id: "recorded-provider".to_string(),
             model: model("host-model"),
             prompt: lash_core::PromptLayer::new().with_contribution(
                 lash_core::PromptContribution::guidance("Host", "host prompt"),
@@ -1640,7 +1675,8 @@ mod reconcile_tests {
                 host.generation.clone(),
             )),
             Some(&persisted_generation),
-        );
+        )
+        .expect("an open naming the recorded provider reconciles");
 
         assert_eq!(state.policy.provider_id, "recorded-provider");
         assert_eq!(state.policy.model.id, "host-model");
@@ -1671,7 +1707,8 @@ mod reconcile_tests {
             ))
         };
         let host = SessionPolicy {
-            provider_id: "host-provider".to_string(),
+            // An open that names no provider inherits the recorded pin.
+            provider_id: String::new(),
             model: model("core-default-model"),
             generation: lash_core::GenerationOptions::default(),
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
@@ -1691,7 +1728,8 @@ mod reconcile_tests {
             Some(&persisted_model),
             None,
             Some(&persisted_generation),
-        );
+        )
+        .expect("an open naming no provider inherits the pin");
 
         assert_eq!(state.policy.provider_id, "recorded-provider");
         assert_eq!(state.policy.model.id, "recorded-model");
@@ -1713,7 +1751,8 @@ mod reconcile_tests {
             Some(&empty_model),
             None,
             None,
-        );
+        )
+        .expect("an unrecorded head reconciles");
         assert_eq!(unrecorded.policy.model.id, "core-default-model");
     }
 
@@ -1736,10 +1775,55 @@ mod reconcile_tests {
             ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         };
 
-        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None);
+        reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None)
+            .expect("an unrecorded pin adopts the host's provider");
 
         assert_eq!(state.policy.provider_id, "host-provider");
         assert_eq!(state.policy.model.id, "host-model");
+    }
+
+    /// FIG-1558: the recorded pin is a durable fact. An open naming a
+    /// different provider is refused here, at open, instead of being discarded
+    /// and re-discovered as a stringified runtime error on the first turn.
+    #[test]
+    fn conflicting_host_provider_is_refused_rather_than_discarded() {
+        let mut state = RuntimeSessionState {
+            session_id: SessionId::from("session"),
+            policy: SessionPolicy {
+                provider_id: "recorded-provider".to_string(),
+                model: model("recorded-model"),
+                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            },
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        let host = SessionPolicy {
+            provider_id: "host-provider".to_string(),
+            model: model("host-model"),
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+
+        let error =
+            reconcile_loaded_state_policy(&mut state, &host, false, None, true, None, None, None)
+                .expect_err("a conflicting provider must be refused at open");
+        match error {
+            EmbedError::Session(SessionError::ProviderMismatch {
+                expected,
+                actual,
+                session_id,
+            }) => {
+                assert_eq!(expected, "recorded-provider");
+                assert_eq!(actual, "host-provider");
+                assert_eq!(session_id.as_str(), "session");
+            }
+            other => panic!("expected a typed provider-pin refusal, got: {other:?}"),
+        }
+        assert_eq!(
+            state.policy.provider_id, "recorded-provider",
+            "the refused open leaves the loaded policy untouched"
+        );
+        assert_eq!(state.policy.model.id, "recorded-model");
     }
 
     #[tokio::test]

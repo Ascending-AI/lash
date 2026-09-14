@@ -326,8 +326,10 @@ impl EmbedError {
     ///   `CodeExecutionUnavailable`);
     /// - direct or session-wrapped
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
-    ///   tombstones, plus nested controller-owned terminal codes or structured
-    ///   causes;
+    ///   tombstones and
+    ///   [`StoreError::SessionRelationMismatch`](lash_core::StoreError::SessionRelationMismatch)
+    ///   relation conflicts, plus nested controller-owned terminal codes or
+    ///   structured causes;
     /// - direct or session-wrapped commit byte or node budget rejections, which
     ///   require the host to raise the configured limit or submit a smaller
     ///   commit;
@@ -392,6 +394,7 @@ fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
     matches!(
         error,
         lash_core::StoreError::SessionDeleted { .. }
+            | lash_core::StoreError::SessionRelationMismatch { .. }
             | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
             | lash_core::StoreError::CommitByteBudgetExceeded { .. }
             | lash_core::StoreError::CheckpointComponentEncodingVersionMismatch { .. }

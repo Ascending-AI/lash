@@ -1,4 +1,6 @@
 use super::*;
+#[path = "session_lifecycle/provider_pin.rs"]
+mod provider_pin;
 #[path = "session_lifecycle/session_binding.rs"]
 mod session_binding;
 
@@ -95,12 +97,12 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
 
 fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     let historical_policy = lash_core::SessionPolicy {
-        provider_id: "persisted-provider".to_string(),
+        provider_id: "embed-test".to_string(),
         model: model_spec("historical-model", None, 11_111),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let current_policy = lash_core::SessionPolicy {
-        provider_id: "persisted-provider".to_string(),
+        provider_id: "embed-test".to_string(),
         model: model_spec("current-frame-model", None, 22_222),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
@@ -136,7 +138,7 @@ fn conflicting_reopen_state(session_id: &SessionId) -> RuntimeSessionState {
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
-        provider_id: "persisted-provider".to_string(),
+        provider_id: "embed-test".to_string(),
         model: model_spec("top-level-model", None, 33_333),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
@@ -1623,7 +1625,7 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
 }
 
 #[tokio::test]
-async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> {
+async fn persisted_provider_id_mismatch_is_refused_at_open_not_deferred_to_a_turn() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("provider-mismatch"),
         policy: lash_core::SessionPolicy {
@@ -1645,21 +1647,26 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
         .store_factory(Arc::new(ReusableStoreFactory { store }))
         .build(crate::testing::runtime_lease_owner())?;
 
-    let session = core.session("provider-mismatch").open().await?;
-    let err = match session.turn(TurnInput::text("must not run")).run().await {
-        Ok(_) => panic!("provider mismatch should fail at turn execution"),
-        Err(err) => err,
+    // The durable pin disagrees with the provider this host names, so the
+    // open answers the conflict instead of discarding the request and letting
+    // the first turn fail on a provider nobody asked for.
+    let error = match core.session("provider-mismatch").open().await {
+        Ok(_) => panic!("a recorded provider mismatch must be refused at open"),
+        Err(error) => error,
     };
-
-    assert!(matches!(
-        err,
-        EmbedError::Runtime(lash_core::RuntimeError {
-            code: lash_core::RuntimeErrorCode::LlmProvider,
-            message,
-            ..
-        }) if message.contains("other-provider")
-            && message.contains("provider-mismatch")
-    ));
+    match &error {
+        EmbedError::Session(lash_core::SessionError::ProviderMismatch {
+            expected,
+            actual,
+            session_id,
+        }) => {
+            assert_eq!(expected, "other-provider");
+            assert_eq!(actual, "embed-test");
+            assert_eq!(session_id.as_str(), "provider-mismatch");
+        }
+        other => panic!("expected a typed provider-pin refusal, got: {other:?}"),
+    }
+    assert!(error.is_terminal());
     Ok(())
 }
 
@@ -2032,7 +2039,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let request_probe = Arc::clone(&requests);
     let provider = crate::testing::TestProvider::builder()
-        .kind("persisted-provider")
+        .kind("embed-test")
         .complete(move |request| {
             let request_probe = Arc::clone(&request_probe);
             async move {
@@ -2222,7 +2229,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
     let store = SnapshotStore::with_state(persisted);
     let policy = lash_core::SessionPolicy {
-        provider_id: "builder-provider".to_string(),
+        provider_id: "embed-test".to_string(),
         model: model_spec("builder-model", None, 77_777),
         session_id: Some(SessionId::from(session_id)),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)

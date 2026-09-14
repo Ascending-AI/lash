@@ -596,6 +596,77 @@ pub enum SessionRelation {
     },
 }
 
+/// Durable lineage identity of a [`SessionRelation`].
+///
+/// This is the part of a relation that session admission compares on a rebind:
+/// the relation kind plus the session ids it names. Causal provenance
+/// (`caused_by`) and observer inheritance are deliberately excluded — they
+/// record *why* and *how* a session was created, not what it descends from,
+/// and a legitimate reopen of an existing child carries neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SessionLineage {
+    #[default]
+    Root,
+    Child {
+        parent_session_id: SessionId,
+    },
+    Fork {
+        source_session_id: SessionId,
+        source_node_id: String,
+    },
+}
+
+impl SessionLineage {
+    /// The lineage a relation declares.
+    pub fn of(relation: &SessionRelation) -> Self {
+        match relation {
+            SessionRelation::Root => Self::Root,
+            SessionRelation::Child {
+                parent_session_id, ..
+            } => Self::Child {
+                parent_session_id: parent_session_id.clone(),
+            },
+            SessionRelation::Fork {
+                source_session_id,
+                source_node_id,
+                ..
+            } => Self::Fork {
+                source_session_id: source_session_id.clone(),
+                source_node_id: source_node_id.clone(),
+            },
+        }
+    }
+
+    /// Human-readable description used in admission refusals.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Root => "a root session".to_string(),
+            Self::Child { parent_session_id } => {
+                format!("a child of session `{parent_session_id}`")
+            }
+            Self::Fork {
+                source_session_id,
+                source_node_id,
+            } => format!("a fork of session `{source_session_id}` at node `{source_node_id}`"),
+        }
+    }
+
+    /// Whether a rebind declaring `requested` conflicts with `self` as recorded.
+    ///
+    /// [`SessionLineage::Root`] is the default a binding carries when the caller
+    /// declares no lineage — every resume, park and plain reopen path admits
+    /// with it — so it is read as "no claim" and never conflicts. Any other
+    /// declared lineage must equal the recorded one: a rebind that renames a
+    /// parent, or claims a parent for a session recorded as a root, is refused
+    /// rather than silently absorbed.
+    pub fn rebind_conflicts_with_recorded(&self, requested: &Self) -> bool {
+        match requested {
+            Self::Root => false,
+            declared => declared != self,
+        }
+    }
+}
+
 impl SessionRelation {
     /// Exposes the parent session ID to store implementors for child and fork relations, returning
     /// `None` for a root session.

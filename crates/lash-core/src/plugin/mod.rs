@@ -91,7 +91,7 @@ pub use session_obj::PluginSession;
 pub use session_types::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginOwned, SessionContextOverlay,
-    SessionCreateRequest, SessionHandle, SessionObservedProcessOutcome,
+    SessionCreateRequest, SessionHandle, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
     SessionPluginSource, SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess,
     SessionToolAccessError, SubagentSessionContext,
