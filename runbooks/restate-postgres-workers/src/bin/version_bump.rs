@@ -60,21 +60,23 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 93;
-/// Component 93 already had every current table.
+const MIGRATION_FLOOR_VERSION: i32 = 94;
+/// Component 94 already had every current table.
 const POST_FLOOR_TABLES: [&str; 0] = [];
-/// The post-floor indexes the fixture must drop by name.
-const POST_FLOOR_INDEXES: [&str; 1] = ["idx_lash_processes_pending_cancel"];
-/// The process columns absent from component 93.
-const POST_FLOOR_COLUMNS: [(&str, &str); 1] = [("lash_processes", "cancel_requested_at_ms")];
+/// The post-floor indexes the fixture must drop by name. Component 95 and 96
+/// installed none: both moved document content, not DDL.
+const POST_FLOOR_INDEXES: [&str; 0] = [];
+/// The columns absent from component 94: none, because every generation since
+/// moved document content rather than the relational shape.
+const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 1] = ["idx_lash_processes_pending_cancel"];
+const POST_FLOOR_ARTIFACTS: [&str; 0] = [];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_processes_pending_cancel"];
+const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary

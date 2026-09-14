@@ -4,30 +4,31 @@
 use super::*;
 
 /// The current cutovers are refusal-only: no predecessor shape can be upgraded
-/// by inventing the cancellation timestamp the process rows now index
-/// (component 94), and none can be upgraded by inventing the source contract
-/// and provider route every trigger subscription now captures (component 95).
-/// Component 94 is therefore retained as the refusal-only endpoint and no row
-/// targets component 95.
+/// by inventing the source contract and provider route every trigger
+/// subscription now captures (component 95), and none can be upgraded by
+/// turning a journaled sleep's resolved duration back into the deadline the
+/// guest asked for (component 96). Component 95 is therefore retained as the
+/// refusal-only endpoint and no row targets component 96.
 ///
-/// Component 95 installs no new relation: the capture lives inside the trigger
-/// subscription record document, which a component-94 store wrote without it.
-/// That is precisely why the cutover is refusal-only rather than a creation
-/// migration — the missing fact is data, and no DDL can invent it.
+/// Neither generation installs a relation: component 95's capture lives inside
+/// the trigger subscription record document, and component 96 moves only the
+/// journaled effect-command encoding. That is precisely why both cutovers are
+/// refusals rather than creation migrations — the missing fact is data, and no
+/// DDL can invent it.
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
-        from: 93,
-        to: 94,
-        // Current-catalog relations and columns a component-93 store does not
-        // have. The list is keyed to the floor, not to one generation: the
-        // fixture rebuilds the published component-93 catalog by removing
-        // these from the schema this build installs, so a column introduced
-        // after 94 belongs here too.
+        from: 94,
+        to: 95,
+        // Component 95 installs no relation and no column: what a component-94
+        // store lacks is the source contract and provider route inside each
+        // trigger subscription record document. The lists are keyed to the
+        // floor, not to one generation, so a relation or column introduced
+        // after 95 belongs here too.
         source_missing_tables: &[],
-        source_missing_columns: &[("lash_processes", "cancel_requested_at_ms")],
+        source_missing_columns: &[],
         source_missing_guards: &[],
-        introduced_relations: &["idx_lash_processes_pending_cancel"],
+        introduced_relations: &[],
         statements: &[],
     },
 ];

@@ -1244,7 +1244,17 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 // Version 21 adds owner-side cancellation-closure participants. This makes
 // scope retirement serialize with authorization held in separate session
 // catalogs; pre-21 effect databases are rejected and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 21;
+// Version 22 drains journals written before the canonical `SleepSpec` encoding
+// (FIG-2968, FIG-2983). A sleep row written at generation 21 carries the
+// resolved `Sleep { duration_ms }` command in `envelope_json`; this build
+// re-encodes the same intent as `Sleep { spec }`, so the row's replay-hash
+// fence no longer reconstructs and a redrive reported `ReplayMismatch` instead
+// of a refusal. The table shape is unchanged — the cutover is in the journaled
+// command encoding — so the generation moves to refuse those journals at open.
+// Pre-22 effect databases are rejected and recreated; there is no migration arm
+// because the resolved duration cannot be turned back into the deadline the
+// guest asked for.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 22;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

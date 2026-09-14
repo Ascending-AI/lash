@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 75,
+  "source_commit": "63f3438c7451",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2983 schema-76 pre-SleepSpec effect-journal drain",
+  "artifacts": {
+    "postgres-expected.json": "a567a7d32536787678971091f82d4832accb6d04056cac4a642854346e22fe96",
+    "sqlite-expected.json": "bf7c1383672f836066a47e8410fc26d7c6810735f7008daafb3e00b90bce6290"
+  }
+}

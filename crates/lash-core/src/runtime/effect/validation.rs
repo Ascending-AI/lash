@@ -20,6 +20,36 @@ const ERROR_SUMMARY_PATH_LIMIT: usize = 8;
 ///
 /// Durable substrates record this value as one unit. Replay validation parses
 /// `json` only to explain a mismatch; the hash is always over `json` itself.
+///
+/// # Moving a command encoding: the domain stays, the store generation moves
+///
+/// This type owns the journaled effect encoding, so the decision made for
+/// FIG-2968 and executed by FIG-2983 is recorded here rather than in a store
+/// crate that only sees one backend.
+///
+/// The hash domain is `lash-runtime-effect-envelope/v3` and it did **not** move
+/// when the sleep command's serialized shape did (resolved
+/// `Sleep { duration_ms }` became `Sleep { spec }`). Bumping the domain rehashes
+/// every journaled envelope, not only the ones whose bytes changed: non-sleep
+/// rows that still replay correctly would stop reconstructing, and the
+/// historical-fixture contracts that reconstruct recorded hashes would fail. The
+/// domain names the hashing construction, not the vocabulary of commands inside
+/// it; it moves only when the construction itself changes.
+///
+/// The lever for the rows that genuinely cannot replay is the store generation.
+/// A pre-cutover journal is unchanged bytes, so its recorded hash no longer
+/// reconstructs from the command this build builds, and a redrive surfaces
+/// `ReplayMismatch` deep in the effect driver — a drift report, not the
+/// reject-and-recreate refusal the durable contract promises. Advancing the
+/// SQLite effect generation (`lash-sqlite-store`'s `EFFECT_SCHEMA_VERSION`) and
+/// the PostgreSQL component (`lash-postgres-store`'s `SCHEMA_VERSION`) refuses
+/// the whole journal at open instead, with a typed message naming the drain.
+///
+/// So: any change that moves the serialized bytes of a `RuntimeEffectCommand`
+/// variant advances both store generations in the same change, and leaves this
+/// domain alone. Both generations are refusal-only for this class — a resolved
+/// duration cannot be turned back into the deadline the guest asked for, so
+/// there is no migration arm to write.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CanonicalRuntimeEffectEnvelope {
     json: String,
