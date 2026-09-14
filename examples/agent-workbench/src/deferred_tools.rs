@@ -78,6 +78,11 @@ impl WorkbenchDeferredTools {
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "workbench_deferred_definitions() always returns at least one tool, so the \
+                  preview builder's empty-catalogue refusal cannot fire"
+    )]
     pub(crate) fn preview_contribution(&self) -> lash::prompt::PromptContribution {
         lash::tools::catalogue_preview_contribution_for_entries_with_options(
             lash::tools::catalogue_preview_entries_from_manifests(
@@ -290,6 +295,11 @@ struct SearchDeferredTools {
 
 #[async_trait]
 impl StaticToolExecute for SearchDeferredTools {
+    #[expect(
+        clippy::expect_used,
+        reason = "catalogue.search returns call_paths drawn from this same catalogue's \
+                  definitions map, so every result is present"
+    )]
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let query = call
             .args
@@ -435,6 +445,11 @@ fn search_tool_definition() -> ToolDefinition {
     .with_tool_binding(ToolBinding::new(["tools"], "search"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "every workbench deferred definition carries a serialized, executable call-path \
+              tool binding (see workbench_deferred_definitions), so all three walks succeed"
+)]
 fn deferred_call_path(definition: &ToolDefinition) -> String {
     definition
         .manifest()

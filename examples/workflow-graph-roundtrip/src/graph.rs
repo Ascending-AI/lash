@@ -827,6 +827,11 @@ fn rebuild_children(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "editable_call_expression / the updated call expression above each guarantee a \
+              receiver operation on the parsed call they just produced"
+)]
 fn node_from_flow_data(
     id: &str,
     data: &NodeData,
@@ -961,6 +966,11 @@ fn node_from_flow_data(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the edited call expression was re-parsed from a receiver call, so its receiver \
+              operation is present"
+)]
 fn apply_editable_data(
     node: &mut WorkflowNode,
     data: &NodeData,
@@ -1221,6 +1231,10 @@ fn receiver_fields_mut(
 }
 
 impl EditableValue {
+    #[expect(
+        clippy::expect_used,
+        reason = "the expression was parsed from authored source, so re-sourcing it round-trips"
+    )]
     fn from_expr(expression: &Expr) -> Self {
         Self::literal_from_expr(expression).unwrap_or_else(|| {
             Self::Expr(

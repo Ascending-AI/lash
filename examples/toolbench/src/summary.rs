@@ -26,6 +26,10 @@ pub(crate) struct Summary {
     rounds_per_task: f64,
     system_prompt_tokens_first_call_mean: Option<f64>,
 }
+#[expect(
+    clippy::expect_used,
+    reason = "Summary.usage is a serde struct, so to_value cannot fail"
+)]
 pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
     let mut cohorts = BTreeMap::<_, Vec<&TaskResult>>::new();
     for row in results {
@@ -50,7 +54,7 @@ pub(crate) fn aggregate(results: &[TaskResult]) -> Vec<Summary> {
             };
             let values = rows
                 .iter()
-                .map(|r| serde_json::to_value(&r.usage).unwrap())
+                .map(|r| serde_json::to_value(&r.usage).expect("usage is a serde struct"))
                 .collect::<Vec<_>>();
             let usage = Usage::from_attempts(&values);
             let mean = |v: Option<u64>| v.map(|v| v as f64 / n as f64);
@@ -92,6 +96,7 @@ fn delta(v: Option<f64>, b: Option<f64>) -> String {
         _ => "n/a".into(),
     }
 }
+#[expect(clippy::expect_used, reason = "writeln! into a String cannot fail")]
 pub(crate) fn markdown(summaries: &[Summary]) -> String {
     let mut out = String::new();
     for model in summaries
@@ -108,17 +113,17 @@ pub(crate) fn markdown(summaries: &[Summary]) -> String {
             "## {model} (reasoning: {})\n",
             rows[0].reasoning_effort.name()
         )
-        .unwrap();
+        .expect("writeln into a String cannot fail");
         out.push_str("| Cohort | Pass | Attempts | Prompt total | of which cached (read) | Cache write | Completion | Reasoning | Cost USD | Wall total/median s | Prompt/task | Completion/task | Reasoning/task | Cost/task USD | Attempts/task | First prompt mean | Retries |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
         for r in &rows {
-            writeln!(out,"| {} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).unwrap();
+            writeln!(out,"| {} | {}/{} | {} | {} | {} | {} | {} | {} | {} | {:.3}/{:.3} | {} | {} | {} | {} | {:.2} | {} | {} |",r.channel,r.passed,r.rows,r.rounds,number(r.usage.prompt_tokens_total),number(r.usage.cache_read),number(r.usage.cache_write),number(r.usage.completion_tokens),number(r.usage.reasoning_tokens),decimal(r.usage.cost,6),r.wall_total_s,r.wall_median_s,decimal(r.prompt_per_task,1),decimal(r.completion_per_task,1),decimal(r.reasoning_per_task,1),decimal(r.cost_per_task,6),r.rounds_per_task,decimal(r.system_prompt_tokens_first_call_mean,1),r.retries).expect("writeln into a String cannot fail");
         }
         out.push('\n');
         for r in &rows {
             if let Some(base) = rows.iter().find(|b| b.channel == "standard")
                 && r.channel != "standard"
             {
-                writeln!(out,"- {} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ attempts/task {}.",r.channel,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).unwrap();
+                writeln!(out,"- {} vs standard: Δ prompt/task {}, Δ completion/task {}, Δ reasoning/task {}, Δ cost/task {}, Δ attempts/task {}.",r.channel,delta(r.prompt_per_task,base.prompt_per_task),delta(r.completion_per_task,base.completion_per_task),delta(r.reasoning_per_task,base.reasoning_per_task),delta(r.cost_per_task,base.cost_per_task),delta(Some(r.rounds_per_task),Some(base.rounds_per_task))).expect("writeln into a String cannot fail");
             }
         }
         out.push('\n');

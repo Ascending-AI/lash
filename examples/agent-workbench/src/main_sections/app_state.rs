@@ -870,6 +870,11 @@ impl WorkbenchSessions {
         Some(entry)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "roster entries are serde structs of plain strings and enums, so the \
+                  pretty JSON encode cannot fail"
+    )]
     pub(crate) fn persist_roster(&self, roster: &BTreeMap<SessionId, WorkbenchSessionEntry>) {
         let Some(path) = self.roster_path.as_deref() else {
             return;
@@ -954,6 +959,12 @@ pub(crate) fn model_variant_for_request(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the token limit comes from workbench_context_window_tokens, which accepts only \
+              values at or above MIN_CONTEXT_WINDOW_TOKENS (see context_window_tokens_from), \
+              so ModelSpec::build cannot reject it"
+)]
 pub(crate) fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
     lash::ModelSpec::builder(selection.model)
         .variant(

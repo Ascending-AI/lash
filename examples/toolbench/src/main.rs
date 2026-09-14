@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 mod accounting;
 mod grading;
 mod provider_log;
@@ -167,6 +165,11 @@ struct TaskResult {
 }
 
 #[tokio::main]
+#[expect(
+    clippy::expect_used,
+    reason = "attempt rows and the json! metadata merged into them are JSON objects by \
+              construction, so as_object_mut/as_object are Some"
+)]
 async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let args = Args::parse();
@@ -240,7 +243,7 @@ async fn main() -> Result<()> {
             for (repetition, probe) in probes.iter().enumerate() {
                 for attempt in &probe.attempts {
                     let mut row = attempt.clone();
-                    row.as_object_mut().unwrap().extend(serde_json::json!({"kind":"preflight","task":"__native_probe","model":model,"channel":item.channel.name(),"repetition":repetition}).as_object().unwrap().clone());
+                    row.as_object_mut().expect("attempt row is a JSON object").extend(serde_json::json!({"kind":"preflight","task":"__native_probe","model":model,"channel":item.channel.name(),"repetition":repetition}).as_object().expect("metadata literal is a JSON object").clone());
                     write_row(&mut file, &row)?;
                 }
                 all_attempts.extend(probe.attempts.clone());
@@ -279,7 +282,7 @@ async fn main() -> Result<()> {
             let mut file = writer.lock().await;
             for attempt in &evidence.attempts {
                 let mut row = attempt.clone();
-                row.as_object_mut().expect("attempt object").extend(serde_json::json!({"kind":"attempt","pack":task.pack(),"task":task.id,"model":model,"route":"openrouter","channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
+                row.as_object_mut().expect("attempt row is a JSON object").extend(serde_json::json!({"kind":"attempt","pack":task.pack(),"task":task.id,"model":model,"route":"openrouter","channel":item.channel.name(),"reasoning_effort":args.reasoning_effort,"rounds":evidence.rounds,"repetition":item.run,"success":grade.passed,"grade":grade,"task_wall_ms":evidence.wall_ms,"executions":evidence.executions,"failed_exec_iterations":evidence.failed_execution_errors.len(),"tool_call_count":evidence.tool_call_count,"expected_tool_call_count":task.tool_calls}).as_object().expect("metadata object").clone());
                 write_row(&mut file, &row)?;
             }
             let result = TaskResult {
@@ -298,7 +301,7 @@ async fn main() -> Result<()> {
                 .submit_count
                 .saturating_sub(evidence.submit_values.len())
                 .into();
-            row.as_object_mut().expect("result object").extend(serde_json::json!({"kind":"task_result","pack":task.pack(),"task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
+            row.as_object_mut().expect("result row is a JSON object").extend(serde_json::json!({"kind":"task_result","pack":task.pack(),"task":task.id,"route":"openrouter","repetition":item.run,"success":result.passed,"grade":{"passed":result.passed,"failure_reason":result.failure_reason}}).as_object().expect("metadata object").clone());
             write_row(&mut file, &provider_log::redact(row, api_key))?;
             file.flush()?;
             Ok(result)

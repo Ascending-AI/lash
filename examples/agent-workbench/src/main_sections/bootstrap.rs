@@ -16,6 +16,11 @@ pub(crate) const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
 pub(crate) const WORKBENCH_SEARCH_MCP_SERVER: &str = "parallel";
 const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
 
+#[expect(
+    clippy::expect_used,
+    reason = "a 2s TTL renewed every 666ms leaves over three renewal windows, satisfying \
+              LeaseTimings' three-renewal invariant (see the comment below)"
+)]
 pub(crate) fn apply_workbench_lease_timings(
     config: lash::durability::RuntimeHostConfig,
 ) -> lash::durability::RuntimeHostConfig {
@@ -400,7 +405,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         let process_observer = core
             .processes()
             .observer()
-            .expect("process observer configured");
+            .context("process observer was configured for the workbench core")?;
 
         let state = AppState {
             core,

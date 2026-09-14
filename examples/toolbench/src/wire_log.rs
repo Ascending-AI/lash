@@ -32,10 +32,14 @@ impl axum::serve::Listener for Connections {
     type Io = tokio::io::DuplexStream;
     type Addr = std::net::SocketAddr;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the tasks mutex guards only retained-handle bookkeeping, so it cannot be poisoned"
+    )]
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         let (mut socket, addr) = axum::serve::Listener::accept(&mut self.listener).await;
         let (http, mut wire) = tokio::io::duplex(64 * 1024);
-        let mut tasks = self.tasks.lock().unwrap();
+        let mut tasks = self.tasks.lock().expect("tasks mutex poisoned");
         if !tasks.closed {
             tasks.handles.retain(|task| !task.is_finished());
             tasks.handles.push(tokio::spawn(async move {
@@ -57,10 +61,15 @@ pub(crate) struct Recorder {
     capture: Capture,
 }
 impl Drop for Recorder {
+    #[expect(
+        clippy::expect_used,
+        reason = "the connection/capture mutexes guard only aborts, clones and pushes, so they \
+                  cannot be poisoned"
+    )]
     fn drop(&mut self) {
         self.task.abort();
         {
-            let mut connections = self.connections.lock().unwrap();
+            let mut connections = self.connections.lock().expect("connections mutex poisoned");
             connections.closed = true;
             for connection in connections.handles.drain(..) {
                 connection.abort();
@@ -72,14 +81,21 @@ impl Drop for Recorder {
             .capture
             .http_bodies
             .lock()
-            .unwrap()
+            .expect("http_bodies mutex poisoned")
             .keys()
             .copied()
             .collect::<Vec<_>>();
         for attempt in attempts {
             finish_capture(&self.capture, attempt, true);
         }
-        for (index, row) in self.capture.entries.lock().unwrap().iter().enumerate() {
+        for (index, row) in self
+            .capture
+            .entries
+            .lock()
+            .expect("entries mutex poisoned")
+            .iter()
+            .enumerate()
+        {
             if row["partial"] == true {
                 self.capture.dump(index + 1, "response", row);
             }
@@ -122,6 +138,12 @@ impl Recorder {
         })
     }
 }
+#[expect(
+    clippy::expect_used,
+    reason = "the capture mutex guards only bookkeeping pushes so it cannot be poisoned; the \
+              unfold recording is Some whenever the Some-guard above passed; and the proxied \
+              upstream headers always form a valid response builder"
+)]
 async fn forward(
     State(state): State<Arc<StateData>>,
     uri: Uri,
@@ -132,7 +154,11 @@ async fn forward(
         return StatusCode::NOT_FOUND.into_response();
     }
     let attempt = {
-        let mut rows = state.capture.entries.lock().unwrap();
+        let mut rows = state
+            .capture
+            .entries
+            .lock()
+            .expect("entries mutex poisoned");
         let attempt = rows.len();
         let Some(row) = rows.last_mut() else {
             return (
@@ -189,7 +215,10 @@ async fn forward(
                     if let Some(active) = &recording {
                         match &chunk {
                             Ok(bytes) => capture_bytes(&active.capture, active.attempt, bytes),
-                            Err(_) => recording.take().unwrap().finish(true),
+                            Err(_) => recording
+                                .take()
+                                .expect("recording is Some whenever the guard above passed")
+                                .finish(true),
                         }
                     }
                     Some((chunk, (upstream, recording)))
@@ -207,16 +236,21 @@ async fn forward(
         .body(Body::from_stream(stream))
         .expect("upstream headers form response")
 }
+
 struct Recording {
     capture: Capture,
     attempt: usize,
 }
 impl Recording {
+    #[expect(
+        clippy::expect_used,
+        reason = "the http_bodies mutex guards only an entry default, so it cannot be poisoned"
+    )]
     fn new(capture: Capture, attempt: usize) -> Self {
         capture
             .http_bodies
             .lock()
-            .unwrap()
+            .expect("http_bodies mutex poisoned")
             .entry(attempt)
             .or_default();
         Self { capture, attempt }
@@ -230,25 +264,44 @@ impl Drop for Recording {
         finish_capture(&self.capture, self.attempt, true);
     }
 }
+#[expect(
+    clippy::expect_used,
+    reason = "the http_finished/http_bodies mutexes guard only insert and read, so they cannot \
+              be poisoned"
+)]
 fn finish_capture(capture: &Capture, attempt: usize, partial: bool) {
-    let mut finished = capture.http_finished.lock().unwrap();
+    let mut finished = capture
+        .http_finished
+        .lock()
+        .expect("http_finished mutex poisoned");
     if !finished.insert(attempt) {
         return;
     }
-    let bodies = capture.http_bodies.lock().unwrap();
+    let bodies = capture
+        .http_bodies
+        .lock()
+        .expect("http_bodies mutex poisoned");
     let body = &bodies[&attempt];
     let value = json!({"body_text":String::from_utf8_lossy(body),"bytes_received":body.len(),"utf8_complete":std::str::from_utf8(body).is_ok(),"partial":partial});
     capture.dump(attempt, "http-response", &value);
 }
+#[expect(
+    clippy::expect_used,
+    reason = "the http_finished/http_bodies mutexes guard only contains and append, so they \
+              cannot be poisoned"
+)]
 fn capture_bytes(capture: &Capture, attempt: usize, bytes: &[u8]) {
-    let finished = capture.http_finished.lock().unwrap();
+    let finished = capture
+        .http_finished
+        .lock()
+        .expect("http_finished mutex poisoned");
     if finished.contains(&attempt) {
         return;
     }
     capture
         .http_bodies
         .lock()
-        .unwrap()
+        .expect("http_bodies mutex poisoned")
         .entry(attempt)
         .or_default()
         .extend_from_slice(bytes);

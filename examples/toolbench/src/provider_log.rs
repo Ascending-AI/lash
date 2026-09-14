@@ -118,6 +118,12 @@ impl Provider for LoggedProvider {
             secret: self.secret.clone(),
         })
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "LlmRequest, LlmResponse and accounting::Usage are serde structs that \
+                  serialize by construction, and the capture mutex guards only non-panicking \
+                  pushes so it cannot be poisoned"
+    )]
     async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         let request_id = request.scope.request_id.clone();
         let attempt_index = self.capture.rows().len() + 1;
@@ -147,7 +153,7 @@ impl Provider for LoggedProvider {
             .capture
             .http_bodies
             .lock()
-            .unwrap()
+            .expect("http_bodies mutex poisoned")
             .get(&attempt_index)
             .cloned();
         let http_json = http_body
@@ -340,11 +346,24 @@ pub(crate) fn trace_subscriber(
 mod tests;
 
 impl Capture {
+    #[expect(
+        clippy::expect_used,
+        reason = "the dump_prefix mutex guards only a plain Option swap, so it cannot be poisoned"
+    )]
     pub(crate) fn set_dump_prefix(&self, prefix: Option<std::path::PathBuf>) {
-        *self.dump_prefix.lock().unwrap() = prefix;
+        *self.dump_prefix.lock().expect("dump_prefix mutex poisoned") = prefix;
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "the dump_prefix mutex guards only a plain Option clone so it cannot be \
+                  poisoned, and the dump path always has a parent directory"
+    )]
     pub(crate) fn dump(&self, attempt: usize, direction: &str, body: &Value) {
-        let prefix = self.dump_prefix.lock().unwrap().clone();
+        let prefix = self
+            .dump_prefix
+            .lock()
+            .expect("dump_prefix mutex poisoned")
+            .clone();
         if let Some(prefix) = prefix {
             let path = prefix.with_extension(format!("turn-1-round-{attempt}-{direction}.json"));
             let result = (|| -> std::io::Result<()> {
@@ -364,13 +383,18 @@ impl Capture {
             if let Err(error) = result {
                 self.dump_errors
                     .lock()
-                    .unwrap()
+                    .expect("dump_errors mutex poisoned")
                     .push(format!("{}: {error}", path.display()));
             }
         }
     }
 }
 impl lash::tracing::TraceSink for Capture {
+    #[expect(
+        clippy::expect_used,
+        reason = "wire_responses was just normalized to a JSON array two lines above, so \
+                  as_array_mut is Some"
+    )]
     fn append(
         &self,
         record: &lash::tracing::TraceRecord,
@@ -403,7 +427,7 @@ impl lash::tracing::TraceSink for Capture {
                 }
                 row["wire_responses"]
                     .as_array_mut()
-                    .unwrap()
+                    .expect("wire_responses was normalized to an array above")
                     .push(body.clone());
                 tracing::debug!(target: "toolbench", parent: &self.span(), attempt, response = %body, "wire response chunk");
                 // The provider completion or recorder teardown writes this row once.

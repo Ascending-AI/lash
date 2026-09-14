@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -381,6 +379,12 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     server.abort();
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "the call sites select a workflow id the served catalog produced, so the HTTP \
+              round-trip succeeds"
+)]
 async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> WorkflowDocument {
     let response = client
         .post(format!("{base}/workflow/select"))
@@ -392,6 +396,12 @@ async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> Work
     response.json().await.expect("selected workflow document")
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "POST /run and its SSE body exist for every served workflow, and each `data: ` \
+              line is a RunEvent the server serialized"
+)]
 async fn run_workflow(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
     let response = client
         .post(format!("{base}/run"))
@@ -407,6 +417,11 @@ async fn run_workflow(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "catalog entries always carry string nodeKind/label and an array of string-named \
+              fields (see the catalog module the server serves)"
+)]
 fn catalog_node(entry: &Value, id: &str) -> FlowNode {
     let text = |key: &str| entry[key].as_str();
     let kind = text("nodeKind").expect("catalog nodeKind");
@@ -454,6 +469,10 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
     node
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the blank workflow template always contains a process container with a body slot"
+)]
 fn append_process_node(document: &mut WorkflowDocument, mut node: FlowNode) {
     let process_index = document
         .nodes

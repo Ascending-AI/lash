@@ -649,6 +649,11 @@ fn integer(value: &Value) -> Option<i64> {
         (n.fract() == 0.0 && n >= i64::MIN as f64 && n < -(i64::MIN as f64)).then_some(n as i64)
     })
 }
+#[expect(
+    clippy::expect_used,
+    reason = "hard tool schemas declare a properties object, and the seeded World guarantees \
+              that order->customer, order->product and ticket->service references resolve"
+)]
 pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<Value, String> {
     // Enforce the same strict inputs in the direct oracle path as in the host.
     let definitions = hard_definitions();
@@ -658,7 +663,9 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
         .ok_or_else(|| format!("unknown tool `{name}`"))?;
     let schema = definition.contract.input_schema.canonical();
     let object = args.as_object().ok_or("arguments must be an object")?;
-    let properties = schema["properties"].as_object().unwrap();
+    let properties = schema["properties"]
+        .as_object()
+        .expect("hard tool schemas declare a properties object");
     if object.len() != properties.len()
         || properties
             .iter()
@@ -748,7 +755,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .customers
                 .iter()
                 .find(|c| c.id == o.customer_id)
-                .unwrap()
+                .expect("every order references a seeded customer")
                 .pending_cents
                 != 0
             {
@@ -765,7 +772,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .products
                 .iter()
                 .find(|p| p.sku == o.sku)
-                .unwrap();
+                .expect("every order references a seeded product");
             if old.category != world.retail.products[product].category {
                 return Ok(refusal("category_mismatch"));
             }
@@ -810,7 +817,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .customers
                 .iter()
                 .find(|c| c.id == order.customer_id)
-                .unwrap()
+                .expect("every order references a seeded customer")
                 .pending_cents
                 != 0
             {
@@ -933,7 +940,7 @@ pub(crate) fn hard_call(world: &mut World, name: &str, args: &Value) -> Result<V
                 .services
                 .iter()
                 .find(|s| s.id == ticket.service_id)
-                .unwrap();
+                .expect("every ticket references a seeded service");
             if service.deployed_release != ticket.fix_release {
                 return Ok(refusal("fix_not_deployed"));
             }

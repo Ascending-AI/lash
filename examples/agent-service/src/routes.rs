@@ -422,13 +422,13 @@ pub(crate) async fn send_message(
         Ok::<Bytes, Infallible>(Bytes::from(line))
     });
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
         .header("x-lash-turn-id", turn_id.as_str())
         .body(Body::from_stream(stream))
-        .expect("valid streaming response"))
+        .map_err(|err| AppError::internal(format!("build streaming response: {err}")))
 }
 
 /// Request cooperative cancellation of one exact foreground turn.

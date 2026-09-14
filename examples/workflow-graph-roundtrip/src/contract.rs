@@ -373,6 +373,10 @@ impl<'de> Deserialize<'de> for EditableValue {
 }
 
 impl EditableValue {
+    #[expect(
+        clippy::expect_used,
+        reason = "the match guard above checked that $expr is present and a string"
+    )]
     fn from_json(value: Value) -> Result<Self, String> {
         match value {
             Value::Null => Ok(Self::Null),

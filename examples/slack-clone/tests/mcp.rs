@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
@@ -126,6 +124,12 @@ fn user(id: &str, name: &str, is_bot: bool, deleted: bool) -> Value {
     })
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "loopback bind on port 0, the OS-assigned local_addr, and the axum serve of that \
+              listener cannot fail but for OS exhaustion"
+)]
 async fn fake_api(state: FakeApiState) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -162,6 +166,10 @@ impl Script {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the recorded request is a serde_json::Value, so re-serializing it cannot fail"
+    )]
     fn provider(&self) -> ProviderHandle {
         let steps = Arc::clone(&self.steps);
         let requests = Arc::clone(&self.requests);
@@ -363,6 +371,12 @@ async fn build_core(
         .core
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "the test token is fixed, the model spec is statically valid, and build_core \
+              fails only on invalid config, which this helper never produces"
+)]
 async fn build_runtime(
     root: &std::path::Path,
     api_base_url: &str,
@@ -600,6 +614,11 @@ async fn wait_for_replacement_pid(path: &std::path::Path, original: u32) -> u32 
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::expect_used,
+    reason = "the kill binary exists on unix and the pid is a number, so status() is Some; \
+              failure to signal is asserted below"
+)]
 fn kill_process(pid: u32) {
     let status = std::process::Command::new("kill")
         .args(["-KILL", &pid.to_string()])
@@ -609,6 +628,10 @@ fn kill_process(pid: u32) {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::expect_used,
+    reason = "the kill binary exists on unix and the pid is a number, so status() is Some"
+)]
 fn process_exists(pid: u32) -> bool {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
@@ -702,6 +725,12 @@ async fn an_exact_native_name_collision_is_rejected_instead_of_shadowing_mcp() {
 // ---------------------------------------------------------------------------
 
 /// Serve the bundled HTTP MCP server on an ephemeral loopback port.
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "loopback bind on port 0, the OS-assigned local_addr, and the axum serve of that \
+              listener cannot fail but for OS exhaustion"
+)]
 async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -717,6 +746,11 @@ async fn http_mcp_server(token: &str) -> (String, tokio::task::JoinHandle<()>) {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the session was created by the caller, so open succeeds; the admin catalog read \
+              cannot fail on a live core"
+)]
 async fn catalog_names(core: &lash::LashCore, session_id: &SessionId) -> Vec<String> {
     core.session(session_id)
         .open()
@@ -1287,6 +1321,12 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
 
 const ADMIN_TOKEN: &str = "slack-clone-admin-test-token";
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "loopback bind on port 0, the OS-assigned local_addr, and the axum serve of that \
+              listener cannot fail but for OS exhaustion"
+)]
 async fn serve_admin(runtime: &BotRuntime) -> String {
     let admin = mcp_admin::McpAdmin::new(runtime, ADMIN_TOKEN);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

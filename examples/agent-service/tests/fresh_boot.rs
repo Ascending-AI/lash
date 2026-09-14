@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::fs::File;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
@@ -68,6 +66,12 @@ fn fresh_data_dir_boot_reaches_listener() {
     }
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does
+/// not reach it: binding port 0 on loopback cannot fail but for OS exhaustion.
+#[expect(
+    clippy::expect_used,
+    reason = "loopback bind on port 0 and the OS-assigned local_addr it returns are infallible by construction"
+)]
 fn unused_local_addr() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve local address");
     listener.local_addr().expect("read local address")
