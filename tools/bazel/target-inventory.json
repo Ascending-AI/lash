@@ -191,6 +191,7 @@
         "lash-internal-remote-protocol",
         "lash-internal-sansio",
         "lash-internal-trace",
+        "lash-internal-typescript",
         "serde",
         "serde_json",
         "thiserror",
@@ -1496,6 +1497,7 @@
         "swc_common",
         "swc_ecma_ast",
         "swc_ecma_parser",
+        "thiserror",
         "tokio"
       ],
       "manifest": "crates/lash-typescript/Cargo.toml",

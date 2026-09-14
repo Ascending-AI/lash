@@ -100,20 +100,15 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
     for source in ["value = [1][missing]", "value = -missing"] {
         let program = crate::parse(source).expect("operand witness parses");
         assert!(matches!(
-            LinkedModule::link(program, full_host_environment()),
+            LinkedModule::link(program.clone(), full_host_environment()),
             Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
         ));
+        let analysis = analyze_workflow_program(&program, &full_host_environment());
 
-        let graph =
-            crate::workflow_graph_from_source_with_facets(source, Some(&full_host_environment()))
-                .expect("facet projection remains best effort");
-        let diagnostics = &graph.main.nodes[0]
-            .type_facets
-            .as_ref()
-            .expect("host-backed projection has type facets")
-            .diagnostics;
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.kind == "unknown_name" && diagnostic.message.contains("missing")
+        let facts = statement_facts(&analysis, &statements(&program)[0]);
+        assert!(facts.diagnostics.iter().any(|diagnostic| {
+            diagnostic.error.kind() == "unknown_name"
+                && diagnostic.error.to_string().contains("missing")
         }));
     }
 }
@@ -302,27 +297,60 @@ fn assignment_indexes_retain_lowering_and_their_own_trigger_keys_in_evaluation_o
     assert_eq!(ordered.0, expected);
 }
 
-fn assert_available_type(node: &crate::WorkflowNode, name: &str, expected: &TypeExpr) {
-    assert!(
-        node.type_facets
-            .as_ref()
-            .expect("sourceable node keeps type facets")
-            .available_variables
-            .iter()
-            .any(|variable| variable.name == name && &variable.ty == expected),
-        "{name} did not have type {expected:?} at node {node:?}"
+/// The statements of a block, or the one statement a non-block body is.
+fn statements(program: &Program) -> &[Expr] {
+    block_statements(&program.main)
+}
+
+fn block_statements(expression: &Expr) -> &[Expr] {
+    match expression {
+        Expr::Block(statements) => statements,
+        single => std::slice::from_ref(single),
+    }
+}
+
+/// The facts the projector's facet derivation reads for one expression.
+///
+/// These witnesses carry names the host cannot resolve, which is exactly what
+/// they exist to prove the canonical walk still visits. The lens's canonical
+/// text is TypeScript, whose front-end refuses an unknown binding at parse, so
+/// no projected graph can carry them: they read the analysis the projector
+/// reads instead of a graph (FIG-3033).
+fn statement_facts<'a>(
+    analysis: &'a crate::WorkflowLinkAnalysis,
+    expression: &Expr,
+) -> &'a super::WorkflowLinkNodeFacts {
+    // The projector peels a label before deriving facets, so an annotated
+    // statement's facts live on the expression the label carries.
+    let annotated = match expression {
+        Expr::LabelAnnotated { expr, .. } => Some(expr.as_ref()),
+        _ => None,
+    };
+    annotated
+        .and_then(|expr| analysis.facts_for(expr))
+        .or_else(|| analysis.facts_for(expression))
+        .expect("the canonical walk records facts for every statement it visits")
+}
+
+fn assert_available_type(facts: &super::WorkflowLinkNodeFacts, name: &str, expected: &TypeExpr) {
+    assert_eq!(
+        facts.available_variables.get(name),
+        Some(expected),
+        "{name} did not have type {expected:?}"
     );
 }
 
-fn assert_unknown_child(nodes: &[crate::WorkflowNode]) {
-    assert!(nodes.iter().all(|node| node.type_facets.is_some()));
-    assert!(nodes.iter().any(|node| {
-        node.type_facets.as_ref().is_some_and(|facets| {
-            facets
-                .diagnostics
-                .iter()
-                .any(|error| error.kind == "unknown_name")
-        })
+fn assert_unknown_child(analysis: &crate::WorkflowLinkAnalysis, statements: &[Expr]) {
+    assert!(
+        statements
+            .iter()
+            .all(|statement| analysis.facts_for(statement).is_some())
+    );
+    assert!(statements.iter().any(|statement| {
+        statement_facts(analysis, statement)
+            .diagnostics
+            .iter()
+            .any(|error| error.error.kind() == "unknown_name")
     }));
 }
 
@@ -335,91 +363,107 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
         if missing { value = "then"; child = unknown } else { value = "else" }
         after = value
     "#;
+    let program = crate::parse(if_source).expect("if witness parses");
     assert!(matches!(
-        LinkedModule::link(crate::parse(if_source).unwrap(), environment.clone()),
+        LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
     ));
-    let graph = crate::workflow_graph_from_source_with_facets(if_source, Some(&environment))
-        .expect("invalid if still projects");
-    let if_node = &graph.main.nodes[1];
-    assert!(if_node.type_facets.as_ref().is_some_and(|facets| {
-        facets
+    let analysis = analyze_workflow_program(&program, &environment);
+    let nodes = statements(&program);
+    assert!(
+        statement_facts(&analysis, &nodes[1])
             .diagnostics
             .iter()
-            .any(|error| error.kind == "unknown_name")
-    }));
-    let crate::WorkflowNodeKind::Container(crate::WorkflowContainer::If {
-        then_graph,
-        else_graph,
-        ..
-    }) = &if_node.kind
-    else {
-        panic!("expected if container")
-    };
-    assert_unknown_child(&then_graph.nodes);
-    assert!(
-        else_graph
-            .nodes
-            .iter()
-            .all(|node| node.type_facets.is_some())
+            .any(|error| error.error.kind() == "unknown_name")
     );
-    assert_available_type(&graph.main.nodes[2], "value", &TypeExpr::Int);
+    let Expr::If {
+        then_block,
+        else_block,
+        ..
+    } = &nodes[1]
+    else {
+        panic!("expected an if")
+    };
+    assert_unknown_child(&analysis, block_statements(then_block));
+    assert!(
+        block_statements(else_block)
+            .iter()
+            .all(|statement| analysis.facts_for(statement).is_some())
+    );
+    assert_available_type(
+        statement_facts(&analysis, &nodes[2]),
+        "value",
+        &TypeExpr::Int,
+    );
 
     let while_source = r#"
         value = 1
         while missing { value = "loop"; child = unknown }
         after = value
     "#;
+    let program = crate::parse(while_source).expect("while witness parses");
     assert!(matches!(
-        LinkedModule::link(crate::parse(while_source).unwrap(), environment.clone()),
+        LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
     ));
-    let graph = crate::workflow_graph_from_source_with_facets(while_source, Some(&environment))
-        .expect("invalid while still projects");
-    let while_node = &graph.main.nodes[1];
-    assert!(while_node.type_facets.as_ref().is_some_and(|facets| {
-        facets
+    let analysis = analyze_workflow_program(&program, &environment);
+    let nodes = statements(&program);
+    assert!(
+        statement_facts(&analysis, &nodes[1])
             .diagnostics
             .iter()
-            .any(|error| error.kind == "unknown_name")
-    }));
-    let crate::WorkflowNodeKind::Container(crate::WorkflowContainer::While { body, .. }) =
-        &while_node.kind
-    else {
-        panic!("expected while container")
+            .any(|error| error.error.kind() == "unknown_name")
+    );
+    let Expr::While { body, .. } = &nodes[1] else {
+        panic!("expected a while")
     };
-    assert_unknown_child(&body.nodes);
-    assert_available_type(&graph.main.nodes[2], "value", &TypeExpr::Int);
+    assert_unknown_child(&analysis, block_statements(body));
+    assert_available_type(
+        statement_facts(&analysis, &nodes[2]),
+        "value",
+        &TypeExpr::Int,
+    );
 
     let for_source = r#"
         item = "outer"
         for item in 1 { seen = item; child = unknown }
         after = item
     "#;
+    let program = crate::parse(for_source).expect("for witness parses");
     assert!(matches!(
-        LinkedModule::link(crate::parse(for_source).unwrap(), environment.clone()),
+        LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::IncompatibleIterationTarget { .. })
     ));
-    let graph = crate::workflow_graph_from_source_with_facets(for_source, Some(&environment))
-        .expect("invalid for still projects");
-    let for_node = &graph.main.nodes[1];
-    assert!(for_node.type_facets.as_ref().is_some_and(|facets| {
-        facets
+    let analysis = analyze_workflow_program(&program, &environment);
+    let nodes = statements(&program);
+    assert!(
+        statement_facts(&analysis, &nodes[1])
             .diagnostics
             .iter()
-            .any(|error| error.kind == "incompatible_iteration_target")
-    }));
-    let crate::WorkflowNodeKind::Container(crate::WorkflowContainer::For { body, .. }) =
-        &for_node.kind
-    else {
-        panic!("expected for container")
+            .any(|error| error.error.kind() == "incompatible_iteration_target")
+    );
+    let Expr::For { body, .. } = &nodes[1] else {
+        panic!("expected a for")
     };
-    let body = &body.nodes;
-    assert_unknown_child(body);
-    assert_available_type(&body[0], "item", &TypeExpr::Any);
-    assert_available_type(&graph.main.nodes[2], "item", &TypeExpr::Str);
+    let body = block_statements(body);
+    assert_unknown_child(&analysis, body);
+    assert_available_type(statement_facts(&analysis, &body[0]), "item", &TypeExpr::Any);
+    assert_available_type(
+        statement_facts(&analysis, &nodes[2]),
+        "item",
+        &TypeExpr::Str,
+    );
 }
 
+/// A recovered diagnostic lands on the statement that owns the invalid
+/// expression, not on the expression itself.
+///
+/// The owner is the statement the projector makes a node from, so this is the
+/// property that decides which node a host sees the error on. The witnesses
+/// carry an unresolvable name and so have no TypeScript spelling; the owner
+/// relation is read off the analysis the projector reads. The projector-side
+/// half — that the diagnostic's span is the owning node's `source_span` — has
+/// no TypeScript witness at all and is not proved here (FIG-3033).
 #[test]
 fn recovered_diagnostics_follow_the_workflow_projection_owner() {
     let environment = full_label_environment();
@@ -429,37 +473,33 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         "value = [missing ? 1 : 2]",
         "value = { choice: missing ? 1 : 2 }",
     ] {
-        let graph = crate::workflow_graph_from_source_with_facets(source, Some(&environment))
-            .expect("an assigned invalid conditional remains projectable");
-        let node = &graph.main.nodes[0];
-        let diagnostics = &node
-            .type_facets
-            .as_ref()
-            .expect("host-backed projection has type facets")
-            .diagnostics;
-        assert_eq!(diagnostics.len(), 1, "unexpected diagnostics for {source}");
-        assert_eq!(diagnostics[0].kind, "unknown_name");
-        assert!(diagnostics[0].message.contains("missing"));
-        assert_eq!(diagnostics[0].span, node.source_span);
+        let program = crate::parse(source).expect("an assigned invalid conditional parses");
+        let analysis = analyze_workflow_program(&program, &environment);
+        let owner = statement_facts(&analysis, &statements(&program)[0]);
+        assert_eq!(
+            owner.diagnostics.len(),
+            1,
+            "unexpected diagnostics for {source}"
+        );
+        assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
+        assert!(owner.diagnostics[0].error.to_string().contains("missing"));
+        assert!(owner.diagnostics[0].span.is_some());
         assert!(matches!(
-            LinkedModule::link(crate::parse(source).unwrap(), environment.clone()),
+            LinkedModule::link(program, environment.clone()),
             Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
         ));
     }
 
     let print_source = "print (missing ? 1 : 2)";
-    let graph = crate::workflow_graph_from_source_with_facets(print_source, Some(&environment))
-        .expect("a printed invalid conditional remains projectable");
+    let program = crate::parse(print_source).expect("a printed invalid conditional parses");
+    let analysis = analyze_workflow_program(&program, &environment);
     assert!(
-        graph.main.nodes[0]
-            .type_facets
-            .as_ref()
-            .expect("host-backed projection has type facets")
+        statement_facts(&analysis, &statements(&program)[0])
             .diagnostics
             .is_empty()
     );
     assert!(matches!(
-        LinkedModule::link(crate::parse(print_source).unwrap(), environment.clone()),
+        LinkedModule::link(program, environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
     ));
 
@@ -467,33 +507,29 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         "@label(title: \"Guard\")\nif missing { seen = 1 } else { seen = 2 }",
         "@label(title: \"Choice\")\nvalue = [missing ? 1 : 2]",
     ] {
-        let graph = crate::workflow_graph_from_source_with_facets(source, Some(&environment))
-            .expect("a labeled invalid conditional remains projectable");
-        let node = &graph.main.nodes[0];
-        let diagnostics = &node
-            .type_facets
-            .as_ref()
-            .expect("labeled projection has type facets")
-            .diagnostics;
-        assert_eq!(diagnostics.len(), 1, "unexpected diagnostics for {source}");
-        assert_eq!(diagnostics[0].kind, "unknown_name");
-        assert!(diagnostics[0].message.contains("missing"));
+        let program = crate::parse(source).expect("a labeled invalid conditional parses");
+        let analysis = analyze_workflow_program(&program, &environment);
+        let owner = statement_facts(&analysis, &statements(&program)[0]);
+        assert_eq!(
+            owner.diagnostics.len(),
+            1,
+            "unexpected diagnostics for {source}"
+        );
+        assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
+        assert!(owner.diagnostics[0].error.to_string().contains("missing"));
     }
 
     let call_source = r#"value = missing
         ? timer.Schedule({ expr: "0 8 * * *" })
         : timer.Schedule({ expr: "0 9 * * *" })"#;
-    let graph = crate::workflow_graph_from_source_with_facets(call_source, Some(&environment))
-        .expect("recovery preserves expected argument facets on the assignment owner");
-    let facets = graph.main.nodes[0]
-        .type_facets
-        .as_ref()
-        .expect("the assigned conditional has type facets");
-    assert_eq!(facets.diagnostics.len(), 1);
-    assert_eq!(facets.diagnostics[0].kind, "unknown_name");
-    assert_eq!(facets.expected_arguments.len(), 4);
+    let program = crate::parse(call_source).expect("a recovered call conditional parses");
+    let analysis = analyze_workflow_program(&program, &environment);
+    let owner = statement_facts(&analysis, &statements(&program)[0]);
+    assert_eq!(owner.diagnostics.len(), 1);
+    assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
+    assert_eq!(owner.expected_arguments.len(), 4);
     assert_eq!(
-        facets
+        owner
             .expected_arguments
             .iter()
             .filter(|argument| {
