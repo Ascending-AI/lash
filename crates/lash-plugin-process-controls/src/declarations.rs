@@ -355,12 +355,13 @@ pub fn execute_process_emit_tool_call(
 
 /// Declares the registration.
 ///
-/// The definition-name registry is a separate child of the arc (FIG-2995). The
-/// declaration is admitted, identified and journaled like any other intent
-/// today, and its realization refuses with the shared typed
-/// `process_definition_registry_unavailable` reason rather than reporting a
-/// registration that never happened. The tool exists ahead of its table because
-/// the declaration shape is what it binds against.
+/// The declaration carries the claimed name to the registry (FIG-2995):
+/// realization resolves the definition once, pins the returned reference into
+/// the durable row, and refuses with the shared typed
+/// `process_definition_registry_unavailable` reason on a runtime that has no
+/// registry. No `expected_revision` rides this tool, so the registration is a
+/// fresh-slot claim and a take-over of a registered name refuses with the
+/// typed conflict instead of silently rewriting it.
 pub fn execute_process_register_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
@@ -386,6 +387,8 @@ pub fn execute_process_register_tool_call(
                 definition,
                 env_spec: None,
                 label: Some(name.to_string()),
+                name: Some(name.to_string()),
+                expected_revision: None,
             },
         ))]),
     )

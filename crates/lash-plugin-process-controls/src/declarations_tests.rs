@@ -197,7 +197,7 @@ async fn emit_process_event_declares_an_append_to_its_own_process() {
 }
 
 #[tokio::test]
-async fn register_process_declares_a_registration_it_cannot_yet_realize() {
+async fn register_process_declares_a_registration_that_claims_the_name() {
     let outcome = attempt!(
         "register_process",
         serde_json::json!({
@@ -211,6 +211,8 @@ async fn register_process_declares_a_registration_it_cannot_yet_realize() {
     };
     assert_eq!(intent.engine_kind, DEFAULT_PROCESS_ENGINE_KIND);
     assert_eq!(intent.label.as_deref(), Some("approval"));
+    assert_eq!(intent.name.as_deref(), Some("approval"));
+    assert_eq!(intent.expected_revision, None);
     assert_eq!(output.get("name"), Some(&serde_json::json!("approval")));
 }
 
