@@ -7,7 +7,7 @@ fn empty_continuation(heap: Heap) -> VmContinuation {
         reference_semantics: false,
         instruction_pointer: 0,
         active_function: None,
-        pending_tools: Vec::new(),
+        pending_tools: Default::default(),
         execution_nonce: 0,
         operand_stack: Vec::new(),
         last_value: None,

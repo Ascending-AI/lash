@@ -57,6 +57,8 @@ impl ExecutionHost for TestHost {
                 let value = self.call_tool(&start.process_name, &start.args).await?;
                 let mut handle = Record::new();
                 handle.insert("__handle__".to_string(), Value::String("process".into()));
+                handle.insert("id".to_string(), Value::String("language".into()));
+                handle.insert("incarnation".to_string(), Value::Number(1.0));
                 handle.insert("value".to_string(), value);
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }

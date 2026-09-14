@@ -1,3 +1,4 @@
+use lash_sansio::handle::HandleId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
@@ -39,13 +40,24 @@ use super::exceptions::PendingErrorOrigin;
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 14;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 15;
+
+/// The suspended execution's live tool requests, keyed by the handle the cell
+/// holds (ADR 0095).
+///
+/// A consumed request stays in the map as `None` rather than leaving it: the
+/// entry is what tells a handle awaited twice from a handle this execution
+/// never minted, and the two get different repair text. Keying by handle makes
+/// the serialized order a function of the handle ids alone, so two runs of the
+/// same program from the same state still produce byte-identical
+/// continuations.
+pub type PendingToolMap = std::collections::BTreeMap<HandleId, Option<Value>>;
 
 /// The execution identity pending-tool handles carry.
 ///
 /// Distinctness is what matters, not secrecy: a handle from one cell must
 /// never match the nonce of the next cell on the same session, and a
-/// hand-written `{__handle__: "tool", id: 0}` must not match anything. The
+/// hand-written `{__handle__: "lash", id: "t.0…0.0"}` must not match anything. The
 /// nonce is a mixed function of the session heap's allocation counter at
 /// execution start — a value that only grows across a session's cells — rather
 /// than a random draw, so two runs of the same program from the same state
@@ -107,10 +119,10 @@ pub struct VmContinuation {
     )]
     pub operand_stack: Vec<Value>,
     #[serde(
-        serialize_with = "continuation_serde::serialize_slots",
-        deserialize_with = "continuation_serde::deserialize_slots"
+        serialize_with = "continuation_serde::serialize_pending_tools",
+        deserialize_with = "continuation_serde::deserialize_pending_tools"
     )]
-    pub pending_tools: Vec<Option<Value>>,
+    pub pending_tools: PendingToolMap,
     /// The suspended execution's identity; every pending-tool handle it minted
     /// carries it, and the resumed VM keeps accepting exactly those handles.
     pub execution_nonce: u64,
@@ -758,6 +770,37 @@ mod continuation_serde {
             .and_then(|value| optional_from_wire(value).map_err(serde::de::Error::custom))
     }
 
+    pub(super) fn serialize_pending_tools<S>(
+        pending: &PendingToolMap,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        pending
+            .iter()
+            .map(|(id, value)| optional_to_wire(value).map(|wire| (id.clone(), wire)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+
+    pub(super) fn deserialize_pending_tools<'de, D>(
+        deserializer: D,
+    ) -> Result<PendingToolMap, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        std::collections::BTreeMap::<HandleId, OptionalValueWire>::deserialize(deserializer)
+            .and_then(|pending| {
+                pending
+                    .into_iter()
+                    .map(|(id, wire)| optional_from_wire(wire).map(|value| (id, value)))
+                    .collect::<Result<_, _>>()
+                    .map_err(serde::de::Error::custom)
+            })
+    }
+
     pub(super) fn serialize_slots<S>(
         slots: &[Option<Value>],
         serializer: S,
@@ -953,7 +996,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
-            pending_tools: Vec::new(),
+            pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
@@ -990,7 +1033,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap: Self::new_heap(host),
             heap_initialized: false,
             extras_heapified: false,
-            pending_tools: Vec::new(),
+            pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]

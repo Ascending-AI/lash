@@ -25,7 +25,7 @@ pub(super) fn validate_program_continuation(
     continuation: &VmContinuation,
     chunk: &Chunk,
 ) -> Result<(), ContinuationError> {
-    for value in continuation.pending_tools.iter().flatten() {
+    for value in continuation.pending_tools.values().flatten() {
         let Value::List(call) = value else {
             unreachable!("structural validation runs first")
         };

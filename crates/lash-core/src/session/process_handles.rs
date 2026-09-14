@@ -8,8 +8,6 @@ use crate::tool_dispatch::ToolPreparationOutcome;
 use crate::{ProcessInput, ProcessRegistration};
 use crate::{ToolCallOutput, ToolCallRecord, ToolOutcome};
 
-const PROCESS_HANDLE_KIND: &str = "process";
-
 enum HandleAuthority {
     RunLocalPossession,
     SessionVisible,
@@ -25,7 +23,7 @@ impl RuntimeExecutionContext<'_> {
     /// reference through JSON.
     pub fn process_handle_json(process_ref: &crate::ProcessRef) -> serde_json::Value {
         json!({
-            "__handle__": "process",
+            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
             "id": process_ref.process_id,
             "incarnation": process_ref.incarnation.registration_sequence(),
         })
@@ -38,28 +36,28 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
+    /// Reads a process handle through the one parse `lash-sansio` owns
+    /// (ADR 0095), so core and the language agree on what a handle is.
     pub(super) fn parse_process_handle(
         handle: &serde_json::Value,
     ) -> Result<crate::ProcessRef, String> {
-        let kind = handle
-            .get("__handle__")
-            .and_then(|value| value.as_str())
-            .ok_or_else(|| "Invalid process handle: missing `__handle__`".to_string())?;
-        if kind != PROCESS_HANDLE_KIND {
-            return Err(format!("Invalid process handle kind: {kind}"));
+        let invalid = || "Invalid process handle".to_string();
+        let target = lash_sansio::handle::parse_handle_json(handle)
+            .as_ref()
+            .and_then(lash_sansio::handle::HandleId::target)
+            .ok_or_else(invalid)?;
+        let lash_sansio::handle::HandleTarget::Process {
+            process_id,
+            incarnation,
+        } = target
+        else {
+            return Err("Invalid process handle: not a process".to_string());
+        };
+        if incarnation == 0 {
+            return Err("Invalid process handle: missing `incarnation`".to_string());
         }
-        let id = handle
-            .get("id")
-            .and_then(|value| value.as_str())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "Invalid process handle: missing `id`".to_string())?;
-        let incarnation = handle
-            .get("incarnation")
-            .and_then(serde_json::Value::as_u64)
-            .filter(|value| *value > 0)
-            .ok_or_else(|| "Invalid process handle: missing `incarnation`".to_string())?;
         Ok(crate::ProcessRef::new(
-            id,
+            process_id,
             crate::ProcessIncarnation::from_registration_sequence(incarnation),
         ))
     }
@@ -849,7 +847,7 @@ mod tests {
         );
 
         let handle = json!({
-            "__handle__": "process",
+            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
             "id": "target-process",
             "incarnation": target_process.incarnation.registration_sequence()
         });
@@ -957,7 +955,7 @@ mod tests {
             crate::TurnContext::default(),
         );
         let handle = json!({
-            "__handle__": "process",
+            "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
             "id": "hidden-process",
             "incarnation": hidden_process.incarnation.registration_sequence()
         });
@@ -1055,7 +1053,7 @@ mod tests {
             .expect("complete run-local await process");
         let local_handle = |process_id: &ProcessId| {
             json!({
-                "__handle__": "process",
+                "__handle__": lash_sansio::handle::LEGACY_PROCESS_HANDLE_KIND,
                 "id": process_id,
                 "incarnation": local_incarnations
                     .get(process_id.as_str())

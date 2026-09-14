@@ -97,7 +97,7 @@ async fn a_non_monotonic_handler_stack_is_refused() {
         iterator_stack_depth: 0,
     };
     let authored = VmContinuation {
-        pending_tools: Vec::new(),
+        pending_tools: Default::default(),
         execution_nonce: 0,
         format_version: VM_CONTINUATION_FORMAT_VERSION,
         reference_semantics: false,

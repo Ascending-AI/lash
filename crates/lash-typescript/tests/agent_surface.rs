@@ -189,7 +189,7 @@ impl ExecutionHost for SignalHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(lashlang::from_json(
-                serde_json::json!({ "__handle__": "process", "id": "run-1" }),
+                serde_json::json!({ "__handle__": "process", "id": "run-1", "incarnation": 1 }),
             ))),
             AbilityOp::SignalRun(signal) => {
                 *self.signal.lock().expect("signal lock") = Some(signal);
@@ -246,6 +246,7 @@ fn process_handle(id: &str) -> Value {
     let mut handle = lashlang::Record::new();
     handle.insert("__handle__".to_string(), Value::String("process".into()));
     handle.insert("id".to_string(), Value::String(id.into()));
+    handle.insert("incarnation".to_string(), Value::Number(1.0));
     Value::Record(std::sync::Arc::new(handle))
 }
 
@@ -409,7 +410,7 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
                 assert_eq!(start.process_name, "worker");
                 assert_eq!(start.args.get("input"), Some(&Value::Number(42.0)));
                 Ok(AbilityResult::Value(lashlang::from_json(
-                    serde_json::json!({ "__handle__": "process", "id": "process-test-42" }),
+                    serde_json::json!({ "__handle__": "process", "id": "process-test-42", "incarnation": 1 }),
                 )))
             }
             AbilityOp::ResourceOperation(call) => {
@@ -1312,7 +1313,7 @@ impl ExecutionHost for ProcessDurabilityHost {
             AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::ProcessEvent(event) => Ok(AbilityResult::Value(event.value)),
             AbilityOp::StartProcess(start) => Ok(AbilityResult::Value(lashlang::from_json(
-                serde_json::json!({ "__handle__": "process", "id": start.process_name }),
+                serde_json::json!({ "__handle__": "process", "id": start.process_name, "incarnation": 1 }),
             ))),
             AbilityOp::Await(handle) => {
                 let id = handle
@@ -1697,8 +1698,10 @@ fn the_selected_rejection_is_replay_deterministic() {
 // `lashlang_aggregates_still_select_in_input_order` was deleted with the second
 // dialect (ADR 0096): aggregates now always select by settlement order.
 /// Settlement order is consumed inside a single `perform` and never persisted.
-/// Snapshot v7 is independently required by the substrate-minted error brands;
-/// the aggregate rule still does not move the VM ABI.
+/// Snapshot v7 is independently required by the substrate-minted error brands.
+/// The ABI is at v8 because ADR 0095's one handle kind changed the handle
+/// record and the pending-request keying, not because the aggregate rule moved:
+/// settlement order still never reaches the continuation format.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
@@ -1708,7 +1711,7 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v7",
+        "lashlang-vm-abi-v8",
         "the compiled-batch selection rule moved the VM ABI"
     );
 }
@@ -2357,6 +2360,7 @@ impl ExecutionHost for MixedAggregateHost {
                 serde_json::json!({
                     "__handle__": "process",
                     "id": start.args.get("input").cloned().unwrap_or(Value::Null),
+                    "incarnation": 1,
                 }),
             ))),
             AbilityOp::Await(handle) => {
@@ -2441,7 +2445,7 @@ fn promise_all_keeps_nested_process_handles_shallow() {
     assert_eq!(
         run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
         ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
-            [{"__handle__": "process", "id": "p"}],
+            [{"__handle__": "process", "id": "p", "incarnation": 1}],
             1
         ])))
     );
@@ -2513,7 +2517,10 @@ fn tool_handles_do_not_cross_cells() {
     );
 
     let stale = lashlang::from_json(serde_json::json!({
-        "p": { "__handle__": "tool", "id": 0, "execution": "0000000000000000" }
+        // The forgery a cell could most plausibly attempt: the one handle
+        // shape, spelled with the nonce an execution that allocated nothing
+        // would mint. It still names no live request (ADR 0095).
+        "p": { "__handle__": "lash", "id": "t.0000000000000000.0" }
     }));
     let mut state = State::from_snapshot(lashlang::Snapshot::new(
         stale.as_record().expect("globals record").clone(),

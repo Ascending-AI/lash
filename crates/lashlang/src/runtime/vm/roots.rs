@@ -133,7 +133,7 @@ pub(super) trait VmRootView {
     fn slots(&self) -> &[Option<Value>];
     fn globals(&self) -> &Record;
     fn operand_stack(&self) -> &[Value];
-    fn pending_tools(&self) -> &[Option<Value>];
+    fn pending_tools(&self) -> &super::continuation::PendingToolMap;
     fn last_value(&self) -> Option<&Value>;
     fn iterators(&self) -> &[Self::Iterator];
     fn frames(&self) -> &[Self::Frame];
@@ -157,7 +157,7 @@ impl<H> VmRootView for Vm<'_, H> {
         &self.slots.extras
     }
 
-    fn pending_tools(&self) -> &[Option<Value>] {
+    fn pending_tools(&self) -> &super::continuation::PendingToolMap {
         &self.pending_tools
     }
 
@@ -199,7 +199,7 @@ impl VmRootView for VmContinuation {
         &self.globals
     }
 
-    fn pending_tools(&self) -> &[Option<Value>] {
+    fn pending_tools(&self) -> &super::continuation::PendingToolMap {
         &self.pending_tools
     }
 
@@ -257,7 +257,7 @@ impl<'a> VmRootVisitor<'a> for PersistedRoots<'a> {
 }
 
 pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl VmRootVisitor<'a>) {
-    for value in view.pending_tools().iter().flatten() {
+    for value in view.pending_tools().values().flatten() {
         visitor.transient(value);
     }
     if view.has_active_function() {

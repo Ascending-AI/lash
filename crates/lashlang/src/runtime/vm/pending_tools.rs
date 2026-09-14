@@ -1,8 +1,9 @@
 use super::super::{
-    CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, is_runtime_process_handle,
-    is_tool_handle_record, record_with_capacity, success, value_contains_tool_handle,
+    CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, parse_handle_record,
+    record_with_capacity, success, value_contains_tool_handle,
 };
 use super::Vm;
+use lash_sansio::handle::{HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget};
 use std::sync::Arc;
 
 /// How the settled outcome of a process handle inside an aggregate is shaped.
@@ -20,8 +21,8 @@ pub(super) enum ProcessLeafSettlement {
 /// What a value handed to `await` turned out to be, in the terms the repair
 /// text has to use.
 pub(super) enum AwaitedValue {
-    /// A pending-tool handle this execution minted: its request slot.
-    LocalToolHandle(usize),
+    /// A pending-tool handle this execution minted: the request it names.
+    LocalToolHandle(HandleId),
     /// A pending-tool handle record minted by another execution, or written
     /// by hand.
     ForeignToolHandle,
@@ -32,35 +33,39 @@ pub(super) enum AwaitedValue {
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    /// Classify `value` for `await`: only a handle stamped with this execution's
-    /// nonce reaches a request slot. The nonce is what stops a handle kept in a
-    /// session global from aliasing the next execution's first request, and a
-    /// literal `{__handle__: "tool", id: 0}` from stealing a live one.
+    /// Classify `value` for `await`: only a handle whose id carries this
+    /// execution's nonce reaches a request slot. The nonce is folded into the
+    /// id rather than stamped beside it, so there is one thing to check and
+    /// nothing to keep in step. It is what stops a handle kept in a session
+    /// global from aliasing the next execution's first request, and a literal
+    /// `{__handle__: "lash", id: "t.0000000000000000.0"}` from stealing a live
+    /// one.
     pub(super) fn classify_awaited(&self, value: &Value) -> AwaitedValue {
         let Value::Record(record) = value else {
             return AwaitedValue::Plain;
         };
-        if is_runtime_process_handle(value) {
-            return AwaitedValue::ProcessHandle;
-        }
-        if !is_tool_handle_record(record) {
+        let Some(handle) = parse_handle_record(record) else {
             return AwaitedValue::Plain;
-        }
-        let stamped = matches!(
-            record.get("execution"),
-            Some(Value::String(nonce)) if nonce.as_str() == execution_nonce_text(self.execution_nonce)
-        );
-        let id = match record.get("id") {
-            Some(Value::Number(id)) if id.is_finite() && *id >= 0.0 && id.fract() == 0.0 => {
-                Some(*id as usize)
-            }
-            _ => None,
         };
-        match id {
-            Some(id) if stamped && id < self.pending_tools.len() => {
-                AwaitedValue::LocalToolHandle(id)
+        match handle.target() {
+            Some(HandleTarget::Tool {
+                execution_nonce,
+                request: _,
+            }) => {
+                if execution_nonce == self.execution_nonce
+                    && self.pending_tools.contains_key(&handle)
+                {
+                    AwaitedValue::LocalToolHandle(handle)
+                } else {
+                    AwaitedValue::ForeignToolHandle
+                }
             }
-            _ => AwaitedValue::ForeignToolHandle,
+            Some(HandleTarget::Process { .. }) => AwaitedValue::ProcessHandle,
+            // A record shaped like a handle whose id names nothing: a
+            // hand-written or tampered id. It is refused as a tool handle
+            // rather than silently read as a plain value, so the repair text
+            // names what went wrong.
+            None => AwaitedValue::ForeignToolHandle,
         }
     }
 
@@ -71,24 +76,30 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<(), RuntimeError> {
         let (receiver, args) = self.drain_receiver_call(argc)?;
         ensure_no_tool_handle_arguments(&args)?;
-        let id = self.pending_tools.len();
-        self.pending_tools.push(Some(Value::List(
-            [
-                Value::Number(operation as f64),
-                Value::Number(self.current_instruction_ip() as f64),
-            ]
-            .into_iter()
-            .chain(std::iter::once(receiver))
-            .chain(args)
-            .collect(),
-        )));
-        let mut handle = record_with_capacity(3);
-        handle.insert("__handle__".to_string(), Value::String("tool".into()));
-        handle.insert("id".to_string(), Value::Number(id as f64));
-        handle.insert(
-            "execution".to_string(),
-            Value::String(execution_nonce_text(self.execution_nonce).into()),
+        // Consumed requests stay in the map as `None`, so the entry count is
+        // the next request number and a settled handle stays tellable from a
+        // foreign one.
+        let request =
+            u32::try_from(self.pending_tools.len()).map_err(|_| RuntimeError::PendingTool {
+                problem: "this cell launched more tool calls than one execution can hold".into(),
+            })?;
+        let id = HandleId::tool(self.execution_nonce, request);
+        self.pending_tools.insert(
+            id.clone(),
+            Some(Value::List(
+                [
+                    Value::Number(operation as f64),
+                    Value::Number(self.current_instruction_ip() as f64),
+                ]
+                .into_iter()
+                .chain(std::iter::once(receiver))
+                .chain(args)
+                .collect(),
+            )),
         );
+        let mut handle = record_with_capacity(2);
+        handle.insert(HANDLE_FIELD.to_string(), Value::String(HANDLE_KIND.into()));
+        handle.insert("id".to_string(), Value::String(id.as_str().into()));
         self.stack.push(Value::Record(Arc::new(handle)));
         Ok(())
     }
@@ -96,7 +107,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn ensure_no_pending_tools(&self) -> Result<(), RuntimeError> {
         let count = self
             .pending_tools
-            .iter()
+            .values()
             .filter(|entry| entry.is_some())
             .count();
         if count == 0 {
@@ -132,7 +143,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         shape.push(CompiledAggregateAwaitShape::BatchLeaf(*index));
                         continue;
                     }
-                    let Some(Some(Value::List(call))) = self.pending_tools.get_mut(id) else {
+                    let Some(Some(Value::List(call))) = self.pending_tools.get_mut(&id) else {
                         return Err(RuntimeError::PendingTool {
                             problem: SETTLED_HANDLE.into(),
                         });
@@ -145,7 +156,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     };
                     let site = site as usize;
                     let index = leaves.len();
-                    seen.insert(id, index);
+                    seen.insert(id.clone(), index);
                     leaves.push(CompiledResourceOperationBatchLeaf {
                         operation: operation as usize,
                         argc: call.len() - 3,
@@ -184,7 +195,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
         for id in seen.keys() {
-            self.pending_tools[*id] = None;
+            // Consumed, not removed: the entry is what tells a second await of
+            // the same handle from a handle this execution never minted.
+            if let Some(entry) = self.pending_tools.get_mut(id) {
+                *entry = None;
+            }
         }
         let process_leaves = if settle {
             ProcessLeafSettlement::Result
@@ -201,11 +216,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.resolve_batch_spec(&batch, values, process_leaves)
             .await
     }
-}
-
-/// The nonce as the handle record spells it.
-pub(super) fn execution_nonce_text(nonce: u64) -> String {
-    format!("{nonce:016x}")
 }
 
 /// A pending handle inside a tool's arguments would reach the host as its

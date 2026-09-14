@@ -1325,13 +1325,25 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
     });
 }
 
+/// The executor names exactly the process handles the runtime would await.
+///
+/// Before ADR 0095 this asserted the opposite: a bare `handle` key, an empty
+/// id and a *tool* handle were all counted as process handles, because
+/// `is_process_handle` only looked for the presence of a key. That looseness is
+/// the defect the one handle kind removes — the executor and the VM now ask the
+/// same parse, so a record that names no process is not a process handle here
+/// either.
 #[test]
 pub(super) fn process_handle_derivation_matches_runtime_await_authority() {
     let globals = lashlang::from_json(serde_json::json!({
-        "canonical": { "__handle__": "process", "id": "p1" },
+        // FIG-2996 part 2 moves this to `{ __handle__: "lash", id }`; the
+        // incarnation rides inside the id from then on.
+        "canonical": { "__handle__": "process", "id": "p1", "incarnation": 1 },
+        "no_incarnation": { "__handle__": "process", "id": "p1" },
         "alternate": { "handle": "p2" },
-        "empty_id": { "__handle__": "process", "id": "" },
+        "empty_id": { "__handle__": "process", "id": "", "incarnation": 1 },
         "other_kind": { "__handle__": "tool", "id": "t1" },
+        "tool_handle": { "__handle__": "lash", "id": "t.0000000000000000.0" },
         "plain_record": { "id": "not-a-handle" },
         "scalar": 1,
     }));
@@ -1339,12 +1351,8 @@ pub(super) fn process_handle_derivation_matches_runtime_await_authority() {
 
     assert_eq!(
         process_handle_names(globals),
-        BTreeSet::from([
-            "alternate".to_string(),
-            "canonical".to_string(),
-            "empty_id".to_string(),
-            "other_kind".to_string(),
-        ])
+        BTreeSet::from(["canonical".to_string()]),
+        "only a well-formed process handle is a process handle"
     );
 }
 

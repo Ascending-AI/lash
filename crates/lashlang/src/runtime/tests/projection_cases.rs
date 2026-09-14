@@ -1637,6 +1637,11 @@ async fn await_list_process_starts_and_joins_handles() {
                     let mut handle = Record::new();
                     handle.insert("__handle__".to_string(), Value::String("process".into()));
                     handle.insert(
+                        "id".to_string(),
+                        Value::String(start.process_name.clone().into()),
+                    );
+                    handle.insert("incarnation".to_string(), Value::Number(1.0));
+                    handle.insert(
                         "process".to_string(),
                         Value::String(start.process_name.into()),
                     );
