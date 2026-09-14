@@ -17,6 +17,25 @@ startup --host_jvm_args=-Xmx4g
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
+# Every pre-analysis fetch of a module archive or a release asset is a serial
+# point of failure on someone else's CDN, and a single HTTP 500 aborts analysis
+# before anything is compiled. Measured against a local server that answers 500
+# (Bazel 9.1.0, `bazel fetch` of an http_archive): the stock defaults give 8
+# attempts over 17s and then fail, and the outer
+# --experimental_repository_downloader_retries layer adds nothing for this error
+# class -- --http_connector_attempts is the load-bearing knob. The backoff
+# doubles from 100ms and is otherwise unbounded, so raising the attempt count
+# alone buys attempts at an exponential price; capping each wait at 15s buys a
+# window instead. At these values the same fault injection retries 22 times over
+# 199s before giving up, and a 12-failure outage that the defaults could not ride
+# out now succeeds on attempt 13. Roughly three minutes of transient 5xx is
+# absorbed, against the 13 minutes plus queue position a CI rerun costs.
+common --http_connector_attempts=20
+common --http_connector_retry_max_timeout=15s
+# Pinned rather than inherited: it is the documented retry knob, and a future
+# default of 0 would silently remove the outer layer.
+common --experimental_repository_downloader_retries=5
+
 # What the pool is asked FOR is a repository fact and stays here.
 # Rust compile and link actions are large and mostly single-invocation: on
 # one core the workspace test binaries take 20-30 minutes each and sit on the

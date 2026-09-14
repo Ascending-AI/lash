@@ -374,6 +374,49 @@ class BazelTestContractTests(unittest.TestCase):
                     "belongs in .kiln.bazelrc or a build-cache secret",
                 )
 
+    def test_transient_release_asset_fetches_are_retried_and_cached(self) -> None:
+        """A 5xx from someone else's CDN must not abort analysis.
+
+        Every Bazel job fetches the module graph and its release assets before
+        it compiles anything, so one HTTP 500 from the BCR or from a GitHub
+        release used to end the run with nothing built. Measured on Bazel
+        9.1.0 against a server answering 500, the stock defaults give eight
+        attempts over 17s; `--experimental_repository_downloader_retries` adds
+        nothing for this error class, so `--http_connector_attempts` carries
+        the window and the per-retry cap keeps its doubling backoff from
+        pricing the extra attempts in hours. Retrying is only half of it: the
+        repository cache is content-addressed, so an asset already seen is
+        never re-fetched at all, which is why every Bazel job restores it and
+        exactly one saves it.
+        """
+        bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
+        self.assertIn("common --http_connector_attempts=20", bazelrc)
+        self.assertIn("common --http_connector_retry_max_timeout=15s", bazelrc)
+        self.assertIn(
+            "common --experimental_repository_downloader_retries=5", bazelrc
+        )
+
+        setup = shared_cache_action()
+        flags = job_step(setup, "Export shared cache flags")["run"]
+        self.assertIn("--repository_cache=$RUNNER_TEMP/bazel-repository", flags)
+        restore = job_step(setup, "Restore Bazel repository cache")
+        save = job_step(setup, "Restore and save Bazel repository cache")
+        self.assertEqual("${{ runner.temp }}/bazel-repository", restore["with"]["path"])
+        self.assertEqual("${{ runner.temp }}/bazel-repository", save["with"]["path"])
+        self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
+        self.assertTrue(save["uses"].startswith("actions/cache@"))
+        # Exactly one job uploads the warmed cache; the rest restore only.
+        self.assertEqual("inputs.save-repository-cache != 'true'", restore["if"])
+        self.assertEqual("inputs.save-repository-cache == 'true'", save["if"])
+        saving_jobs = [
+            job
+            for job in workflow()["jobs"].values()
+            for step in job.get("steps", [])
+            if step.get("uses") == "./.github/actions/bazel-shared-cache"
+            and step.get("with", {}).get("save-repository-cache") == "true"
+        ]
+        self.assertEqual(1, len(saving_jobs))
+
     def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
         """A misconfigured environment must name what is wrong, not build wrong.
 
