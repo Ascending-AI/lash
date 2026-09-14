@@ -392,14 +392,6 @@ publish-order:
       print(f"  {index:2}. {name}")
   PY
 
-# Dry-run the two leaf crates (no internal deps) — quick sanity check.
-# Non-leaf dry-runs only work after their deps are already on crates.io.
-publish-dry-run:
-  @echo "Dry-run on leaf crates (lash-internal-sansio, lash-internal-lashlang)..."
-  cargo publish --dry-run --locked -p lash-internal-sansio
-  cargo publish --dry-run --locked -p lash-internal-lashlang
-  @echo "OK."
-
 # The packaging proof the release runs before it publishes anything: package
 # every publishable crate in one cargo invocation (so workspace siblings resolve
 # against the crates just packaged, not against crates.io) and report the sha256
