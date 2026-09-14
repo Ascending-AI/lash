@@ -210,12 +210,6 @@ pub struct AbandonRequest {
     pub reason: Option<String>,
 }
 
-
-
-
-
-
-
 /// Exact authority retaining immutable module or process-environment bytes.
 ///
 /// Artifact stores persist one edge per owner and content address. Owners are
@@ -279,12 +273,6 @@ impl ArtifactOwner {
         Ok((kind, id))
     }
 }
-
-
-
-
-
-
 
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
@@ -966,11 +954,6 @@ impl ProcessRegistration {
     }
 }
 
-
-
-
-
-
 /// Whether a durable write landed on this call, or coalesced onto a fact the
 /// store already held under the same durable key.
 ///
@@ -1066,8 +1049,6 @@ impl ProcessRegistrationOutcome {
     }
 }
 
-
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitState {
     pub kind: WaitKind,
@@ -1093,8 +1074,6 @@ impl WaitState {
         key
     }
 }
-
-
 
 /// The kind and label a host declares for a start whose input core owns
 /// outright — a session turn, a tool call, an external placeholder.

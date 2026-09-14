@@ -17,8 +17,7 @@ pub fn bind_store_turn_control_authority(
             "the configured effect host delegates turn cancellation to a session store that exposes no recoverable authority",
         )
     })?;
-    let authority =
-        crate::runtime::effect::executor::concrete_turn_cancellation_authority(&handle);
+    let authority = crate::runtime::effect::executor::concrete_turn_cancellation_authority(&handle);
     let peek_controller = Arc::new(StoreDelegatedTurnControlPeekController {
         resolver: authority.resolver(),
     });

@@ -1,5 +1,5 @@
-pub use lash_core_store::process_identity::{process_wake_turn_cause, process_wake_turn_text};
 use crate::plugin::PluginError;
+pub use lash_core_store::process_identity::{process_wake_turn_cause, process_wake_turn_text};
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
 use super::model::{ProcessId, ProcessIncarnation, SessionId};
@@ -57,10 +57,6 @@ pub fn process_wake_input_from_event_payload(payload: &serde_json::Value) -> Str
         .unwrap_or_else(|| payload.to_string())
 }
 
-
-
-
-
 #[derive(Clone, Debug)]
 pub struct ProcessWakeDeliveryRequest {
     pub target_session_id: SessionId,
@@ -106,8 +102,6 @@ pub fn process_wake_delivery(
         created_at_ms: occurred_at_ms,
     })
 }
-
-
 
 #[cfg(test)]
 mod identity_tests {

@@ -255,7 +255,7 @@ pub fn shared_drain_mode_policy(mode: DrainMode) -> Arc<dyn QueuedDrainPolicy> {
 /// The policy Lash uses when a host configures none: [`DrainMode::OneAtATime`].
 ///
 /// Hosts reach this through
-/// [`QueuedWorkBatchingConfig::drain_policy`](crate::QueuedWorkBatchingConfig::drain_policy)
+/// `QueuedWorkBatchingConfig::drain_policy`
 /// rather than directly, so it stays crate-internal.
 pub fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
     shared_drain_mode_policy(DrainMode::default())

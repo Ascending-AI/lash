@@ -1,5 +1,5 @@
-pub use lash_core_store::tool_state::{ReconfigureError, ToolRegistrationKind};
 use super::*;
+pub use lash_core_store::tool_state::{ReconfigureError, ToolRegistrationKind};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ToolRegistryEntry {
@@ -132,8 +132,6 @@ impl ToolSurface {
     }
 }
 
-
-
 /// Typed registry-source identity. Leaf source labels and orchestrating tool
 /// identities occupy disjoint namespaces even when their rendered text is
 /// identical.
@@ -183,8 +181,6 @@ pub struct ToolRestoreReport {
     pub generation: u64,
     pub orphaned: Vec<ToolId>,
 }
-
-
 
 #[derive(Clone)]
 pub struct ToolRegistry {

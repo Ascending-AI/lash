@@ -1,5 +1,5 @@
-use crate::runtime_error::{RuntimeError, RuntimeErrorCode};
 use crate::SessionId;
+use crate::runtime_error::{RuntimeError, RuntimeErrorCode};
 
 #[test]
 fn missing_process_execution_id_round_trips() {

@@ -1,5 +1,5 @@
-pub use lash_core_store::session_policy::*;
 use crate::SessionId;
+pub use lash_core_store::session_policy::*;
 pub mod context;
 pub use lash_sansio::session_model::message;
 pub use lash_sansio::session_model::prompt;
@@ -61,12 +61,6 @@ pub(crate) async fn send_event(tx: &mpsc::Sender<SessionStreamEvent>, event: Ses
 
 pub(crate) use lash_core_store::message_projection::plugin_message_to_message;
 
-
-
-
-
-
-
 /// Runtime-only policy resolved against host-owned live dependencies.
 #[derive(Clone, Debug)]
 pub struct RuntimeSessionPolicy {
@@ -105,10 +99,6 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
         &mut self.policy
     }
 }
-
-
-
-
 
 /// Reusable session configuration overlay.
 ///

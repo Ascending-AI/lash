@@ -71,7 +71,7 @@ pub struct UnreportedUsageAttempt {
     pub generation_id: Option<String>,
 }
 
-/// Outcome of one host-invoked [`crate::runtime::LashRuntime::reconcile_unreported_usage`].
+/// Outcome of one host-invoked `LashRuntime::reconcile_unreported_usage`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UsageReconciliationReport {
     /// Attempts whose usage the provider recovered; each produced one
@@ -377,7 +377,7 @@ pub struct UsageTotals {
     #[serde(default, skip_serializing_if = "count_is_zero")]
     pub unreported_attempts: u32,
     /// Previously unreported attempts whose usage was recovered from the
-    /// provider by [`crate::runtime::LashRuntime::reconcile_unreported_usage`];
+    /// provider by `LashRuntime::reconcile_unreported_usage`;
     /// their counters are included above.
     #[serde(default, skip_serializing_if = "count_is_zero")]
     pub reconciled_attempts: u32,

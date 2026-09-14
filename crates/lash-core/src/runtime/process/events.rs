@@ -1,5 +1,5 @@
-pub use lash_core_store::process_identity::*;
 use crate::SessionId;
+pub use lash_core_store::process_identity::*;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;
 
@@ -256,8 +256,6 @@ pub fn terminal_append_request(
     ProcessEventAppendRequest::new(event_type, payload)
         .with_replay_key(format!("process:{process_id}:terminal:{event_type}"))
 }
-
-
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -784,10 +782,6 @@ fn cancellation_replay_key(process_ref: &ProcessRef, request: &CancelRequest) ->
 /// Version 3 carries full admitted effect addresses and complete trigger causes
 /// in the invocation delivered with a process wake.
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
-
-
-
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessEventKind {

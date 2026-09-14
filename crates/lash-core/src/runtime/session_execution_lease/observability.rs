@@ -4,7 +4,6 @@ use crate::{SessionExecutionLease, StoreError};
 
 pub(crate) use lash_core_store::session_execution_lease::{trace_acquisition, trace_busy};
 
-
 pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &SessionExecutionLease) {
     let holder_owner_id_sha256 = crate::stable_hash::sha256_hex(holder.owner.owner_id.as_bytes());
     let holder_incarnation_id_sha256 =
@@ -21,7 +20,6 @@ pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &Sessio
         "live lease holder observed: proceeding under the commit CAS fence"
     );
 }
-
 
 /// Report a commit whose head compare-and-set lost to a concurrent writer.
 ///

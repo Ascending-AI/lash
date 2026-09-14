@@ -206,22 +206,20 @@ pub(crate) use session_policy::ApplyConfigPatch;
 pub(crate) use store::OrphanedTurnInputScope;
 pub(crate) use store::work_claim::WorkCompletion;
 
+pub(crate) use attachments::AttachmentGcFence;
 pub(crate) use lash_core_ids::test_watchdog;
 pub(crate) use lash_sansio::attachment::MediaType;
 pub(crate) use lash_sansio::llm::capability::{ModelCapability, ReasoningRetentionPolicy};
-pub(crate) use queued_work_vocabulary::QueuedWorkCompletionData;
-pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
-pub(crate) use turn_input_vocabulary::{TurnInputCompletionData, TurnInputSettlementClaim};
 pub(crate) use lash_sansio::llm::capability::{
     OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionSelection,
 };
 pub(crate) use lash_sansio::llm::types::LlmResponse;
 pub(crate) use lash_sansio::tool_contract::ToolContract;
 pub(crate) use lash_sansio::tool_output::AttachmentMaterializationReason;
-pub(crate) use attachments::AttachmentGcFence;
 pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
 };
+pub(crate) use queued_work_vocabulary::QueuedWorkCompletionData;
 pub(crate) use queued_work_vocabulary::TurnWorkPayload;
 pub(crate) use session_graph::{
     SESSION_NODE_BODY_SCHEMA_VERSION, SharedJsonValue, build_active_read_projection,
@@ -235,7 +233,9 @@ pub(crate) use store::attachment_manifest::{
 pub(crate) use store::commit_budget::{CommitBudget, CommitBudgetLimit};
 pub(crate) use store::runtime_commit::{RuntimeCommit, RuntimeTurnCommitStamp};
 pub(crate) use store::{SessionAdmission, SessionBinding};
+pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
 pub(crate) use turn_input_vocabulary::{TurnInputClaimMode, ingress_message_id};
+pub(crate) use turn_input_vocabulary::{TurnInputCompletionData, TurnInputSettlementClaim};
 
 pub(crate) use turn_input_vocabulary::TurnActivityId;
 

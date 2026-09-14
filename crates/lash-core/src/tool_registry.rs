@@ -118,5 +118,4 @@ pub(crate) mod facade_ops {
             self.remove_source_id(handle.id())
         }
     }
-
 }

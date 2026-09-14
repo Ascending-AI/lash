@@ -1,10 +1,10 @@
+pub use lash_core_store::session_identity::facade_ops;
 pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
-    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage,
-    SessionObserverIntent, SessionObserverIntentAttribution, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObserverIntent,
+    SessionObserverIntentAttribution, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
 };
-pub use lash_core_store::session_identity::facade_ops;
 
 use crate::SessionId;
 use std::collections::BTreeSet;
@@ -53,14 +53,6 @@ pub enum SessionObservedProcessOutcome {
     },
 }
 
-
-
-
-
-
-
-
-
 #[derive(Clone, Debug)]
 pub struct PluginOwned<T> {
     pub plugin_id: String,
@@ -74,39 +66,6 @@ pub enum SessionPluginSource {
     #[default]
     CurrentSessionFork,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod agent_frame_reason_tests {
@@ -153,34 +112,6 @@ mod frame_node_id_tests {
         );
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionCreateRequest {
@@ -381,22 +312,6 @@ impl SessionCreateRequest {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[cfg(test)]
 mod session_tool_access_tests {
     use super::{SessionToolAccess, SessionToolAccessError};
@@ -572,8 +487,6 @@ mod session_tool_access_tests {
         assert!(decoded.hides("restricted"));
     }
 }
-
-
 
 #[cfg(test)]
 mod observer_intent_relation_cutover_tests {

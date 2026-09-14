@@ -540,22 +540,14 @@ impl SessionGraphAppendBuilder {
         )
     }
 
-    pub fn append_events_at<I>(
-        &mut self,
-        events: I,
-        timestamp: String,
-    ) -> Vec<SessionNodeRecord>
+    pub fn append_events_at<I>(&mut self, events: I, timestamp: String) -> Vec<SessionNodeRecord>
     where
         I: IntoIterator<Item = SessionHistoryRecord>,
     {
         self.append_drafts_at(events.into_iter().map(SessionNodeDraft::event), timestamp)
     }
 
-    pub fn append_drafts_at<I>(
-        &mut self,
-        drafts: I,
-        timestamp: String,
-    ) -> Vec<SessionNodeRecord>
+    pub fn append_drafts_at<I>(&mut self, drafts: I, timestamp: String) -> Vec<SessionNodeRecord>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {

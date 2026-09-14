@@ -11,10 +11,6 @@ use std::sync::{Arc, Mutex};
 const VALUE_LIMIT: usize = 32 * 1024;
 const STORE_LIMIT: usize = 128 * 1024;
 
-
-
-
-
 /// A deterministic rejection of a plugin-state key.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum KeyRejection {

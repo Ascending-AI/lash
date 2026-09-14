@@ -17,9 +17,7 @@ fn decode_binding_scope(
 impl TurnInputStore for Store {
     fn turn_cancellation_authority(
         &self,
-    ) -> Option<
-        std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>,
-    > {
+    ) -> Option<std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
         self.turn_cancellation_authority
             .clone()
             .map(lash_core::TurnCancellationAuthority::into_store_authority)

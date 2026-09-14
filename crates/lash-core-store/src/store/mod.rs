@@ -97,8 +97,7 @@ pub use state_version::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use testing::{
-    ConformancePersistence, StoreTestSupport,
-    append_request_commit_with_clock_for_testing,
+    ConformancePersistence, StoreTestSupport, append_request_commit_with_clock_for_testing,
 };
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
 pub use work_claim::{WorkClaim, WorkCompletion};

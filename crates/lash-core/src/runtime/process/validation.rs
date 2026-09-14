@@ -502,11 +502,7 @@ pub fn apply_process_event_projection(
             return Ok(());
         }
         record.outcome = Some(terminal.outcome.clone());
-        apply_process_status_projection(
-            record,
-            terminal.into_status(),
-            event.occurred_at,
-        );
+        apply_process_status_projection(record, terminal.into_status(), event.occurred_at);
     } else {
         record.updated_at_ms = event.occurred_at;
     }

@@ -4,9 +4,7 @@ use super::*;
 impl TurnInputStore for PostgresSessionStore {
     fn turn_cancellation_authority(
         &self,
-    ) -> Option<
-        std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>,
-    > {
+    ) -> Option<std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
         let resolver = crate::await_event::postgres_await_events(
             self.pool.clone(),
             Arc::clone(&self.await_event_signing_secret),

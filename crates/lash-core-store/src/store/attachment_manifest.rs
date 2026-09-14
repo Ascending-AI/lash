@@ -660,10 +660,17 @@ macro_rules! impl_noop_attachment_manifest {
             async fn begin_attachment_write(
                 &self,
                 _intent: $crate::store::attachment_manifest::AttachmentIntent,
-            ) -> ::std::result::Result<$crate::store::attachment_manifest::AttachmentWriteFence, $crate::store::StoreError> {
-                ::std::result::Result::Ok($crate::store::attachment_manifest::AttachmentWriteFence::Granted(
-                    $crate::store::attachment_manifest::AttachmentWritePermit::new($crate::store::attachment_manifest::AttachmentWriteToken::new()),
-                ))
+            ) -> ::std::result::Result<
+                $crate::store::attachment_manifest::AttachmentWriteFence,
+                $crate::store::StoreError,
+            > {
+                ::std::result::Result::Ok(
+                    $crate::store::attachment_manifest::AttachmentWriteFence::Granted(
+                        $crate::store::attachment_manifest::AttachmentWritePermit::new(
+                            $crate::store::attachment_manifest::AttachmentWriteToken::new(),
+                        ),
+                    ),
+                )
             }
 
             async fn complete_attachment_write(
@@ -693,8 +700,10 @@ macro_rules! impl_noop_attachment_manifest {
             async fn list_uncommitted(
                 &self,
                 _older_than_epoch_ms: u64,
-            ) -> ::std::result::Result<Vec<$crate::store::attachment_manifest::AttachmentManifestEntry>, $crate::store::StoreError>
-            {
+            ) -> ::std::result::Result<
+                Vec<$crate::store::attachment_manifest::AttachmentManifestEntry>,
+                $crate::store::StoreError,
+            > {
                 Ok(Vec::new())
             }
 
@@ -708,7 +717,8 @@ macro_rules! impl_noop_attachment_manifest {
 
             async fn list_all_refs(
                 &self,
-            ) -> ::std::result::Result<Vec<$crate::sansio::AttachmentId>, $crate::store::StoreError> {
+            ) -> ::std::result::Result<Vec<$crate::sansio::AttachmentId>, $crate::store::StoreError>
+            {
                 Ok(Vec::new())
             }
         }

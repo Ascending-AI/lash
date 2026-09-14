@@ -1,7 +1,7 @@
-pub use lash_core_store::await_event_identity::*;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
+pub use lash_core_store::await_event_identity::*;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -167,14 +167,6 @@ impl EffectJournalRetirement {
         }
     }
 }
-
-
-
-
-
-
-
-
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalCompletionError {
@@ -1384,11 +1376,10 @@ pub trait EffectHost: AwaitEventResolver {
                         "durable turn-control controller does not identify its await-event authority",
                     ));
                 };
-                let controller_binding_id =
-                    super::turn_control_binding_id_for_scope(
-                        &controller_authority_id,
-                        scoped.execution_scope(),
-                    )?;
+                let controller_binding_id = super::turn_control_binding_id_for_scope(
+                    &controller_authority_id,
+                    scoped.execution_scope(),
+                )?;
                 if controller_binding_id != binding_id {
                     return Err(RuntimeError::new(
                         crate::RuntimeErrorCode::InvalidTurnCancelRequest,
@@ -1576,10 +1567,8 @@ impl TurnCancelClosureOwnerBinding {
         scope: &ExecutionScope,
         admitted_binding_id: &str,
     ) -> Result<(), RuntimeError> {
-        let owner_binding_id = super::turn_control_binding_id_for_scope(
-            &self.owner.turn_control_binding_id(),
-            scope,
-        )?;
+        let owner_binding_id =
+            super::turn_control_binding_id_for_scope(&self.owner.turn_control_binding_id(), scope)?;
         if owner_binding_id != admitted_binding_id {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvalidTurnCancelRequest,

@@ -85,4 +85,3 @@ pub fn append_request_commit_with_clock_for_testing(
 pub trait ConformancePersistence: super::RuntimePersistence + StoreTestSupport {}
 
 impl<T> ConformancePersistence for T where T: super::RuntimePersistence + StoreTestSupport + ?Sized {}
-

@@ -150,8 +150,6 @@ fn is_pre_cutover_trigger_list_envelope(value: &Value) -> bool {
             .is_some_and(|filter| filter.contains_key("session_id"))
 }
 
-
-
 /// Trace capability dedicated to replay-divergence diagnostics.
 ///
 /// Construction returns `None` only when no sink is configured. A divergence

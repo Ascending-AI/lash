@@ -17,18 +17,6 @@ use crate::{SessionPolicy, SessionSnapshot};
 
 use super::PluginError;
 
-
-
-
-
-
-
-
-
-
-
-
-
 /// Context passed to a turn-context transform.
 #[derive(Clone)]
 pub struct TurnTransformContext<'run> {

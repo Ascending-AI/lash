@@ -3,14 +3,6 @@ use std::sync::Arc;
 use super::control::{AwaitEventResolver, ScopedEffectController};
 use crate::RuntimeError;
 
-
-
-
-
-
-
-
-
 /// A reopenable authority for the reserved turn-cancellation promises.
 ///
 /// The resolver is intentionally owned: reopening a session must recover the
@@ -58,8 +50,10 @@ impl TurnCancellationAuthority {
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureSettlement, RuntimeError> {
         authorization.validate()?;
-        let expected_binding =
-            crate::turn_control_binding_id_for_scope(&self.binding_id, authorization.admitted_scope())?;
+        let expected_binding = crate::turn_control_binding_id_for_scope(
+            &self.binding_id,
+            authorization.admitted_scope(),
+        )?;
         if authorization.binding_id() != expected_binding {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::InvalidTurnCancelRequest,
@@ -229,13 +223,11 @@ impl TurnControlBinding<'_> {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
-    use lash_core_store::turn_control_binding::{admitted_turn_cancel_scope, turn_control_binding_id_for_scope};
+    use lash_core_store::turn_control_binding::{
+        admitted_turn_cancel_scope, turn_control_binding_id_for_scope,
+    };
 
     #[test]
     fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {

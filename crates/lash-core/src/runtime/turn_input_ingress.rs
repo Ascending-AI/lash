@@ -1,18 +1,7 @@
-pub use lash_core_store::turn_input_vocabulary::*;
 use crate::SessionId;
 use crate::TurnId;
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
-
-
-
-
-
-
-
-
-
-
-
+pub use lash_core_store::turn_input_vocabulary::*;
 
 /// Generates the checkpoint enumeration a claim can name, from one variant list.
 ///
@@ -36,57 +25,6 @@ macro_rules! turn_input_claim_checkpoints {
 }
 
 turn_input_claim_checkpoints!(AfterWork, BeforeCompletion);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /// The turn-input rows one turn is driving, with the authority it will settle
 /// them under.
@@ -150,8 +88,6 @@ impl TurnInputDrive {
         }
     }
 
-
-
     pub(crate) fn record_initial_turn_application(
         &mut self,
         turn_id: &crate::TurnId,
@@ -168,27 +104,6 @@ impl TurnInputDrive {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {

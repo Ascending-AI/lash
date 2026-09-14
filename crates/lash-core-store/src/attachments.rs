@@ -1319,10 +1319,7 @@ impl SessionAttachmentStore {
         self.max_attachment_bytes
     }
 
-    pub fn reconfigured_max_attachment_bytes(
-        &self,
-        max_attachment_bytes: Option<u64>,
-    ) -> Self {
+    pub fn reconfigured_max_attachment_bytes(&self, max_attachment_bytes: Option<u64>) -> Self {
         Self {
             backend: Arc::clone(&self.backend),
             manifest: Arc::clone(&self.manifest),

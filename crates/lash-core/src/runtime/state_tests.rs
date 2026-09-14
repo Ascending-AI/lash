@@ -172,7 +172,6 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-
 #[test]
 fn reconciled_generation_forces_next_plugin_state_export() {
     let names = Arc::new(Mutex::new(vec!["dynamic_one".to_string()]));
@@ -204,4 +203,3 @@ fn reconciled_generation_forces_next_plugin_state_export() {
     assert_eq!(refreshed.generation(), report.generation);
     assert!(refreshed.contains(&crate::ToolId::from("tool:dynamic_two")));
 }
-

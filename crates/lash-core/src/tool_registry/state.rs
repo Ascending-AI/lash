@@ -1,5 +1,5 @@
-pub use lash_core_store::tool_state::{ToolState, ToolStateEntry};
 use super::*;
+pub use lash_core_store::tool_state::{ToolState, ToolStateEntry};
 
 pub const PLUGIN_TOOL_SOURCE_ID: &str = "plugins";
 
@@ -30,24 +30,6 @@ impl ToolSourceHandle {
         &self.id
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 pub(crate) trait ToolSourceCapture: Send + 'static {
     fn advertised_tools(&self) -> Vec<ToolManifest>;

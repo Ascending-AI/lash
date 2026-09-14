@@ -1022,4 +1022,3 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         self.capture_state()
     }
 }
-

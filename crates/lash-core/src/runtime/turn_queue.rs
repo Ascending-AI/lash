@@ -1,17 +1,9 @@
-pub use lash_core_store::queued_work_vocabulary::*;
 use super::process::ProcessWakeDelivery;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::store::QueuedWorkClass;
 use crate::{PluginMessage, TurnCause, TurnInput};
-
-
-
-
-
-
-
-
+pub use lash_core_store::queued_work_vocabulary::*;
 
 /// An accepted session command waiting for its queue completion to be
 /// committed atomically with the new session head.
@@ -20,26 +12,12 @@ pub(crate) struct SessionCommandSettlementHandle {
     pub(crate) receipt: SessionCommandReceipt,
 }
 
-
-
-
-
-
-
 /// Constant producer-selected merge key for process wakes.
 ///
 /// The key says only that wake rows are eligible to share a turn. Work kind,
 /// delivery boundary, authority, elevation, row count, age, and rendered size
 /// remain independent claim gates.
 pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
-
-
-
-
-
-
-
-
 
 /// Host policy bounding one automatically selected queued-work claim.
 ///
@@ -224,44 +202,6 @@ impl QueuedWorkBatchingConfig {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
     process_wake_batch_draft_with_delivery_policy(wake, DeliveryPolicy::EarliestSafeBoundary)
 }
@@ -288,8 +228,6 @@ pub fn process_wake_batch_draft_with_delivery_policy(
     .with_authority(authority)
     .with_merge_key(PROCESS_WAKE_MERGE_KEY)
 }
-
-
 
 #[cfg(test)]
 mod wire_tests {
@@ -322,36 +260,6 @@ mod wire_tests {
         );
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod typed_payload_tests {

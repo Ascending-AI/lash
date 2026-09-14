@@ -1,7 +1,7 @@
-pub use lash_core_store::process_identity::*;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::plugin::PluginError;
+pub use lash_core_store::process_identity::*;
 
 use super::engine::PersistedSegmentHandover;
 use super::events::ProcessWakeDelivery;
@@ -167,11 +167,6 @@ impl WakeDeliveryConfig {
         Ok(self)
     }
 }
-
-
-
-
-
 
 /// Durable terminal outcome for an undeliverable wake.
 ///

@@ -181,14 +181,6 @@ pub struct ProtocolBeforeLlmCallContext {
 /// changes, where inlining them all commits the whole 1.09 MB every turn.
 pub const EXECUTION_STATE_LEAF_MIN_BODY_BYTES: usize = 512;
 
-
-
-
-
-
-
-
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolLlmCallAction {
     SwitchAgentFrame {
@@ -364,7 +356,3 @@ pub trait ProtocolDriverPlugin: Send + Sync {
     /// surface metadata) for a turn.
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 }
-
-
-
-

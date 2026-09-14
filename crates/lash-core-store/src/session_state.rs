@@ -1746,4 +1746,3 @@ where
         T::capture_plugin_state(self)
     }
 }
-

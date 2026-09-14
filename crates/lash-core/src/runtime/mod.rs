@@ -1,5 +1,5 @@
-pub use lash_core_store::turn_input_vocabulary::*;
 use crate::TurnId;
+pub use lash_core_store::turn_input_vocabulary::*;
 use lash_sansio::sync::MutexExt;
 #[cfg(feature = "testing")]
 pub mod assembly;
@@ -48,10 +48,10 @@ pub(crate) mod native_substrate;
 mod observation;
 mod process;
 mod process_worker;
-pub(crate) use process_worker::ensure_process_execution_permit;
-pub use process_worker::release_process_execution_permit_while;
 use lash_core_store::queued_drain_policy;
 pub use native_substrate::bounded_multiplicative_jitter;
+pub(crate) use process_worker::ensure_process_execution_permit;
+pub use process_worker::release_process_execution_permit_while;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
@@ -213,8 +213,7 @@ pub use effect::{
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
     concrete_turn_cancellation_authority, refuse_unhonored_group_membership,
-    turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
@@ -424,40 +423,9 @@ impl RuntimeTurnPhaseProbeSlot {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 pub(crate) mod facade_ops {
     use super::*;
-
-
-
 }
-
-
-
-
-
-
-
-
-
-
 
 #[derive(Clone)]
 pub struct ProtocolSessionExtensionHandle(Arc<dyn ProtocolSessionExtension>);
@@ -618,10 +586,6 @@ impl EventSink for NoopEventSink {
 
     async fn emit(&self, _event: SessionStreamEvent) {}
 }
-
-
-
-
 
 /// App-facing semantic activity emitted during a turn.
 ///

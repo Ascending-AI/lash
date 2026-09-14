@@ -3,9 +3,9 @@
 //!
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`.
 
-pub use lash_core_store::session_policy::*;
 use crate::SessionError;
 use crate::provider::ProviderHandle;
+pub use lash_core_store::session_policy::*;
 
 use super::LashRuntime;
 
@@ -26,12 +26,6 @@ pub struct SessionConfigPatch {
     pub prompt: Option<crate::PromptLayer>,
     pub generation: Option<crate::GenerationOverlay>,
 }
-
-
-
-
-
-
 
 impl SessionConfigPatch {
     /// A patch that changes only the prompt layer.

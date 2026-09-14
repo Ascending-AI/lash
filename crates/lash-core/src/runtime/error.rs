@@ -5,10 +5,6 @@ pub use lash_core_store::runtime_error::{
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, runtime_error_from_store_commit,
 };
 
-
-
-
-
 /// Wrap a store commit failure for the session-facing API.
 ///
 /// The typed arm is not a convenience list: every variant here is one a host is
@@ -46,23 +42,3 @@ mod store_commit_error_tests;
 
 #[cfg(test)]
 mod host_commit_outcome_tests;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
