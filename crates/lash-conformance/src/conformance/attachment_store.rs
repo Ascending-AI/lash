@@ -30,6 +30,10 @@ where
     session_attachment_store_enforces_host_size_limit(make).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_attachment_store_enforces_host_size_limit<F>(make: F)
 where
     F: Fn() -> Arc<dyn AttachmentStore>,
@@ -89,6 +93,10 @@ pub async fn attachment_store_reopenable<F>(
     attachment_store_survives_reopen(make()).await;
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 fn attachment_meta() -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(
         MediaType::parse("image/png").unwrap(),
@@ -97,6 +105,10 @@ fn attachment_meta() -> AttachmentCreateMeta {
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_put_get_round_trips_bytes_and_meta(store: Arc<dyn AttachmentStore>) {
     let bytes = vec![1u8, 2, 3, 4, 5];
     let reference = store
@@ -115,6 +127,10 @@ async fn attachment_put_get_round_trips_bytes_and_meta(store: Arc<dyn Attachment
     assert_eq!(reference.label.as_deref(), Some("pixel"));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_is_content_addressed(store: Arc<dyn AttachmentStore>) {
     let first = store
         .put(vec![9u8, 9, 9], attachment_meta())
@@ -139,6 +155,10 @@ async fn attachment_is_content_addressed(store: Arc<dyn AttachmentStore>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn AttachmentStore>) {
     let bytes = vec![3u8, 1, 4, 1, 5];
     let reference = store
@@ -207,6 +227,10 @@ async fn attachment_head_reflects_put_and_refreshes_timestamp(store: Arc<dyn Att
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
     let err = store
         .get(&AttachmentId::parse("sha256:does-not-exist").expect("valid attachment id"))
@@ -218,6 +242,10 @@ async fn attachment_get_unknown_is_not_found(store: Arc<dyn AttachmentStore>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn AttachmentStore>) {
     let reference = store
         .put(vec![5u8, 6, 7, 8], attachment_meta())
@@ -250,6 +278,10 @@ async fn attachment_delete_removes_content_and_is_idempotent(store: Arc<dyn Atta
         .expect("delete of unknown id is a no-op");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_head_reports_absence(store: Arc<dyn AttachmentStore>) {
     let never_written =
         AttachmentId::parse("sha256:never-written-head").expect("valid attachment id");
@@ -285,6 +317,10 @@ async fn attachment_head_reports_absence(store: Arc<dyn AttachmentStore>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_list_enumerates_stored_blobs(store: Arc<dyn AttachmentStore>) {
     // An empty store lists nothing.
     assert!(
@@ -337,6 +373,10 @@ async fn attachment_list_enumerates_stored_blobs(store: Arc<dyn AttachmentStore>
     assert!(after.contains(&second.id), "surviving blob stays listed");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_head_agrees_with_list(store: Arc<dyn AttachmentStore>) {
     store
         .put(vec![6u8, 2, 6, 4], attachment_meta())
@@ -383,6 +423,10 @@ fn attachment_reports_declared_persistence(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_store_survives_reopen(factory: ReopenableAttachmentStore) {
     let reference = factory
         .open

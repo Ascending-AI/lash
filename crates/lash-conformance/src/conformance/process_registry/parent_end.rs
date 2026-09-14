@@ -4,6 +4,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -233,6 +237,10 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 /// settled scope with no live child can no longer parent anything lash will
 /// act on. Without this every committed turn would leave one row behind
 /// forever.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -324,6 +332,10 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
 }
 
 /// Drive one registered process to a terminal outcome under its own lease.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn complete_process(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &ProcessId,

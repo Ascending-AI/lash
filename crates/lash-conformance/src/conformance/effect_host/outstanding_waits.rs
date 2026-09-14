@@ -3,6 +3,10 @@ use super::*;
 /// The deployment-level administrative read exposes only registered,
 /// unresolved waits for exactly one session, and every returned key remains a
 /// valid input to the existing resolution path.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn effect_host_lists_registered_unresolved_waits(
     owner: Arc<dyn EffectHost>,
     observer: Arc<dyn EffectHost>,

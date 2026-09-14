@@ -3,6 +3,10 @@ use super::*;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tombstones(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {

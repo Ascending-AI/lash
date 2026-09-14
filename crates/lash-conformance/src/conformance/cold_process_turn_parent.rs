@@ -42,6 +42,10 @@ where
     built
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn assert_real_turn_kill_recovery(
     tempdir: &std::path::Path,
     mut command: impl FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
@@ -295,6 +299,10 @@ pub async fn assert_real_turn_cancel_kill_recovery(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn kill_at_semantic_point<F>(
     command: &mut F,
     action: &str,

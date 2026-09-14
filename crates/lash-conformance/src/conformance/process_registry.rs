@@ -88,6 +88,10 @@ pub async fn long_cancellation_requester_replay_is_backend_safe(
 
 /// Prove that leased terminal replay repairs a stale record projection from
 /// the persisted tail event on the backend under test.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn leased_completion_replay_repairs_projection<C, Fut>(
     registry: Arc<dyn ProcessRegistry>,
     corrupt_projection: C,
@@ -165,7 +169,15 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
 /// Prove that the retention filter scopes a prune (ADR 0023): a host pruning
 /// one originator's terminal work reclaims exactly those rows and leaves every
 /// other originator's row, and its own live row, in place.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistry>) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn register_for(
         registry: &Arc<dyn ProcessRegistry>,
         process_id: &ProcessId,
@@ -180,6 +192,10 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
             .expect("register scoped prune process");
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn complete(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
         registry
             .complete_process(
@@ -320,6 +336,10 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
 
 /// Prove that one SQL prune batch allocates complete, process-id-ordered
 /// tombstone sequences and reports every removed process event.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) {
     let cases = [
         (
@@ -477,6 +497,10 @@ pub async fn watched_process_registry_reused_process_ids_refuse_superseded_incar
     .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn reused_process_ids_refuse_superseded_incarnations_for(
     registry: Arc<dyn ProcessRegistry>,
     mode: &str,
@@ -559,6 +583,10 @@ async fn reused_process_ids_refuse_superseded_incarnations_for(
     }));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
     let process_ids = [
         ProcessId::from("lease-batch-leased"),
@@ -619,6 +647,10 @@ pub async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn Proc
 /// Lifecycle refusals come from the shared process-event fold, so every
 /// registry backend must return the fold's exact answer for the same record
 /// and requested transition.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn lifecycle_transition_refusals_are_backend_invariant(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -790,6 +822,10 @@ pub async fn settled_parent_end_plans_are_reclaimed_by_retention(
 }
 
 /// Prove bounded keyset pagination and its page-boundary completion contract.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     let process_ids = (0..7)
         .map(|index| format!("000-paged-worklist-{index:02}"))
@@ -864,6 +900,10 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     worklist_captured_boundary_defers_beyond_bound_insert(registry).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> {
     let limit = std::num::NonZeroUsize::new(128).expect("non-zero test page size");
     let mut continuation = None;
@@ -882,6 +922,10 @@ async fn collect_worklist_ids(registry: &dyn ProcessRegistry) -> Vec<ProcessId> 
 }
 
 /// A row that terminalizes before its not-yet-read page is no longer recovery work.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -924,6 +968,10 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
 }
 
 /// An in-range insert behind the keyset cursor is guaranteed on the next scan.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn worklist_next_scan_recovers_insert_behind_cursor(registry: Arc<dyn ProcessRegistry>) {
     let first_id = "!!worklist-behind-cursor-a";
     let bound_id = "!!worklist-behind-cursor-z";
@@ -959,6 +1007,10 @@ pub async fn worklist_next_scan_recovers_insert_behind_cursor(registry: Arc<dyn 
 }
 
 /// An insert beyond the captured upper bound waits for the next scan.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -1000,6 +1052,10 @@ pub async fn worklist_captured_boundary_defers_beyond_bound_insert(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn refolded_process_record_matches_stored_projection(
     writer: Arc<dyn ProcessRegistry>,
     reader: Arc<dyn ProcessRegistry>,
@@ -1126,6 +1182,10 @@ async fn refolded_process_record_matches_stored_projection(
         .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_refold_matches_stored_projection(
     reader: &Arc<dyn ProcessRegistry>,
     base: &ProcessRecord,
@@ -1156,6 +1216,10 @@ async fn assert_refold_matches_stored_projection(
 /// redriven on a reconfigured host would re-register the same id with a
 /// different fingerprint and conflict forever. The row is the durable truth:
 /// the caller's own resolution decides only for a child with no row yet.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn redriven_child_reregisters_with_the_recorded_attempt_bound(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -1218,6 +1282,10 @@ pub async fn redriven_child_reregisters_with_the_recorded_attempt_bound(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("process-attempt-budget");
     registry
@@ -1310,6 +1378,10 @@ pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>)
         .expect("release exhausted-attempt lease");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn producer_terminal_status_must_match_materialized_outcome(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -1374,6 +1446,10 @@ pub async fn producer_terminal_status_must_match_materialized_outcome(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("reserved-edge-audit");
     registry
@@ -1406,6 +1482,10 @@ pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("waiting-recovery-worklist");
     let definition = serde_json::json!({"suite": "waiting-recovery-worklist"});
@@ -1500,6 +1580,10 @@ fn process_lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn claim_after_expiry(
     registry: &dyn ProcessRegistry,
     process_id: &ProcessId,
@@ -1525,6 +1609,10 @@ async fn claim_after_expiry(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
     const SHORT_TTL_MS: u64 = 20;
 
@@ -1772,6 +1860,10 @@ pub async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) 
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn observer_events_are_auditable_and_transfer_is_atomic(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -1840,6 +1932,10 @@ pub async fn observer_events_are_auditable_and_transfer_is_atomic(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("wake-retarget");
     registry
@@ -1883,6 +1979,10 @@ pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Pro
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("terminal-outcome");
     registry
@@ -1902,6 +2002,10 @@ pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry
     assert_eq!(terminal.outcome, Some(expected));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("session-delete-bytes");
     registry
@@ -1958,6 +2062,10 @@ pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessReg
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("pruned-tombstone");
     registry
@@ -2117,6 +2225,10 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegistry) {
     let open: Arc<dyn ProcessRegistry> = handles.open.clone();
     let reopen: Arc<dyn ProcessRegistry> = handles.reopen.clone();
@@ -2171,6 +2283,10 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
 /// the state is durable, reachable only from a running Externally-Owned row,
 /// idempotent, refused from every other source state and disposition, closable
 /// by external reconciliation, and never retracts a reconciled terminal state.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     let process_id = ProcessId::from("caller-departure-machine");
     let observer_session = "caller-departure-observer";

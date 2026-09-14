@@ -28,6 +28,10 @@ impl crate::ToolProvider for ResidentProvider {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id: &str) {
     let mut factories = lash_core::testing::test_standard_protocol_factories();
     factories.push(Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -59,6 +63,10 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
 
 /// Proves explicit resident-tool authority survives a real backend reopen and
 /// that historical or invalid authority bytes refuse through production reads.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_tool_access_durable_recovery(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {

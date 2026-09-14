@@ -9,6 +9,10 @@ use pretty_assertions::assert_eq;
 /// independently constructed handle, drop that writer, then construct a third
 /// handle and hydrate. The helper owns construction order so a caller cannot
 /// prebuild nominally cold handles before the writes they verify.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn complete_runtime_checkpoint_component_set_survives_cold_reopens<F>(make: F)
 where
     F: Fn() -> Arc<dyn RuntimePersistence>,
@@ -253,6 +257,10 @@ where
 
 /// A ref-only checkpoint commit is valid only when every referenced component
 /// already exists in the backend.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-unknown-ref"),
@@ -286,6 +294,10 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("missing-frame-root"),
@@ -327,6 +339,10 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -424,6 +440,10 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "checkpoint-work";
     let turn_id = crate::TurnId::from("checkpoint-turn");
@@ -501,6 +521,10 @@ pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePer
 /// (`claim_active_turn_inputs`): `BeforeCompletion` ingress is withheld at
 /// `AfterWork` and admitted at `BeforeCompletion`; `AfterWork` ingress is
 /// admitted at both (FIG-1524).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -666,6 +690,10 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 /// A checkpoint claim spans pending inputs and queued work atomically. If the
 /// queued head cannot fit the context window, the active-turn input must remain
 /// pending and visible rather than being left accepted under a discarded claim.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -742,6 +770,10 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
 /// Prove checkpoint admission probes stay read-only for empty queues and for
 /// deferred queue heads, while real checkpoint work still shares one write
 /// transaction and deferred work remains claimable at the idle boundary.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_claim_probe_transaction_counts(
     store: Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
@@ -945,6 +977,10 @@ pub(super) fn pending_next_turn_input_draft(
     )
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 pub(super) fn inline_png(bytes: Vec<u8>) -> crate::AttachmentSource {
     crate::AttachmentSource::inline(crate::MediaType::parse("image/png").unwrap(), bytes)
 }
@@ -987,6 +1023,10 @@ pub(super) fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn release_session_execution_lease_for_test(
     store: &Arc<dyn RuntimePersistence>,
     lease: &crate::SessionExecutionLease,
@@ -997,6 +1037,10 @@ pub(super) async fn release_session_execution_lease_for_test(
         .expect("release session execution lease");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) fn sample_session_node(
     session_id: &SessionId,
     id: &str,
@@ -1031,12 +1075,20 @@ pub(super) fn sample_session_node(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) fn caller_frame_node_id(session_id: &SessionId, material: &str) -> crate::FrameNodeId {
     let frame_key =
         crate::FrameKey::from_caller_material(material).expect("non-empty frame material");
     crate::frame_node_id(session_id, frame_key.as_str())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) fn attachment_intent(id: &str) -> AttachmentIntent {
     AttachmentIntent {
         attachment_id: AttachmentId::parse(id).expect("valid attachment id"),

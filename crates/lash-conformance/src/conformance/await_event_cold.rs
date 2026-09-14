@@ -15,6 +15,10 @@ use pretty_assertions::assert_eq;
 /// [`effect_host_await_events_cold_instance`].
 pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreFactory> {
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
     for session_id in session_ids {
@@ -83,6 +87,10 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     super::effect_host::effect_host_lists_registered_unresolved_waits(make(), make(), make()).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_replayed_parked_owner<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -176,6 +184,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_mint_resolve_observe_all_identities<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -228,6 +240,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_first_writer_wins<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -259,6 +275,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_key_stability<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -279,6 +299,10 @@ where
     assert_eq!(first, reopened, "key bytes must survive host reopen");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_auth_tamper_matrix<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -346,6 +370,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_revocation_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -388,6 +416,10 @@ where
 /// A process scope's retirement is a durable fence, not a resident memory:
 /// hosts that never saw the retirement refuse to resolve, read, mint, or admit
 /// an effect under the retired scope (FIG-2499, FIG-2500).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_scope_retirement_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -447,6 +479,10 @@ where
     assert_eq!(admission.code, crate::RuntimeErrorCode::EffectScopeRetired);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_cancel_sweep_excludes_turn_control<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
@@ -514,6 +550,10 @@ where
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn cold_terminal_attach_both_orders<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,

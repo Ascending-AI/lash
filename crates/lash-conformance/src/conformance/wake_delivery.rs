@@ -23,6 +23,10 @@ impl crate::QueuedWorkRunHandle for RecordingWakeTurnHandle {
 }
 
 impl RecordingWakeTurnHandle {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn wait_for_process_wake(&self, session_id: &SessionId, prior_runs: usize) {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
@@ -104,6 +108,10 @@ pub async fn wake_delivery_ordering_group_conformance<BeforeTerminal, BeforeTerm
     .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_process_terminal_wait<BeforeTerminal, BeforeTerminalFuture>(
     registry: &Arc<dyn crate::ProcessRegistry>,
     process_work: &Arc<dyn crate::ProcessWorkSubstrate>,
@@ -171,6 +179,10 @@ async fn assert_process_terminal_wait<BeforeTerminal, BeforeTerminalFuture>(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn ordering_group_discard_case(
     registry: &Arc<dyn crate::ProcessRegistry>,
     injector: &Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
@@ -260,6 +272,10 @@ async fn ordering_group_discard_case(
 ///
 /// A process append owns the outbox insertion. Delivery may happen on a later
 /// host instance, must be idempotent, and must never mutate the lifecycle fold.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
@@ -1056,6 +1072,10 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     expired_is_a_typed_discard(factory, registry, clock).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn missing_target_is_deferred_and_rearmed(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -1151,6 +1171,10 @@ async fn missing_target_is_deferred_and_rearmed(
     assert_eq!(rearmed.disposition.discard_reason(), None);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn sender_floor_lifetime(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
@@ -1266,6 +1290,10 @@ async fn sender_floor_lifetime(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn settle_queued_batch(
     target: &Arc<dyn crate::RuntimePersistence>,
     session_id: &SessionId,
@@ -1328,6 +1356,10 @@ async fn settle_queued_batch(
         .expect("settle target wake batch");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_id: &ProcessId) {
     registry
         .complete_process(
@@ -1350,6 +1382,10 @@ async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_
     assert_eq!(report.pruned_processes, 1);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn prune_reregister_sender_floor_delivers_through_driver(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -1500,6 +1536,10 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn replay_and_same_millisecond_allocation_are_deterministic(
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
@@ -1544,6 +1584,10 @@ async fn replay_and_same_millisecond_allocation_are_deterministic(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn mixed_era_floor_and_ordering(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -1715,6 +1759,10 @@ async fn mixed_era_floor_and_ordering(
     assert_eq!(queued_sequences, vec![1, 2, sender_floor_wake.sequence]);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn rewound_fresh_delivery_is_discarded_without_blocking(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -1853,6 +1901,10 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn target_gone_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
@@ -1922,6 +1974,10 @@ async fn target_gone_is_a_typed_discard(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn expired_is_a_typed_discard(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,

@@ -5,6 +5,10 @@ use super::*;
 use crate::{Clock, SessionStoreFactory};
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_coalesces_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -84,6 +88,10 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_store_factory_bounds_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -161,6 +169,10 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_session_command_claim(
     store: &dyn crate::RuntimePersistence,
     request: &crate::SessionStoreCreateRequest,

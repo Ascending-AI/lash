@@ -60,6 +60,10 @@ pub(super) async fn assert_process_count_conservation(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -194,6 +198,10 @@ fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(Strin
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn key(definition: &serde_json::Value) -> String {
     serde_json::to_string(definition).expect("definition serializes")
 }

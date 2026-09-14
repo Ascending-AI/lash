@@ -6,6 +6,10 @@ use pretty_assertions::assert_eq;
 
 /// The ADR 0077 marker is read before guarded payloads, and its admission seam
 /// is unavailable until the caller owns the session execution lease.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_state_version_admission_contract(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {

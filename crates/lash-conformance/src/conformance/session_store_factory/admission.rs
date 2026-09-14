@@ -4,6 +4,10 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>) {
     let request = session_store_request(
         &SessionId::from("admission-created"),

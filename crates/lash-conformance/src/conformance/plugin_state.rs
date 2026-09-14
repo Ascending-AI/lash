@@ -106,6 +106,10 @@ impl MockPlugin {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit(store: &Arc<dyn RuntimePersistence>, state: &mut RuntimeSessionState) {
     let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
         store,
@@ -144,6 +148,11 @@ pub async fn plugin_state_boundary(
 
 /// Execute the plugin-state boundary and fork laws, returning decoded checkpoint
 /// bodies for independent cross-backend comparison.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn plugin_state_boundary_trace(
     store: Arc<dyn RuntimePersistence>,
     parent_id: &str,
@@ -280,6 +289,11 @@ pub async fn plugin_state_boundary_trace(
 
 // Exercise production construction and park; this witness never explicitly
 // refreshes components or manufactures a checkpoint for the runtime.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
     let id = "plugin-state-lifecycle";
     let fixture = MockPlugin {
@@ -388,6 +402,10 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
 }
 
 // Seed generation five durably, then exercise registration on a cold rebuild.
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn registration_state_law(
     store: Arc<dyn RuntimePersistence>,
     id: &str,

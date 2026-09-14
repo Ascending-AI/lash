@@ -1493,6 +1493,10 @@ impl crate::ToolProvider for TraceTool {
     fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
         (name == "trace_effect").then(|| Arc::new(trace_tool_definition().contract()))
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
         if let Some(marker) = &self.marker {
             use std::io::Write as _;
@@ -1517,6 +1521,10 @@ impl crate::ToolProvider for TraceTool {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn recovery_timings() -> crate::LeaseTimings {
     crate::LeaseTimings::new(RECOVERY_TTL, RECOVERY_RENEW)
         .expect("3s TTL / 100ms renew satisfies ttl >= 3x renew")
@@ -1538,6 +1546,10 @@ fn recovery_timings() -> crate::LeaseTimings {
 /// demand by [`collapse_crashed_executor_lease`]. Deliberate lease starvation
 /// stays available to cases that want it ([`RenewalPressure::Starved`], which
 /// runs its turn on [`recovery_timings`]).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn crashed_turn_timings() -> crate::LeaseTimings {
     crate::LeaseTimings::new(CRASHED_TURN_TTL, RECOVERY_RENEW)
         .expect("60s TTL / 100ms renew satisfies ttl >= 3x renew")
@@ -1552,6 +1564,10 @@ fn crashed_turn_timings() -> crate::LeaseTimings {
 /// Returns whether a lease held by [`CRASHED_EXECUTOR_OWNER_ID`] was collapsed;
 /// an absent, released, or already-lapsed lease is not an error, because in each
 /// of those states the next claim already succeeds.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn collapse_crashed_executor_lease(
     store: &dyn RuntimePersistence,
     session_id: &SessionId,
@@ -1573,6 +1589,10 @@ pub(crate) async fn collapse_crashed_executor_lease(
         .is_ok()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn nominal_recovery_timings() -> crate::LeaseTimings {
     // The scripted provider deliberately awaits the first completed renewal.
     // Keep that nominal successor turn's lease window independent from the
@@ -1582,6 +1602,10 @@ fn nominal_recovery_timings() -> crate::LeaseTimings {
         .expect("5s TTL / 100ms renew tolerates the nominal renewal barrier")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn runtime_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
         provider_id: "turn-crash-script".to_string(),
@@ -1603,6 +1627,10 @@ fn provider_handle(control: SeamControl) -> ProviderHandle {
     })))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn scoped_controller(
     controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
@@ -1684,6 +1712,10 @@ impl crate::AwaitEventResolver for InvocationEffectHost {
 
 #[async_trait::async_trait]
 impl crate::EffectHost for InvocationEffectHost {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn turn_control_binding_id(&self) -> String {
         self.inner
             .await_event_authority_binding_id()
@@ -1718,6 +1750,10 @@ async fn build_runtime(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn build_runtime_with_lease_timings(
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
@@ -1785,6 +1821,10 @@ async fn build_runtime_with_lease_timings(
     .expect("build reference runtime")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn seed_reference_ingress(
     store: &Arc<dyn RuntimePersistence>,
     identity: &ReferenceIdentity,
@@ -1885,11 +1925,19 @@ fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
     points
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn golden_trace() -> Vec<TurnSeamOperation> {
     serde_json::from_str(GOLDEN_TRACE).expect("committed turn crash trace is valid")
 }
 
 /// Return the committed trace-derived matrix and its hand-written outcomes.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn reviewed_turn_crash_rulings() -> Vec<ReviewedTurnCrashRuling> {
     serde_json::from_str(OUTCOME_TABLE).expect("committed turn crash outcome table is valid")
 }
@@ -1914,6 +1962,10 @@ fn durable_recovery_rulings() -> Vec<DurableRecoveryRuling> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn validate_outcome_table(
     generated: &[TurnCrashPoint],
     table: &[TurnCrashOutcome],
@@ -2055,6 +2107,10 @@ fn is_ticket_id(ticket: &str) -> bool {
 
 /// Re-record the reference turn and fail if its live seam traffic drifts from
 /// the committed golden trace or the outcome table omits a generated point.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn turn_crash_trace_drift_check<F>(make: F)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
@@ -2101,6 +2157,10 @@ where
         .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn wait_for_recovery_lease<F>(
     make: &F,
     scenario: &str,
@@ -2156,6 +2216,10 @@ async fn wait_for_recovery_lease<F>(
     .expect("crashed turn lease becomes reclaimable by polling");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn point_key(point: &TurnCrashPoint) -> String {
     let encoded = serde_json::to_vec(point).expect("serialize crash point");
     let digest = encoded.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
@@ -2212,6 +2276,10 @@ fn pending_input_text(input: &PendingTurnInput) -> String {
 /// task deterministically starved, which pins the advisory checkpoint-skip
 /// path (lease lapsed by wall clock) that a loaded runner would otherwise
 /// reach only by luck.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn turn_crash_matrix_level_1<F, I>(make: F, make_invocation: I)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
@@ -2252,6 +2320,11 @@ where
 
 /// Crash one scripted turn at `entry`'s point, recover it with a successor
 /// turn under `pressure`, and assert the ruled durable end state.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn run_crash_matrix_case<F, I>(
     make: &F,
     make_invocation: &I,

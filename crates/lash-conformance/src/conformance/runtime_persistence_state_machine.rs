@@ -300,6 +300,10 @@ impl RunShapeTotals {
 }
 
 /// Run generated runtime-persistence laws with shrinking and persisted counterexamples.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn runtime_persistence_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
@@ -508,6 +512,10 @@ where
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn apply_operation(
     store: &dyn RuntimePersistence,
     attachment_handles: Option<&RuntimePersistenceStateMachineHandles>,
@@ -838,6 +846,10 @@ async fn claim_work_with_stale_lease(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn claim_turn_inputs_with_stale_lease(
     store: &dyn RuntimePersistence,
     model: &ReferenceModel,
@@ -989,6 +1001,10 @@ async fn crash_between_claim_and_commit(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_operation(
     store: &dyn RuntimePersistence,
     model: &mut ReferenceModel,

@@ -168,6 +168,10 @@ pub fn cold_process_turn_cancel_actions() -> Vec<&'static str> {
 ///
 /// The values are derived from `turn_crash_outcomes.json`, keeping the backend
 /// helper-process assertions on the same oracle as the level-1 matrix.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, String, Option<String>)>
 {
     let generated = generated_points(&golden_trace());
@@ -219,6 +223,10 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
 
 /// Return the reviewed exact durable end state for a composed level-2 recovery
 /// trajectory in `turn_crash_outcomes.json`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
     let rulings = durable_recovery_rulings();
     validate_durable_recovery_rulings(&rulings)
@@ -239,6 +247,10 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     crate::ExecutionScope::turn(identity.session_id, identity.turn_id)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn recover_turn_cancel_closure(
     store: Arc<dyn RuntimePersistence>,
     identity: &ReferenceIdentity,
@@ -426,6 +438,11 @@ async fn recover_turn_cancel_closure(
 /// the session lease, drives a fresh runtime/controller, and reports exact
 /// committed terminal-output and ingress counts from the reopened store. The
 /// parent process compares that `turn_complete` summary with the outcome table.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn cold_process_real_turn_driver(
     store: Arc<dyn RuntimePersistence>,
     effect_controller: Arc<dyn RuntimeEffectController>,

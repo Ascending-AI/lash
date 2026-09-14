@@ -11,6 +11,11 @@ fn malformed_attachment_ids() -> Vec<String> {
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn attachment_namespace(store: Arc<dyn AttachmentStore>) {
     let reference = store
         .put(
@@ -45,6 +50,10 @@ pub(super) async fn attachment_namespace(store: Arc<dyn AttachmentStore>) {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactory>) {
     use super::session_store_factory::session_store_request;
     for raw in ["", "nul\0session"] {
@@ -151,6 +160,10 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::SessionStoreFactor
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = crate::ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),
@@ -191,6 +204,10 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
     for raw in ["", " ", "nul\0process", "reserved#segment"] {
         assert!(

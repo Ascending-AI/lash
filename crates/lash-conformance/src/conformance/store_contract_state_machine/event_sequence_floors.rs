@@ -40,6 +40,10 @@ impl EventSequenceStep {
         Self { prior, floors }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     pub(super) fn advance(&self, record: &mut ProcessRecord) {
         record.last_event_sequence = record
             .last_event_sequence

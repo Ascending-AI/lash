@@ -3,7 +3,15 @@ use super::*;
 use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn filtered_ids(
         registry: &Arc<dyn ProcessRegistry>,
         filter: ProcessListFilter,
@@ -17,6 +25,10 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             .collect()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn assert_rust_parity(registry: &Arc<dyn ProcessRegistry>, filter: ProcessListFilter) {
         let all = registry
             .list_processes(&ProcessListFilter {
@@ -242,6 +254,10 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     registry: Arc<dyn ProcessRegistry>,
 ) {
@@ -408,9 +424,17 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
 /// `(? IS NULL OR ...)` disjunctions, so the pushdown and the Rust predicate
 /// can disagree silently; every assertion below is therefore paired with a
 /// parity check against `ProcessListFilter::matches_record`.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
     registry: Arc<dyn ProcessRegistry>,
 ) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn filtered_ids(
         registry: &Arc<dyn ProcessRegistry>,
         filter: &ProcessListFilter,
@@ -424,6 +448,10 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
             .collect()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn assert_ids(
         registry: &Arc<dyn ProcessRegistry>,
         filter: ProcessListFilter,

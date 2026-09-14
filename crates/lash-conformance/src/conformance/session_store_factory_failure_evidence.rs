@@ -8,6 +8,10 @@ use std::sync::Arc;
 
 /// Prove that a real mid-stream provider failure settles durable evidence that
 /// survives closing the runtime and reopening through the backend's read view.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_store_factory_mid_stream_failure_evidence(
     factory: Arc<dyn crate::SessionStoreFactory>,
     advance_commit_clock: impl FnOnce(),

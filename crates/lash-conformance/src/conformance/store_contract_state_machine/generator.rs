@@ -22,6 +22,10 @@ pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
 /// The required prefix prevents small differential budgets from starving the
 /// process, lease, wake-delivery, queue, and prune surfaces. Remaining steps
 /// come from the exact strategy used by the property-law harness.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec<StoreContractOp> {
     let mut operations = generated_prefix();
     operations.truncate(max_ops);

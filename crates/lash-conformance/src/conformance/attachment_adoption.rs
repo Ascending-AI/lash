@@ -232,6 +232,10 @@ fn with_image(state: &mut RuntimeSessionState, reference: &AttachmentRef) {
         )]),
     });
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePersistence> {
     f.create_store(&session_store_request(
         &SessionId::from(id),
@@ -246,6 +250,11 @@ async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePe
 /// the backend's factory authority. The caller's `reopen` must create a new
 /// factory over the same durable catalog after the initial factory and session
 /// handle have been dropped.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     initial_factory: Arc<dyn SessionStoreFactory>,
     reopen: R,
@@ -382,6 +391,10 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         "successful cross-session adoption is a live root"
     );
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn put(
     store: Arc<dyn RuntimePersistence>,
     bytes: Arc<dyn AttachmentStore>,
@@ -396,6 +409,10 @@ async fn put(
         .await
         .unwrap()
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn sweep(f: &Arc<dyn SessionStoreFactory>, bytes: &Arc<dyn AttachmentStore>) -> usize {
     reclaim_unreferenced_attachments(
         f.as_ref(),
@@ -409,6 +426,10 @@ async fn sweep(f: &Arc<dyn SessionStoreFactory>, bytes: &Arc<dyn AttachmentStore
     .unwrap()
     .reclaimed_count
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("adoption-owner-{namespace}");
@@ -482,6 +503,11 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
 }
 
 /// Shared host-facing condemnation-enumeration law.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("condemnation-list-owner-{namespace}"));
@@ -639,6 +665,11 @@ impl AttachmentRootSet for StopBeforeCondemnationReclaim {
 
 /// Real GC regression for the crash window after bytes are deleted but before
 /// the `Deleting` condemnation row is retired.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, ReopenFuture>(
     factory: Arc<dyn SessionStoreFactory>,
     reopen: Reopen,
@@ -728,6 +759,11 @@ pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, R
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn out_of_band_absence_leaves_no_adoptable_evidence(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("absent-head-receiver-{namespace}"));
@@ -753,6 +789,11 @@ async fn out_of_band_absence_leaves_no_adoptable_evidence(f: Arc<dyn SessionStor
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("failed-delete-receiver-{namespace}"));
@@ -804,6 +845,11 @@ async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionSto
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("failed-reput-{namespace}"));
@@ -858,6 +904,11 @@ async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
         .expect("the successful re-put makes the digest adoptable again");
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn competing_writer_survives_failed_reput(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let first_id = SessionId::from(format!("failed-writer-{namespace}"));
@@ -918,6 +969,11 @@ async fn competing_writer_survives_failed_reput(f: Arc<dyn SessionStoreFactory>)
     assert!(backend.get(&attachment_id).await.is_ok());
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn sweep_cannot_overwrite_failed_reput_rollback(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("sweep-reput-race-{namespace}"));
@@ -966,6 +1022,11 @@ async fn sweep_cannot_overwrite_failed_reput_rollback(f: Arc<dyn SessionStoreFac
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-sweep-release-{namespace}"));
@@ -1019,6 +1080,11 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
         .unwrap();
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     f: Arc<dyn SessionStoreFactory>,
 ) {
@@ -1132,6 +1198,11 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
         .expect("another session adopts the restored attachment");
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-writer-sweep-{namespace}"));
@@ -1202,6 +1273,11 @@ enum CommittedRestoringSettlement {
 /// A restoring write can outlive the turn commit that stamps its associated
 /// intent. Abort and explicit recovery must retain that root and retire the old
 /// unarmed `Condemned` phase before its sweeper can arm.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionStoreFactory>) {
     for settlement in [
         CommittedRestoringSettlement::Abort,
@@ -1276,6 +1352,11 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
     committed_restoring_abort_survives_the_older_sweep(factory).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn commit_turn_owned_intent(
     store: &Arc<dyn RuntimePersistence>,
     request: &SessionStoreCreateRequest,
@@ -1322,6 +1403,11 @@ async fn commit_turn_owned_intent(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("attachment-committed-sweep-{namespace}"));
@@ -1405,6 +1491,10 @@ async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn Ses
     );
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 fn image_meta() -> AttachmentCreateMeta {
     AttachmentCreateMeta::new(MediaType::parse("image/png").unwrap(), None, None)
 }
@@ -1412,6 +1502,10 @@ fn image_meta() -> AttachmentCreateMeta {
 /// One completed write against the manifest: acquire the fence, then stamp the
 /// upload evidence. This is the only way a manifest row is created by a writer,
 /// and the only thing that makes a digest adoptable.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn record_completed_write(store: &Arc<dyn RuntimePersistence>, intent: &AttachmentIntent) {
     let AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
@@ -1441,6 +1535,11 @@ fn write_intent(session_id: &SessionId, attachment_id: &AttachmentId) -> Attachm
 
 /// A begun-but-never-completed write leaves an unstamped row, and an unstamped
 /// row certifies nothing: the digest stays unadoptable until a put completes.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("unstamped-intent-{namespace}"));
@@ -1504,6 +1603,11 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
 }
 
 /// Only the attempt that currently owns the manifest row can certify an upload.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-permit-{namespace}"));
@@ -1558,6 +1662,11 @@ async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) 
 
 /// Upload evidence is a property of the digest, not of the uploader's row: an
 /// adopter's copied stamp keeps the digest adoptable after the uploader is gone.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let uploader_id = SessionId::from(format!("evidence-uploader-{namespace}"));
@@ -1597,6 +1706,11 @@ async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStor
 
 /// An uploader's own rollback settles its own row only; it can neither unroot
 /// nor unstamp a digest another session already adopted.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn abort_after_a_foreign_adoption_preserves_that_root(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let uploader_id = SessionId::from(format!("abort-uploader-{namespace}"));
@@ -1644,6 +1758,11 @@ async fn abort_after_a_foreign_adoption_preserves_that_root(f: Arc<dyn SessionSt
 
 /// Re-putting a digest that is already committed is a fresh attempt over the
 /// same row: neither the upload stamp nor the commitment is lost.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("duplicate-put-{namespace}"));
@@ -1688,6 +1807,11 @@ async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFac
 }
 
 /// Validation covers the whole batch before anything is written.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("batch-unknown-{namespace}"));
@@ -1730,6 +1854,11 @@ async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionS
     assert!(f.has_live_attachment_ref(&known, u64::MAX).await.unwrap());
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     let session_id = SessionId::from(format!("fenced-adoption-{}", uuid::Uuid::new_v4()));
     let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
@@ -1827,6 +1956,11 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     assert_eq!(sweep(&f, &bytes).await, 2);
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("swept-adoption-owner-{namespace}");
@@ -1913,6 +2047,11 @@ async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFa
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn reput_after_full_gc_allows_adoption(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("reput-owner-{namespace}");
@@ -1973,6 +2112,10 @@ async fn reput_after_full_gc_allows_adoption(f: Arc<dyn SessionStoreFactory>) {
 
 const RACE_SCHEDULES: usize = 20;
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: the unwrap mirrors the setup above"
+)]
 async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
@@ -2042,6 +2185,11 @@ async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
@@ -2107,6 +2255,11 @@ async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
 /// the three owner shapes round-trip identically everywhere: a turn owner
 /// carries no incarnation, a process owner always carries its own, and an
 /// unowned direct host put reads back with no owner at all.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn SessionStoreFactory>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = format!("owner-identity-{namespace}");

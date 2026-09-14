@@ -251,6 +251,10 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
 /// Reopenable backends exercise this through two independently constructed
 /// handles over one durable store. Their conformance clocks deliberately keep
 /// both admissions in one millisecond so the nonce is the deciding fact.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
     first: &dyn RuntimePersistence,
     second: &dyn RuntimePersistence,
@@ -284,6 +288,10 @@ pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
 /// conformance suites state their timing mode explicitly; the `Realtime` mode
 /// keeps its expired-to-reclaimable direction on the production backend clock
 /// with bounded polling.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn runtime_persistence_clock_expiry(
     store: Arc<dyn RuntimePersistence>,
     advance: impl FnOnce(u64),
@@ -409,6 +417,10 @@ pub async fn runtime_persistence_clock_expiry(
     assert_eq!(stale_input_claim.inputs[0].input_id, input.input_id);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_prompt_layer_round_trips_through_the_committed_head(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -449,6 +461,10 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
 /// FIG-2479: the commanded protocol-turn-options fact round-trips resident
 /// state → committed head row (SESSION_HEAD_META v6) → cold load, and the head
 /// value is what the loaded state carries.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_protocol_turn_options_round_trip_through_the_committed_head(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -492,6 +508,10 @@ pub async fn session_protocol_turn_options_round_trip_through_the_committed_head
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -555,6 +575,10 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimePersistence>) {
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
@@ -590,6 +614,10 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePersistence>) {
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
@@ -634,6 +662,10 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_queue_batch_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -664,6 +696,10 @@ pub async fn commit_rejects_queue_batch_bytes_over_budget(store: Arc<dyn Runtime
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -689,6 +725,10 @@ pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn Runtime
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -720,6 +760,10 @@ pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn Runtime
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
@@ -745,6 +789,10 @@ pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn Runtime
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn commit_with_every_payload_family_inside_budget_succeeds(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -802,6 +850,10 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
         .expect("a commit with every payload family inside the limit must succeed");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -884,6 +936,10 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
         .expect("leaf-changing commit");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -921,6 +977,10 @@ pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence
 /// an explicit zero-valued correction — must survive a store round trip with its
 /// hole identities intact, and the outstanding set must be rebuildable from the
 /// rows alone.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1027,6 +1087,10 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     assert_eq!(report.usage.reconciled_attempts, 2);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -1074,6 +1138,10 @@ pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1108,6 +1176,10 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
 /// while the prompt-side counters alone overflow. Restore must reject that
 /// checkpoint rather than hand a poisoned base to the next turn's merge and to
 /// the bare `total()`/`input_total()` policy readers.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
     store: Arc<dyn RuntimePersistence>,
 ) {
@@ -1146,6 +1218,10 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     ));
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimePersistence>) {
     let usage = TokenLedgerEntry {
         source: "idempotent-republish".to_string(),

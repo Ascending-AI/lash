@@ -71,6 +71,10 @@ where
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn run_case(
     handles: GraphIntegrityHandles,
     case: &'static str,

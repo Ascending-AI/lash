@@ -31,6 +31,10 @@ async fn assert_plan_matches_edge_walk(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_readability_equals_edge_reachability(
     store: &Arc<dyn RuntimePersistence>,
     injector: &Arc<dyn LineageConformanceInjector>,
@@ -76,6 +80,10 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn seed(
     factory: &Arc<dyn SessionStoreFactory>,
     session_id: &SessionId,
@@ -115,6 +123,10 @@ async fn seed(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn fork(
     factory: &Arc<dyn SessionStoreFactory>,
     session_id: &SessionId,
@@ -137,6 +149,10 @@ async fn fork(
         .expect("lineage conformance fork exists")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<lash_core::NodeId> {
     let mut state = crate::store::load_persisted_session_state(store.as_ref())
         .await
@@ -164,6 +180,10 @@ async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<lash_c
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
@@ -387,6 +407,10 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 
 /// Pin a non-root-owned node, delete its owner with no descendant carrier, and
 /// prove the later fork remains total over the retained edge path.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;
@@ -444,6 +468,10 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
 
 /// Independently reconstruct the expected per-owner maxima from raw edges and
 /// compare them with the backend's installed ForkPlan.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn fork_plan_matches_edge_walk_law(handles: LineageConformanceHandles) {
     let factory = handles.factory;
     let injector = handles.injector;

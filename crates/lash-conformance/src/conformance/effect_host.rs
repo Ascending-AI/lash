@@ -260,6 +260,10 @@ pub async fn effect_controller_segmentation_vector(
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn run_script(
         controller: &dyn RuntimeEffectController,
         execution_scope: &ExecutionScope,
@@ -440,6 +444,10 @@ impl ConformanceInvocation {
 }
 
 /// Run journaled-effect replay checks across an explicitly scoped invocation.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_controller_journaled_effect_replay<F>(make: F)
 where
     F: FnOnce() -> ConformanceInvocation,
@@ -684,6 +692,10 @@ where
 }
 
 /// Prove that retiring one session removes every journal scope it owns.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
     let session_id = "retired-journal-session";
     let scopes = [
@@ -725,6 +737,10 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
 
 /// Prove that terminal-process retention can retire the exact process journal
 /// without parsing or prefix-matching its canonical key.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
     let process_id = "retired-journal-process";
     let scope = ExecutionScope::process(process_id);
@@ -760,6 +776,10 @@ pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
 /// (FIG-2500): the retired operation's rows go, a sibling operation's rows and
 /// their replay answers stay, and the retired scope is fenced against a
 /// late admission.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost) {
     let suffix = uuid::Uuid::new_v4().simple();
     let retired_id = format!("retired-journal-op-{suffix}");
@@ -835,6 +855,10 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
 
 /// Assert that a durable effect controller surfaces the same structural replay
 /// mismatch detail as the shared canonical-envelope validator.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_controller_replay_mismatch_diagnostics<F>(make: F, mismatch_code: &str)
 where
     F: FnOnce() -> ConformanceInvocation,
@@ -900,6 +924,10 @@ where
     invocation.end();
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
     let scope = ExecutionScope::queue_drain("session-1", "drain-1");
     let scoped = host.scoped(scope.clone()).expect("queue drain scope");
@@ -941,6 +969,10 @@ async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dyn EffectHost>) {
     let scope = ExecutionScope::runtime_operation("static-runtime-op");
     let Some(scoped) = host
@@ -953,6 +985,10 @@ async fn effect_host_static_scope_preserves_metadata_when_available(host: Arc<dy
     assert_eq!(scoped.scope_id(), "static-runtime-op");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn effect_host_local_turn_control_resolves_on_minting_host(
     host: Arc<dyn EffectHost>,
 ) {
@@ -1043,6 +1079,10 @@ mod local_control_conformance_tests {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-stable", "turn-stable");
     let wait = AwaitEventWaitIdentity::tool_completion("call-stable");
@@ -1059,6 +1099,10 @@ async fn effect_host_await_event_key_is_stable(host: Arc<dyn EffectHost>) {
     assert_eq!(first, second);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-early", "turn-early");
     let key = host
@@ -1083,6 +1127,10 @@ async fn effect_host_await_event_accepts_early_resolution(host: Arc<dyn EffectHo
     assert_eq!(awaited, resolution);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-dupe", "turn-dupe");
     let key = host
@@ -1109,6 +1157,10 @@ async fn effect_host_await_event_duplicate_resolution_is_terminal(host: Arc<dyn 
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn EffectHost>) {
     let cancel_scope = durable_turn_scope("await-event-session-cancel", "turn-cancel");
     let cancel_key = host
@@ -1153,6 +1205,10 @@ async fn effect_host_await_event_cancel_and_timeout_are_terminal(host: Arc<dyn E
     assert_eq!(timed_out, Resolution::Timeout);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-revoke", "turn-revoke");
     let key = host
@@ -1188,6 +1244,10 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
 /// the process scope lifts the fence its retirement left, so the new
 /// incarnation mints and resolves promises, while a session-bearing scope is
 /// refused on this lever exactly as on retirement (ADR 0049, FIG-2499).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<dyn EffectHost>) {
     let suffix = uuid::Uuid::new_v4().simple();
     let process_id = ProcessId::from(format!("await-event-reinstated-process-{suffix}"));
@@ -1256,6 +1316,10 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// the in-process host keeps no record of a dropped waiter and retires the
 /// scope. That is the one memory-versus-durable differential in quiescence
 /// (ADR 0049), and a law over the dropped case would assert two answers.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     host: Arc<dyn EffectHost>,
     assert_retirement: ActiveWaitRetirementAssertion,
@@ -1315,6 +1379,10 @@ pub(super) fn boxed_active_wait_retirement_assertion(
 /// This split lets engine-backed conformance observe its durable registration
 /// boundary without replacing the shared refusal, unfenced-state, settlement,
 /// and eventual-retirement assertions.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_host_registered_wait_rejects_quiescent_retirement(
     host: Arc<dyn EffectHost>,
     scope: ExecutionScope,
@@ -1377,6 +1445,10 @@ pub async fn effect_host_registered_wait_rejects_quiescent_retirement(
 /// `restate_effect_host_requires_handler_scope` — cannot be held to this law
 /// through this seam; its handler-side controller is held to it by the live
 /// end-to-end harness instead.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
     host: Arc<dyn EffectHost>,
 ) {
@@ -1477,6 +1549,10 @@ pub(crate) async fn effect_host_when_quiescent_waits_for_executing_effects(
 }
 
 /// refused by the scope lever: their promises die with their session.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn EffectHost>) {
     let suffix = uuid::Uuid::new_v4().simple();
     let retired_op = format!("await-event-retired-op-{suffix}");
@@ -1573,6 +1649,10 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
 /// never hang; late resolves observe the terminal) while leaving the session
 /// usable — new waits registered afterwards resolve normally, unlike the
 /// tombstoning session revocation exercised above.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     host: Arc<dyn EffectHost>,
 ) {
@@ -1652,6 +1732,10 @@ async fn effect_host_await_event_session_cancel_resolves_outstanding_waits(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>) {
     let scope = durable_turn_scope("await-event-session-tamper", "turn-tamper");
     let mut key = host
@@ -1684,6 +1768,10 @@ async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>
 /// effects are requested in the opposite order with local executors that fail
 /// if called. A compliant controller returns the recorded outcomes by
 /// `replay.key`, independent of local completion/request ordering.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_controller_concurrent_replay_deterministic<F>(make: F)
 where
     F: FnOnce() -> ConformanceInvocation,
@@ -1752,6 +1840,10 @@ where
 /// workflow-context controllers record them sequentially, then still replay in
 /// reverse order. In both modes, outcomes must resolve by stable `replay.key`
 /// rather than request position, completion order, or source order.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn effect_controller_tool_attempt_fanout_replay_deterministic<F>(make: F)
 where
     F: FnOnce() -> ConformanceInvocation,
@@ -1860,6 +1952,10 @@ where
     invocation.end();
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) fn exec_code_conformance_envelope(
     execution_scope: &ExecutionScope,
     effect_id: &str,
@@ -1950,6 +2046,10 @@ impl LeaseFencingClock {
         );
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn await_sleep_started(&self) {
         self.sleep_started
             .acquire()
@@ -1976,6 +2076,10 @@ impl crate::Clock for LeaseFencingClock {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn sleep(&self, _duration: std::time::Duration) {
         self.sleep_started.add_permits(1);
         self.release_sleep
@@ -2006,6 +2110,10 @@ fn lease_fencing_system_clock() -> Arc<dyn crate::Clock> {
     Arc::new(crate::facade_support::SystemClock)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn lease_fencing_envelope(replay_key: &str) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -2039,6 +2147,10 @@ pub async fn effect_controller_lease_fencing(backend: EffectLeaseFencingBackend)
     lease_fencing_reclaims_explicitly_expired_lease(&backend, &run).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBackend, run: &str) {
     let ttl = std::time::Duration::from_millis(300);
     let renew_interval = ttl / 3;
@@ -2128,6 +2240,10 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
     assert_replay_conformance_exec_marker(replayed, "renewed-owner");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn lease_fencing_reports_lease_lost_when_stolen(
     backend: &EffectLeaseFencingBackend,
     run: &str,
@@ -2172,6 +2288,10 @@ async fn lease_fencing_reports_lease_lost_when_stolen(
     let _keep_notify_alive = never_release;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn lease_fencing_rejects_finalize_after_expiry(
     backend: &EffectLeaseFencingBackend,
     run: &str,
@@ -2219,6 +2339,10 @@ async fn lease_fencing_rejects_finalize_after_expiry(
 
 /// A successor must reclaim and execute an effect after its predecessor's
 /// lease is explicitly expired.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn lease_fencing_reclaims_explicitly_expired_lease(
     backend: &EffectLeaseFencingBackend,
     run: &str,
@@ -2273,6 +2397,10 @@ async fn lease_fencing_reclaims_explicitly_expired_lease(
     let _keep_notify_alive = never_release;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn replay_conformance_tool_attempt_envelope(
     execution_scope: &ExecutionScope,
     effect_id: &'static str,
@@ -2338,6 +2466,10 @@ struct ReplayConformanceProbe {
 /// Run a slow request before a fast request, prove both local executors are
 /// entered before either may finish, then observe the fast controller call
 /// finish recording before allowing the slow executor to complete.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn replay_conformance_concurrent_first_pass(
     controller: &dyn RuntimeEffectController,
     slow_envelope: RuntimeEffectEnvelope,
@@ -2423,6 +2555,10 @@ async fn replay_conformance_concurrent_first_pass(
     (slow_outcome, fast_outcome)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn replay_conformance_tool_attempt_recording_executor(
     attempt: ReplayConformanceToolAttempt,
     concurrent_probe: Option<ReplayConformanceProbe>,

@@ -32,6 +32,10 @@ where
     assert_fresh_instances(&first, &second, "process_execution_env_store");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn failed_registration_reclaims_process_env(
     store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) {
@@ -56,6 +60,10 @@ pub async fn failed_registration_reclaims_process_env(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -99,6 +107,10 @@ pub async fn process_env_owner_lifecycle(store: Arc<dyn crate::ProcessExecutionE
         .expect("repeated release is idempotent");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -144,6 +156,10 @@ pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecuti
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExecutionEnvStore>) {
     let spec = sample_env_spec();
     let env_ref = spec.stable_ref().expect("stable env ref");
@@ -169,6 +185,10 @@ pub async fn slow_process_env_writer_is_fenced(store: Arc<dyn crate::ProcessExec
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionEnvStore) {
     let ReopenableProcessExecutionEnvStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);

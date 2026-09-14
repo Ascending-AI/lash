@@ -180,6 +180,10 @@ impl RunShapeTotals {
 }
 
 /// Run generated session-graph laws with shrinking and counterexample capture.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn session_graph_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
@@ -491,6 +495,10 @@ impl SessionGraphScenario {
         format!("sg-prop-{}-{kind}-{operation}", self.seed)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn append(&mut self, slot: u8, node_count: u8, requirement: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         self.ensure_session(slot).await?;
@@ -634,6 +642,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn fork(&mut self, source: u8, target: u8, selector: u8) -> Result<(), String> {
         let source = source % SESSION_COUNT;
         let target = target % SESSION_COUNT;
@@ -720,6 +732,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn truncate_rewind(&mut self, slot: u8, selector: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         let Some(node_id) = self.selected_node(slot, selector) else {
@@ -815,6 +831,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn checkpoint_commit(&mut self, slot: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         self.ensure_session(slot).await?;
@@ -851,6 +871,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn cold_reload(&mut self, slot: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         let Some(live) = self.live.get(&slot) else {
@@ -897,6 +921,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn malformed(&mut self, slot: u8, shape: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         self.ensure_session(slot).await?;
@@ -948,6 +976,10 @@ impl SessionGraphScenario {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn stale_head_cas(&mut self, slot: u8) -> Result<(), String> {
         let slot = slot % SESSION_COUNT;
         self.ensure_session(slot).await?;
@@ -1028,6 +1060,10 @@ impl SessionGraphScenario {
         persisted_projection(live.store.as_ref()).await
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     fn record_read(&mut self, slot: u8, read: &crate::PersistedSessionRead) -> Result<(), String> {
         let path = graph_path_ids(&read.graph)?;
         for node_id in &path {
@@ -1404,6 +1440,10 @@ async fn commit_runtime_state_for_property(
     result
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn malformed_graph_append(
     state: &crate::RuntimeSessionState,
     operation: &crate::OperationId,

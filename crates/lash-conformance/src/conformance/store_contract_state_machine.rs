@@ -250,6 +250,10 @@ async fn cursor_after_full_relist_if_required(
 /// On failure this writes the case seed and the minimized operation trace before
 /// panicking, so a backend defect remains reproducible even when the test log is
 /// unavailable.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn store_contract_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64, String) -> Fut + Send + Sync + Clone + 'static,
@@ -568,6 +572,10 @@ fn wait_state(process_id: &ProcessId) -> WaitState {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn apply_operation(
     handles: &StoreContractHandles,
     model: &mut ReferenceModel,
@@ -1242,6 +1250,10 @@ enum WakeSettle {
     Defer,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn settle_wake(
     handles: &StoreContractHandles,
     model: &mut ReferenceModel,
@@ -1549,6 +1561,10 @@ async fn assert_replay_key_idempotency(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_attempt_monotonicity_and_budget(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
@@ -1631,6 +1647,10 @@ async fn assert_attempt_monotonicity_and_budget(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_stale_authority_non_mutation(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
@@ -1678,6 +1698,10 @@ async fn assert_stale_authority_non_mutation(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_wake_group_order_and_claim_ownership(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
@@ -1755,6 +1779,10 @@ async fn assert_wake_group_order_and_claim_ownership(
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn assert_enqueued_wake_high_water_safety(
     runtime: &Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {

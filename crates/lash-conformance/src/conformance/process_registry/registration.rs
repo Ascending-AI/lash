@@ -10,6 +10,10 @@ use pretty_assertions::assert_eq;
 /// the row's `StartFailed` terminal — must distinguish the two or a retry
 /// would cancel the work its predecessor started. The disposition is the only
 /// thing that licenses that write, so every backend must report it alike.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn registration_reports_created_then_existing(registry: Arc<dyn ProcessRegistry>) {
     let id = "registration-disposition";
     let first = registry
@@ -53,6 +57,10 @@ pub async fn registration_reports_created_then_existing(registry: Arc<dyn Proces
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegistry>) {
     let record = registry
         .register_process_with_observers(

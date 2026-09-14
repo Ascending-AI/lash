@@ -74,6 +74,10 @@ impl ScriptedQueuedLaneProbe {
 
 #[async_trait::async_trait]
 impl QueuedLaneProbe for ScriptedQueuedLaneProbe {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn try_acquire(&self) -> Result<crate::QueuedLaneAttempt, RuntimeError> {
         self.try_calls.fetch_add(1, Ordering::SeqCst);
         Ok(self
@@ -93,6 +97,10 @@ impl QueuedLaneProbe for ScriptedQueuedLaneProbe {
 ///
 /// The backend supplies only the two resolver implementations. The shared law
 /// owns the scripted lane probes and all outcome and call-count assertions.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn durable_queued_drain_wait_resolver_laws<Engine, Deployment>(
     make_engine: Engine,
     make_deployment: Deployment,
@@ -149,6 +157,10 @@ pub async fn durable_queued_drain_wait_store_laws(
     gives_up_on_a_renewing_holder_without_touching_its_row(&store, lease_timing, ttl_ms).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn waits_out_a_crashed_holder_then_claims(
     store: &Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -216,6 +228,10 @@ async fn waits_out_a_crashed_holder_then_claims(
         .expect("release the drain's lane");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn gives_up_on_a_renewing_holder_without_touching_its_row(
     store: &Arc<dyn RuntimePersistence>,
     lease_timing: &RuntimePersistenceLeaseTiming,
@@ -288,6 +304,10 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
         .expect("release the live holder's lane");
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn busy_holder(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,

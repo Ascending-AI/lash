@@ -4,6 +4,11 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 /// Certify the explicit factory retention lever on one fresh backend.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>) {
     let request = session_store_request(
         &SessionId::from("retention-terminal"),

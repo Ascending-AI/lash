@@ -77,6 +77,10 @@ struct CommittedCheckpoint {
     leaf_node_id: String,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn committed_checkpoint(
     factory: &Arc<dyn crate::SessionStoreFactory>,
     session_id: &SessionId,
@@ -133,6 +137,10 @@ pub(super) struct ContentAliasedCheckpointRoots {
     pub(super) aliased_component: crate::BlobRef,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
     rmp_serde::to_vec_named(manifest).expect("encode checkpoint manifest for content alias")
 }
@@ -140,6 +148,10 @@ fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
 /// Commit two roots A and B where A names B's exact root bytes as one opaque
 /// component. The nonce makes B sort before A, reproducing the restrictive-FK
 /// delete order that matters to a multi-root reclaim batch.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn commit_content_aliased_checkpoint_roots(
     factory: &Arc<dyn crate::SessionStoreFactory>,
     dependent_session_id: &SessionId,
@@ -244,6 +256,10 @@ where
     session_delete_ignores_broken_factory_gc_scope(backend, make()).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_delete_reclaims_content_aliased_checkpoint_roots(
     backend: &str,
     handles: SessionDeleteBlobHandles,
@@ -296,6 +312,10 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_delete_reclaims_exclusive_checkpoint_blobs(
     backend: &str,
     handles: SessionDeleteBlobHandles,
@@ -331,6 +351,10 @@ async fn session_delete_reclaims_exclusive_checkpoint_blobs(
     .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     backend: &str,
     handles: SessionDeleteBlobHandles,
@@ -383,6 +407,10 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_delete_blob_failure_rolls_back_with_partial_report(
     backend: &str,
     handles: SessionDeleteBlobHandles,
@@ -423,6 +451,10 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
     .await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn session_delete_ignores_broken_factory_gc_scope(
     backend: &str,
     handles: SessionDeleteBlobHandles,
@@ -478,6 +510,11 @@ impl SessionDeleteBlobProbe for crate::InMemorySessionStoreFactory {
 }
 
 /// FIG-2501: fork and pin roots protect attachment bytes after owner deletion.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn attachment_prefix_retention(
     backend_name: &str,
     handles: SessionDeleteBlobHandles,

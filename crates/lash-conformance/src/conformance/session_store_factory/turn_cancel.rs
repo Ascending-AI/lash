@@ -45,6 +45,10 @@ fn closure_key(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn authorize_closure(
     store: &Arc<dyn crate::RuntimePersistence>,
     fence: &crate::SessionExecutionLeaseAuthority,
@@ -75,6 +79,10 @@ async fn authorize_closure(
     authorization
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn closure_authorization(
     address: &crate::TurnAddress,
     admitted_scope: crate::ExecutionScope,
@@ -124,6 +132,10 @@ fn settled_closure(
 
 /// Replaying an already committed receipt must not consume a newer pending
 /// authorization that happens to reuse the same turn address.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
     factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
 ) {
@@ -235,6 +247,10 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
 /// The durable closure slot is non-overwritable, survives lease-generation
 /// changes, preserves its admitted physical scope, and can be consumed only by
 /// a current owner presenting the exact authorization.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -626,9 +642,17 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
 
 /// An escalation can change effective timing while repair retains the first
 /// accepted request and its provenance across owner loss and reopen.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn claim(
         store: &Arc<dyn crate::RuntimePersistence>,
         session_id: &SessionId,
@@ -738,9 +762,17 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
 /// linearizable lifecycle boundary. Both deterministic orders and a
 /// barrier-released overlap have exactly one winner, and retirement remains a
 /// permanent admission refusal for that physical scope.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn prepared(
         factory: &Arc<dyn crate::SessionStoreFactory>,
         suffix: &str,
@@ -933,6 +965,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn turn_cancel_disposition_crash_cell(
         factory: Arc<dyn crate::SessionStoreFactory>,
         mode: crate::TurnCancelMode,
@@ -1212,6 +1248,10 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
 
 /// Escalating a durable after-step request advances the intent revision while
 /// the one durable row retains the first request and its provenance.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1449,9 +1489,17 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
 /// A request committed first blocks no-intent repair until the gate decision
 /// arrives; a request committed after ordinary repair cannot retroactively
 /// dispose an input that no longer targets the turn.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: each result is established by the setup above"
+    )]
     async fn lease(
         store: &Arc<dyn crate::RuntimePersistence>,
         session_id: &SessionId,
@@ -1746,6 +1794,10 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
 /// A stale cancellation predicate refuses the entire final commit, including
 /// head publication and active-input settlement. Refreshing only the predicate
 /// and gate evidence then commits the already-materialized payload once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -1939,6 +1991,10 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
 /// store's — the store has no terminal to consult — so that case is a runtime
 /// law (`sealed_turn_refuses_a_conflicting_repeat_without_durable_effect`) and
 /// is deliberately not asserted here.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {
@@ -2074,6 +2130,10 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
 /// fences the owner's closure CAS must be exactly one — no racer past the
 /// first may advance it, because a disagreeing repeat is a conflict, not an
 /// escalation.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
     factory: Arc<dyn crate::SessionStoreFactory>,
 ) {

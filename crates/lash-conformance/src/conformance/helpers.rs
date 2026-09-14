@@ -14,6 +14,10 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
 /// Record one completed attachment write: acquire the write fence, then stamp
 /// the upload evidence. This is the only way a manifest row comes into being,
 /// and the stamp is the only thing that makes a digest adoptable.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn record_completed_attachment_write(
     store: &Arc<dyn crate::RuntimePersistence>,
     intent: crate::AttachmentIntent,
@@ -36,6 +40,10 @@ pub(crate) async fn record_completed_attachment_write(
 
 /// Model the artifact-cleanup worker before asserting that a projected process
 /// tombstone is eligible for physical compaction.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 pub(crate) async fn acknowledge_pending_process_artifact_cleanup(
     registry: &dyn crate::ProcessRegistry,
 ) {
