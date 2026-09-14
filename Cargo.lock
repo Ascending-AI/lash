@@ -2683,7 +2683,6 @@ dependencies = [
  "lash-internal-restate",
  "lash-internal-s3-store",
  "lash-internal-sqlite-store",
- "lash-internal-trace",
  "lash-runtime",
  "reqwest 0.13.4",
  "restate-sdk",
