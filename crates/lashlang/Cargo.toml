@@ -59,6 +59,10 @@ name = "integration"
 path = "tests/main.rs"
 
 [[test]]
+name = "append_cost"
+path = "tests/append_cost.rs"
+
+[[test]]
 name = "benchmark_contract"
 path = "tests/benchmark_contract.rs"
 

@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
-  "cargo_target_count": 125,
-  "generated_label_count": 180,
+  "cargo_target_count": 126,
+  "generated_label_count": 181,
   "packages": [
     {
       "declared_features": [],
@@ -1717,6 +1717,12 @@
           "cargo": "integration",
           "kind": "test",
           "label": "//crates/lashlang:integration__test",
+          "tags": []
+        },
+        {
+          "cargo": "append_cost",
+          "kind": "test",
+          "label": "//crates/lashlang:append_cost__test",
           "tags": []
         },
         {

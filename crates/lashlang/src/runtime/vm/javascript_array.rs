@@ -41,6 +41,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::List(current) = self.heap.get(receiver)? else {
             return Ok(false);
         };
+        // `push` is the one array method a program runs once per loop
+        // iteration, so it is the one that must not rebuild the array. It
+        // grows the vector the heap already owns instead of cloning it, and
+        // returns ECMA's new length like the rebuild did (FIG-3063).
+        if method == "push" {
+            let length = self.heap.append_javascript_list(receiver, args)?;
+            self.stack.push(Value::Number(length as f64));
+            return Ok(true);
+        }
         let mut values = current.clone();
         let result = match method {
             "fill" => {
@@ -71,18 +80,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.heap.replace_javascript_list(receiver, values)?;
                 self.heap.allocate_list(removed)?
             }
-            // The four ends-of-the-array mutators. They ride the same
+            // The ends-of-the-array mutators that still rebuild. They ride the
             // live-receiver path `splice` established: mutate the cloned
             // vector, hand it back through `replace_javascript_list` so the
             // byte accounting and the memory bound answer, and return what
-            // ECMA returns — the new length for the growing pair, the removed
-            // element (or `undefined`) for the shrinking one.
-            "push" => {
-                values.extend(args.iter().cloned());
-                let length = values.len();
-                self.heap.replace_javascript_list(receiver, values)?;
-                Value::Number(length as f64)
-            }
+            // ECMA returns — the new length for `unshift`, the removed element
+            // (or `undefined`) for the shrinking pair. Each of them moves every
+            // surviving member anyway, so the rebuild costs what the operation
+            // costs; `push` is handled above because it does not.
             "unshift" => {
                 values.splice(0..0, args.iter().cloned());
                 let length = values.len();
