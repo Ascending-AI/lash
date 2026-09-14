@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::generator::generate_workload;
 use crate::oracles::{
     LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, combine_oracles, generated_trace_oracles,
+    passed_battery_verdict, walk_generated_trace_oracles,
 };
 use crate::replay::{ReplayError, replay_trace};
 use crate::runner::run_generated_workload_for_fixture;
@@ -250,8 +251,7 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.retain(|event| event.kind != kind);
         renumber_events(&mut candidate);
-        let target_preserved =
-            refresh_trace_verdicts(&mut candidate, Some(target)).unwrap_or(false);
+        let target_preserved = candidate_preserves_target(&mut candidate, target).unwrap_or(false);
         let accepted = target_preserved
             && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate-family.trace.json"), &candidate).is_ok();
@@ -270,8 +270,7 @@ pub fn minimize_trace(
         let mut candidate = best.clone();
         candidate.events.remove(index);
         renumber_events(&mut candidate);
-        let target_preserved =
-            refresh_trace_verdicts(&mut candidate, Some(target)).unwrap_or(false);
+        let target_preserved = candidate_preserves_target(&mut candidate, target).unwrap_or(false);
         if target_preserved
             && preserves_target_failure(&candidate, target)
             && replay_trace(Path::new("candidate.trace.json"), &candidate).is_ok()
@@ -429,6 +428,114 @@ fn refresh_trace_verdicts(
     trace.oracles = oracles;
     trace.oracle = oracle;
     Ok(target_preserved)
+}
+
+/// Answer the one question the reduction loop asks — does the target verdict
+/// still hold for this candidate? — without materializing the whole battery.
+///
+/// This is [`refresh_trace_verdicts`] narrowed to its decision. It performs the
+/// same derived-state mutations in the same order (checkpoint retention, then
+/// the abstract summary) and decides the same predicate, but it stops
+/// evaluating oracles the moment the answer is settled.
+///
+/// # Why the skipped evaluations cannot change the answer
+///
+/// `refresh_trace_verdicts` accepts a candidate exactly when some verdict in
+/// the battery equals the target triple (id, status, message), or when the
+/// aggregate `combine_oracles` builds from a wholly passing battery does. Its
+/// trace verdict is `combine_oracles`, which is either the FIRST failing
+/// verdict — itself one of the battery's verdicts — or that passed aggregate,
+/// and `find_target_oracle` then rescues any other verdict that matches. Given
+/// that, each skip below is answer-preserving:
+///
+/// * The moment any verdict matches the target the answer is `true` whatever
+///   the remaining oracles say, because `find_target_oracle` would have found
+///   this one. Nothing after it is evaluated.
+/// * Nothing is skipped until a failing verdict is in hand, so `combine_oracles`
+///   sees the same first failure it would have seen over the full battery.
+/// * Once that first failure is known and does not match the target, only a
+///   verdict carrying the target's own oracle id can still rescue the
+///   candidate. Every slot declares the id it reports under BEFORE it is
+///   evaluated — a battery slot names its constant at the call site, a
+///   scenario-contract slot derives its id from its static contract — and
+///   [`walk_generated_trace_oracles`] debug-asserts each evaluated verdict
+///   against its slot's declared id, so a slot that ever reported under a
+///   second id would fail this crate's own tests rather than silently make the
+///   skip wrong. The slots that cannot carry the target's id are therefore
+///   skipped unevaluated without losing a possible match.
+/// * The passed aggregate's message counts the battery. It is reachable only
+///   when no verdict failed, and no slot is skipped on that path, so the count
+///   is the full one.
+///
+/// The verdict vector itself is deliberately not written back. The loop never
+/// reads a candidate's `oracles`, and `minimize_trace` rebuilds them with a full
+/// `refresh_trace_verdicts` over the final survivor before anything is written.
+/// The one field a later refresh does read out of `oracles` is the carried
+/// live-provider verdict, which every refresh copies forward unchanged, so the
+/// vector left in place carries the same one.
+fn candidate_preserves_target(
+    trace: &mut SimulationTrace,
+    target: TargetFailure<'_>,
+) -> Result<bool, MinimizeError> {
+    let carried_live_provider_oracle = trace
+        .oracles
+        .iter()
+        .find(|oracle| oracle.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE)
+        .cloned();
+    retain_causally_supported_checkpoint_writes(trace);
+    let final_summary = summary_for_trace(trace)?;
+
+    #[derive(Default)]
+    struct Search {
+        battery_size: usize,
+        first_failure: Option<OracleVerdict>,
+        target_match: Option<OracleVerdict>,
+    }
+    let search = std::cell::RefCell::new(Search::default());
+    let consider = |verdict: OracleVerdict| -> bool {
+        let mut search = search.borrow_mut();
+        search.battery_size += 1;
+        if verdict_matches_target(&verdict, target) {
+            search.target_match = Some(verdict);
+            return false;
+        }
+        if search.first_failure.is_none() && !verdict.is_passed() {
+            search.first_failure = Some(verdict);
+        }
+        true
+    };
+    let settled = match carried_live_provider_oracle {
+        Some(verdict) => !consider(verdict),
+        None => false,
+    };
+    if !settled {
+        walk_generated_trace_oracles(
+            &trace.events,
+            &final_summary,
+            &trace.durable_writes,
+            &trace.expectations,
+            |slot| {
+                search.borrow().first_failure.is_some()
+                    && slot.declared_oracle_id() != target.oracle_id
+            },
+            consider,
+        );
+    }
+    let Search {
+        battery_size,
+        first_failure,
+        target_match,
+    } = search.into_inner();
+
+    trace.final_summary = final_summary;
+    if let Some(verdict) = target_match {
+        trace.oracle = verdict;
+        return Ok(true);
+    }
+    let combined = first_failure.unwrap_or_else(|| passed_battery_verdict(battery_size));
+    let preserved = verdict_matches_target(&combined, target);
+    trace.oracle = combined;
+    Ok(preserved)
 }
 
 fn find_target_oracle<'a>(
