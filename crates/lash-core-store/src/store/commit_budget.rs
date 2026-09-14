@@ -68,18 +68,18 @@ impl CommitBudget {
 }
 
 pub struct RuntimeCommitBudgetMeasurement {
-    pub(crate) graph_rows: usize,
-    pub(crate) adopted_intent_rows: usize,
-    pub(crate) total_rows: usize,
-    pub(crate) session_config_bytes: usize,
-    pub(crate) graph_delta_bytes: usize,
+    pub graph_rows: usize,
+    pub adopted_intent_rows: usize,
+    pub total_rows: usize,
+    pub session_config_bytes: usize,
+    pub graph_delta_bytes: usize,
     pub checkpoint_bytes: usize,
-    pub(crate) attachment_manifest_bytes: usize,
-    pub(crate) queue_batch_bytes: usize,
-    pub(crate) agent_frame_bytes: usize,
-    pub(crate) usage_delta_bytes: usize,
-    pub(crate) turn_result_bytes: usize,
-    pub(crate) total_bytes: usize,
+    pub attachment_manifest_bytes: usize,
+    pub queue_batch_bytes: usize,
+    pub agent_frame_bytes: usize,
+    pub usage_delta_bytes: usize,
+    pub turn_result_bytes: usize,
+    pub total_bytes: usize,
 }
 
 impl RuntimeCommit {

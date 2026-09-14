@@ -82,7 +82,7 @@ impl<'a> BorrowedChronologicalMessage<'a> {
 }
 
 impl ChronologicalProjection {
-    pub(crate) fn from_read_model(read_model: &crate::session_graph::SessionReadModel) -> Self {
+    pub fn from_read_model(read_model: &crate::session_graph::SessionReadModel) -> Self {
         Self::from_active_read(
             read_model.active_events.as_slice(),
             read_model.messages.as_slice(),

@@ -143,8 +143,8 @@ impl From<&FrameNodeId> for String {
 pub struct AgentFrameReason(String);
 impl AgentFrameReason {
     pub(crate) const INITIAL: &'static str = "initial";
-    pub(crate) const CONTINUE_AS: &'static str = "continue_as";
-    pub(crate) const COMPACTION: &'static str = "compaction";
+    pub const CONTINUE_AS: &'static str = "continue_as";
+    pub const COMPACTION: &'static str = "compaction";
     pub fn new(label: impl Into<String>) -> Self {
         Self(label.into())
     }

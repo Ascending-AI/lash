@@ -463,7 +463,7 @@ pub(crate) struct ActiveReadReplacement {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ActiveReadProjection {
+pub struct ActiveReadProjection {
     pub active_events: Vec<SessionHistoryRecord>,
     pub active_messages: Vec<Message>,
 }
@@ -977,7 +977,7 @@ impl SessionGraph {
         self.cache = Arc::new(OnceLock::new());
     }
 
-    pub(crate) fn data_mut(&mut self) -> &mut SessionGraphData {
+    pub fn data_mut(&mut self) -> &mut SessionGraphData {
         self.invalidate_cache();
         Arc::make_mut(&mut self.inner)
     }
@@ -1588,7 +1588,7 @@ fn build_tree_children(
     children
 }
 
-pub(crate) fn build_active_read_replacement<'a>(
+pub fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     mut append_builder: SessionGraphAppendBuilder,
     messages: &[Message],

@@ -17,7 +17,7 @@ pub(crate) fn validate_node_id(node_id: &NodeId) -> Result<(), crate::StoreError
     Ok(())
 }
 
-pub(crate) fn graph_node_indices(
+pub fn graph_node_indices(
     graph: &SessionGraph,
 ) -> Result<HashMap<NodeId, usize>, crate::StoreError> {
     let mut by_id = HashMap::with_capacity(graph.nodes.len());

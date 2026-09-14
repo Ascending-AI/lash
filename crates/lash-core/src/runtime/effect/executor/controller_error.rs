@@ -168,10 +168,7 @@ mod tests {
         )
         .into_runtime_error();
 
-        assert_eq!(
-            runtime_error.code,
-            crate::RuntimeErrorCode::ForeignCode("plugin_defined_abort".to_string())
-        );
+        assert_eq!(runtime_error.code.as_str(), "plugin_defined_abort");
         assert!(!runtime_error.is_retryable());
         assert!(!runtime_error.is_terminal());
     }

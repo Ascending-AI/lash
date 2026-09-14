@@ -20,6 +20,8 @@ pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod runtime_error;
+#[cfg(test)]
+mod runtime_error_tests;
 pub mod session_execution_lease;
 pub mod session_graph;
 pub(crate) mod session_graph_integrity;
@@ -36,9 +38,6 @@ pub mod turn_control_vocabulary;
 pub mod turn_failure_evidence;
 pub mod turn_input_vocabulary;
 pub mod usage;
-
-#[cfg(test)]
-mod session_graph_tests;
 
 pub mod store_backend_support;
 
@@ -154,6 +153,7 @@ pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
 pub(crate) mod facade_support {
     pub(crate) use crate::session_graph::facade_ops::SessionGraphFacadeOps;
 
+    pub(crate) use crate::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub(crate) use crate::tool_state::facade_ops::ToolStateFacadeOps;
     pub(crate) use lash_sansio::visible_response_text_from_parts;
 }
@@ -176,6 +176,8 @@ pub(crate) mod runtime {
         PromptUsage, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,
     };
 
+    pub(crate) use crate::turn_input_vocabulary::ingress_message_id;
+
     pub(crate) mod turn_input_ingress {
         pub use crate::turn_input_vocabulary::derive_pending_turn_input_id;
     }
@@ -196,6 +198,38 @@ pub(crate) use session_identity::{
 pub(crate) use session_policy::ApplyConfigPatch;
 pub(crate) use store::OrphanedTurnInputScope;
 pub(crate) use store::work_claim::WorkCompletion;
+
+pub(crate) use lash_core_ids::test_watchdog;
+pub(crate) use lash_sansio::attachment::MediaType;
+pub(crate) use lash_sansio::llm::capability::{ModelCapability, ReasoningRetentionPolicy};
+pub(crate) use queued_work_vocabulary::QueuedWorkCompletionData;
+pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
+pub(crate) use turn_input_vocabulary::{TurnInputCompletionData, TurnInputSettlementClaim};
+pub(crate) use lash_sansio::llm::capability::{
+    OpenAiReasoningContext, ReasoningRetentionCapability, ReasoningRetentionSelection,
+};
+pub(crate) use lash_sansio::llm::types::LlmResponse;
+pub(crate) use lash_sansio::tool_contract::ToolContract;
+pub(crate) use lash_sansio::tool_output::AttachmentMaterializationReason;
+pub(crate) use attachments::AttachmentGcFence;
+pub(crate) use queued_drain_policy::{
+    DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
+};
+pub(crate) use queued_work_vocabulary::TurnWorkPayload;
+pub(crate) use session_graph::{
+    SESSION_NODE_BODY_SCHEMA_VERSION, SharedJsonValue, build_active_read_projection,
+    build_active_read_replacement, frame_node_id,
+};
+pub(crate) use session_graph_integrity::graph_node_indices;
+pub(crate) use store::attachment_manifest::{
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
+    AttachmentWriteFence, AttachmentWritePermit,
+};
+pub(crate) use store::commit_budget::{CommitBudget, CommitBudgetLimit};
+pub(crate) use store::runtime_commit::{RuntimeCommit, RuntimeTurnCommitStamp};
+pub(crate) use store::{SessionAdmission, SessionBinding};
+pub(crate) use turn_input_vocabulary::{TurnInputClaimMode, ingress_message_id};
+
 pub(crate) use turn_input_vocabulary::TurnActivityId;
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::plugin`.

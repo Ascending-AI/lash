@@ -115,6 +115,20 @@ pub struct TurnCancelClosureSettlement {
     effective_cancellation: Option<TurnCancellationEvidence>,
 }
 impl TurnCancelClosureSettlement {
+    /// Assemble a settlement from the authorization and the evidence the
+    /// turn-control driver read back.
+    pub fn new(
+        authorization: TurnCancelClosureAuthorization,
+        base_cancellation: Option<TurnCancellationEvidence>,
+        effective_cancellation: Option<TurnCancellationEvidence>,
+    ) -> Self {
+        Self {
+            authorization,
+            base_cancellation,
+            effective_cancellation,
+        }
+    }
+
     pub fn authorization(&self) -> &TurnCancelClosureAuthorization {
         &self.authorization
     }
@@ -442,8 +456,8 @@ impl TurnCancelOriginHint {
             .flatten()
     }
 
-    #[cfg(test)]
-    pub(crate) fn was_set(&self) -> bool {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn was_set(&self) -> bool {
         self.state.lock_recover().observed_origin.is_some()
     }
 

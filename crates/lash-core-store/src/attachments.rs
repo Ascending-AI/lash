@@ -1797,10 +1797,6 @@ pub fn degrade_unmaterializable_request_attachments(
 #[path = "attachments/fail_closed_tests.rs"]
 mod fail_closed_tests;
 
-#[cfg(test)]
-#[path = "attachments/tests.rs"]
-mod tests;
-
 #[cfg(any(test, feature = "testing"))]
 #[path = "attachments/test_capability.rs"]
 pub mod test_capability;

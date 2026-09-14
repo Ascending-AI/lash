@@ -963,11 +963,11 @@ impl ActiveTurnControl {
         };
         let effective_cancellation = self.settle_proposed(resolver, proposed).await?;
         let base_cancellation = self.read_settled_base_cancel_evidence(resolver).await?;
-        Ok(TurnCancelClosureSettlement {
-            authorization: authorization.clone(),
+        Ok(TurnCancelClosureSettlement::new(
+            authorization.clone(),
             base_cancellation,
             effective_cancellation,
-        })
+        ))
     }
 
     async fn settle_proposed(

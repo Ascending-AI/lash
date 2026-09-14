@@ -30,7 +30,6 @@ pub struct ToolStateEntry {
     pub registration_kind: ToolRegistrationKind,
 }
 impl ToolStateEntry {
-    #[cfg(test)]
     pub fn new(manifest: ToolManifest) -> Self {
         Self {
             manifest,

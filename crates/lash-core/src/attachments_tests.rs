@@ -1,4 +1,27 @@
-use super::*;
+//! Attachment-layer tests.
+//!
+//! The attachment layer moved to `lash-core-store`; these cases drive it
+//! through `lash-core`'s in-memory session-store factory, so they live here.
+
+use crate::{SessionId, TurnId};
+use lash_core_store::attachments::*;
+use lash_sansio::sync::MutexExt;
+use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+
+fn attachment_uri(attachment_id: &AttachmentId) -> String {
+    format!("lash-attachment://blake3/{attachment_id}")
+}
+
+fn now_epoch_ms() -> u64 {
+    <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
+}
+
+use crate::store::{
+    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
+    AttachmentWriteFence, AttachmentWritePermit, StoreError,
+};
 use lash_sansio::{AttachmentTypeMetadata, MediaType};
 
 #[derive(Default)]
@@ -1709,7 +1732,7 @@ fn attachment_request(
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
         model_variant: crate::ReasoningSelection::ProviderDefault,
-        model_capability: super::attachment_test_capability(),
+        model_capability: lash_core_store::attachments::attachment_test_capability(),
         generation: crate::llm::types::GenerationOptions::default(),
         scope: crate::llm::types::LlmRequestScope::new(
             "attachment-session",
@@ -1904,7 +1927,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         crate::AttachmentSource::inline(MediaType::parse("image/png").unwrap(), vec![1, 2, 3]);
     let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
     policy.model.id = "attachment-model".into();
-    policy.model.capability = super::attachment_test_capability();
+    policy.model.capability = lash_core_store::attachments::attachment_test_capability();
     let mut upgraded_model = policy.model.clone();
     upgraded_model.id = "upgraded-attachment-model".into();
     upgraded_model.capability.attachment_acceptance =

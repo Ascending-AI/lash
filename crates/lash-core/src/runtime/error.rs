@@ -43,8 +43,6 @@ pub(super) fn session_commit_error(
 
 #[cfg(test)]
 mod store_commit_error_tests;
-#[cfg(test)]
-mod tests;
 
 #[cfg(test)]
 mod host_commit_outcome_tests;

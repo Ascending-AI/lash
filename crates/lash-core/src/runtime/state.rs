@@ -51,3 +51,7 @@ pub(crate) async fn commit_in_lane_context(
         .await
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;

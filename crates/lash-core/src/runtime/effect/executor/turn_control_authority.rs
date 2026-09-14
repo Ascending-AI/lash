@@ -223,7 +223,7 @@ impl TurnControlBinding<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{admitted_turn_cancel_scope, turn_control_binding_id_for_scope};
+    use lash_core_store::turn_control_binding::{admitted_turn_cancel_scope, turn_control_binding_id_for_scope};
 
     #[test]
     fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {

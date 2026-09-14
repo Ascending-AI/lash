@@ -268,7 +268,7 @@ impl RuntimeCommit {
         .expect("test graph commit must be hashable")
     }
 
-    pub(crate) fn persisted_state_with_operation(
+    pub fn persisted_state_with_operation(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,

@@ -2,7 +2,7 @@
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
-mod attachment_manifest;
+pub mod attachment_manifest;
 mod checkpoint;
 pub mod namespace;
 pub mod process_key;
@@ -14,7 +14,7 @@ pub use checkpoint::{
     ensure_checkpoint_component_hash_agreement,
 };
 mod claim_settlement;
-mod commit_budget;
+pub mod commit_budget;
 mod commit_identity;
 mod error;
 mod fork_plan;
@@ -97,7 +97,7 @@ pub use state_version::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use testing::{
-    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+    ConformancePersistence, StoreTestSupport,
     append_request_commit_with_clock_for_testing,
 };
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};

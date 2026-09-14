@@ -420,6 +420,13 @@ mod typed_payload_tests {
             "task",
             None,
         );
+        let turn_work = || {
+            TurnWorkPayload::agent_frame_task(
+                crate::facade_support::frame_node_id(&SessionId::from("s"), "f"),
+                "task",
+                None,
+            )
+        };
         let mut command_draft =
             QueuedWorkBatchDraft::new("s", DeliveryPolicy::EarliestSafeBoundary, command.clone());
         command_draft.source_key = Some("source".into());
@@ -428,8 +435,8 @@ mod typed_payload_tests {
             "s",
             DeliveryPolicy::EarliestSafeBoundary,
             QueuedWorkBatchPayloads::TurnWork {
-                first: TurnWorkPayload(turn.clone()),
-                rest: vec![TurnWorkPayload(turn.clone())],
+                first: turn_work(),
+                rest: vec![turn_work()],
             },
         );
         for (draft, kind, payloads) in [

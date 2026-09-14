@@ -1078,7 +1078,7 @@ macro_rules! turn_input_wire {
     }) => {
         impl $type {
             #[allow(dead_code)]
-            pub(crate) const ALL: &'static [Self] = &[$(Self::$variant),+];
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
             /// Returns the stable wire spelling persisted by turn-input stores.
             $visibility fn $encoder(self) -> &'static str {
@@ -1099,7 +1099,7 @@ macro_rules! turn_input_wire {
     };
 }
 
-turn_input_wire!(TurnInputCheckpointBoundary, pub(crate), as_wire_str, from_wire_str {
+turn_input_wire!(TurnInputCheckpointBoundary, pub, as_wire_str, from_wire_str {
     AfterWork => "after_work",
     BeforeCompletion => "before_completion",
 });

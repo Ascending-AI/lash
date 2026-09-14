@@ -1,4 +1,4 @@
-use super::{RuntimeError, RuntimeErrorCode};
+use crate::runtime_error::{RuntimeError, RuntimeErrorCode};
 use crate::SessionId;
 
 #[test]

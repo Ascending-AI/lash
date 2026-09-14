@@ -80,15 +80,15 @@ impl SessionExecutionLeaseRefusalOperation {
 /// Durable facts consulted while diagnosing a lease refusal.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SessionExecutionLeaseRefusalFacts<'a> {
-    pub(crate) current_owner: Option<&'a LeaseOwnerIdentity>,
-    pub(crate) current_executor_id: Option<&'a str>,
-    pub(crate) current_token: Option<&'a str>,
-    pub(crate) current_fencing_token: Option<u64>,
-    pub(crate) current_expires_at_epoch_ms: Option<u64>,
-    pub(crate) observed_at_epoch_ms: Option<u64>,
-    pub(crate) minimum_expires_at_epoch_ms: Option<u64>,
-    pub(crate) requested_session_id: Option<&'a SessionId>,
-    pub(crate) refusal_cause: Option<&'static str>,
+    pub current_owner: Option<&'a LeaseOwnerIdentity>,
+    pub current_executor_id: Option<&'a str>,
+    pub current_token: Option<&'a str>,
+    pub current_fencing_token: Option<u64>,
+    pub current_expires_at_epoch_ms: Option<u64>,
+    pub observed_at_epoch_ms: Option<u64>,
+    pub minimum_expires_at_epoch_ms: Option<u64>,
+    pub requested_session_id: Option<&'a SessionId>,
+    pub refusal_cause: Option<&'static str>,
 }
 
 impl<'a> SessionExecutionLeaseRefusalFacts<'a> {

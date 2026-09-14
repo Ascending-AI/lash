@@ -179,3 +179,75 @@ pub mod facade_ops {
         fn merged_with_override(&self, override_options: &Self) -> Self;
     }
 }
+
+#[cfg(test)]
+mod schema_version_tests {
+    use super::*;
+
+    #[test]
+    fn protocol_turn_options_missing_payload_deserializes_to_empty_object() {
+        let options: ProtocolTurnOptions = serde_json::from_value(serde_json::json!({
+            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION
+        }))
+        .expect("deserialize options");
+
+        assert!(options.is_empty());
+        assert_eq!(options.payload, serde_json::json!({}));
+    }
+
+    #[test]
+    fn protocol_turn_options_explicit_null_is_not_empty() {
+        let options: ProtocolTurnOptions = serde_json::from_value(serde_json::json!({
+            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+            "payload": null
+        }))
+        .expect("deserialize options");
+
+        assert!(!options.is_empty());
+        assert_eq!(options.payload, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn protocol_turn_options_missing_schema_version_rejects_preversioned_state() {
+        let err =
+            serde_json::from_value::<ProtocolTurnOptions>(serde_json::json!({ "payload": {} }))
+                .expect_err("pre-versioned options should fail");
+
+        assert!(
+            err.to_string().contains(
+                "missing schema_version and were written by unsupported pre-versioned state"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn protocol_turn_options_unsupported_schema_version_rejects_state() {
+        let err = serde_json::from_value::<ProtocolTurnOptions>(serde_json::json!({
+            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION + 1,
+            "payload": {}
+        }))
+        .expect_err("unsupported options version should fail");
+
+        assert!(
+            err.to_string().contains("is not supported by this binary"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn protocol_turn_options_serialization_preserves_wire_shape() {
+        let options = ProtocolTurnOptions::from_payload(serde_json::json!({
+            "mode": "test"
+        }));
+        // Byte-level: `serde_json::Value` compares as a `BTreeMap` here, so only the emitted
+        // string pins field order — the property the persisted envelope actually depends on.
+        let encoded = serde_json::to_string(&options).expect("serialize options");
+        assert_eq!(encoded, r#"{"schema_version":1,"payload":{"mode":"test"}}"#);
+        assert_eq!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, 1);
+
+        let round_tripped: ProtocolTurnOptions =
+            serde_json::from_str(&encoded).expect("deserialize roundtrip");
+        assert_eq!(round_tripped.payload, serde_json::json!({ "mode": "test" }));
+    }
+}
