@@ -383,7 +383,11 @@ RESTATE_AUTHORITY_ID="agent-workbench-e2e:${LASH_GATE_WORKTREE_SLUG}" \
 AGENT_WORKBENCH_E2E_ENDPOINT_BIND="$endpoint_bind" \
 AGENT_WORKBENCH_E2E_POSTGRES_ENDPOINT_BIND="$postgres_endpoint_bind" \
 AGENT_WORKBENCH_E2E_DATABASE_URL="$database_url" \
+# The participant crash child is spawned by its parent test with the
+# LASH_RESTATE_PARTICIPANT_CRASH_* environment it needs; run directly under the
+# `live_restate_` filter it has none of them and panics before reaching Restate.
 "$test_executable" "${AGENT_WORKBENCH_E2E_TEST_FILTER:-live_restate_}" \
+  --skip live_restate_participant_protocol_crash_child \
   --ignored --nocapture --test-threads=1 2>&1 | tee "$test_output"
 test_status="${PIPESTATUS[0]}"
 set -e
