@@ -136,8 +136,9 @@ pub use frame_switch::{
     logical_turn_claims_settle_exactly_once,
 };
 pub use live_provider::{
-    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, LIVE_PROVIDER_FAILURE_ORACLE, LiveProviderFailureFacts,
-    combine_oracles, live_provider_failure_coverage, live_provider_failure_terminalizes,
+    GENERATED_WORKLOAD_BATTERY_ORACLE, LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
+    LIVE_PROVIDER_FAILURE_ORACLE, LiveProviderFailureFacts, combine_oracles,
+    live_provider_failure_coverage, live_provider_failure_terminalizes, passed_battery_verdict,
 };
 use mini_scenarios::*;
 pub use mini_scenarios::{
@@ -186,44 +187,290 @@ pub fn generated_trace_oracles(
     durable_writes: &[CheckpointWriteEvent],
     expectations: &WorkloadExpectations,
 ) -> Vec<OracleVerdict> {
-    let mut oracles = vec![
-        scheduler_controlled_delivery(events),
-        scheduler_owned_runtime_completions(events),
-        state_machine_semantic_invariants(events, summary),
-        operational_coverage(events, summary),
-        ingress_sessions_opened(summary, expectations),
-        queued_ingress_observed(summary, events),
-        cancellation_observed(summary, events),
-        trigger_delivery_observed(summary, events),
-        observer_reconnect_observed(summary, events),
-        backend_failure_observed(summary, events),
-        provider_mutation_rejected(summary, events),
-        provider_transport_mutation_classified(events, expectations),
-        generated_runtime_provider_matrix(events),
-        provider_turn_interleaving_depth(events, expectations),
-        process_wake_observed(summary, events),
-        process_wake_at_most_once(events),
-        process_never_double_started(events),
-        abandoned_requires_evidence(events),
-        tool_boundary_observed(summary, events),
-        exec_code_observed(summary, events),
-        cross_session_isolation(summary),
-        observer_convergence(summary, expectations),
-        runtime_session_graph_contract(summary, expectations),
-        runtime_graph_acyclic(durable_writes),
-        runtime_single_active_agent_frame(events),
-        runtime_usage_monotonic(events),
-        crate::usage_oracle::checkpoint_usage_conservation(durable_writes),
-        durable_effect_exactly_once(summary),
-        worker_stale_completion_rejected(summary),
-        worker_failover_continues_work(events),
-        healthy_long_turn_liveness(events),
-        lease_time_monotonic(events, expectations),
-        generated_suspend_resume(events),
-        generated_final_value_semantic_channel(events, expectations),
-        crate::state_checker::checkpoint_state_consistency(events, durable_writes, expectations),
-    ];
-    oracles.extend(scenario_contract_mini_oracles(events, summary));
-    oracles.extend(scenario_contract_oracles(events, summary));
+    let mut oracles = Vec::new();
+    visit_generated_trace_oracles(events, summary, durable_writes, expectations, |verdict| {
+        oracles.push(verdict);
+        true
+    });
     oracles
+}
+
+/// Identity of a generated-workload oracle that is known BEFORE the oracle is
+/// evaluated. Scenario-contract oracles are keyed by their static contract, so
+/// a caller hunting one named verdict can decline to evaluate the rest; every
+/// other oracle only becomes identifiable once it has been evaluated.
+pub enum OracleSlot<'a> {
+    Battery(&'static str),
+    ScenarioContract(&'a ScenarioContractSpec),
+}
+
+impl OracleSlot<'_> {
+    /// The verdict id this slot produces. Every generated-workload oracle has a
+    /// fixed id: a battery entry declares the constant it reports under, and a
+    /// scenario-contract entry derives its id from the static contract. The
+    /// walk debug-asserts the evaluated verdict against this, so a slot whose
+    /// oracle grows a second id fails the crate's own tests rather than
+    /// silently making a caller's skip decision wrong.
+    pub fn declared_oracle_id(&self) -> String {
+        match self {
+            Self::Battery(oracle_id) => (*oracle_id).to_string(),
+            Self::ScenarioContract(contract) => scenario_contract_oracle_id(contract),
+        }
+    }
+}
+
+/// Walk the generated-workload oracle battery in evaluation order, handing each
+/// verdict to `visit` and stopping as soon as it returns `false`.
+///
+/// [`generated_trace_oracles`] is this walk collected into a vector, so the two
+/// cannot drift: one ordering, one membership. `skip` is consulted BEFORE a
+/// slot is evaluated and a skipped slot costs nothing — the minimizer uses it
+/// to avoid re-deriving scenario-contract verdicts it has already proven cannot
+/// change its answer (see `minimize::candidate_preserves_target`).
+pub fn walk_generated_trace_oracles<S, V>(
+    events: &[DeliveredBoundary],
+    summary: &AbstractWorldSummary,
+    durable_writes: &[CheckpointWriteEvent],
+    expectations: &WorkloadExpectations,
+    mut skip: S,
+    mut visit: V,
+) where
+    S: FnMut(&OracleSlot<'_>) -> bool,
+    V: FnMut(OracleVerdict) -> bool,
+{
+    macro_rules! battery {
+        ($oracle_id:expr, $verdict:expr) => {
+            if !skip(&OracleSlot::Battery($oracle_id)) {
+                let verdict = $verdict;
+                debug_assert_eq!(
+                    verdict.oracle_id, $oracle_id,
+                    "battery slot declared an oracle id its verdict does not use"
+                );
+                if !visit(verdict) {
+                    return;
+                }
+            }
+        };
+    }
+    battery!(
+        SCHEDULER_CONTROLLED_DELIVERY_ORACLE,
+        scheduler_controlled_delivery(events)
+    );
+    battery!(
+        SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
+        scheduler_owned_runtime_completions(events)
+    );
+    battery!(
+        STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
+        state_machine_semantic_invariants(events, summary)
+    );
+    battery!(
+        OPERATIONAL_COVERAGE_ORACLE,
+        operational_coverage(events, summary)
+    );
+    battery!(
+        INGRESS_SESSION_OPENED_ORACLE,
+        ingress_sessions_opened(summary, expectations)
+    );
+    battery!(
+        QUEUED_INGRESS_ORACLE,
+        queued_ingress_observed(summary, events)
+    );
+    battery!(CANCELLATION_ORACLE, cancellation_observed(summary, events));
+    battery!(TRIGGER_ORACLE, trigger_delivery_observed(summary, events));
+    battery!(
+        OBSERVER_RECONNECT_ORACLE,
+        observer_reconnect_observed(summary, events)
+    );
+    battery!(
+        BACKEND_FAILURE_ORACLE,
+        backend_failure_observed(summary, events)
+    );
+    battery!(
+        PROVIDER_MUTATION_ORACLE,
+        provider_mutation_rejected(summary, events)
+    );
+    battery!(
+        PROVIDER_TRANSPORT_MUTATION_ORACLE,
+        provider_transport_mutation_classified(events, expectations)
+    );
+    battery!(
+        GENERATED_PROVIDER_MATRIX_ORACLE,
+        generated_runtime_provider_matrix(events)
+    );
+    battery!(
+        PROVIDER_TURN_INTERLEAVING_ORACLE,
+        provider_turn_interleaving_depth(events, expectations)
+    );
+    battery!(PROCESS_WAKE_ORACLE, process_wake_observed(summary, events));
+    battery!(
+        PROCESS_WAKE_AT_MOST_ONCE_ORACLE,
+        process_wake_at_most_once(events)
+    );
+    battery!(
+        PROCESS_NEVER_DOUBLE_STARTED_ORACLE,
+        process_never_double_started(events)
+    );
+    battery!(
+        ABANDONED_REQUIRES_EVIDENCE_ORACLE,
+        abandoned_requires_evidence(events)
+    );
+    battery!(
+        TOOL_BOUNDARY_ORACLE,
+        tool_boundary_observed(summary, events)
+    );
+    battery!(EXEC_CODE_ORACLE, exec_code_observed(summary, events));
+    battery!(
+        CROSS_SESSION_ISOLATION_ORACLE,
+        cross_session_isolation(summary)
+    );
+    battery!(
+        OBSERVER_CONVERGENCE_ORACLE,
+        observer_convergence(summary, expectations)
+    );
+    battery!(
+        RUNTIME_SESSION_GRAPH_ORACLE,
+        runtime_session_graph_contract(summary, expectations)
+    );
+    battery!(
+        RUNTIME_GRAPH_ACYCLIC_ORACLE,
+        runtime_graph_acyclic(durable_writes)
+    );
+    battery!(
+        RUNTIME_SINGLE_ACTIVE_AGENT_FRAME_ORACLE,
+        runtime_single_active_agent_frame(events)
+    );
+    battery!(
+        RUNTIME_USAGE_MONOTONIC_ORACLE,
+        runtime_usage_monotonic(events)
+    );
+    battery!(
+        crate::usage_oracle::RUNTIME_USAGE_CONSERVATION_ORACLE,
+        crate::usage_oracle::checkpoint_usage_conservation(durable_writes)
+    );
+    battery!(
+        DURABLE_EFFECT_EXACTLY_ONCE_ORACLE,
+        durable_effect_exactly_once(summary)
+    );
+    battery!(
+        WORKER_STALE_COMPLETION_ORACLE,
+        worker_stale_completion_rejected(summary)
+    );
+    battery!(
+        WORKER_FAILOVER_CONTINUATION_ORACLE,
+        worker_failover_continues_work(events)
+    );
+    battery!(
+        HEALTHY_LONG_TURN_LIVENESS_ORACLE,
+        healthy_long_turn_liveness(events)
+    );
+    battery!(
+        LEASE_TIME_MONOTONIC_ORACLE,
+        lease_time_monotonic(events, expectations)
+    );
+    battery!(
+        GENERATED_SUSPEND_RESUME_ORACLE,
+        generated_suspend_resume(events)
+    );
+    battery!(
+        GENERATED_FINAL_VALUE_ORACLE,
+        generated_final_value_semantic_channel(events, expectations)
+    );
+    battery!(
+        crate::state_checker::INDEPENDENT_CHECKPOINT_STATE_ORACLE,
+        crate::state_checker::checkpoint_state_consistency(events, durable_writes, expectations)
+    );
+    // Same oracles, in the same order, as `scenario_contract_mini_oracles`;
+    // spelled out one slot at a time so each declares the id it reports under.
+    debug_assert_eq!(
+        scenario_contract_mini_oracles(events, summary).len(),
+        13,
+        "mini scenario-contract oracles changed shape without updating this walk"
+    );
+    battery!(
+        SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE,
+        mini_runtime_queued_input_hidden(events)
+    );
+    battery!(
+        SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE,
+        mini_runtime_cancellation_prevents_idle_claim(events)
+    );
+    battery!(
+        SCENARIO_MINI_RUNTIME_PROCESS_WAKE_DEDUPE_ORACLE,
+        mini_runtime_process_wake_duplicate_rejected(events)
+    );
+    battery!(
+        SCENARIO_MINI_RUNTIME_STALE_LEASE_ORACLE,
+        mini_runtime_stale_lease_commit_rejected(events, summary)
+    );
+    battery!(
+        SCENARIO_MINI_STANDARD_STREAM_FINALIZE_ORACLE,
+        mini_standard_streamed_text_finalizes_once(events)
+    );
+    battery!(
+        SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE,
+        mini_standard_provider_error_without_checkpoint(events)
+    );
+    battery!(
+        SCENARIO_MINI_STANDARD_TOOL_REENTRY_ORACLE,
+        mini_standard_tool_loop_reenters(events)
+    );
+    battery!(
+        SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE,
+        mini_rlm_finish_required_prose_repair(events, summary)
+    );
+    battery!(
+        SCENARIO_MINI_RLM_SCHEMA_REPAIR_ORACLE,
+        mini_rlm_schema_mismatch_repair(events)
+    );
+    battery!(
+        SCENARIO_MINI_RLM_CELL_EXEC_ORACLE,
+        mini_rlm_lashlang_cell_exec_continues(events)
+    );
+    battery!(
+        SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE,
+        mini_agent_durable_input_resolution(events)
+    );
+    battery!(
+        SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE,
+        mini_agent_child_failure_graph(events, summary)
+    );
+    battery!(
+        SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE,
+        mini_agent_parallel_spawn_join(events, summary)
+    );
+    for contract in all_scenario_contracts() {
+        if skip(&OracleSlot::ScenarioContract(contract)) {
+            continue;
+        }
+        let verdict = scenario_contract_oracle(contract, events, summary);
+        debug_assert_eq!(
+            verdict.oracle_id,
+            scenario_contract_oracle_id(contract),
+            "scenario-contract slot declared an oracle id its verdict does not use"
+        );
+        if !visit(verdict) {
+            return;
+        }
+    }
+}
+
+/// [`walk_generated_trace_oracles`] with nothing skipped.
+pub fn visit_generated_trace_oracles<V>(
+    events: &[DeliveredBoundary],
+    summary: &AbstractWorldSummary,
+    durable_writes: &[CheckpointWriteEvent],
+    expectations: &WorkloadExpectations,
+    visit: V,
+) where
+    V: FnMut(OracleVerdict) -> bool,
+{
+    walk_generated_trace_oracles(
+        events,
+        summary,
+        durable_writes,
+        expectations,
+        |_| false,
+        visit,
+    )
 }

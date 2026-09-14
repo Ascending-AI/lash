@@ -134,8 +134,20 @@ pub fn combine_oracles(oracles: &[OracleVerdict]) -> OracleVerdict {
     if let Some(failure) = oracles.iter().find(|oracle| !oracle.is_passed()) {
         return failure.clone();
     }
+    passed_battery_verdict(oracles.len())
+}
+
+/// Verdict id of the aggregate [`combine_oracles`] reports when a whole battery
+/// passed. No single oracle reports under it: it is a function of the battery as
+/// a whole, so a caller that wants it has to evaluate every oracle.
+pub const GENERATED_WORKLOAD_BATTERY_ORACLE: &str = "sim.oracle.generated-workload.v1";
+
+/// The verdict [`combine_oracles`] reports when every oracle in a battery of
+/// `count` passed. Shared so a caller that decides the same predicate without
+/// materializing the battery cannot drift from the id or the wording.
+pub fn passed_battery_verdict(count: usize) -> OracleVerdict {
     OracleVerdict::passed(
-        "sim.oracle.generated-workload.v1",
-        format!("{} generated workload oracles passed", oracles.len()),
+        GENERATED_WORKLOAD_BATTERY_ORACLE,
+        format!("{count} generated workload oracles passed"),
     )
 }

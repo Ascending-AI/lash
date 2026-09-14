@@ -24,6 +24,9 @@ struct CheckedSession {
 /// serialized commit events into its own graph, active transcript, and token
 /// ledger, then compares that independent reconstruction with both the accepted
 /// raw rows and the accepted read-model projection captured at the commit seam.
+/// Verdict id of the independent checkpoint-state checker.
+pub const INDEPENDENT_CHECKPOINT_STATE_ORACLE: &str = "sim.oracle.independent-checkpoint-state.v1";
+
 pub fn checkpoint_state_consistency(
     events: &[DeliveredBoundary],
     writes: &[CheckpointWriteEvent],
@@ -31,15 +34,13 @@ pub fn checkpoint_state_consistency(
 ) -> OracleVerdict {
     match check_checkpoint_state(events, writes, expectations) {
         Ok((sessions, commits, runtime_facts)) => OracleVerdict::passed(
-            "sim.oracle.independent-checkpoint-state.v1",
+            INDEPENDENT_CHECKPOINT_STATE_ORACLE,
             format!(
                 "independent checkpoint checker matched raw rows, read models, and {runtime_facts} runtime-facts observations across {commits} commits in {sessions} sessions (workload declared {} session(s))",
                 expectations.session_count()
             ),
         ),
-        Err(message) => {
-            OracleVerdict::failed("sim.oracle.independent-checkpoint-state.v1", message)
-        }
+        Err(message) => OracleVerdict::failed(INDEPENDENT_CHECKPOINT_STATE_ORACLE, message),
     }
 }
 
