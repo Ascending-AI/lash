@@ -343,7 +343,7 @@ fn turn_control_hold_script(workflow_id: &str, fail_once: bool) -> String {
     let crash = if fail_once {
         format!(
             r#"
-crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
+const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});
 "#
         )
     } else {
@@ -353,10 +353,10 @@ crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
         r#"
 Wait for the exact-turn cooperative cancellation gate.
 
-<lashlang>
-{crash}gate = await tools.cancel_gate({{ workflow_id: "{workflow_id}" }})?
-finish {{ gate: gate, final: "unreachable" }}
-</lashlang>
+<typescript>
+{crash}const gate = await tools.cancel_gate({{ workflow_id: "{workflow_id}" }});
+finish({{ gate: gate, final: "unreachable" }});
+</typescript>
 "#
     )
 }
@@ -366,10 +366,10 @@ fn turn_control_sleep_script(workflow_id: &str) -> String {
         r#"
 Enter a long durable timer that must be woken by exact-turn cancellation.
 
-<lashlang>
-sleep for "300s"
-finish {{ workflow_id: "{workflow_id}", final: "unreachable" }}
-</lashlang>
+<typescript>
+await sleep(300000);
+finish({{ workflow_id: "{workflow_id}", final: "unreachable" }});
+</typescript>
 "#
     )
 }
@@ -379,9 +379,9 @@ fn turn_control_complete_script(workflow_id: &str) -> String {
         r#"
 Complete immediately so the terminal seal can race cancellation.
 
-<lashlang>
-finish {{ workflow_id: "{workflow_id}", final: "turn-control-completed" }}
-</lashlang>
+<typescript>
+finish({{ workflow_id: "{workflow_id}", final: "turn-control-completed" }});
+</typescript>
 "#
     )
 }
@@ -391,12 +391,12 @@ fn frame_switch_start_script(workflow_id: &str, follow_marker: &str) -> String {
         r#"
 Switch to a fresh frame and carry the non-empty baton seed.
 
-<lashlang>
+<typescript>
 await control.continue_as({{
   task: "Complete the durable follow-on. workflow_id={workflow_id} {follow_marker}",
   seed: {{ baton: "seed:{workflow_id}" }}
-}})?
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -406,14 +406,14 @@ fn frame_switch_follow_script(workflow_id: &str) -> String {
         r#"
 Read the seeded baton and finish.
 
-<lashlang>
-finish {{
+<typescript>
+finish({{
   workflow_id: "{workflow_id}",
   seed_visible: baton,
   follow_on: true,
   final: "{EXPECTED_FRAME_SWITCH_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -423,10 +423,10 @@ fn frame_switch_cancel_follow_script(workflow_id: &str) -> String {
         r#"
 Wait for cancellation in the follow-on frame.
 
-<lashlang>
-gate = await tools.cancel_gate({{ workflow_id: "{workflow_id}" }})?
-finish {{ gate: gate, final: "unreachable" }}
-</lashlang>
+<typescript>
+const gate = await tools.cancel_gate({{ workflow_id: "{workflow_id}" }});
+finish({{ gate: gate, final: "unreachable" }});
+</typescript>
 "#
     )
 }
@@ -436,13 +436,13 @@ fn frame_switch_pending_script(workflow_id: &str) -> String {
         r#"
 Finish the pre-existing second queued item.
 
-<lashlang>
-finish {{
+<typescript>
+finish({{
   workflow_id: "{workflow_id}",
   pending_item: true,
   final: "pending-after-frame-switch"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -452,13 +452,13 @@ fn frame_switch_post_cancel_script(workflow_id: &str) -> String {
         r#"
 Prove the cancelled session remains usable.
 
-<lashlang>
-finish {{
+<typescript>
+finish({{
   workflow_id: "{workflow_id}",
   session_usable: true,
   final: "{EXPECTED_FRAME_SWITCH_CANCEL_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -488,39 +488,41 @@ fn segment_loop_script(workflow_id: &str) -> String {
 Execute the same authored loop once without segmentation and once with a forced
 three-effect segment budget.
 
-<lashlang>
-process effect_loop(tools: Tools, workflow_id: str, force_segmentation: bool) {{
-  n = 0
-  total = 0
-  values = []
-  while n < 8 {{
-    lookup = await tools.app_lookup({{ key: "segment-loop" }})?
-    total = total + n
-    values = values + [lookup.value]
-    n = n + 1
+<typescript>
+const effect_loop = defineProcess({{
+  name: "effect_loop",
+  signals: {{}},
+  run: async (workflow_id, force_segmentation) => {{
+    let n = 0;
+    let total = 0;
+    const values = [];
+    while (n < 8) {{
+      const lookup = await tools.app_lookup({{ key: "segment-loop" }});
+      total = total + n;
+      values.push(lookup.value);
+      n = n + 1;
+    }}
+    return {{ total: total, values: values }};
   }}
-  finish {{ total: total, values: values }}
-}}
+}});
 
-control_handle = start effect_loop(
-  tools: tools,
+const control_handle = start(effect_loop, {{
   workflow_id: "{workflow_id}",
   force_segmentation: false
-)
-segmented_handle = start effect_loop(
-  tools: tools,
+}});
+const segmented_handle = start(effect_loop, {{
   workflow_id: "{workflow_id}",
   force_segmentation: true
-)
-control = (await control_handle)?
-segmented = (await segmented_handle)?
-finish {{
+}});
+const control = await control_handle;
+const segmented = await segmented_handle;
+finish({{
   workflow_id: "{workflow_id}",
   control: control,
   segmented: segmented,
   final: "{EXPECTED_SEGMENT_LOOP_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -529,7 +531,7 @@ fn kitchen_sink_script(workflow_id: &str, fail_once: bool) -> String {
     let crash = if fail_once {
         format!(
             r#"
-crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
+const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});
 "#
         )
     } else {
@@ -539,65 +541,73 @@ crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
         r#"
 Execute this program.
 
-<lashlang>
-process child(tools: Tools, value: str) {{
-  lookup = await tools.app_lookup({{ key: value }})?
-  finish {{ child: value, lookup: lookup.value }}
-}}
-
-process parent(tools: Tools, workflow_id: str) {{
-  parent_lookup = await tools.app_lookup({{ key: "parent" }})?
-  nested_handle = start child(tools: tools, value: "nested")
-  nested_result = (await nested_handle)?
-  parallel = await {{
-    left: start child(tools: tools, value: "left"),
-    right: start child(tools: tools, value: "right")
+<typescript>
+const child = defineProcess({{
+  name: "child",
+  signals: {{}},
+  run: async (value) => {{
+    const lookup = await tools.app_lookup({{ key: value }});
+    return {{ child: value, lookup: lookup.value }};
   }}
-  left_result = parallel.left?
-  right_result = parallel.right?
-  sleep for "1ms"
-  finish {{
-    parent_lookup: parent_lookup.value,
-    nested: nested_result.lookup,
-    parallel: {{
-      left: left_result.lookup,
-      right: right_result.lookup
-    }},
-    slept: true,
-    wake: "deferred"
-  }}
-}}
+}});
 
-process waker(workflow_id: str) {{
-  sleep for "1500ms"
-  wake {{
-    kind: "parent_wake",
-    workflow_id: workflow_id,
-    text: "deploy complete"
+const parent = defineProcess({{
+  name: "parent",
+  signals: {{}},
+  run: async (workflow_id) => {{
+    const parent_lookup = await tools.app_lookup({{ key: "parent" }});
+    const nested_result = await start(child, {{ value: "nested" }});
+    const [left_result, right_result] = await Promise.all([
+      start(child, {{ value: "left" }}),
+      start(child, {{ value: "right" }})
+    ]);
+    await sleep(1);
+    return {{
+      parent_lookup: parent_lookup.value,
+      nested: nested_result.lookup,
+      parallel: {{
+        left: left_result.lookup,
+        right: right_result.lookup
+      }},
+      slept: true,
+      wake: "deferred"
+    }};
   }}
-  finish {{ wake: "sent" }}
-}}
+}});
 
-foreground = await tools.app_lookup({{ key: "foreground" }})?
-attachment = await tools.make_attachment({{
+const waker = defineProcess({{
+  name: "waker",
+  signals: {{}},
+  run: async (workflow_id) => {{
+    await sleep(1500);
+    wake({{
+      kind: "parent_wake",
+      workflow_id: workflow_id,
+      text: "deploy complete"
+    }});
+    return {{ wake: "sent" }};
+  }}
+}});
+
+const foreground = await tools.app_lookup({{ key: "foreground" }});
+const attachment = await tools.make_attachment({{
   workflow_id: "{workflow_id}",
   name: "kitchen-sink.png"
-}})?
+}});
 {crash}
-parent_handle = start parent(tools: tools, workflow_id: "{workflow_id}")
-process_result = (await parent_handle)?
-waker_handle = start waker(workflow_id: "{workflow_id}")
-sleep for "0ms"
-finish {{
+const process_result = await start(parent, {{ workflow_id: "{workflow_id}" }});
+const waker_handle = start(waker, {{ workflow_id: "{workflow_id}" }});
+await sleep(0);
+finish({{
   workflow_id: "{workflow_id}",
   foreground: foreground.value,
   attachment_id: attachment.id,
   attachment_mime: attachment.mime,
-  wake_process: waker_handle,
+  wake_process: waker_handle.id,
   process: process_result,
   final: "{EXPECTED_FINAL_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -606,19 +616,23 @@ fn trigger_setup_script() -> String {
     r#"
 Register this trigger.
 
-<lashlang>
-process on_button(event: ui.button.Pressed) {
-  finish { triggered: event.button, message: event.message }
-}
+<typescript>
+const on_button = defineProcess({
+  name: "on_button",
+  signals: {},
+  run: async (event: ui.button.Pressed) => {
+    return { triggered: event.button, message: event.message };
+  }
+});
 
-handle = await triggers.register({
+const handle = await registerTrigger({
   source: ui.button.pressed({}),
   target: on_button,
-  inputs: { event: trigger.event },
+  inputs: (event) => ({ event: event }),
   name: "button watcher"
-})?
-finish { registered: true, handle: handle }
-</lashlang>
+});
+finish({ registered: true, handle: handle });
+</typescript>
 "#
     .to_string()
 }
@@ -628,24 +642,28 @@ fn signal_suspend_script(workflow_id: &str) -> String {
         r#"
 Start the signal suspension process but do not await it.
 
-<lashlang>
-process waiter(workflow_id: str) signals {{ first: any, second: any }} {{
-  first = wait_signal("first")
-  second = wait_signal("second")
-  finish {{
-    workflow_id: workflow_id,
-    first: first,
-    second: second
+<typescript>
+const waiter = defineProcess({{
+  name: "waiter",
+  signals: {{ first: null, second: null }},
+  run: async (workflow_id) => {{
+    const first = await waitSignal("first");
+    const second = await waitSignal("second");
+    return {{
+      workflow_id: workflow_id,
+      first: first,
+      second: second
+    }};
   }}
-}}
+}});
 
-handle = start waiter(workflow_id: "{workflow_id}")
-finish {{
+const handle = start(waiter, {{ workflow_id: "{workflow_id}" }});
+finish({{
   workflow_id: "{workflow_id}",
   process_id: handle.id,
   final: "signal-suspend-started"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -655,9 +673,9 @@ fn queued_wake_script() -> String {
         r#"
 Consume the queued wake.
 
-<lashlang>
-finish {{ wake_consumed: true, final: "{EXPECTED_WAKE_TEXT}" }}
-</lashlang>
+<typescript>
+finish({{ wake_consumed: true, final: "{EXPECTED_WAKE_TEXT}" }});
+</typescript>
 "#
     )
 }
@@ -667,20 +685,22 @@ fn async_completion_script(workflow_id: &str) -> String {
         r#"
 Exercise the async host tool completion path.
 
-<lashlang>
-process async_child(tools: Tools, workflow_id: str) {{
-  lookup = await tools.async_lookup({{ workflow_id: workflow_id, key: "detached" }})?
-  finish lookup
-}}
+<typescript>
+const async_child = defineProcess({{
+  name: "async_child",
+  signals: {{}},
+  run: async (workflow_id) => {{
+    return await tools.async_lookup({{ workflow_id: workflow_id, key: "detached" }});
+  }}
+}});
 
-handle = start async_child(tools: tools, workflow_id: "{workflow_id}")
-result = (await handle)?
-finish {{
+const result = await start(async_child, {{ workflow_id: "{workflow_id}" }});
+finish({{
   workflow_id: "{workflow_id}",
   async: result,
   final: "{EXPECTED_ASYNC_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -692,7 +712,7 @@ fn process_llm_query_script(workflow_id: &str, fail_once: bool) -> String {
         // rather than waiting on a peer that cedes (FIG-3030).
         format!(
             r#"
-  await tools.crash_once({{ workflow_id: "{workflow_id}", peer_takeover: false }})?"#
+    await tools.crash_once({{ workflow_id: "{workflow_id}", peer_takeover: false }});"#
         )
     } else {
         String::new()
@@ -701,24 +721,27 @@ fn process_llm_query_script(workflow_id: &str, fail_once: bool) -> String {
         r#"
 Exercise the exact FIG-446 process-to-llm_query geometry with typed output.
 
-<lashlang>
-process enrich(event: {{ email: str }}) {{
-  enriched = await llm.query({{
-    task: "Classify this email. workflow_id={workflow_id} process_llm_query=true",
-    inputs: {{ event: event }},
-    output: Type {{ category: str, confidence: float }}
-  }})?{replay_probe}
-  finish enriched
-}}
-handle = start enrich(event: {{ email: "hello@example.com" }})
-result = (await handle)?
-finish {{
+<typescript>
+const enrich = defineProcess({{
+  name: "enrich",
+  signals: {{}},
+  run: async (event) => {{
+    const enriched = await llm.query({{
+      task: "Classify this email. workflow_id={workflow_id} process_llm_query=true",
+      inputs: {{ event: event }},
+      output: {{ category: "str", confidence: "float" }}
+    }});{replay_probe}
+    return enriched;
+  }}
+}});
+const result = await start(enrich, {{ event: {{ email: "hello@example.com" }} }});
+finish({{
   workflow_id: "{workflow_id}",
   category: result.category,
   confidence: result.confidence,
   final: "process-llm-query-complete"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -728,23 +751,25 @@ fn durable_input_request_script(workflow_id: &str) -> String {
         r#"
 Exercise a durable in-process tool that opens an input request and resumes through a custom await key.
 
-<lashlang>
-process durable_child(tools: Tools, workflow_id: str) {{
-  input = await tools.durable_input_request({{
-    workflow_id: workflow_id,
-    question: "approve durable input?"
-  }})?
-  finish input
-}}
+<typescript>
+const durable_child = defineProcess({{
+  name: "durable_child",
+  signals: {{}},
+  run: async (workflow_id) => {{
+    return await tools.durable_input_request({{
+      workflow_id: workflow_id,
+      question: "approve durable input?"
+    }});
+  }}
+}});
 
-handle = start durable_child(tools: tools, workflow_id: "{workflow_id}")
-result = (await handle)?
-finish {{
+const result = await start(durable_child, {{ workflow_id: "{workflow_id}" }});
+finish({{
   workflow_id: "{workflow_id}",
   durable: result,
   final: "{EXPECTED_DURABLE_INPUT_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -754,33 +779,39 @@ fn parent_durable_input_after_child_script(workflow_id: &str) -> String {
         r#"
 Exercise parent replay after a completed child process and a durable input suspension.
 
-<lashlang>
-process immediate_child(value: str) {{
-  finish {{ child: value }}
-}}
-
-process parent(tools: Tools, workflow_id: str) {{
-  child_handle = start immediate_child(value: "ready")
-  child = (await child_handle)?
-  input = await tools.durable_input_request({{
-    workflow_id: workflow_id,
-    question: "approve parent durable input?",
-    attach_after_resolution: true
-  }})?
-  finish {{
-    child: child.child,
-    durable: input
+<typescript>
+const immediate_child = defineProcess({{
+  name: "immediate_child",
+  signals: {{}},
+  run: async (value) => {{
+    return {{ child: value }};
   }}
-}}
+}});
 
-handle = start parent(tools: tools, workflow_id: "{workflow_id}")
-result = (await handle)?
-finish {{
+const parent = defineProcess({{
+  name: "parent",
+  signals: {{}},
+  run: async (workflow_id) => {{
+    const child = await start(immediate_child, {{ value: "ready" }});
+    const input = await tools.durable_input_request({{
+      workflow_id: workflow_id,
+      question: "approve parent durable input?",
+      attach_after_resolution: true
+    }});
+    return {{
+      child: child.child,
+      durable: input
+    }};
+  }}
+}});
+
+const result = await start(parent, {{ workflow_id: "{workflow_id}" }});
+finish({{
   workflow_id: "{workflow_id}",
   parent: result,
   final: "{EXPECTED_PARENT_DURABLE_INPUT_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -789,7 +820,7 @@ fn tool_batch_script(workflow_id: &str, fail_once: bool) -> String {
     let crash = if fail_once {
         format!(
             r#"
-crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
+const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});
 "#
         )
     } else {
@@ -799,27 +830,27 @@ crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }})?
         r#"
 Exercise direct aggregate resource batching.
 
-<lashlang>
+<typescript>
 {crash}
-batch = await {{
-  slow: tools.batch_side_effect({{
+const [slow, fast] = await Promise.all([
+  tools.batch_side_effect({{
     workflow_id: "{workflow_id}",
     key: "slow",
     delay_ms: 75
-  }})?,
-  fast: tools.batch_side_effect({{
+  }}),
+  tools.batch_side_effect({{
     workflow_id: "{workflow_id}",
     key: "fast",
     delay_ms: 5
-  }})?,
-  literal: "kept"
-}}
-finish {{
+  }})
+]);
+const batch = {{ slow: slow, fast: fast, literal: "kept" }};
+finish({{
   workflow_id: "{workflow_id}",
   batch: batch,
   final: "{EXPECTED_TOOL_BATCH_TEXT}"
-}}
-</lashlang>
+}});
+</typescript>
 "#
     )
 }
@@ -860,29 +891,71 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mock_scripts_use_paired_lashlang_tags() {
-        let scripts = [
+    /// Every scripted response the mock provider can return, so a cell that
+    /// stops being executable cannot hide behind a scenario nobody enumerates.
+    fn every_mock_script() -> Vec<String> {
+        vec![
             kitchen_sink_script("e2e-test", false),
             kitchen_sink_script("e2e-test", true),
             trigger_setup_script(),
             signal_suspend_script("e2e-test"),
             queued_wake_script(),
             async_completion_script("e2e-test"),
+            process_llm_query_script("e2e-test", false),
+            process_llm_query_script("e2e-test", true),
             durable_input_request_script("e2e-test"),
             parent_durable_input_after_child_script("e2e-test"),
             tool_batch_script("e2e-test", false),
             tool_batch_script("e2e-test", true),
             segment_loop_script("e2e-test"),
-        ];
+            turn_control_hold_script("e2e-test", false),
+            turn_control_hold_script("e2e-test", true),
+            turn_control_sleep_script("e2e-test"),
+            turn_control_complete_script("e2e-test"),
+            frame_switch_start_script("e2e-test", "frame_switch_follow=true"),
+            frame_switch_follow_script("e2e-test"),
+            frame_switch_cancel_follow_script("e2e-test"),
+            frame_switch_pending_script("e2e-test"),
+            frame_switch_post_cancel_script("e2e-test"),
+        ]
+    }
 
-        for script in scripts {
+    /// TypeScript is the only RLM language (ADR 0096). A cell in the retired
+    /// surface is not refused — it is read as prose, so the turn finishes with
+    /// no final value and every downstream assertion reads `null` instead of
+    /// the program's answer. That is how FIG-3062's second failure hid: the
+    /// dialect cutover re-authored the crate's other cells and missed this
+    /// file's scripted provider.
+    #[test]
+    fn mock_scripts_are_paired_typescript_cells() {
+        for script in every_mock_script() {
             assert!(
-                !script.contains("```lashlang"),
-                "mock script still uses markdown-fenced Lashlang:\n{script}"
+                !script.contains("lashlang"),
+                "mock script still names the retired RLM surface:\n{script}"
             );
-            assert_eq!(script.matches("<lashlang>").count(), 1);
-            assert_eq!(script.matches("</lashlang>").count(), 1);
+            assert_eq!(
+                script.matches("<typescript>").count(),
+                1,
+                "mock script does not open exactly one TypeScript cell:\n{script}"
+            );
+            assert_eq!(
+                script.matches("</typescript>").count(),
+                1,
+                "mock script does not close exactly one TypeScript cell:\n{script}"
+            );
+        }
+    }
+
+    /// Every cell has to reach a terminal statement. A cell that only computes
+    /// leaves the turn with no final value, which the runner reads as a missing
+    /// answer rather than as a broken script.
+    #[test]
+    fn every_mock_script_reaches_a_terminal_statement() {
+        for script in every_mock_script() {
+            assert!(
+                script.contains("finish(") || script.contains("control.continue_as("),
+                "mock script neither finishes nor switches frame:\n{script}"
+            );
         }
     }
 }
