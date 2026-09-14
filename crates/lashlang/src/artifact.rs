@@ -169,17 +169,7 @@ impl ModuleArtifact {
         canonical_ir: Program,
         requirements: HostRequirements,
     ) -> Result<Self, ModuleArtifactError> {
-        crate::ast::validate_ast(&canonical_ir)?;
-        if let Some(process) = canonical_ir.declarations.iter().find_map(|declaration| {
-            let Declaration::Process(process) = declaration else {
-                return None;
-            };
-            process.return_ty.is_none().then_some(process)
-        }) {
-            return Err(ModuleArtifactError::IncompleteProcessSignature {
-                process: process.name.to_string(),
-            });
-        }
+        Self::check_canonical_ir(&canonical_ir)?;
         let host_requirements_ref = host_requirements_ref(&requirements);
         let exports = module_exports(&canonical_ir);
         let module_ref = module_ref(&canonical_ir, &host_requirements_ref, &exports);
@@ -190,6 +180,25 @@ impl ModuleArtifact {
             exports,
             canonical_ir,
         })
+    }
+
+    /// Refuses IR the compiler cannot lower, independently of its refs.
+    ///
+    /// Shared by the builder and by `verify` so an admission check sees exactly
+    /// what construction does.
+    fn check_canonical_ir(canonical_ir: &Program) -> Result<(), ModuleArtifactError> {
+        crate::ast::validate_ast(canonical_ir)?;
+        if let Some(process) = canonical_ir.declarations.iter().find_map(|declaration| {
+            let Declaration::Process(process) = declaration else {
+                return None;
+            };
+            process.return_ty.is_none().then_some(process)
+        }) {
+            return Err(ModuleArtifactError::IncompleteProcessSignature {
+                process: process.name.to_string(),
+            });
+        }
+        Ok(())
     }
 
     pub fn process_ref(&self, process_name: &str) -> Option<&ProcessRef> {
@@ -250,26 +259,41 @@ impl ModuleArtifact {
         crate::ModuleIntrospection::from_artifact(self)
     }
 
+    /// Refuses an artifact whose recorded refs do not match its own content.
+    ///
+    /// The refs are derived from borrowed content rather than by rebuilding the
+    /// artifact: a rebuild cloned the whole canonical IR and the host
+    /// requirements only to hash them, which made every publish cost a deep
+    /// copy of the program (FIG-3088). What this refuses is unchanged - the
+    /// same AST validation, the same incomplete-signature refusal, and the same
+    /// three ref comparisons in the same order. Canonicalisation only clears the
+    /// span tables, which neither `write_program` nor `validate_ast` reads, so
+    /// deriving from the artifact's own IR is equivalent to deriving from a
+    /// canonicalised copy of it.
     pub fn verify(&self) -> Result<(), ModuleArtifactError> {
-        let rebuilt = Self::from_program_with_requirements(
-            self.canonical_ir.clone(),
-            self.host_requirements.clone(),
-        )?;
-        if rebuilt.module_ref != self.module_ref {
+        Self::check_canonical_ir(&self.canonical_ir)?;
+        let derived_host_requirements_ref = host_requirements_ref(&self.host_requirements);
+        let derived_exports = module_exports(&self.canonical_ir);
+        let derived_module_ref = module_ref(
+            &self.canonical_ir,
+            &derived_host_requirements_ref,
+            &derived_exports,
+        );
+        if derived_module_ref != self.module_ref {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "module_ref",
-                expected: rebuilt.module_ref.to_string(),
+                expected: derived_module_ref.to_string(),
                 actual: self.module_ref.to_string(),
             });
         }
-        if rebuilt.host_requirements_ref != self.host_requirements_ref {
+        if derived_host_requirements_ref != self.host_requirements_ref {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "host_requirements_ref",
-                expected: rebuilt.host_requirements_ref.to_string(),
+                expected: derived_host_requirements_ref.to_string(),
                 actual: self.host_requirements_ref.to_string(),
             });
         }
-        if rebuilt.exports != self.exports {
+        if derived_exports != self.exports {
             return Err(ModuleArtifactError::HashMismatch {
                 field: "exports",
                 expected: "canonical exports".to_string(),
@@ -1028,7 +1052,19 @@ fn write_type(writer: &mut HashWriter, ty: &TypeExpr) {
     }
 }
 
-fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer) {
+fn write_name_token(writer: &mut HashWriter, token: NameToken<'_>) {
+    match token {
+        NameToken::Abi(name) => writer.prefixed_atom("abi:", name),
+        NameToken::Global(name) => writer.prefixed_atom("global:", name),
+        NameToken::Local(index) => writer.numbered_atom("local:", u64::from(index)),
+    }
+}
+
+fn write_expr<'program>(
+    writer: &mut HashWriter,
+    expr: &'program Expr,
+    normalizer: &NameNormalizer<'program>,
+) {
     match expr {
         Expr::Block(expressions) => {
             writer.atom("block");
@@ -1058,7 +1094,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
         }
         Expr::Variable(name) => {
             writer.atom("variable");
-            writer.atom(&normalizer.name_token(name.as_str()));
+            write_name_token(writer, normalizer.name_token(name.as_str()));
         }
         Expr::Tuple(items) => {
             writer.atom("tuple");
@@ -1081,7 +1117,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
                 match clause {
                     ListComprehensionClause::For { binding, iterable } => {
                         writer.atom("for");
-                        writer.atom(&normalizer.name_token(binding.as_str()));
+                        write_name_token(writer, normalizer.name_token(binding.as_str()));
                         write_expr(writer, iterable, normalizer);
                     }
                     ListComprehensionClause::If { condition } => {
@@ -1102,7 +1138,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
         }
         Expr::Assign { target, expr } => {
             writer.atom("assign");
-            writer.atom(&normalizer.name_token(target.root.as_str()));
+            write_name_token(writer, normalizer.name_token(target.root.as_str()));
             writer.usize(target.steps.len());
             for step in &target.steps {
                 match step {
@@ -1134,7 +1170,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             body,
         } => {
             writer.atom("for");
-            writer.atom(&normalizer.name_token(binding.as_str()));
+            write_name_token(writer, normalizer.name_token(binding.as_str()));
             write_expr(writer, iterable, normalizer);
             write_expr(writer, body, normalizer);
         }
@@ -1219,16 +1255,16 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
         Expr::Function(function) => {
             writer.atom("function");
             match &function.name {
-                Some(name) => writer.atom(&normalizer.name_token(name.as_str())),
+                Some(name) => write_name_token(writer, normalizer.name_token(name.as_str())),
                 None => writer.atom("anonymous"),
             }
             writer.usize(function.params.len());
             for param in &function.params {
-                writer.atom(&normalizer.name_token(param.as_str()));
+                write_name_token(writer, normalizer.name_token(param.as_str()));
             }
             writer.usize(function.captures.len());
             for capture in &function.captures {
-                writer.atom(&normalizer.name_token(capture.as_str()));
+                write_name_token(writer, normalizer.name_token(capture.as_str()));
             }
             write_expr(writer, &function.body, normalizer);
         }
@@ -1251,7 +1287,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
             match &scope.catch {
                 Some(catch) => {
                     writer.atom("catch");
-                    writer.atom(&normalizer.name_token(catch.binding.as_str()));
+                    write_name_token(writer, normalizer.name_token(catch.binding.as_str()));
                     write_expr(writer, &catch.body, normalizer);
                 }
                 None => writer.atom("no-catch"),
@@ -1314,36 +1350,54 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr, normalizer: &NameNormalizer)
 #[cfg(test)]
 mod tests;
 
+/// One name's hashed identity, held as a description rather than as a rendered
+/// string.
+///
+/// Rendering the token (`abi:x`, `local:3`, `global:x`) allocated once per
+/// binding and once per mention, which is the bulk of what hashing a module
+/// cost (FIG-3088). `HashWriter` writes the same bytes from the parts.
+#[derive(Clone, Copy)]
+enum NameToken<'program> {
+    Abi(&'program str),
+    Local(u32),
+    Global(&'program str),
+}
+
+/// Name bindings are looked up, never iterated, so the map is unordered: a
+/// `BTreeMap` allocates a ~KiB node for the handful of names one scope binds,
+/// which showed up directly in the artifact roundtrip's byte budget
+/// (FIG-3088). The hashed bytes do not depend on the map's order - the local
+/// index a name gets is assigned in binder order by `next_local`.
 #[derive(Default)]
-struct NameNormalizer {
-    names: BTreeMap<String, String>,
-    abi_names: BTreeSet<String>,
+struct NameNormalizer<'program> {
+    names: rustc_hash::FxHashMap<&'program str, NameToken<'program>>,
     next_local: u32,
 }
 
-impl NameNormalizer {
-    fn bind_abi(&mut self, name: &str) {
-        self.abi_names.insert(name.to_string());
-        self.names.insert(name.to_string(), format!("abi:{name}"));
+impl<'program> NameNormalizer<'program> {
+    fn bind_abi(&mut self, name: &'program str) {
+        self.names.insert(name, NameToken::Abi(name));
     }
 
-    fn bind_local(&mut self, name: &str) {
-        if self.abi_names.contains(name) || self.names.contains_key(name) {
+    fn bind_local(&mut self, name: &'program str) {
+        // An ABI name is in `names` too, so one lookup covers both.
+        if self.names.contains_key(name) {
             return;
         }
-        let token = format!("local:{}", self.next_local);
+        let token = NameToken::Local(self.next_local);
         self.next_local += 1;
-        self.names.insert(name.to_string(), token);
+        self.names.insert(name, token);
     }
 
-    fn name_token(&self, name: &str) -> String {
+    /// The hashed token for one name reference.
+    fn name_token(&self, name: &'program str) -> NameToken<'program> {
         self.names
             .get(name)
-            .cloned()
-            .unwrap_or_else(|| format!("global:{name}"))
+            .copied()
+            .unwrap_or(NameToken::Global(name))
     }
 
-    fn collect_expr(&mut self, expr: &Expr) {
+    fn collect_expr(&mut self, expr: &'program Expr) {
         // Local binders are the only nodes that carry naming semantics; every
         // other node just feeds its sub-expressions back through `collect_expr`,
         // so the generic arm folds over `Expr::children()`. `Assign` and `For`

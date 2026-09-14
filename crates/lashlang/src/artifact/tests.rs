@@ -225,3 +225,88 @@ fn malformed_artifact_json_remains_an_undecodable_codec_error() {
     assert!(matches!(error, ModuleArtifactError::Codec(_)));
     assert!(!matches!(error, ModuleArtifactError::FutureShape { .. }));
 }
+
+/// The refs are now derived from borrowed content instead of by rebuilding the
+/// artifact, so the store's admission check has to keep refusing an artifact
+/// whose refs do not describe the content it carries.
+///
+/// Red side: dropping the `artifact.verify()?;` line from
+/// `InMemoryLashlangArtifactStore::publish_module_artifact`, or either of the
+/// two ref comparisons exercised here, lets the forged artifacts publish.
+/// Each half gets its own store so the refusal under test is the ref check and
+/// never the immutability check on an already-published ref.
+#[tokio::test(flavor = "current_thread")]
+async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
+    let owner = lash_core::ArtifactOwner::host("fig-3088");
+    let honest = process_typed_artifact("event");
+
+    // A forged `module_ref`: the content is the "payload" program, the ref is
+    // the one the "event" program hashes to.
+    let mut forged_module_ref = process_typed_artifact("payload");
+    let payload_ref = forged_module_ref.module_ref.clone();
+    forged_module_ref.module_ref = honest.module_ref.clone();
+    let store = InMemoryLashlangArtifactStore::new();
+    let error = store
+        .publish_module_artifact(&owner, &forged_module_ref)
+        .await
+        .expect_err("a module_ref that does not hash its own content must be refused");
+    assert!(
+        error.to_string().contains("module_ref"),
+        "expected a module_ref mismatch, got {error}"
+    );
+    for refused in [&honest.module_ref, &payload_ref] {
+        assert!(
+            store
+                .get_module_artifact(refused)
+                .await
+                .expect("the store reads back")
+                .is_none(),
+            "a refused publish must retain nothing"
+        );
+    }
+
+    // A forged `host_requirements_ref`: the content and the module_ref are the
+    // honest ones, only the requirements ref names requirements this artifact
+    // does not carry, so the module_ref comparison passes and the second
+    // comparison is the one that has to refuse it.
+    let mut forged_requirements_ref = process_typed_artifact("event");
+    let mut unrequested = forged_requirements_ref.host_requirements.clone();
+    unrequested.globals.insert("unrequested_global".to_string());
+    forged_requirements_ref.host_requirements_ref = host_requirements_ref(&unrequested);
+    assert_ne!(
+        forged_requirements_ref.host_requirements_ref,
+        honest.host_requirements_ref
+    );
+    assert_eq!(forged_requirements_ref.module_ref, honest.module_ref);
+    let store = InMemoryLashlangArtifactStore::new();
+    let error = store
+        .publish_module_artifact(&owner, &forged_requirements_ref)
+        .await
+        .expect_err("host requirements that do not hash to their ref must be refused");
+    assert!(
+        error.to_string().contains("host_requirements_ref"),
+        "expected a host_requirements_ref mismatch, got {error}"
+    );
+    assert!(
+        store
+            .get_module_artifact(&honest.module_ref)
+            .await
+            .expect("the store reads back")
+            .is_none(),
+        "a refused publish must retain nothing"
+    );
+
+    // The same store still admits the artifact whose refs do match, so the
+    // refusals above are the ref check and not a blanket rejection.
+    let store = InMemoryLashlangArtifactStore::new();
+    store
+        .publish_module_artifact(&owner, &honest)
+        .await
+        .expect("an artifact whose refs match its content publishes");
+    let stored = store
+        .get_module_artifact(&honest.module_ref)
+        .await
+        .expect("the store reads back")
+        .expect("the honest artifact is retained");
+    assert_eq!(*stored, honest);
+}
