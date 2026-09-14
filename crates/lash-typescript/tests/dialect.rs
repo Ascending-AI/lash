@@ -324,49 +324,16 @@ fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
     });
 }
 
-#[test]
-fn lashlang_resume_refuses_an_authored_typescript_reference_marker() {
-    futures::executor::block_on(async {
-        let program = lashlang::compile("print 1\nfinish 2").expect("compile Lashlang");
-        let mut state = State::new();
-        let mut vm = Vm::from_state(&program, &mut state, &Host).expect("install Lashlang VM");
-        vm.run_process_until_effect().await.expect("run to print");
-        let continuation = vm.suspend().expect("capture Lashlang continuation");
-        let mut authored = serde_json::to_value(continuation).expect("encode continuation");
-        authored
-            .as_object_mut()
-            .expect("continuation object")
-            .insert("reference_semantics".into(), serde_json::Value::Bool(true));
-        let decoded = serde_json::from_value(authored).expect("decode authored continuation");
-
-        assert!(
-            Vm::resume_from(decoded, &program, &Host).is_err(),
-            "a TypeScript reference marker must not select Lashlang VM semantics"
-        );
-    });
-}
-
-#[test]
-fn lashlang_execution_refuses_a_shared_typescript_state() {
-    futures::executor::block_on(async {
-        let typescript = lash_typescript::compile(
-            "const shared = { value: 1 }; const holder = { a: shared, b: shared }; finish(holder.a.value);",
-        )
-        .expect("compile TypeScript");
-        let mut state = State::new();
-        lashlang::execute(&typescript, &mut state, &Host)
-            .await
-            .expect("create shared TypeScript state");
-
-        let lashlang = lashlang::compile("finish 1").expect("compile Lashlang");
-        assert!(
-            lashlang::execute(&lashlang, &mut state, &Host)
-                .await
-                .is_err(),
-            "Lashlang must reject a shared heap regardless of the stored marker"
-        );
-    });
-}
+// Two refusals lived here: a continuation whose `reference_semantics` marker
+// was authored true could not be resumed under Lashlang VM semantics, and a
+// heap a TypeScript program had shared could not be re-entered by a Lashlang
+// program. Both cross-checked a program's dialect against the heap shape, and
+// both retired with the surface (ADR 0096): every program this build compiles
+// runs ECMA reference semantics, so there is no second semantics to refuse.
+// `reference_semantics` still says what it always said on the wire — whether
+// the heap is a shared graph or a forest — and the structural validation it
+// selects is still asserted by `resumed_typescript_can_capture_aliases_created
+// _after_the_first_suspend` above.
 
 fn normalized_continuation_bytes(
     program: &lashlang::CompiledProgram,

@@ -390,7 +390,7 @@ if (existing.length > 0) {
   handle = await registerTrigger({
     source: mail.received({}),
     target: forward_mail,
-    inputs: { event: trigger.event },
+    inputs: (event) => ({ event: event }),
     name: "runtime-perf-test-to-test23-forwarder"
   });
 }
@@ -654,7 +654,7 @@ if (existing.length == 0) {{
   const handle = await registerTrigger({{
     source: mail.received({{}}),
     target: load_forward,
-    inputs: {{ event: trigger.event }},
+    inputs: (event) => ({{ event: event }}),
     name: {trigger_name}
   }});
 }}

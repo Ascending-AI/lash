@@ -900,7 +900,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     // (ADR 0096). Same three facts: the registration primitive is offered, its
     // shape is stated, and the registry is readable.
     assert!(prompts[0].contains("registerTrigger(c: {source:"));
-    assert!(prompts[0].contains("Literal target; inputs match params."));
+    assert!(prompts[0].contains("Literal target; inputs match params, arrow erased."));
     assert!(prompts[0].contains("triggers.list"));
     assert!(!prompts[0].contains("TRIGGER."));
     Ok(())

@@ -1909,6 +1909,12 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 /// Artifact-byte identity is what the hashes and the bytecode are derived
 /// from, so a drift in any of them is a drift in the first assertion too; the
 /// rest are pinned because they are what other systems durably hold.
+///
+/// The captured bytes were re-pinned once more when TypeScript became the only
+/// RLM language (ADR 0096): the artifact no longer carries a
+/// `compilation_dialect` field, and every hash derived from those bytes moved
+/// with it. Nothing else in the capture changed, so the arrow form still
+/// reproduces the retired record form structure for structure.
 #[test]
 fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
@@ -1989,11 +1995,8 @@ finish(handle);
             fixture["process_definition_identity"]
         );
 
-        let compiled = lashlang::compile_ast_with_dialect(
-            &artifact.canonical_ir,
-            lashlang::CompilationDialect::Typescript,
-        )
-        .expect("the canonical IR compiles");
+        let compiled =
+            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
         assert_eq!(
             serde_json::json!(format!("{compiled:?}")),
             fixture["compiled_program_debug"]

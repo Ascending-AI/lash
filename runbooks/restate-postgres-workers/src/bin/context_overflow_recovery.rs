@@ -50,8 +50,6 @@ const OVERSIZED_TOOL: &str = "oversized_report";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()
-        .context("LASH_RUNBOOK_DIALECT names a registered dialect")?;
     let run_id = format!(
         "{:x}",
         lash_restate_postgres_workers_e2e::current_epoch_ms()
@@ -59,7 +57,6 @@ async fn main() -> Result<()> {
 
     // Arm 1: the provider states the terminal reason itself.
     let overflow = overflow_and_recovery(
-        dialect,
         &run_id,
         Script::Overflow,
         "context_overflow_recovered",
@@ -72,7 +69,6 @@ async fn main() -> Result<()> {
     // a real provider takes, and the one that used to collapse into
     // `ProviderError` no matter how well it had been classified.
     let classified = overflow_and_recovery(
-        dialect,
         &run_id,
         Script::ClassifiedOverflow,
         "classified_overflow_recovered",
@@ -80,7 +76,7 @@ async fn main() -> Result<()> {
     )
     .await?;
     emit(&classified);
-    let control = provider_error_control(dialect, &run_id).await?;
+    let control = provider_error_control(&run_id).await?;
     emit(&control);
     Ok(())
 }
@@ -96,13 +92,12 @@ fn emit(checkpoint: &Value) {
 /// text lash classifies itself -- and the point of running both is that the
 /// outcome, the recovery and the continued session must be identical either way.
 async fn overflow_and_recovery(
-    dialect: lash::rlm::RlmDialect,
     run_id: &str,
     script: Script,
     checkpoint: &str,
     session_tag: &str,
 ) -> Result<Value> {
-    let harness = Harness::new(dialect, script)?;
+    let harness = Harness::new(script)?;
     let session_id = SessionId::from(format!("context-overflow-{session_tag}-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -152,7 +147,7 @@ async fn overflow_and_recovery(
 
     Ok(json!({
         "checkpoint": checkpoint,
-        "dialect": dialect.language_id(),
+        "dialect": "typescript",
         "session_id": session_id.as_str(),
         "oversized_tool_result_bytes": tool_bytes,
         "provider_calls": harness.provider_calls(),
@@ -173,8 +168,8 @@ async fn overflow_and_recovery(
 
 /// The control: a plain provider error on the same harness must not produce
 /// the overflow outcome.
-async fn provider_error_control(dialect: lash::rlm::RlmDialect, run_id: &str) -> Result<Value> {
-    let harness = Harness::new(dialect, Script::ProviderError)?;
+async fn provider_error_control(run_id: &str) -> Result<Value> {
+    let harness = Harness::new(Script::ProviderError)?;
     let session_id = SessionId::from(format!("context-overflow-control-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -195,7 +190,7 @@ async fn provider_error_control(dialect: lash::rlm::RlmDialect, run_id: &str) ->
 
     Ok(json!({
         "checkpoint": "provider_error_control",
-        "dialect": dialect.language_id(),
+        "dialect": "typescript",
         "session_id": session_id.as_str(),
         "control_stop": stop,
         "control_outcome": outcome,
@@ -230,7 +225,6 @@ enum Script {
 
 struct Harness {
     core: lash::LashCore,
-    dialect: lash::rlm::RlmDialect,
     provider_calls: Arc<AtomicUsize>,
     tool_bytes: Arc<AtomicUsize>,
     _scratch: tempfile::TempDir,
@@ -238,7 +232,7 @@ struct Harness {
 }
 
 impl Harness {
-    fn new(dialect: lash::rlm::RlmDialect, script: Script) -> Result<Self> {
+    fn new(script: Script) -> Result<Self> {
         let scratch = tempfile::tempdir().context("scratch dir for the SQLite backend")?;
         let attachments = tempfile::tempdir().context("attachment dir")?;
         let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -259,11 +253,7 @@ impl Harness {
 
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, rlm)
             .with_native_queued_work()
-            .provider(scripted_provider(
-                dialect,
-                script,
-                Arc::clone(&provider_calls),
-            ))
+            .provider(scripted_provider(script, Arc::clone(&provider_calls)))
             .model(
                 lash::ModelSpec::builder("context-overflow-recovery-mock")
                     .context_window_tokens(200_000)
@@ -291,7 +281,6 @@ impl Harness {
 
         Ok(Self {
             core,
-            dialect,
             provider_calls,
             tool_bytes,
             _scratch: scratch,
@@ -302,14 +291,6 @@ impl Harness {
     async fn open(&self, session_id: &SessionId) -> Result<lash::LashSession> {
         self.core
             .session(session_id)
-            .plugin_option(
-                lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras {
-                    dialect: Some(self.dialect),
-                    ..lash::rlm::RlmCreateExtras::default()
-                },
-            )
-            .context("state the row's dialect")?
             .open()
             .await
             .with_context(|| format!("open session `{session_id}`"))
@@ -324,33 +305,22 @@ impl Harness {
     }
 }
 
-/// One cell, spelled for `dialect`.
-fn cell(dialect: lash::rlm::RlmDialect, lashlang: &str, typescript: &str) -> String {
-    let body = match dialect {
-        lash::rlm::RlmDialect::Lashlang => lashlang,
-        lash::rlm::RlmDialect::Typescript => typescript,
-    };
-    let tag = dialect.language_id();
-    format!("<{tag}>\n{body}\n</{tag}>")
+/// One cell. TypeScript is the only RLM language (ADR 0096).
+fn cell(body: &str) -> String {
+    format!("<typescript>\n{body}\n</typescript>")
 }
 
 /// The cell that pulls the oversized tool result into this turn's context and
 /// does *not* finish, so the protocol asks the provider again with the
 /// oversized result in the request. That second request is the one that
 /// overflows.
-fn oversized_call_cell(dialect: lash::rlm::RlmDialect) -> String {
-    cell(
-        dialect,
-        &format!("report = await tools.{OVERSIZED_TOOL}({{}})?"),
-        &format!("const report = await tools.{OVERSIZED_TOOL}({{}});"),
-    )
+fn oversized_call_cell() -> String {
+    cell(&format!(
+        "const report = await tools.{OVERSIZED_TOOL}({{}});"
+    ))
 }
 
-fn scripted_provider(
-    dialect: lash::rlm::RlmDialect,
-    script: Script,
-    calls: Arc<AtomicUsize>,
-) -> lash::provider::ProviderHandle {
+fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider::ProviderHandle {
     lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
         .kind("context-overflow-recovery")
         .complete(move |_request| {
@@ -358,7 +328,7 @@ fn scripted_provider(
             async move {
                 Ok(match (script, call) {
                     // Turn 1, call 1: reach for the oversized report.
-                    (_, 0) => text_response(oversized_call_cell(dialect)),
+                    (_, 0) => text_response(oversized_call_cell()),
                     // Turn 1, call 2: the request now carries the oversized
                     // result and the model refuses it as too large.
                     (Script::Overflow, 1) => terminal_response(
@@ -383,7 +353,6 @@ fn scripted_provider(
                     // Turn 2, after the host compacted: the session continues.
                     (_, _) => {
                         text_response(lash_restate_postgres_workers_e2e::scripted_finish_cell(
-                            dialect,
                             "\"the report checks out\"",
                         ))
                     }

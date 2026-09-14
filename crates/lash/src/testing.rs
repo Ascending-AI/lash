@@ -103,7 +103,7 @@ const remember = defineProcess({
 const handle = await registerTrigger({
   source: clock.Alarm({ at: "08:00" }),
   target: remember,
-  inputs: { tick: trigger.event },
+  inputs: (event) => ({ tick: event }),
   name: "remembered"
 });
 finish("registered");
@@ -122,7 +122,7 @@ const remember_button = defineProcess({
 const handle = await registerTrigger({
   source: ui.button.pressed({}),
   target: remember_button,
-  inputs: { event: trigger.event },
+  inputs: (event) => ({ event: event }),
   name: "button remembered"
 });
 finish("registered");
