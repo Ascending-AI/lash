@@ -4,6 +4,13 @@
 
 Accepted.
 
+Amended 2026-09-14 (FIG-3075): the statement-position property this ADR leaned
+on for the transient side of the rule is gone, and it is not needed. TypeScript
+is the sole dialect (ADR 0096), its assignment is an expression, and a store
+does run while operands are pending. The paragraph that named that as a
+breaking change is rewritten below to say what the boundary actually holds;
+nothing else in this ADR moves, and Lashlang's forest validator is unchanged.
+
 ## Context
 
 Lashlang values used to be trees: every binding held its own structure, and a
@@ -78,16 +85,26 @@ Applying the validator to the encoders as well means a violation fails at the
 write that introduced it rather than at a later cold restore in another process,
 and cannot reach durable storage at all.
 
-The transient side of that rule rests on a property of the language rather than
-of the heap: assignment in Lashlang is a statement, so no durable store can run
-while operands are pending, and a borrowed handle on the stack cannot outlive
-the store that created it. Two changes would break it — making assignment an
-expression, so that `f(x = [1], x)` puts a store between two live operands, or
-adding an opcode that writes a slot while unrelated operands are still on the
-stack. The heap layer does not detect either: it would keep accepting the
-duplicate as a transient borrow. A parse-level test pins the statement property;
-an opcode that wanted to violate the second would have to declare itself in the
-instruction heap plan, which is where someone would have to notice.
+The transient side of that rule rests on the heap, not on the language. This
+ADR originally read the other way: it held that assignment being a statement
+kept any durable store from running while operands were pending, so a borrowed
+handle on the stack could not outlive the store that created it, and it named
+`f(x = [1], x)` as a shape that would break the rule. That reading was wrong
+about what the rule needs. TypeScript is the sole dialect (ADR 0096) and its
+assignment is an expression, so `f((x = [1]), x)` and `[(xs = [2]), xs]` are
+ordinary programs: the store runs between two live operands, and the handle it
+leaves on the stack is the object the slot now holds. The boundary takes that
+as written, because an operand is a *transient* root — it confers no ownership,
+so one object named by a slot and by a pending operand is still a forest with
+one owner. A turn can park on that shape, encode, decode and resume with the
+sharing intact, and where a program's heap genuinely has no forest form the
+encoder records the shared graph form instead (ADR 0096). The same answer
+covers an opcode that writes a slot while unrelated operands are live: the
+in-place append and compound-assignment opcodes do exactly that, and under
+reference semantics the operand holding the object is *required* to see the
+write. What the durable rule still forbids is a second *durable* owner, which
+is what the isolation copy at every durable store exists to prevent, and what
+the validator checks at every boundary.
 
 One recursive enumerator answers child discovery for allocation bookkeeping,
 reverse parent edges, mark, sweep, wire validation and root traversal, so no
