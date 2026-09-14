@@ -6,7 +6,7 @@ use crate::ast::{
 };
 use crate::runtime::entry_points::compile_program_internal;
 use crate::testing::ast_builders as builders;
-use lash_sansio::sync::{LockResultExt, MutexExt};
+use lash_sansio::sync::MutexExt;
 use std::fmt::Write as _;
 use std::sync::{
     Arc, Mutex,

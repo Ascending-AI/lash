@@ -156,7 +156,14 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
         environment: &environment,
     })
     .expect("labeled workflow compiles");
-    let graph = lashlang::workflow_graph_from_source(source).expect("workflow graph projects");
+    // The lens moved to the TypeScript crate (FIG-3033). This witness is
+    // Lashlang source — `@label` and a list comprehension have no TypeScript
+    // form — so it projects the parsed program rather than the source: the
+    // program projection is language-agnostic and does not round-trip through
+    // canonical TypeScript.
+    let graph = lash_typescript::workflow_graph::workflow_graph_from_program(
+        &lashlang::parse(source).expect("labeled workflow parses"),
+    );
     let trace_map = trace_lashlang_main_map(&output.artifact);
 
     let container_kinds = graph
