@@ -75,8 +75,8 @@ fn prompt_advertises_bound_variable(prompt: &str, name: &str) -> bool {
     prompt.contains(&format!("- `{name}`:")) || prompt.contains(&format!("- `{name}` ="))
 }
 
-fn lashlang_block(code: &str) -> String {
-    format!("<lashlang>\n{code}\n</lashlang>")
+fn typescript_block(code: &str) -> String {
+    format!("<typescript>\n{code}\n</typescript>")
 }
 
 #[test]
@@ -459,15 +459,15 @@ async fn spawn_uses_live_parent_provider_when_selecting_subagent_model() {
 #[tokio::test]
 async fn rlm_spawn_seed_is_visible_to_child_executor_and_prompt() {
     let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-result = await agents.spawn({
+        r#"<typescript>
+const result = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#,
+  output: { len: "int" }
+});
+finish(result);
+</typescript>"#,
         TurnInput::text("spawn a child with a seeded chunk"),
     )
     .await;
@@ -496,15 +496,15 @@ finish result
 #[tokio::test]
 async fn a_typescript_parent_spawns_typescript_children() {
     let (_outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-result = await agents.spawn({
+        r#"<typescript>
+const result = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#,
+  output: { len: "int" }
+});
+finish(result);
+</typescript>"#,
         TurnInput::text("spawn a child from a typescript parent"),
     )
     .await;
@@ -532,15 +532,15 @@ finish result
 /// measured on and, since ADR 0096, the only reader there is.
 #[tokio::test]
 async fn spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt() {
-    let parent_response = r#"<lashlang>
-result = await agents.spawn({
+    let parent_response = r#"<typescript>
+const result = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#;
+  output: { len: "int" }
+});
+finish(result);
+</typescript>"#;
 
     let (_outcome, typescript) = run_seed_probe(
         parent_response,
@@ -593,16 +593,15 @@ fn tool_doc_section(prompt: &str) -> &str {
 #[tokio::test]
 async fn rlm_spawn_record_shorthand_returns_child_final_value() {
     let (outcome, _) = run_seed_probe(
-        r#"<lashlang>
-@label(title: "Spawn subagent")
-direct = await agents.spawn({
+        r#"<typescript>
+const direct = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
   output: { len: "int" }
-})?
-finish direct
-</lashlang>"#,
+});
+finish(direct);
+</typescript>"#,
         TurnInput::text("spawn a child with record shorthand output"),
     )
     .await;
@@ -620,16 +619,20 @@ finish direct
 #[tokio::test]
 async fn schema_mismatch_stops_after_one_child_execution_and_reaches_parent_failure() {
     let probe = run_seed_probe_inner_dispatch_with(
-        lashlang_block(
+        typescript_block(
             r#"
-result = await agents.spawn({
-  capability: "default",
-  task: "Return a len value.",
-  output: Type { len: int }
-})
-finish result"#,
+try {
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Return a len value.",
+    output: { len: "int" }
+  });
+  finish(result);
+} catch (error) {
+  finish({ ok: false, error: error.message });
+}"#,
         ),
-        lashlang_block(r#"finish "not-an-object""#),
+        typescript_block(r#"finish("not-an-object");"#),
         TurnInput::text("reject the child's invalid typed result"),
         Arc::new(BoundaryValidationCapability),
     )
@@ -666,15 +669,15 @@ finish result"#,
 #[tokio::test]
 async fn rlm_spawn_is_visible_through_parent_session_process_observer() {
     let probe = run_seed_probe_inner_dispatch(
-        lashlang_block(
+        typescript_block(
             r#"
-result = await agents.spawn({
+const result = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result"#,
+  output: { len: "int" }
+});
+finish(result);"#,
         ),
         TurnInput::text("spawn one observable subagent process"),
         None,
@@ -694,20 +697,23 @@ finish result"#,
 #[tokio::test]
 async fn rlm_spawn_process_handle_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-process spawn_child(agents: Agents) {
-  result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start spawn_child(agents: agents)
-result = (await handle)?
-finish result
-</lashlang>"#,
+        r#"<typescript>
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    const result = await agents.spawn({
+      capability: "default",
+      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["a", "b"] },
+      output: { len: "int" }
+    });
+    return result;
+  }
+});
+const handle = start(spawnChild);
+finish(await handle);
+</typescript>"#,
         TurnInput::text("spawn a child with a seeded chunk through start/await"),
     )
     .await;
@@ -726,25 +732,34 @@ finish result
     );
 }
 
+/// A spawn inside a process still returns the child's final value.
+///
+/// The lashlang form of this cell carried an `@label(title: ..)` decorator on
+/// the spawn. TypeScript has no label form — the lowerer builds no label node —
+/// so the decorator is gone with the surface (ADR 0096) and the name is kept
+/// only because the trunk shards select tests by name. Nothing here asserted
+/// the label; what it pins is the spawn-inside-a-process path.
 #[tokio::test]
 async fn rlm_spawn_labeled_inside_process_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-process spawn_child() {
-  @label(title: "Spawn subagent inside process")
-  result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start spawn_child()
-result = (await handle)?
-finish result
-</lashlang>"#,
-        TurnInput::text("spawn a labeled child inside a Lashlang process"),
+        r#"<typescript>
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    const result = await agents.spawn({
+      capability: "default",
+      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["a", "b"] },
+      output: { len: "int" }
+    });
+    return result;
+  }
+});
+const handle = start(spawnChild);
+finish(await handle);
+</typescript>"#,
+        TurnInput::text("spawn a child inside a durable process"),
     )
     .await;
 
@@ -765,20 +780,23 @@ finish result
 #[tokio::test]
 async fn rlm_spawn_captured_process_authority_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-process spawn_child() {
-  result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start spawn_child()
-result = (await handle)?
-finish result
-</lashlang>"#,
+        r#"<typescript>
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    const result = await agents.spawn({
+      capability: "default",
+      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["a", "b"] },
+      output: { len: "int" }
+    });
+    return result;
+  }
+});
+const handle = start(spawnChild);
+finish(await handle);
+</typescript>"#,
         TurnInput::text("spawn a child with captured agents authority through start/await"),
     )
     .await;
@@ -801,15 +819,15 @@ finish result
 async fn rlm_spawn_links_subagent_process_from_lashlang_graph() {
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
     let (outcome, _) = run_seed_probe_with_graph_store(
-        r#"<lashlang>
-result = await agents.spawn({
+        r#"<typescript>
+const result = await agents.spawn({
   capability: "default",
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#,
+  output: { len: "int" }
+});
+finish(result);
+</typescript>"#,
         TurnInput::text("spawn a child and link its graph"),
         Some(Arc::clone(&graph_store)),
     )
@@ -852,14 +870,14 @@ finish result
 #[tokio::test]
 async fn rlm_spawn_defaults_single_capability_when_omitted() {
     let (outcome, prompt) = run_seed_probe(
-        r#"<lashlang>
-result = await agents.spawn({
-  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+        r#"<typescript>
+const result = await agents.spawn({
+  task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["a", "b"] },
-  output: Type { len: int }
-})?
-finish result
-</lashlang>"#,
+  output: { len: "int" }
+});
+finish(result);
+</typescript>"#,
         TurnInput::text("spawn a child with the default capability"),
     )
     .await;
@@ -945,7 +963,7 @@ async fn run_seed_probe_inner_dispatch(
 ) -> SeedProbe {
     run_seed_probe_inner_dispatch_with_options(
         parent_response,
-        lashlang_block("finish { len: len(chunk) }"),
+        typescript_block("finish({ len: chunk.length });"),
         input,
         graph_store,
         Arc::new(StaticCapability::new("default", SessionSpec::inherit())),

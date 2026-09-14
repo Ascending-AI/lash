@@ -7,6 +7,11 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v21 carries VM continuation v14 and bytecode v15. TypeScript is the only RLM
+// language (ADR 0096), so the instruction set loses the deep-copy instructions
+// the retired surface compiled to: a snapshot written before the cutover parks
+// a continuation over an instruction stream this reader cannot reproduce, so
+// the boundary is a version rather than a decode failure.
 // v20 pins the attempt bound this execution stamps onto the children its code
 // starts. An older reader would drop the pin and let a redrive re-resolve the
 // host default, which re-registers an existing child with a different
@@ -32,9 +37,6 @@ use thiserror::Error;
 // v12 carried Lashlang snapshot v6 and its durable RegExpMatch heap kind.
 // v11 carried Lashlang snapshot v5, whose stricter heap reference wire shape
 // changes embedded global bytes and therefore their component identities.
-// v21 drops the dialect from the executor snapshot: TypeScript is the only RLM
-// language (ADR 0096), so a snapshot that still records one is refused as an
-// incompatible format rather than decoded with a default.
 // v10 added serializable lashlang call frames and closure heap objects. v9 was
 // one shape carrying two changes that each claimed v8 independently:
 // the inline-versus-leaf size line applies to globals and files alike, and a

@@ -105,16 +105,16 @@ fn rlm_prompt_history_focused_check_metadata_is_unique_and_complete() {
 fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
     RlmProtocolScenario::new(TEXT_ONLY_CELL_TRAJECTORY.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part(&lashlang_block("print \"hi\""))])
+        .llm_response(vec![text_part(&typescript_block("print(\"hi\");"))])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_message_count: Some(0),
             assistant_reasoning_texts: Some(Vec::new()),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"hi\"",
+                code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 error: None,
                 final_output: None,
@@ -130,16 +130,16 @@ fn rlm_prompt_history_provider_reasoning_is_recorded_separately_from_lashlang_te
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![
             reasoning_part("hidden plan"),
-            text_part(&lashlang_block("print \"hi\"")),
+            text_part(&typescript_block("print(\"hi\");")),
         ])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_reasoning_texts: Some(vec!["hidden plan"]),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"hi\"",
+                code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 error: None,
                 final_output: None,
@@ -153,18 +153,18 @@ fn rlm_prompt_history_provider_reasoning_is_recorded_separately_from_lashlang_te
 fn rlm_prompt_history_visible_text_before_cell_is_recorded_as_prose_not_reasoning() {
     RlmProtocolScenario::new(VISIBLE_PROSE_BEFORE_CELL.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part(&lashlang_block_with_prose(
+        .llm_response(vec![text_part(&typescript_block_with_prose(
             "I will inspect first.\n",
-            "print \"hi\"",
+            "print(\"hi\");",
         ))])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_reasoning_texts: Some(Vec::new()),
             assistant_visible_texts: Some(vec!["I will inspect first."]),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"hi\"",
+                code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 error: None,
                 final_output: None,
@@ -179,10 +179,10 @@ fn rlm_prompt_history_text_after_closing_tag_is_silently_cut_and_executes() {
     RlmProtocolScenario::new(SUFFIX_REPAIR.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![text_part(
-            "Before\n<lashlang>\nprint \"hi\"\n</lashlang>\nIgnored suffix",
+            "Before\n<typescript>\nprint(\"hi\");\n</typescript>\nIgnored suffix",
         )])
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             ..RlmProtocolExpectations::default()
         })
         .run();
@@ -194,16 +194,19 @@ fn rlm_prompt_history_reasoning_and_visible_prose_are_independent_lanes() {
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![
             reasoning_part("private chain"),
-            text_part(&lashlang_block_with_prose("visible status", "print \"hi\"")),
+            text_part(&typescript_block_with_prose(
+                "visible status",
+                "print(\"hi\");",
+            )),
         ])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_reasoning_texts: Some(vec!["private chain"]),
             assistant_visible_texts: Some(vec!["visible status"]),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"hi\"",
+                code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 error: None,
                 final_output: None,
@@ -217,7 +220,7 @@ fn rlm_prompt_history_reasoning_and_visible_prose_are_independent_lanes() {
 fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lashlang_cell() {
     RlmProtocolScenario::new(MARKDOWN_BEFORE_CELL.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part(&lashlang_block_with_prose(
+        .llm_response(vec![text_part(&typescript_block_with_prose(
             "Example:\n```python\nprint('hi')\n```",
             "print \"done\"",
         ))])
@@ -244,11 +247,14 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![
             reasoning_part("find the failing call"),
-            text_part(&lashlang_block_with_prose("Trying it now.", "missing_name")),
+            text_part(&typescript_block_with_prose(
+                "Trying it now.",
+                "missing_name",
+            )),
         ])
         .exec_result(exec_response(
             &[],
-            Some("unknown variable `missing_name`"),
+            Some("unknown binding `missing_name`"),
             None,
         ))
         .expect(RlmProtocolExpectations {
@@ -260,8 +266,8 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
                 code: "missing_name",
                 output: Vec::new(),
                 error: Some(program_failure_feedback(
-                    "unknown variable `missing_name`",
-                    "block",
+                    "unknown binding `missing_name`",
+                    "cell",
                 )),
                 final_output: None,
             }),
@@ -276,17 +282,20 @@ fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() 
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![
             reasoning_part("ready to finish"),
-            text_part(&lashlang_block_with_prose("Finishting.", "finish \"done\"")),
+            text_part(&typescript_block_with_prose(
+                "Finishting.",
+                "finish(\"done\");",
+            )),
         ])
         .exec_result(exec_response(&[], None, Some(serde_json::json!("done"))))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish \"done\""],
+            exec_codes: vec!["finish(\"done\");"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             no_final_message_event: true,
             assistant_reasoning_texts: Some(vec!["ready to finish"]),
             assistant_visible_texts: Some(vec!["Finishting."]),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish \"done\"",
+                code: "finish(\"done\");",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!("done")),
@@ -303,17 +312,17 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
         .termination(RlmTermination::FinishRequired { schema: None })
         .streamed_llm_response(vec![
             reasoning_part("I'll answer directly."),
-            text_part(&lashlang_block("finish \"Hi.\"")),
+            text_part(&typescript_block("finish(\"Hi.\");")),
         ])
         .exec_result(exec_response(&[], None, Some(serde_json::json!("Hi."))))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish \"Hi.\""],
+            exec_codes: vec!["finish(\"Hi.\");"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             no_final_message_event: true,
             assistant_reasoning_texts: Some(vec!["I'll answer directly."]),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish \"Hi.\"",
+                code: "finish(\"Hi.\");",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!("Hi.")),

@@ -30,6 +30,13 @@ use super::exceptions::PendingErrorOrigin;
 /// continuations cannot carry projected bindings, so restore reconstructs the
 /// in-memory vectors from the slot counts.
 ///
+/// v14 follows the single-language cutover (ADR 0096). The instruction set
+/// loses the deep-copy instructions the retired surface compiled to, so a
+/// parked continuation's instruction pointer and frame stack address a stream
+/// this build cannot reproduce; and `reference_semantics` stops being a
+/// cross-check against the program's dialect and becomes only what it always
+/// described on the wire, whether this heap is a shared graph or a forest.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 14;

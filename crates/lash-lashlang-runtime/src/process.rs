@@ -44,9 +44,11 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
-/// v8 drops the dialect from the segment envelope: TypeScript is the only RLM
-/// language (ADR 0096), so a segment parked by a build that recorded one is
-/// refused as an incompatible format rather than decoded with a default.
+/// v8 carries VM continuation v14. TypeScript is the only RLM language
+/// (ADR 0096), so the instruction set loses the deep-copy instructions the
+/// retired surface compiled to: a segment parked before the cutover holds a
+/// continuation over an instruction stream this reader cannot reproduce, so the
+/// boundary is a version rather than a decode failure.
 /// v7 pins the attempt bound this segment stamps onto the children it starts,
 /// so a redrive after a host config change re-registers the recorded bound
 /// instead of conflicting with the fingerprint the first attempt wrote.

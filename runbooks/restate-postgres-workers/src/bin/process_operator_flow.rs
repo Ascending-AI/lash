@@ -214,7 +214,6 @@ fn process_json(record: &ProcessRecord) -> Value {
     })
 }
 
-/// Read once: a bad `LASH_RUNBOOK_DIALECT` must fail the phase, not one turn.
 /// The scripted cell. A cell the session cannot execute never reaches a
 /// terminal state, so the row would hang instead of failing.
 fn scripted_response(value: &str) -> LlmResponse {

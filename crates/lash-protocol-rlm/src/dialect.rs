@@ -412,9 +412,16 @@ pub(crate) struct DialectPromptVocabulary {
 }
 
 impl Default for DialectPromptVocabulary {
-    /// The default dialect's words, matching `RlmDialect::default()`.
+    /// TypeScript's words, because they are the only ones a session can be
+    /// served (ADR 0096).
+    ///
+    /// This used to answer with the retired surface's vocabulary, which was
+    /// correct only while `RlmDialect::default()` named it. With the selector
+    /// gone, a defaulted vocabulary that still spoke the retired surface would
+    /// be the compatibility reader this cutover exists to remove. FIG-3021
+    /// deletes the lashlang vocabulary itself.
     fn default() -> Self {
-        crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY
+        crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY
     }
 }
 

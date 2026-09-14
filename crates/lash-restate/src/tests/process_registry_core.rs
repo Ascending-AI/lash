@@ -1230,15 +1230,19 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 let llm_provider_calls = Arc::clone(&llm_provider_calls);
                 async move {
                     llm_provider_calls.fetch_add(1, Ordering::SeqCst);
-                    let source = r#"<lashlang>
-process replay_probe(tools: Tools) {
-  counted = await tools.replay_scalar_counter({})?
-  resumed = await tools.replay_pending_input({})?
-  finish { counted: counted.value, answer: resumed.answer }
-}
-handle = start replay_probe(tools: tools)
-finish (await handle)?
-</lashlang>"#;
+                    let source = r#"<typescript>
+const replayProbe = defineProcess({
+  name: "replay_probe",
+  signals: {},
+  run: async () => {
+    const counted = await tools.replay_scalar_counter({});
+    const resumed = await tools.replay_pending_input({});
+    return { counted: counted.value, answer: resumed.answer };
+  }
+});
+const handle = start(replayProbe);
+finish(await handle);
+</typescript>"#;
                     Ok(lash_core::LlmResponse {
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: source.to_string(),

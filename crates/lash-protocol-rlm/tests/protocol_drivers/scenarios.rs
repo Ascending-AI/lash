@@ -195,18 +195,18 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
 
     let reasoning_text = "Plan first.";
     let prose = "Ready.";
-    let code = "print \"hi\"";
-    let cell_text = lashlang_block_with_prose(prose, code);
+    let code = "print(\"hi\");";
+    let cell_text = typescript_block_with_prose(prose, code);
     let cell_payload = serde_json::json!({
         "turn_id": "test-turn",
-        "decision": "execute_lashlang",
+        "decision": "execute_typescript",
         "termination": "natural",
         "counts": {
             "full_text_chars": cell_text.chars().count(),
             "prose_chars": prose.chars().count(),
             "code_chars": code.chars().count(),
             "reasoning_chars": reasoning_text.chars().count(),
-            "lashlang_cell_count": 1,
+            "typescript_cell_count": 1,
         },
     });
 
@@ -223,23 +223,23 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
         vec![code],
     );
 
-    let split_open = "<lashlang>\nprint \"split\"";
-    let split_close = "</lashlang>";
-    let split_code = "print \"split\"\n";
+    let split_open = "<typescript>\nprint(\"split\");";
+    let split_close = "</typescript>";
+    let split_code = "print(\"split\");\n";
     let split_full_text_chars = split_open.chars().count() + split_close.chars().count() + 2;
     assert_case(
         "response cell classification: split text parts",
         vec![text_part(split_open), text_part(split_close)],
         serde_json::json!({
             "turn_id": "test-turn",
-            "decision": "execute_lashlang",
+            "decision": "execute_typescript",
             "termination": "natural",
             "counts": {
                 "full_text_chars": split_full_text_chars,
                 "prose_chars": 0,
                 "code_chars": split_code.chars().count(),
                 "reasoning_chars": 0,
-                "lashlang_cell_count": 1,
+                "typescript_cell_count": 1,
             },
         }),
         vec![split_code],
@@ -274,7 +274,7 @@ fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup(
     RlmProtocolScenario::new("natural unclosed cell retry")
         .termination(RlmTermination::Natural)
         .llm_response(vec![text_part(
-            "Visible plan.\n<lashlang>\nprint \"unfinished\"",
+            "Visible plan.\n<typescript>\nprint(\"unfinished\");",
         )])
         .checkpoint()
         .expect(RlmProtocolExpectations {
@@ -292,7 +292,7 @@ fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup(
 fn rlm_protocol_unclosed_cell_retries_in_finish_required_mode() {
     RlmProtocolScenario::new("finish-required unclosed cell retry")
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part("<lashlang>\nfinish { ok: true }")])
+        .llm_response(vec![text_part("<typescript>\nfinish({ ok: true });")])
         .checkpoint()
         .expect(RlmProtocolExpectations {
             checkpoints: vec![CheckpointKind::AfterWork],
@@ -315,7 +315,7 @@ fn rlm_protocol_scenario_typed_prose_only_response_requests_finish() {
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_call_count: Some(2),
             done: Some(false),
-            system_message_contains: vec!["No code from that response executed.", "finish <value>"],
+            system_message_contains: vec!["No code from that response executed.", "finish(value)"],
             system_message_omits: vec!["required output schema"],
             ..RlmProtocolExpectations::default()
         })
@@ -334,7 +334,7 @@ fn rlm_protocol_scenario_finish_required_prose_at_max_turns_stops_without_retry_
         .expect(RlmProtocolExpectations {
             llm_call_count: Some(1),
             done: Some(true),
-            system_message_omits: vec!["No code from that response executed.", "finish <value>"],
+            system_message_omits: vec!["No code from that response executed.", "finish(value)"],
             turn_outcome: Some(lash_core::facade_support::TurnOutcome::Stopped(
                 lash_core::facade_support::TurnStop::MaxTurns,
             )),
@@ -349,10 +349,10 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
         .user_message("run bad code")
         .termination(RlmTermination::FinishRequired { schema: None })
         .max_turns(1)
-        .llm_response(vec![text_part(&lashlang_block("missing_name"))])
+        .llm_response(vec![text_part(&typescript_block("missing_name"))])
         .exec_result(exec_response(
             &[],
-            Some("unknown variable `missing_name`"),
+            Some("unknown binding `missing_name`"),
             None,
         ))
         .expect(RlmProtocolExpectations {
@@ -366,8 +366,8 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
                 code: "missing_name",
                 output: Vec::new(),
                 error: Some(program_failure_feedback(
-                    "unknown variable `missing_name`",
-                    "block",
+                    "unknown binding `missing_name`",
+                    "cell",
                 )),
                 final_output: None,
             }),
@@ -381,7 +381,7 @@ fn rlm_protocol_scenario_natural_cell_at_budget_stops_without_another_provider_c
     RlmProtocolScenario::new(NATURAL_CELL_MAX_TURN.display_name)
         .user_message("run exactly one cell")
         .max_turns(1)
-        .llm_response(vec![text_part(&lashlang_block("print \"allowed\""))])
+        .llm_response(vec![text_part(&typescript_block("print \"allowed\""))])
         .exec_result(exec_response(&["allowed"], None, None))
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["print \"allowed\""],
@@ -415,7 +415,7 @@ fn rlm_protocol_scenario_finish_required_prose_only_diagnostic_has_clean_counts(
                     "prose_chars": assistant_text.chars().count(),
                     "code_chars": 0,
                     "reasoning_chars": 0,
-                    "lashlang_cell_count": 0,
+                    "typescript_cell_count": 0,
                 },
             })),
             ..RlmProtocolExpectations::default()
@@ -442,7 +442,7 @@ fn rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts() {
                     "prose_chars": assistant_text.chars().count(),
                     "code_chars": 0,
                     "reasoning_chars": 0,
-                    "lashlang_cell_count": 0,
+                    "typescript_cell_count": 0,
                 },
             })),
             ..RlmProtocolExpectations::default()
@@ -454,8 +454,8 @@ fn rlm_protocol_scenario_natural_prose_only_diagnostic_has_clean_counts() {
 fn rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts() {
     let reasoning_text = "Checking state.";
     let assistant_prose = "Ready.";
-    let code = "print \"hi\"";
-    let assistant_text = lashlang_block_with_prose(assistant_prose, code);
+    let code = "print(\"hi\");";
+    let assistant_text = typescript_block_with_prose(assistant_prose, code);
 
     RlmProtocolScenario::new(CELL_REASONING_PROSE_CODE_DIAGNOSTIC.display_name)
         .user_message("run some code")
@@ -467,14 +467,14 @@ fn rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts()
             exec_codes: vec![code],
             llm_extraction_payload: Some(serde_json::json!({
                 "turn_id": "test-turn",
-                "decision": "execute_lashlang",
+                "decision": "execute_typescript",
                 "termination": "natural",
                 "counts": {
                     "full_text_chars": assistant_text.chars().count(),
                     "prose_chars": assistant_prose.chars().count(),
                     "code_chars": code.chars().count(),
                     "reasoning_chars": reasoning_text.chars().count(),
-                    "lashlang_cell_count": 1,
+                    "typescript_cell_count": 1,
                 },
             })),
             ..RlmProtocolExpectations::default()
@@ -486,7 +486,7 @@ fn rlm_protocol_scenario_cell_reasoning_prose_code_diagnostic_has_clean_counts()
 fn rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text() {
     let assistant_prose = "First.";
     let code = "text = \"%%lashlang is just source here\"\nprint text";
-    let assistant_text = lashlang_block_with_prose(assistant_prose, code);
+    let assistant_text = typescript_block_with_prose(assistant_prose, code);
 
     RlmProtocolScenario::new(RETIRED_PERCENT_MARKER.display_name)
         .user_message("run some code")
@@ -495,14 +495,14 @@ fn rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_
             exec_codes: vec![code],
             llm_extraction_payload: Some(serde_json::json!({
                 "turn_id": "test-turn",
-                "decision": "execute_lashlang",
+                "decision": "execute_typescript",
                 "termination": "natural",
                 "counts": {
                     "full_text_chars": assistant_text.chars().count(),
                     "prose_chars": assistant_prose.chars().count(),
                     "code_chars": code.chars().count(),
                     "reasoning_chars": 0,
-                    "lashlang_cell_count": 1,
+                    "typescript_cell_count": 1,
                 },
             })),
             ..RlmProtocolExpectations::default()
@@ -514,20 +514,20 @@ fn rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_
 fn rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues() {
     RlmProtocolScenario::new(LASHLANG_CELL_EXECUTION.display_name)
         .user_message("run some code")
-        .llm_response(vec![text_part(&lashlang_block_with_prose(
+        .llm_response(vec![text_part(&typescript_block_with_prose(
             "Quick check.\n",
-            "print \"hi\"",
+            "print(\"hi\");",
         ))])
         .exec_result(exec_response(&["hi\n"], None, None))
         .checkpoint()
         .expect(RlmProtocolExpectations {
             initial_request_tools_empty: true,
-            exec_codes: vec!["print \"hi\""],
+            exec_codes: vec!["print(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_call_count: Some(2),
             done: Some(false),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"hi\"",
+                code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 error: None,
                 final_output: None,
@@ -541,7 +541,7 @@ fn rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues() {
 fn rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory() {
     RlmProtocolScenario::new(STREAMED_LASHLANG_CELL_EXECUTION.display_name)
         .user_message("run streamed code")
-        .streamed_llm_response(vec![text_part(&lashlang_block_with_prose(
+        .streamed_llm_response(vec![text_part(&typescript_block_with_prose(
             "Streaming visible prose.\n",
             "print \"streamed hi\"",
         ))])
@@ -566,24 +566,26 @@ fn rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajector
 
 #[test]
 fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reextraction() {
-    const CODE: &str = "alpha = \"first\"\nbeta = alpha + \" second\"\nfinish beta";
-    const RESPONSE: &str = "Visible prefix.\n<lashlang>\nalpha = \"first\"\nbeta = alpha + \" second\"\nfinish beta\n</lashlang>";
+    const CODE: &str = "const alpha = \"first\";\nconst beta = alpha + \" second\";\nfinish(beta);";
+    const RESPONSE: &str = "Visible prefix.\n<typescript>\nconst alpha = \"first\";\nconst beta = alpha + \" second\";\nfinish(beta);\n</typescript>";
 
     RlmProtocolScenario::new(PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION.display_name)
         .user_message("run chunk-spanning streamed code")
         .plugin_factory(rlm_protocol_plugin_factory())
         .plugin_streamed_llm_response(
+            // The chunk boundaries still fall inside the open and close tags,
+            // which is what this scenario exists to exercise.
             vec![
-                "Visible prefix.\n<las",
-                "hlang>\nalpha = \"fir",
-                "st\"\nbeta = alpha + ",
-                "\" second\"\nfinish be",
-                "ta\n</lash",
-                "lang>",
-                "\n<lashlang>\nfinish \"must not be consumed\"\n</lashlang>",
+                "Visible prefix.\n<type",
+                "script>\nconst alpha = \"fir",
+                "st\";\nconst beta = alpha + ",
+                "\" second\";\nfinish(be",
+                "ta);\n</type",
+                "script>",
+                "\n<typescript>\nfinish(\"must not be consumed\");\n</typescript>",
             ],
             vec![text_part(&format!(
-                "{RESPONSE}\n<lashlang>\nfinish \"must not be consumed\"\n</lashlang>"
+                "{RESPONSE}\n<typescript>\nfinish(\"must not be consumed\");\n</typescript>"
             ))],
         )
         .expect(RlmProtocolExpectations {
@@ -604,11 +606,11 @@ fn rlm_protocol_scenario_empty_turn_options_use_natural_default() {
     RlmProtocolScenario::new(EMPTY_TURN_OPTIONS_DEFAULT.display_name)
         .user_message("finish")
         .protocol_turn_options(lash_core::ProtocolTurnOptions::empty())
-        .llm_response(vec![text_part(&lashlang_block("finish \"done\""))])
+        .llm_response(vec![text_part(&typescript_block("finish(\"done\");"))])
         .exec_result(exec_response(&[], None, Some(serde_json::json!("done"))))
         .checkpoint()
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish \"done\""],
+            exec_codes: vec!["finish(\"done\");"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             done: Some(true),
             turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
@@ -617,7 +619,7 @@ fn rlm_protocol_scenario_empty_turn_options_use_natural_default() {
                 },
             )),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish \"done\"",
+                code: "finish(\"done\");",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!("done")),
@@ -631,7 +633,7 @@ fn rlm_protocol_scenario_empty_turn_options_use_natural_default() {
 fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_ids() {
     RlmProtocolScenario::new(EXEC_RESULT_TOOL_CALL_IDS_INTERNAL.display_name)
         .user_message("run a tool")
-        .llm_response(vec![text_part(&lashlang_block(
+        .llm_response(vec![text_part(&typescript_block(
             "x = await tools.read_file({ path: \"foo\" })?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
@@ -676,7 +678,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
     )];
     RlmProtocolScenario::new(EXEC_TOOL_CONTROL_FRAME_SWITCH.display_name)
         .user_message("run a custom frame-switch tool")
-        .llm_response(vec![text_part(&lashlang_block(
+        .llm_response(vec![text_part(&typescript_block(
             "x = await tools.custom_frame_switch({})?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
@@ -732,7 +734,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
 fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
     RlmProtocolScenario::new(EXEC_TOOL_CONTROL_FAIL.display_name)
         .user_message("run a custom failure tool")
-        .llm_response(vec![text_part(&lashlang_block(
+        .llm_response(vec![text_part(&typescript_block(
             "x = await tools.custom_fail({})?",
         ))])
         .exec_result(lash_sansio::ExecResponse {
@@ -784,7 +786,7 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
     RlmProtocolScenario::new(TYPED_FINAL_VALUE.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part(&lashlang_block("finish { ok: true }"))])
+        .llm_response(vec![text_part(&typescript_block("finish({ ok: true });"))])
         .exec_result(exec_response(
             &[],
             None,
@@ -792,7 +794,7 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
         ))
         .checkpoint()
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish { ok: true }"],
+            exec_codes: vec!["finish({ ok: true });"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             done: Some(true),
             no_final_message_event: true,
@@ -802,7 +804,7 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
                 },
             )),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish { ok: true }",
+                code: "finish({ ok: true });",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!({ "ok": true })),
@@ -817,7 +819,7 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
     RlmProtocolScenario::new(NATURAL_FINAL_VALUE.display_name)
         .user_message("return typed data")
         .termination(RlmTermination::Natural)
-        .llm_response(vec![text_part(&lashlang_block("finish { ok: true }"))])
+        .llm_response(vec![text_part(&typescript_block("finish({ ok: true });"))])
         .exec_result(exec_response(
             &[],
             None,
@@ -825,7 +827,7 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
         ))
         .checkpoint()
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish { ok: true }"],
+            exec_codes: vec!["finish({ ok: true });"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             done: Some(true),
             turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
@@ -834,7 +836,7 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
                 },
             )),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish { ok: true }",
+                code: "finish({ ok: true });",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!({ "ok": true })),
@@ -857,14 +859,16 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
                 "required": ["ok"]
             })),
         })
-        .llm_response(vec![text_part(&lashlang_block("finish { missing: true }"))])
+        .llm_response(vec![text_part(&typescript_block(
+            "finish({ missing: true });",
+        ))])
         .exec_result(exec_response(
             &[],
             None,
             Some(serde_json::json!({ "missing": true })),
         ))
         .checkpoint()
-        .llm_response(vec![text_part(&lashlang_block("finish { ok: true }"))])
+        .llm_response(vec![text_part(&typescript_block("finish({ ok: true });"))])
         .exec_result(exec_response(
             &[],
             None,
@@ -872,18 +876,18 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
         ))
         .checkpoint()
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish { missing: true }", "finish { ok: true }"],
+            exec_codes: vec!["finish({ missing: true });", "finish({ ok: true });"],
             checkpoints: vec![CheckpointKind::AfterWork, CheckpointKind::BeforeCompletion],
             llm_call_count: Some(2),
             done: Some(true),
-            system_message_contains: vec!["didn't match the required output schema"],
+            system_message_contains: vec!["did not match the required output schema"],
             turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
                 lash_sansio::TurnFinish::FinalValue {
                     value: serde_json::json!({ "ok": true }),
                 },
             )),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish { ok: true }",
+                code: "finish({ ok: true });",
                 output: Vec::new(),
                 error: None,
                 final_output: Some(serde_json::json!({ "ok": true })),
@@ -893,13 +897,13 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
         .run();
     insta::assert_snapshot!(run.transcript.render(), @r#"
     rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.lashlang_code   text="finish { missing: true }"
-    rlm          exec      cell.start              lang="lashlang"
+    rlm          observe   message.typescript_code  text="finish({ missing: true });"
+    rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=after_work
     rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0
-    rlm          observe   message.lashlang_code   text="finish { ok: true }"
-    rlm          exec      cell.start              lang="lashlang"
+    rlm          observe   message.typescript_code  text="finish({ ok: true });"
+    rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=before_completion
     rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          outcome   turn.final_value        value={"ok":true}
@@ -918,14 +922,14 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
                 ]
             })),
         })
-        .llm_response(vec![text_part(&lashlang_block("finish true"))])
+        .llm_response(vec![text_part(&typescript_block("finish(true);"))])
         .exec_result(exec_response(&[], None, Some(serde_json::json!(true))))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["finish true"],
+            exec_codes: vec!["finish(true);"],
             checkpoints: vec![CheckpointKind::AfterWork],
-            system_message_contains: vec!["didn't match the required output schema"],
+            system_message_contains: vec!["did not match the required output schema"],
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish true",
+                code: "finish(true);",
                 output: Vec::new(),
                 error: Some(
                     "true is not valid under any of the schemas listed in the 'anyOf' keyword"
@@ -955,7 +959,9 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
                 "required": ["ok"]
             })),
         })
-        .llm_response(vec![text_part(&lashlang_block("finish { missing: true }"))])
+        .llm_response(vec![text_part(&typescript_block(
+            "finish({ missing: true });",
+        ))])
         .checkpoint_round_trip()
         .exec_result(exec_response(
             &[],
@@ -966,12 +972,12 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
         .expect(RlmProtocolExpectations {
             // The restored machine redrives the same pending cell, so the code is
             // observed twice — once before the boundary and once after it.
-            exec_codes: vec!["finish { missing: true }", "finish { missing: true }"],
+            exec_codes: vec!["finish({ missing: true });", "finish({ missing: true });"],
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_call_count: Some(2),
-            system_message_contains: vec!["didn't match the required output schema"],
+            system_message_contains: vec!["did not match the required output schema"],
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish { missing: true }",
+                code: "finish({ missing: true });",
                 output: Vec::new(),
                 error: Some("\"ok\" is a required property".to_string()),
                 final_output: None,
@@ -989,11 +995,11 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     // reaching the model, and exactly one checkpoint before re-entry.
     insta::assert_snapshot!(run.transcript.render(), @r#"
     rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.lashlang_code   text="finish { missing: true }"
-    rlm          exec      cell.start              lang="lashlang"
+    rlm          observe   message.typescript_code  text="finish({ missing: true });"
+    rlm          exec      cell.start              lang="typescript"
     rlm          park      cell.checkpoint
     rlm          resume    cell.restore
-    rlm          exec      cell.start              lang="lashlang"
+    rlm          exec      cell.start              lang="typescript"
     rlm          commit    checkpoint.request      checkpoint=after_work
     rlm                      usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
     rlm          provider  model.request           messages=2 tools=0

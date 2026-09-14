@@ -20,7 +20,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "Your answer was cut off by the output limit — retry with a shorter answer. Do less per block and continue in a later step.",
+          "text": "Your answer was cut off by the output limit — retry with a shorter answer. Do less per cell and continue in a later step.",
           "response_meta": null,
           "cache_breakpoint": true
         }
@@ -32,7 +32,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `list[HistoryItem]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nNatural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish <value>` inside the program to return a computed value.",
+          "text": "\n\n\n=== CURRENT ITERATION: 2 ===\n\n\n=== BOUND VARIABLES ===\n\n- `history`: `HistoryItem[]`, read-only, 2 entries\n\n\n=== FINALIZATION ===\n\nNatural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish(value)` inside the program to return a computed value.",
           "response_meta": null,
           "cache_breakpoint": false
         }

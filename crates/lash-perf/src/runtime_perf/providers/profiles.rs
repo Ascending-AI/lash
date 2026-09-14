@@ -22,14 +22,14 @@ pub(super) fn benchmark_stream_profile_for_request(
             .is_some_and(|text| text.contains("Subagent capability: default. Depth: 1/5."))
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
-            return text_profile(lashlang_block(
+            return text_profile(typescript_block(
                 r#"
-sleep for "0ms"
-result = await tools.benchmark_async({ value: len(chunk), delay_ms: 0 })?
-finish { len: result.value }"#,
+await sleep(0);
+const result = await tools.benchmark_async({ value: chunk.length, delay_ms: 0 });
+finish({ len: result.value });"#,
             ));
         }
-        return text_profile(lashlang_block("finish { len: len(chunk) }"));
+        return text_profile(typescript_block("finish({ len: chunk.length });"));
     }
 
     if request.output_spec.is_some() || request.session_id().ends_with("-llm-query") {
@@ -202,26 +202,29 @@ finish { len: result.value }"#,
         | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::EmbedRlm
         | RuntimePerfScenario::TraceJsonlExtended => {
-            let text = lashlang_block(r#"finish "runtime perf benchmark ok""#);
+            let text = typescript_block(r#"finish("runtime perf benchmark ok");"#);
             text_profile(text)
         }
         RuntimePerfScenario::RlmStreamedPairedLashlang => {
             let full_text = concat!(
                 "Visible preface before executable code.\n",
-                "<lashlang>\n",
-                "value = \"runtime perf benchmark ok\"\n",
-                "finish value\n",
-                "</lashlang>\n",
+                "<typescript>\n",
+                "const value = \"runtime perf benchmark ok\";\n",
+                "finish(value);\n",
+                "</typescript>\n",
                 "This suffix must be ignored after the close tag."
             )
             .to_string();
+            // The deltas still split inside the open and close tags, which is
+            // the whole point of the scenario: the cell scanner has to stitch a
+            // tag across chunk boundaries.
             BenchmarkStreamProfile {
                 full_text,
                 deltas: vec![
-                    "Visible preface before executable code.\n<lash".to_string(),
-                    "lang>\nvalue = \"runtime perf benchmark ok\"\n".to_string(),
-                    "finish value\n</lash".to_string(),
-                    "lang>\nThis suffix must be ignored after the close tag.".to_string(),
+                    "Visible preface before executable code.\n<type".to_string(),
+                    "script>\nconst value = \"runtime perf benchmark ok\";\n".to_string(),
+                    "finish(value);\n</type".to_string(),
+                    "script>\nThis suffix must be ignored after the close tag.".to_string(),
                 ],
                 parts: Vec::new(),
             }
@@ -232,22 +235,22 @@ finish { len: result.value }"#,
             // small values render in full, while `big_map`/`big_notes`/`big_text`
             // exceed the inline budget and go through the keys / head-tail
             // truncation path that runs on every prompt build.
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-big_map = {}
-for i in range(24) {
-  big_map[format("room_{}", i)] = { exits: ["north", "south", "east"], items: [format("item_{}", i)] }
+const big_map = {};
+for (let i = 0; i < 24; i++) {
+  big_map[`room_${i}`] = { exits: ["north", "south", "east"], items: [`item_${i}`] };
 }
 
-big_notes = []
-for i in range(45) {
-  big_notes = push(big_notes, format("note {}: long observation about world state, plan, and next steps", i))
+const big_notes = [];
+for (let i = 0; i < 45; i++) {
+  big_notes.push(`note ${i}: long observation about world state, plan, and next steps`);
 }
-big_text = "Loud Room: "
-for i in range(40) {
-  big_text = format("{}echo step {} dampens the acoustics; ", big_text, i)
+let big_text = "Loud Room: ";
+for (let i = 0; i < 40; i++) {
+  big_text = `${big_text}echo step ${i} dampens the acoustics; `;
 }
-live_record = {
+const live_record = {
   status: "ready",
   turn: input.turn,
   goal: input.goal,
@@ -257,34 +260,34 @@ live_record = {
     counters: { first: 1, second: 2, third: 3 }
   }
 }
-live_list = [
+const live_list = [
   { name: "alpha", count: 1 },
   { name: "beta", count: 2 },
   { name: "gamma", count: 3 }
 ]
-live_message = "runtime perf benchmark ok"
-host_snapshot = { benchmark: benchmark, input: input, chat: chat }
-finish live_message"#,
+const live_message = "runtime perf benchmark ok";
+const host_snapshot = { benchmark: benchmark, input: input, chat: chat };
+finish(live_message);"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmLargePrint => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-big_text = ""
-for i in range(70) {
-  big_text = format("{}line {}: abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789\n", big_text, i)
+let big_text = "";
+for (let i = 0; i < 70; i++) {
+  big_text = `${big_text}line ${i}: abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789\n`;
 }
 
-rows = []
-for i in range(16) {
-  rows = push(rows, {
-    id: format("row_{}", i),
+const rows = [];
+for (let i = 0; i < 16; i++) {
+  rows.push({
+    id: `row_${i}`,
     status: "ok",
     exit_code: 0,
     stderr: "short diagnostic stderr remains visible",
     output: big_text
-  })
+  });
 }
 
 payload = {
@@ -299,113 +302,124 @@ payload = {
     turn: 1,
     tags: ["runtime", "projection", "print"]
   }
-}
+};
 
-result = await tools.benchmark_echo({ value: payload, ordinal: 1 })?
-print result
-finish "runtime perf benchmark ok""#,
+const result = await tools.benchmark_echo({ value: payload, ordinal: 1 });
+print(result);
+finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmToolCalls
         | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
         | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-first = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 })?
-second = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 2 })?
-third = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 3 })?
-fourth = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 4 })?
-finish first.value"#,
+const first = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
+const second = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 2 });
+const third = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 3 });
+const fourth = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 4 });
+finish(first.value);"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmAsyncToolCompletion => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-first = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 })?
-second = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 })?
-finish first.value"#,
+const first = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
+const second = await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
+finish(first.value);"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmProcessHandles => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-process benchmark_echo_process(tool: Tools, value: str, ordinal: int) {
-  result = await tool.benchmark_echo({ value: value, ordinal: ordinal })?
-  finish result
-}
+const benchmarkEchoProcess = defineProcess({
+  name: "benchmark_echo_process",
+  signals: {},
+  run: async (value: string, ordinal: number) => {
+    return await tools.benchmark_echo({ value: value, ordinal: ordinal });
+  }
+});
 
-process benchmark_slow_process(tool: Tools, value: str, delay_ms: int) {
-  result = await tool.benchmark_slow({ value: value, delay_ms: delay_ms })?
-  finish result
-}
+const benchmarkSlowProcess = defineProcess({
+  name: "benchmark_slow_process",
+  signals: {},
+  run: async (value: string, delay_ms: number) => {
+    return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
+  }
+});
 
-first = start benchmark_echo_process(tool: tools, value: "runtime perf benchmark ok", ordinal: 1)
-second = start benchmark_echo_process(tool: tools, value: "runtime perf benchmark ok", ordinal: 2)
-slow = start benchmark_slow_process(tool: tools, value: "cancelled", delay_ms: 50)
-live = await processes.list({})?
-cancel slow
-first_result = (await first)?
-second_result = (await second)?
-finish first_result.value"#,
+const first = start(benchmarkEchoProcess, { value: "runtime perf benchmark ok", ordinal: 1 });
+const second = start(benchmarkEchoProcess, { value: "runtime perf benchmark ok", ordinal: 2 });
+const slow = start(benchmarkSlowProcess, { value: "cancelled", delay_ms: 50 });
+const live = await processes.list({});
+const first_result = await first;
+const second_result = await second;
+finish(first_result.value);"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmTriggerMailPipeline => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-@label(title: "Define and register mail forwarder")
-process forward_mail(event: mail.Received) {
-  if event.account == "test" {
-    await inbox.test23.send({
-      title: format("[Fwd from test] {}", event.title),
-      text: event.text
-    })?
+const forward_mail = defineProcess({
+  name: "forward_mail",
+  signals: {},
+  run: async (event: mail.Received) => {
+    if (event.account == "test") {
+      await inbox.test23.send({
+        title: `[Fwd from test] ${event.title}`,
+        text: event.text
+      });
+    }
+    return true;
   }
-  finish true
-}
+});
 
-existing = await triggers.list({
+const existing = await triggers.list({
   name: "runtime-perf-test-to-test23-forwarder",
   enabled: true
-})?
+});
 
-if len(existing) > 0 {
-  handle = existing[0]
+let handle;
+if (existing.length > 0) {
+  handle = existing[0];
 } else {
-  handle = await triggers.register({
+  handle = await registerTrigger({
     source: mail.received({}),
     target: forward_mail,
     inputs: { event: trigger.event },
     name: "runtime-perf-test-to-test23-forwarder"
-  })?
+  });
 }
 
-@label(title: "Send test message to inbox.test")
-sent = await inbox.test.send({
+const sent = await inbox.test.send({
   title: "Hello from test",
   text: "This is a forwarding test for runtime perf stack profiling."
-})?
+});
 
-finish "runtime perf benchmark ok""#,
+finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-process benchmark_async_process(tool: Tools, value: str) {
-  result = await tool.benchmark_async({ value: value, delay_ms: 0 })?
-  finish result
-}
+const benchmarkAsyncProcess = defineProcess({
+  name: "benchmark_async_process",
+  signals: {},
+  run: async (value: string) => {
+    return await tools.benchmark_async({ value: value, delay_ms: 0 });
+  }
+});
 
-first = start benchmark_async_process(tool: tools, value: "runtime perf benchmark ok")
-second = start benchmark_async_process(tool: tools, value: "runtime perf benchmark ok")
-first_result = (await first)?
-second_result = (await second)?
-finish first_result.value"#,
+const first = start(benchmarkAsyncProcess, { value: "runtime perf benchmark ok" });
+const second = start(benchmarkAsyncProcess, { value: "runtime perf benchmark ok" });
+const first_result = await first;
+const second_result = await second;
+finish(first_result.value);"#,
             );
             text_profile(text)
         }
@@ -417,41 +431,47 @@ finish first_result.value"#,
             let starts = (0..children)
                 .map(|index| {
                     format!(
-                        "child_{index} = start settlement_child(tool: tools, value: \"child-{index}\")"
+                        "const child_{index} = start(settlementChild, {{ value: \"child-{index}\" }});"
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let text = lashlang_block(&format!(
+            let text = typescript_block(&format!(
                 r#"
-process settlement_child(tool: Tools, value: str) {{
-  result = await tool.benchmark_async({{ value: value, delay_ms: 0 }})?
-  finish result
-}}
+const settlementChild = defineProcess({{
+  name: "settlement_child",
+  signals: {{}},
+  run: async (value: string) => {{
+    return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
+  }}
+}});
 
 {starts}
-finish "runtime perf benchmark ok""#
+finish("runtime perf benchmark ok");"#
             ));
             text_profile(text)
         }
         RuntimePerfScenario::RlmSubagentSpawn
         | RuntimePerfScenario::DurableAgentChildTurnSqlite
         | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-process spawn_child(agents: Agents) {
-  result = await agents.spawn({
-    capability: "default",
-    task: "Submit `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["alpha", "beta", "gamma"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
+const spawnChild = defineProcess({
+  name: "spawn_child",
+  signals: {},
+  run: async () => {
+    return await agents.spawn({
+      capability: "default",
+      task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["alpha", "beta", "gamma"] },
+      output: { len: "int" }
+    });
+  }
+});
 
-handle = start spawn_child(agents: agents)
-result = (await handle)?
-finish "runtime perf benchmark ok""#,
+const handle = start(spawnChild);
+const result = await handle;
+finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
@@ -460,19 +480,22 @@ finish "runtime perf benchmark ok""#,
             unreachable!("durable checkpoint curves bypass the provider harness")
         }
         RuntimePerfScenario::RlmObliqueStackMix => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-process explore(agents: Agents) {
-  result = await agents.spawn({
-    capability: "default",
-    task: "Return `{ len: len(chunk) }` using the seeded chunk.",
-    seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
+const explore = defineProcess({
+  name: "explore",
+  signals: {},
+  run: async () => {
+    return await agents.spawn({
+      capability: "default",
+      task: "Return `{ len: chunk.length }` using the seeded chunk.",
+      seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
+      output: { len: "int" }
+    });
+  }
+});
 
-first_pool = await obliq.search({
+const first_pool = await obliq.search({
   queries: [
     "latent algebraic invariant transfer",
     "proof strategy analogue with distractor wording",
@@ -482,9 +505,9 @@ first_pool = await obliq.search({
   mode: "hybrid",
   limit: 72,
   candidate_pool: 512
-})?
+});
 
-second_pool = await obliq.search({
+const second_pool = await obliq.search({
   queries: [
     "geometric proof reused as combinatorial invariant",
     "relevance by method not vocabulary",
@@ -493,73 +516,79 @@ second_pool = await obliq.search({
   mode: "hybrid",
   limit: 72,
   candidate_pool: 512
-})?
+});
 
-candidate_ids = [match.doc_id for match in first_pool.matches]
-for match in second_pool.matches {
-  candidate_ids = push(candidate_ids, match.doc_id)
+const candidate_ids = first_pool.matches.map((match) => match.doc_id);
+for (const match of second_pool.matches) {
+  candidate_ids.push(match.doc_id);
 }
 
-subagent_handle = start explore(agents: agents)
-handles = await obliq.list_async_handles({})?
-judged = await obliq.judge_candidates({
+const subagent_handle = start(explore);
+const handles = await obliq.list_async_handles({});
+const judged = await obliq.judge_candidates({
   verifier_predicate: "documents share the same abstract proof strategy, not topic words",
   candidate_doc_ids: candidate_ids,
   surface_bait: ["same vocabulary", "same topic"]
-})?
-subagent = (await subagent_handle)?
+});
+const subagent = await subagent_handle;
 
-print {
+print({
   first_pool: first_pool,
   second_pool: second_pool,
   handles: handles,
   judged: judged,
   subagent: subagent
-}
+});
 
-finish "runtime perf benchmark ok""#,
+finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::IngressClaimProjection => {
             if latest_request_item_contains(request, "ingress projection marker") {
-                text_profile(lashlang_block(r#"finish "runtime perf benchmark ok""#))
+                text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
             } else {
-                text_profile(lashlang_block(r#"print("checkpoint before projection")"#))
+                text_profile(typescript_block(
+                    r#"print("checkpoint before projection");"#,
+                ))
             }
         }
         RuntimePerfScenario::DeepTurnComposition => {
             if request_text(request).contains("deep composition ingress marker") {
-                return text_profile(lashlang_block(r#"finish "runtime perf benchmark ok""#));
+                return text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#));
             }
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-process deep_child(agents: Agents, tool: Tools) {
-  pending = await tool.benchmark_async({ value: "parent tool loop", delay_ms: 0 })?
-  sleep for "0ms"
-  child = await agents.spawn({
-    capability: "default",
-    task: "Use the seeded chunk and return its length after the durable waits.",
-    seed: { chunk: ["parent", "child", "tool", "wait"] },
-    output: Type { len: int }
-  })?
-  finish { pending: pending.value, child: child.len }
-}
+const deepChild = defineProcess({
+  name: "deep_child",
+  signals: {},
+  run: async () => {
+    const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
+    await sleep(0);
+    const child = await agents.spawn({
+      capability: "default",
+      task: "Use the seeded chunk and return its length after the durable waits.",
+      seed: { chunk: ["parent", "child", "tool", "wait"] },
+      output: { len: "int" }
+    });
+    return { pending: pending.value, child: child.len };
+  }
+});
 
-handle = start deep_child(agents: agents, tool: tools)
-result = (await handle)?
-print result"#,
+const handle = start(deepChild);
+const result = await handle;
+print(result);"#,
             );
             text_profile(text)
         }
         RuntimePerfScenario::RlmLlmQuery => {
-            let text = lashlang_block(
+            let text = typescript_block(
                 r#"
-result = await llm.query({
+const result = await llm.query({
   task: "Return the exact benchmark marker.",
   inputs: { marker: "runtime perf benchmark ok" }
-})?
-finish result"#,
+});
+finish(result);"#,
             );
             text_profile(text)
         }
@@ -570,59 +599,69 @@ finish result"#,
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
     if kind == Some("tool") {
-        return text_profile(lashlang_block(
-            r#"result = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 })?
-finish result.value"#,
+        return text_profile(typescript_block(
+            r#"const result = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
+finish(result.value);"#,
         ));
     }
     if kind == Some("child") {
-        return text_profile(lashlang_block(
-            r#"process load_child(agents: Agents) {
-  result = await agents.spawn({
-    capability: "default",
-    task: "Submit `{ len: len(chunk) }` using the seeded `chunk` variable.",
-    seed: { chunk: ["alpha", "beta", "gamma"] },
-    output: Type { len: int }
-  })?
-  finish result
-}
-handle = start load_child(agents: agents)
-result = (await handle)?
-finish "runtime perf benchmark ok""#,
+        return text_profile(typescript_block(
+            r#"const loadChild = defineProcess({
+  name: "load_child",
+  signals: {},
+  run: async () => {
+    return await agents.spawn({
+      capability: "default",
+      task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+      seed: { chunk: ["alpha", "beta", "gamma"] },
+      output: { len: "int" }
+    });
+  }
+});
+const handle = start(loadChild);
+const result = await handle;
+finish("runtime perf benchmark ok");"#,
         ));
     }
     if kind == Some("wake") {
-        return text_profile(lashlang_block(
-            r#"process load_wake(tool: Tools) {
-  result = await tool.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 })?
-  finish result
-}
-handle = start load_wake(tool: tools)
-result = (await handle)?
-finish result.value"#,
+        return text_profile(typescript_block(
+            r#"const loadWake = defineProcess({
+  name: "load_wake",
+  signals: {},
+  run: async () => {
+    return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
+  }
+});
+const handle = start(loadWake);
+const result = await handle;
+finish(result.value);"#,
         ));
     }
     if kind == Some("trigger") {
         let trigger_name = high_traffic_trigger_name(request);
         let trigger_name = serde_json::to_string(&trigger_name)
             .expect("high-traffic trigger name always serializes");
-        return text_profile(lashlang_block(&format!(
-            r#"process load_forward(event: mail.Received) {{
-  finish event.title
-}}
-existing = await triggers.list({{ name: {trigger_name}, enabled: true }})?
-if len(existing) == 0 {{
-  handle = await triggers.register({{
+        return text_profile(typescript_block(&format!(
+            r#"const load_forward = defineProcess({{
+  name: "load_forward",
+  signals: {{}},
+  run: async (event: mail.Received) => {{
+    return event.title;
+  }}
+}});
+const existing = await triggers.list({{ name: {trigger_name}, enabled: true }});
+if (existing.length == 0) {{
+  const handle = await registerTrigger({{
     source: mail.received({{}}),
     target: load_forward,
     inputs: {{ event: trigger.event }},
     name: {trigger_name}
-  }})?
+  }});
 }}
-finish "runtime perf benchmark ok""#,
+finish("runtime perf benchmark ok");"#,
         )));
     }
-    text_profile(lashlang_block(r#"finish "runtime perf benchmark ok""#))
+    text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
 }
 
 pub(super) fn high_traffic_operation_kind(request: &LlmRequest) -> Option<&str> {
@@ -649,8 +688,8 @@ pub(super) fn high_traffic_trigger_name(request: &LlmRequest) -> String {
     format!("runtime-perf-load-trigger-{session_id}")
 }
 
-pub(super) fn lashlang_block(source: &str) -> String {
-    format!("<lashlang>\n{}\n</lashlang>", source.trim())
+pub(super) fn typescript_block(source: &str) -> String {
+    format!("<typescript>\n{}\n</typescript>", source.trim())
 }
 
 pub(super) fn text_profile(text: impl Into<String>) -> BenchmarkStreamProfile {
