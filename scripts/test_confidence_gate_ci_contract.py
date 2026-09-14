@@ -227,11 +227,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
     def test_confidence_checkout_uses_trigger_sha_in_a_shallow_repository(self):
         jobs = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())["jobs"]
-        scripts = {next(s["run"] for s in job["steps"] if s["name"] == "Check out repository")
-                   for job in jobs.values()}
-        # Every producer, consumer and conclusion uses the identical checkout.
-        self.assertEqual(1, len(scripts))
-        script = scripts.pop()
+        calls = {next(s["uses"] for s in job["steps"] if s["name"] == "Check out repository")
+                 for job in jobs.values()}
+        # Every producer, consumer and conclusion calls the identical composite action.
+        self.assertEqual(["./.github/actions/git-checkout"], sorted(calls))
+        with_opts = {tuple(sorted((s.get("with") or {}).items())) for s in (next(s for s in job["steps"] if s["name"] == "Check out repository") for job in jobs.values())}
+        # The single call carries the same gc-auto parameter on every job.
+        self.assertEqual(1, len(with_opts))
+        self.assertEqual((("gc_auto_off", "true"),), with_opts.pop())
+        # The executed script is the composite action's checkout step.
+        action = yaml.safe_load((CONFIDENCE_WORKFLOW.parent.parent / "actions/git-checkout/action.yml").read_text())
+        script = next(step["run"] for step in action["runs"]["steps"] if step.get("name") == "Check out repository")
         self.assertIn('git config gc.auto 0', script)
         self.assertIn('git checkout --detach --force "${GITHUB_SHA}"', script)
         with tempfile.TemporaryDirectory() as tmp:
@@ -249,7 +255,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             clone = root / "checkout"
             clone.mkdir()
             env = dict(os.environ, GITHUB_SERVER_URL=root.as_uri(), GITHUB_REPOSITORY="repo",
-                       GITHUB_SHA=sha, CHECKOUT_TOKEN="fixture-token")
+                       GITHUB_SHA=sha, CHECKOUT_TOKEN="fixture-token",
+                       # The confidence jobs pass gc_auto_off: 'true'; mirror it.
+                       GC_AUTO_OFF="true", TAGS="")
             result = subprocess.run(["bash", "-euc", script], cwd=clone, env=env, capture_output=True, text=True)
             self.assertEqual(0, result.returncode, result.stderr)
             head = subprocess.check_output(["git", "-C", str(clone), "rev-parse", "HEAD"], text=True).strip()

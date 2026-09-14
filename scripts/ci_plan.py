@@ -325,12 +325,7 @@ def _is_known_path(path: str) -> bool:
 
 def fail_open(reason: str) -> dict[str, str]:
     outputs = {
-        "rust_code": "false",
-        "deps_config": "false",
         "docs_only": "false",
-        "workflows_only": "false",
-        "e2e_relevant": "false",
-        "scripts_gates": "false",
         "fail_open": "true",
         "reason": reason,
     }
@@ -378,12 +373,7 @@ def classify(
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
-        "rust_code": str(any(path.endswith(".rs") or path.startswith(("crates/", "src/", "tests/")) for path in paths)).lower(),
-        "deps_config": str(any(PurePosixPath(path).name in {"Cargo.lock", "Cargo.toml"} or path.startswith((".cargo/", ".config/")) for path in paths)).lower(),
         "docs_only": str(docs_only).lower(),
-        "workflows_only": str(all(path.startswith(".github/workflows/") for path in paths)).lower(),
-        "e2e_relevant": str(any(path.startswith(("examples/", "runbooks/")) or "e2e" in PurePosixPath(path).parts for path in paths)).lower(),
-        "scripts_gates": str(any(path.startswith("scripts/") or path in {"justfile", "deny.toml"} for path in paths)).lower(),
         "fail_open": str(bool(ambiguous)).lower(),
         "reason": (
             "docs deletion"

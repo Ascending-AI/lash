@@ -94,6 +94,9 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 | Missing-method/rejection hit list recorded | | `fluency-hits.json` |
 
 The exact first-settled rejection ordering remains covered by the TypeScript
-conformance test in `crates/lash-typescript/tests/agent_surface.rs:1406-1481`;
+conformance tests in `crates/lash-typescript/tests/agent_surface.rs` —
+`durable_processes_resume_across_await_signal_sleep_and_pending_finally`,
+`uncaught_throw_fails_a_durable_process` and
+`durable_process_resumes_after_shared_promise_batch` — while
 this live row covers the host-level aggregate rejection semantics available
 through the shipped catalogue.

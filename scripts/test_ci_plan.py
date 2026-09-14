@@ -116,7 +116,6 @@ class ClassifyTests(unittest.TestCase):
         surfaced on later, unrelated pull requests.
         """
         plan = ci_plan.classify([("M", "crates/lash-core/src/session/mod.rs")])
-        self.assertEqual("true", plan["rust_code"])
         self.assertEqual("true", plan["rust"])
         self.assertEqual("true", plan["stores"])
         self.assertEqual("true", plan["workbench"])

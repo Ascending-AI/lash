@@ -41,21 +41,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -91,21 +79,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -152,21 +128,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -216,21 +180,9 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -277,21 +229,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -337,21 +277,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -397,21 +325,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -457,21 +373,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -517,21 +421,9 @@ jobs:
     timeout-minutes: 100
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -581,21 +473,9 @@ jobs:
         package: [lash-internal-core, lash-internal-lashlang, lash-internal-protocol-rlm, lash-internal-protocol-standard, lash-internal-sqlite-store, lash-internal-postgres-store]
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -646,21 +526,9 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -705,21 +573,9 @@ jobs:
     needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-packages, sim-search]
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Validate every confidence producer and consumer
         env:

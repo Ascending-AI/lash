@@ -121,12 +121,7 @@ jobs:
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
       schema: ${{ steps.classify.outputs.schema }}
-      rust_code: ${{ steps.classify.outputs.rust_code }}
-      deps_config: ${{ steps.classify.outputs.deps_config }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
-      workflows_only: ${{ steps.classify.outputs.workflows_only }}
-      e2e_relevant: ${{ steps.classify.outputs.e2e_relevant }}
-      scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
       postgres_matrix: ${{ steps.postgres-matrix.outputs.postgres_matrix }}
@@ -140,19 +135,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Classify exact diff
         id: classify
@@ -236,20 +219,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
@@ -283,20 +253,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
+        with:
+          tags: 'true'
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -405,20 +364,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
+        with:
+          tags: 'true'
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -490,20 +438,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -536,20 +471,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -624,20 +546,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -712,20 +621,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -770,19 +666,7 @@ jobs:
     environment: build-cache
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Configure shared build cache
         uses: ./.github/actions/bazel-shared-cache
@@ -834,21 +718,9 @@ jobs:
       || (needs.plan.outputs.bazel_trusted != 'true' && needs.plan.outputs.rust == 'true')
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1018,20 +890,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1298,19 +1157,7 @@ jobs:
     environment: build-cache
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1398,20 +1245,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Configure shared build cache
         if: needs.plan.outputs.bazel_trusted == 'true'
@@ -1538,20 +1372,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Configure shared build cache
         if: needs.plan.outputs.bazel_trusted == 'true'
@@ -1617,21 +1438,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Check seed corpus integrity
         run: python3 scripts/check_fuzz_corpus.py
@@ -1670,20 +1479,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -1730,21 +1526,9 @@ jobs:
 
       - name: Check out repository
         if: env.RUN_WORKER_ARTIFACTS == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Reclaim runner disk
         if: env.RUN_WORKER_ARTIFACTS == 'true'
@@ -1870,20 +1654,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -1980,21 +1751,9 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force "${GITHUB_SHA}"
+        uses: ./.github/actions/git-checkout
+        with:
+          gc_auto_off: 'true'
 
       - name: Reclaim runner disk
         run: bash scripts/ci-reclaim-disk.sh
@@ -2118,20 +1877,7 @@ jobs:
 
       - name: Check out repository
         if: env.RUN_WORKERS_E2E == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Reclaim runner disk
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2309,20 +2055,7 @@ jobs:
     steps:
       - name: Check out repository
         if: env.RUN_WORKERS_E2E == 'true'
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Require exact segment result selections
         if: env.RUN_WORKERS_E2E == 'true'
@@ -2704,19 +2437,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+        uses: ./.github/actions/git-checkout
 
       - name: Validate CI conclusion
         env:
