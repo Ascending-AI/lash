@@ -1,0 +1,129 @@
+name: Seal cache
+
+# `Seal-test the API surface` (ci.yml's `test-doc` seal lane) took 748 s on
+# PR #1417 and was the CI tail. A fully warm `target-seal` runs the same
+# command in 28.6 s, so the whole cost is a cold cache, not compute: trybuild
+# recompiles the entire dependency graph a second time under
+# `--cfg trybuild -A dead_code` (trybuild 1.0.118 `src/rustflags.rs`), which no
+# rlib from the outer build can satisfy, and `src/cargo.rs` pins that nested
+# build's `CARGO_TARGET_DIR` with no override. The duplication is therefore
+# permanent; paying it once and caching the result is the only lever.
+#
+# `test-doc` is `if: github.event_name != 'push'`, so it never writes a cache
+# into the default-branch scope, and a pull request can only restore caches
+# from its own branch or from `main`. Every PR started this job from scratch.
+# This workflow is the sole main-scoped writer of `linux-seal`; ci.yml's seal
+# lane stays a restore-only consumer, and nothing here is gating.
+#
+# It is deliberately NOT a job inside ci.yml: main push runs supersede each
+# other, so a twelve-minute job would often be cancelled before its cache save,
+# and it would drag `evaluate_conclusion` and the push-policy tests into a
+# cache fix.
+#
+# Path filter: the `linux-seal` key is a function of the lockfiles, the
+# toolchain and the cargo environment — never of crate sources. So these are
+# exactly the pushes that strand pull requests on a key nothing has written.
+# A source-only change keeps the key and restores a tree cargo rebuilds
+# incrementally, which is why `crates/**` is not listed: running twelve minutes
+# on every merge would buy freshness the key does not need, and successive
+# merges would cancel each other mid-save. `workflow_dispatch` refreshes the
+# contents on demand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - "rust-toolchain*"
+      - ".cargo/**"
+      - ".github/actions/rust-toolchain/**"
+      - ".github/actions/install-tools/**"
+      - ".github/actions/setup-mold/**"
+      - ".github/workflows/seal-cache.yml"
+  workflow_dispatch:
+
+# Only the newest tree is worth warming; an older run's key is already stale.
+concurrency:
+  group: linux-seal-cache-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every name below is a `Swatinem/rust-cache` key input, and the key must equal
+# the one ci.yml's seal lane computes or this writes a cache nothing reads.
+# CARGO_HOME comes from the shared toolchain action; CARGO_INCREMENTAL=0 from
+# the same action; CARGO_TERM_COLOR, LASH_CI_FEATURES and RUSTFLAGS mirror
+# ci.yml's workflow-level `env`; CARGO_TARGET_DIR mirrors the seal matrix
+# entry's `target-seal`.
+env:
+  CARGO_TERM_COLOR: always
+  LASH_CI_FEATURES: ""
+  RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+jobs:
+  linux-seal-cache:
+    name: Build seal cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # trybuild derives its fixture tree from Cargo's target directory, and
+      # this value is part of the cache key. It must stay the seal lane's.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-seal
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      # Sole writer of `linux-seal`; ci.yml's seal lane restores it. Every
+      # input here mirrors that lane, `workspaces` included: rust-cache derives
+      # the cached paths from it, so a different value would cache a different
+      # tree under the same key.
+      - name: Restore isolated seal dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-seal
+          workspaces: . -> target-seal
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      # Byte-identical to ci.yml's `Seal-test the API surface` step. The saved
+      # tree is only worth restoring if it was produced by the same command:
+      # a narrower build would leave the seal lane rebuilding what it missed.
+      # The fixture set, feature unification and `--test ui` selection are the
+      # seal lane's, unchanged.
+      - name: Seal-test the API surface
+        run: |
+          # shellcheck disable=SC2086
+          cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
+
+      - name: Report cache disk capacity
+        if: always()
+        run: bash scripts/ci/report-cache.sh

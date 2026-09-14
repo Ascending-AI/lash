@@ -312,6 +312,14 @@ jobs:
           cache-bin: false
           shared-key: linux-debug
 
+      # Restore-only. `seal-cache.yml` is the sole writer of `linux-seal`, and
+      # it must stay the writer: this job never runs on a push to main, so a
+      # cache saved here lands in a pull request's own branch scope, which no
+      # other branch can read. Every key input below -- shared-key,
+      # `workspaces`, CARGO_TARGET_DIR, RUSTFLAGS, CARGO_TERM_COLOR,
+      # CARGO_INCREMENTAL, CARGO_HOME -- is mirrored there; changing one here
+      # without changing it there writes a cache nothing reads, and this job
+      # goes back to a twelve-minute cold build (FIG-3056).
       - name: Restore isolated seal dependencies
         if: matrix.lane == 'seal'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
