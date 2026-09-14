@@ -137,6 +137,10 @@ pub use process::{
     RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWorkflowInput,
     RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
 };
+pub use process_attach::{
+    LashProcessAttach, LashProcessAttachClient, LashProcessAttachImpl, RestateProcessAttachRequest,
+    ServeLashProcessAttach,
+};
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 

@@ -57,5 +57,6 @@ fn endpoint(
         .bind(process_deployment.workflow(process_worker).serve())
         .bind(LashDurableWaitWorkflowImpl.serve())
         .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashProcessAttachImpl.serve())
         .build()
 }

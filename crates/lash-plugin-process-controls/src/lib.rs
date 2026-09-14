@@ -185,10 +185,16 @@ fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinitio
 /// `processes.await(handle)` — park until the process behind `handle` reaches
 /// its terminal, and answer with that terminal.
 ///
-/// The argument is typed as a handle through `x-lash` rather than as a record:
-/// a cell passes the process handle value itself, whose nominal type is not
-/// assignable to a record, so a `{"type":"object"}` parameter would refuse the
-/// call in the type checker before the handler ever ran.
+/// The argument is typed through `x-lash` rather than as a record: a cell
+/// passes the process handle value itself, whose nominal type is not assignable
+/// to a record, so a `{"type":"object"}` parameter would refuse the call in the
+/// type checker before the handler ever ran.
+///
+/// The kind is `process_unknown` — a process the host can only describe as
+/// callable — because the host has no authoritative call signature for an
+/// arbitrary awaited process. `handle` is the *trigger* handle kind and carries
+/// the payload its trigger delivers, which is a different type and would refuse
+/// a process value here.
 pub fn process_await_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:await_process",
@@ -198,7 +204,7 @@ pub fn process_await_tool_definition() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "handle": {
-                    "x-lash": { "kind": "handle" },
+                    "x-lash": { "kind": "process_unknown" },
                     "description": "Process handle to wait on, as returned by a process start or `processes.list(...)`."
                 }
             },
@@ -530,10 +536,10 @@ mod tests {
         );
         // A `{"type":"object"}` parameter would refuse a nominally typed cell
         // handle in the type checker before the handler ran (FIG-2989), which
-        // is exactly what the `x-lash` handle keyword exists to avoid.
+        // is exactly what the `x-lash` keyword exists to avoid.
         assert_eq!(
             definition.contract.input_schema.canonical["properties"]["handle"]["x-lash"],
-            serde_json::json!({ "kind": "handle" })
+            serde_json::json!({ "kind": "process_unknown" })
         );
     }
 
