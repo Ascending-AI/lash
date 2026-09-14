@@ -200,7 +200,6 @@ lash_rust_integration_test(
     crate_root = "tests/signal_replay_key_constructor.rs",
     declared_features = [],
     extra_compile_data = [
-        "//crates/lash-core:package_files",
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
         "//:workspace_rust_sources",
