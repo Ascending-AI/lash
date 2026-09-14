@@ -952,3 +952,143 @@ finish({ baton: baton });
     assert!(claim_verdict.is_passed(), "{claim_verdict:?}");
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
 }
+
+/// FIG-3085: a top-level binding that shadows the `control` module disarms
+/// `control.continue_as` for every later turn of the session. The frame switch
+/// never happens, the driver refuses the same cell until its no-progress budget
+/// is spent, and the turn commits `Stopped(MaxTurns)` with no final value --
+/// which is how the distributed workers E2E surfaced it as
+/// `[500] queued frame-switch follow-on produced no final value`. The budget is
+/// unbounded here, so `MaxTurns` can only come from the no-progress path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_shadowed_control_module_stops_the_frame_switch_turn_without_a_final_value() {
+    let call_index = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("logical-turn-rlm-shadowed-control")
+        .complete({
+            let call_index = Arc::clone(&call_index);
+            let requests = Arc::clone(&requests);
+            move |request| {
+                let call_index = Arc::clone(&call_index);
+                let requests = Arc::clone(&requests);
+                async move {
+                    requests
+                        .lock_recover()
+                        .push(serde_json::to_string(&request).unwrap_or_default());
+                    let text = if call_index.fetch_add(1, Ordering::SeqCst) == 0 {
+                        r#"
+<typescript>
+const control = "local shadow";
+finish({ bound: control });
+</typescript>
+"#
+                    } else {
+                        r#"
+<typescript>
+await control.continue_as({
+  task: "finish with the carried baton",
+  seed: { baton: "rlm-sim-seed" }
+});
+</typescript>
+"#
+                    };
+                    Ok(text_response(text))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+    );
+    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
+            as Arc<dyn lash_core::ProcessRegistry>)
+        .provider(provider)
+        .model(model())
+        .without_queued_work()
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "logical-turn-test",
+            "logical-turn-test-boot",
+        ))
+        .expect("build RLM shadowed-control sim core");
+    let session = core
+        .session("logical-turn-rlm-shadowed-control")
+        .open()
+        .await
+        .expect("open shadowed-control session");
+    session
+        .enqueue(TurnInput::text("bind a local `control`"))
+        .send()
+        .await
+        .expect("enqueue binding turn");
+    let bound = session
+        .queued_turn()
+        .run()
+        .await
+        .expect("binding drain succeeds")
+        .expect("binding turn runs");
+    assert_eq!(
+        bound
+            .final_value()
+            .and_then(|value| value.get("bound"))
+            .and_then(Value::as_str),
+        Some("local shadow")
+    );
+    let calls_after_binding = call_index.load(Ordering::SeqCst);
+
+    session
+        .enqueue(TurnInput::text("switch with an RLM seed"))
+        .send()
+        .await
+        .expect("enqueue frame-switch turn");
+    let switched = session
+        .queued_turn()
+        .run()
+        .await
+        .expect("frame-switch drain succeeds")
+        .expect("frame-switch turn runs");
+    assert!(
+        matches!(
+            switched.result.outcome,
+            lash_core::facade_support::TurnOutcome::Stopped(TurnStop::MaxTurns)
+        ),
+        "expected the shadowed frame switch to stop on the no-progress budget, got {:?}",
+        switched.result.outcome
+    );
+    assert!(
+        switched.final_value().is_none(),
+        "a stopped turn must not report a final value"
+    );
+    let refusals = requests
+        .lock_recover()
+        .iter()
+        .filter(|request| request.contains("shadows module"))
+        .count();
+    assert!(
+        refusals > 0,
+        "expected the refusal to name the shadowed module authority"
+    );
+    assert_eq!(
+        call_index.load(Ordering::SeqCst) - calls_after_binding,
+        12,
+        "the stopped turn must spend exactly the default no-progress budget"
+    );
+}
