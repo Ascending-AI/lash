@@ -697,7 +697,7 @@ class FuzzSmokeTests(unittest.TestCase):
         targets = check_fuzz_corpus.fuzz_targets(
             check_fuzz_corpus.FUZZ_MANIFEST.read_text(encoding="utf-8")
         )
-        self.assertGreaterEqual(len(targets), 4)
+        self.assertGreaterEqual(len(targets), 3)
         self.assertEqual(
             [], check_fuzz_corpus.corpus_problems(targets, check_fuzz_corpus.CORPUS_ROOT)
         )

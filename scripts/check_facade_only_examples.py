@@ -27,6 +27,7 @@ RLM_LASHLANG_SOURCES = frozenset(
         "agent-workbench/src/main_sections/tests.rs",
         "agent-workbench/src/main_sections/tests/session_isolation.rs",
         "agent-workbench/src/main_sections/tests/typescript_dialect.rs",
+        "agent-workbench/src/main_sections/tests/mail_payload.rs",
         "agent-workbench/src/restate.rs",
         "agent-workbench/src/restate/tests/cron_tests.rs",
     )

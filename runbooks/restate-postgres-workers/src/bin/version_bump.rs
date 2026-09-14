@@ -303,7 +303,7 @@ fn wake_registration(process_id: &ProcessId, wake_session_id: &SessionId) -> Pro
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
         ProcessIdentity::for_definition(
             lash::process::ProcessDefinitionRef::unclaimed(
                 "version-bump",

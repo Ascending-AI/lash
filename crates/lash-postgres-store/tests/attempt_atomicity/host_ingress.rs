@@ -184,23 +184,21 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         duplicate_cancel_outcome, first_cancel_outcome,
         "the real key-addressed journal returns the first cancel outcome"
     );
-    let lash::tools::ToolIntentIngressOutcome::Admitted {
-        outcome:
-            lash::tools::ToolIntentExecutionOutcome::Refused {
+    // The pre-realization submission ledger binds the identity to the target
+    // it first named (FIG-3072), so a changed target is refused at ingress as
+    // `DuplicateIdentity` before the PostgreSQL replay-hash check can run.
+    let lash::tools::ToolIntentIngressOutcome::Refused {
+        refusal:
+            lash::tools::ToolIntentIngressRefusal::DuplicateIdentity {
                 kind: lash_core::ToolIntentKind::CancelProcess,
-                refusal: lash_core::ToolIntentRefusalReason::CommandFailed { message, .. },
-                ..
             },
-        replayed: false,
     } = conflicting_cancel
     else {
-        panic!("the conflicting PostgreSQL cancel ingress submission must be refused")
+        panic!(
+            "the conflicting PostgreSQL cancel ingress submission must be refused as \
+             DuplicateIdentity, got {conflicting_cancel:?}"
+        )
     };
-    assert!(
-        message.contains("postgres_effect_replay_hash_conflict")
-            && message.contains("command.command.process_ref.process_id"),
-        "the refusal must identify the canonical command conflict: {message}"
-    );
     let cancel_events = registry
         .events_after(&process_id, 0)
         .await
