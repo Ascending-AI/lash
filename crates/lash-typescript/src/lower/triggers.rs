@@ -99,12 +99,36 @@ impl Lowerer {
         for (name, value) in entries {
             let value = if name == "inputs" {
                 self.lower_trigger_input_template(value)?
+            } else if name == "target" {
+                self.lower_process_target(value)?
             } else {
                 self.lower_expr(value)?
             };
             lowered.push((name.into(), value));
         }
         Ok(LashExpr::Record(lowered))
+    }
+
+    /// Lowers a registration target to the process it names.
+    ///
+    /// `require_literal_process_target` has already established that the target
+    /// is a top-level `defineProcess` binding, and such a binding holds exactly
+    /// this reference — so naming the process directly is the same value the
+    /// variable read would have produced. It is not the same *program*: a
+    /// variable read is a capture, and `defineProcess.run` refuses captures, so
+    /// reading the binding made a process registering a trigger against
+    /// another process unwritable (FIG-3059). A reference has nothing to
+    /// capture.
+    fn lower_process_target(&mut self, target: &Expr) -> Result<LashExpr, Diagnostic> {
+        if let Expr::Ident(name, _) = target
+            && let Ok(BindingRole::ProcessDefinition(process)) =
+                self.binding(name).map(|binding| binding.role.clone())
+        {
+            return Ok(LashExpr::ProcessRef {
+                process: process.as_str().into(),
+            });
+        }
+        self.lower_expr(target)
     }
 
     /// The registration target names a top-level `defineProcess` binding.

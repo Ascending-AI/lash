@@ -324,3 +324,94 @@ fn a_trigger_target_is_a_literal_process_binding() {
     }
     accept(&program("tick: unknown", "(event) => ({ tick: event })"));
 }
+
+/// FIG-3059: a process body could not register a trigger aimed at another
+/// process. The target had to be a literal top-level `defineProcess` binding,
+/// and reading that binding from inside `run` was a capture, which
+/// `defineProcess.run` refuses — the two rules were jointly unsatisfiable.
+///
+/// A target now lowers to the process it names rather than to a read of the
+/// binding that holds it, so there is nothing to capture.
+#[test]
+fn a_process_can_register_a_trigger_aimed_at_another_process() {
+    accept(
+        r#"
+        const remember = defineProcess({
+          name: "remember", signals: {},
+          run: async (tick: unknown) => { return true; }
+        });
+        const owner = defineProcess({
+          name: "owner", signals: {},
+          run: async () => {
+            const schedule = timer.Schedule({ expr: "0 8 * * *" });
+            await registerTrigger({
+              source: schedule,
+              target: remember,
+              inputs: (event) => ({ tick: event }),
+              subscription_key: "remembered-key"
+            });
+            return true;
+          }
+        });
+        finish(await start(owner, {}));
+        "#,
+    );
+}
+
+/// Source order is the registration order: two registrations in one process
+/// body reach the program in the order they are written.
+#[test]
+fn registrations_in_a_process_body_keep_their_source_order() {
+    accept(
+        r#"
+        const first = defineProcess({
+          name: "first", signals: {}, run: async (tick: unknown) => { return true; }
+        });
+        const second = defineProcess({
+          name: "second", signals: {}, run: async (tick: unknown) => { return true; }
+        });
+        const owner = defineProcess({
+          name: "owner", signals: {},
+          run: async () => {
+            const schedule = timer.Schedule({ expr: "0 8 * * *" });
+            await registerTrigger({
+              source: schedule, target: first,
+              inputs: (event) => ({ tick: event }),
+              subscription_key: "first-key"
+            });
+            await registerTrigger({
+              source: schedule, target: second,
+              inputs: (event) => ({ tick: event }),
+              subscription_key: "second-key"
+            });
+            return true;
+          }
+        });
+        finish(await start(owner, {}));
+        "#,
+    );
+}
+
+/// The literal-target rule is what makes the reference honest, so it stays: an
+/// alias still has no name a reader of the registration can see.
+#[test]
+fn an_aliased_trigger_target_is_still_refused() {
+    assert_eq!(
+        reject(
+            r#"
+        const remember = defineProcess({
+          name: "remember", signals: {}, run: async (tick: unknown) => { return true; }
+        });
+        const alias = remember;
+        const schedule = timer.Schedule({ expr: "0 8 * * *" });
+        finish(await registerTrigger({
+          source: schedule, target: alias,
+          inputs: (event) => ({ tick: event }),
+          subscription_key: "remembered-key"
+        }));
+        "#
+        )
+        .code,
+        DiagnosticCode::ProcessTargetStaticRequired
+    );
+}
