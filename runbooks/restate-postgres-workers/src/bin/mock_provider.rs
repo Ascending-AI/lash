@@ -506,7 +506,7 @@ const effect_loop = defineProcess({{
   }}
 }});
 
-const control_handle = start(effect_loop, {{
+const unsegmented_handle = start(effect_loop, {{
   workflow_id: "{workflow_id}",
   force_segmentation: false
 }});
@@ -514,11 +514,11 @@ const segmented_handle = start(effect_loop, {{
   workflow_id: "{workflow_id}",
   force_segmentation: true
 }});
-const control = await control_handle;
+const unsegmented = await unsegmented_handle;
 const segmented = await segmented_handle;
 finish({{
   workflow_id: "{workflow_id}",
-  control: control,
+  control: unsegmented,
   segmented: segmented,
   final: "{EXPECTED_SEGMENT_LOOP_TEXT}"
 }});
@@ -943,6 +943,40 @@ mod tests {
                 1,
                 "mock script does not close exactly one TypeScript cell:\n{script}"
             );
+        }
+    }
+
+    /// Host modules (`control`, `tools`, `llm`, `triggers`) are resolved by
+    /// name, and a top-level `const control = ...` shadows the module for the
+    /// rest of the session -- every later `control.continue_as(...)` is refused
+    /// with TS_METHOD_UNSUPPORTED. Segment 2 runs every workflow against one
+    /// session, so a binding one scenario leaves behind disarms a later
+    /// scenario's frame switch: that is FIG-3085, where the queued
+    /// frame-switch turn burned the driver's no-progress budget and committed
+    /// `stopped: max_turns` with no final value.
+    #[test]
+    fn no_mock_script_binds_over_a_host_module() {
+        const MODULE_ROOTS: [&str; 4] = ["control", "tools", "llm", "triggers"];
+        for script in every_mock_script() {
+            for line in script.lines() {
+                // Top-level bindings only: nested ones die with their scope.
+                let Some(rest) = line
+                    .strip_prefix("const ")
+                    .or_else(|| line.strip_prefix("let "))
+                    .or_else(|| line.strip_prefix("var "))
+                else {
+                    continue;
+                };
+                let name = rest
+                    .split(|ch: char| !(ch.is_alphanumeric() || ch == '_' || ch == '$'))
+                    .next()
+                    .unwrap_or_default();
+                assert!(
+                    !MODULE_ROOTS.contains(&name),
+                    "mock script binds `{name}` over the host module of the same name, \
+                     disarming it for every later turn in the session:\n{script}"
+                );
+            }
         }
     }
 

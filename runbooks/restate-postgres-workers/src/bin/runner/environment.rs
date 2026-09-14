@@ -419,17 +419,44 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
                     .is_some_and(|key| completed_promise_keys.contains(key))
         });
 
-        if callees_completed && parent_running_or_backing_off {
+        // A turn handler that returned a terminal failure never writes its
+        // terminal-result row, so the runner's poll times out with every
+        // promise settled. That is not an inconclusive wait state: the answer
+        // is already on the invocation row, and reading it as INCONCLUSIVE
+        // sent FIG-3085 looking for a stranded promise that never existed.
+        let terminal_handler_failure = rows.iter().find(|row| {
+            row.target_service_name == TURN_WORKFLOW_NAME
+                && row.target_service_key.as_deref() == Some(workflow_id)
+                && row.status == "completed"
+                && row.completion_result.as_deref() == Some("failure")
+        });
+
+        if let Some(row) = terminal_handler_failure {
+            let failure = row.completion_failure.as_deref().unwrap_or("<no failure text>");
+            format!(
+                "HANDLER-TERMINAL-FAILURE: {TURN_WORKFLOW_NAME}/{workflow_id}/run completed with \
+                 failure `{failure}`; the runner timed out only because a failed handler writes no \
+                 terminal-result row. A `no final value` failure means the turn committed a \
+                 non-finishing outcome (RCA FIG-3085: the turn's cells errored until the RLM \
+                 driver's no-progress budget stopped it as `max_turns`), so read the durable-wait \
+                 resolution payload and the provider-call rows, not the promise state."
+            )
+        } else if callees_completed && parent_running_or_backing_off {
             "GUARD-HANG: await_resolution callees Completed while the parent is running/backing-off"
+                .to_string()
         } else if suspended_on_completed_promise {
             "PROMISE-STRANDING: await_resolution callee is suspended on a promise that peek reports completed"
+                .to_string()
         } else {
             "INCONCLUSIVE: invocation/promise state matches neither ratified RCA discriminator"
+                .to_string()
         }
     });
     eprintln!(
         "workers-e2e TIMEOUT DISCRIMINATOR: {}",
-        discriminator.unwrap_or("INCONCLUSIVE: Restate invocation query unavailable")
+        discriminator.unwrap_or_else(|| {
+            "INCONCLUSIVE: Restate invocation query unavailable".to_string()
+        })
     );
 }
 
