@@ -1,7 +1,5 @@
 //! HTTP backend for the workflow-graph round-trip example.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash::sync::MutexExt;
 mod catalog;
 mod contract;
@@ -108,6 +106,11 @@ impl AppState {
         Self::with_run_timing(RunTiming::default())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the graph was just rendered by workflow_graph_to_source, the inverse of the \
+                  parser, so re-rendering it canonically cannot fail"
+    )]
     pub fn with_run_timing(timing: RunTiming) -> Result<Self, WorkflowGraphBuildError> {
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let source = workflow_graph_to_source(&graph)
@@ -124,6 +127,10 @@ impl AppState {
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "AppState::new seeds the store with version 1 and save always pushes"
+    )]
     fn current(&self) -> SavedWorkflow {
         self.store
             .lock_recover()
@@ -147,6 +154,10 @@ impl AppState {
 }
 
 impl Default for AppState {
+    #[expect(
+        clippy::expect_used,
+        reason = "the built-in default workflow source is valid; see DEFAULT_WORKFLOW"
+    )]
     fn default() -> Self {
         Self::new().expect("default workflow should be valid")
     }
@@ -223,6 +234,11 @@ pub async fn serve_addr(addr: SocketAddr, state: AppState) -> std::io::Result<()
     serve(listener, state).await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "saved sources are produced by workflow_graph_to_source, so reprojecting them \
+              with type facets cannot fail"
+)]
 async fn get_workflow(State(state): State<AppState>) -> Json<WorkflowDocument> {
     let saved = state.current();
     let environment = runtime::host_environment();
@@ -261,6 +277,10 @@ async fn save_workflow(
     }))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "RunEvent is a serde struct, so to_string cannot fail"
+)]
 async fn run_workflow(
     State(state): State<AppState>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, RenderErrorResponse> {

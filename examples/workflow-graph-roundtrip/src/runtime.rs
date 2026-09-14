@@ -75,6 +75,11 @@ impl PreparedRun {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "each mock operation registers exactly once under its own module and host \
+              operation keys, so the catalog adds cannot conflict"
+)]
 pub(crate) fn host_environment() -> LashlangHostEnvironment {
     let mut catalog = LashlangHostCatalog::new();
     for operation in crate::display::OPERATIONS {

@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

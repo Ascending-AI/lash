@@ -543,10 +543,14 @@ pub(super) async fn drive_frame_switch_crash_process(
     Ok(response)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
+)]
 pub(super) async fn wait_for_minio(store: &impl lash::persistence::AttachmentStore) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     let meta = lash_core::AttachmentCreateMeta::new(
-        lash_core::MediaType::parse("image/png").unwrap(),
+        lash_core::MediaType::parse("image/png").expect("literal image/png is a valid MediaType"),
         Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
         Some("runner-health.png".to_string()),
     );

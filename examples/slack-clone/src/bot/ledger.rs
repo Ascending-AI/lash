@@ -299,6 +299,10 @@ impl EventLedger {
     /// `deliveries` is bumped on every claim including the first, so the value is
     /// delivery attempts and not "retries after the first" — and `deliveries == 1`
     /// is exactly the condition for "this caller inserted the row".
+    #[expect(
+        clippy::expect_used,
+        reason = "read re-fetches the row this same transaction just inserted, so it is Some"
+    )]
     pub async fn claim(
         &self,
         event_id: String,

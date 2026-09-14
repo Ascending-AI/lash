@@ -50,6 +50,10 @@ pub(crate) async fn enqueue_turn_input(
     Ok(Json(receipt))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
+)]
 pub(crate) async fn admit_queued_send(
     state: &AppState,
     session_id: &SessionId,

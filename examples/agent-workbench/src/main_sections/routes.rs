@@ -210,7 +210,7 @@ pub(crate) async fn retrieve_attachment(
         // Audited: the content-addressed attachment store has no session identity or tombstone error variant.
         Err(err) => return Err(AppError::internal(err)),
     };
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         // StoredAttachment is bytes-only by design; image/png is host knowledge from this
         // PNG-only upload contract, not metadata supplied by the blob store.
@@ -219,7 +219,7 @@ pub(crate) async fn retrieve_attachment(
         .header(header::CACHE_CONTROL, "private, no-store")
         .header("x-lash-attachment-id", attachment_id)
         .body(Body::from(stored.bytes))
-        .expect("valid attachment response"))
+        .map_err(|err| AppError::internal(format!("build attachment response: {err}")))
 }
 
 pub(crate) async fn commit_and_submit_user_turn(

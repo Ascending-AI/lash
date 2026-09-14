@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 use lash::ProcessId;
 use lash::SessionId;
 mod schema;
@@ -580,6 +578,11 @@ impl PluginFactory for E2ePluginFactory {
         "restate-postgres-workers-e2e"
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the e2e button trigger source name/types are valid by the catalog grammar, \
+                  and the contribution's statically defined abilities serialize"
+    )]
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
         let abilities = LashlangAbilities::default()
             .with_processes()
@@ -655,6 +658,11 @@ impl SessionPlugin for E2eSessionPlugin {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`ui.button.Pressed` and its enum/string fields satisfy NamedDataType::object's \
+              validation"
+)]
 fn button_pressed_event_type() -> NamedDataType {
     NamedDataType::object(
         "ui.button.Pressed",
@@ -1070,6 +1078,10 @@ impl E2eTools {
         ToolOutcome::ok(result)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the literal `image/png` is a valid MediaType by the attachments grammar"
+    )]
     async fn make_attachment(&self, call: ToolCall<'_>) -> ToolOutcome {
         let workflow_id =
             workflow_id_from_args(&SessionId::from(call.context.session_id()), call.args);
@@ -1085,7 +1097,8 @@ impl E2eTools {
             .put(
                 bytes,
                 lash_core::AttachmentCreateMeta::new(
-                    lash_core::MediaType::parse("image/png").unwrap(),
+                    lash_core::MediaType::parse("image/png")
+                        .expect("literal image/png is a valid MediaType"),
                     Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
                     Some(filename.to_string()),
                 ),

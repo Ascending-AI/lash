@@ -39,8 +39,6 @@
 //! line per backend. Session ids carry a per-run suffix, so a shared PostgreSQL
 //! database never collides with an earlier run and no phase truncates tables.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash::SessionId;
 use lash::sync::MutexExt;
 use std::collections::BTreeMap;
@@ -79,6 +77,10 @@ const GATE_TIMEOUT: Duration = Duration::from_secs(30);
 const LIVELOCK_ROUNDS: usize = 3;
 
 /// Timings for the two phases that watch the renewal loop work.
+#[expect(
+    clippy::expect_used,
+    reason = "LEASE_TTL/RENEW_INTERVAL constants satisfy the ttl >= 3 * renew invariant"
+)]
 fn observable_timings() -> lash::durability::LeaseTimings {
     lash::durability::LeaseTimings::new(LEASE_TTL, RENEW_INTERVAL).expect("ttl >= 3 * renew")
 }
@@ -86,6 +88,10 @@ fn observable_timings() -> lash::durability::LeaseTimings {
 /// Timings for the direct-turn recovery phase's doomed worker. Its lane is left
 /// held by a process that will never renew again, so the successor's wait for a
 /// dead holder is bounded by this term rather than by the observable default.
+#[expect(
+    clippy::expect_used,
+    reason = "1500ms TTL against 500ms renewals satisfies the ttl >= 3 * renew invariant"
+)]
 fn short_lived_timings() -> lash::durability::LeaseTimings {
     lash::durability::LeaseTimings::new(Duration::from_millis(1_500), Duration::from_millis(500))
         .expect("ttl >= 3 * renew")
@@ -120,6 +126,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "checkpoints are serde Values that always serialize"
+)]
 fn emit(checkpoint: Value) {
     println!(
         "{}",
@@ -146,6 +156,10 @@ struct LeaseTraceCapture {
 }
 
 impl LeaseTraceCapture {
+    #[expect(
+        clippy::expect_used,
+        reason = "the process-wide trace subscriber is installed at most once, at startup"
+    )]
     fn install() -> Self {
         let capture = Self::default();
         let subscriber = Registry::default().with(capture.clone());
@@ -413,6 +427,11 @@ struct StallingProvider {
 }
 
 impl StallingProvider {
+    #[expect(
+        clippy::expect_used,
+        reason = "the harness releases the stalling provider when its observation window \
+                  closes, so the acquire cannot wait forever"
+    )]
     fn new() -> Self {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Semaphore::new(0));

@@ -7,8 +7,6 @@
 //! test. The selected-drain row uses scripted agent-frame work to exercise the
 //! public turn facade without model nondeterminism.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash::ProcessId;
 use lash::SessionId;
 use lash::sync::MutexExt;
@@ -58,6 +56,10 @@ async fn main() -> Result<()> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "checkpoints are serde Values that always serialize"
+)]
 fn emit(checkpoint: Value) {
     println!(
         "{}",
@@ -172,6 +174,11 @@ impl RecordingWorkerFaultSink {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the runbook worker config supplies bounded commit-budget and batching values; \
+              DurableProcessWorker::new refuses only unvalidated configs"
+)]
 fn process_worker(
     storage: &PostgresStorage,
     registry: Arc<dyn ProcessRegistry>,
@@ -238,6 +245,11 @@ struct StallingProvider {
 }
 
 impl StallingProvider {
+    #[expect(
+        clippy::expect_used,
+        reason = "the harness releases the stalling provider (see the release semantics call \
+                  site), so the acquire cannot time out"
+    )]
     fn new() -> Self {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Semaphore::new(0));
@@ -475,6 +487,11 @@ fn queued_batch_draft(
     .with_merge_key(merge_key)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the wired batch-id selection must be refused: it cannot jump one merge key \
+              across another"
+)]
 async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()> {
     const SESSION_ID: &str = "process-operations-selected-drain";
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -826,6 +843,11 @@ fn all_processes() -> ProcessListFilter {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the per-row assertions above prove the `drain-owner-bound-mine` row is present in \
+              these records"
+)]
 fn assert_drain_records(records: &[Value]) -> Result<()> {
     for (id, terminal, status) in [
         ("drain-owner-bound-mine", true, "Abandoned"),

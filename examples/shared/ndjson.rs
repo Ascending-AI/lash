@@ -9,6 +9,10 @@ use serde::Serialize;
 use serde_json::json;
 use std::convert::Infallible;
 
+#[expect(
+    clippy::expect_used,
+    reason = "every builder part is a static header value, so the response cannot fail to build"
+)]
 pub(crate) fn ndjson_response<T>(
     stream: impl futures_util::Stream<Item = T> + Send + 'static,
 ) -> Response

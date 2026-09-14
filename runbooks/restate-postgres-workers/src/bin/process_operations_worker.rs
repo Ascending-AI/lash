@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use anyhow::{Context, Result, bail};
 use lash::ProcessId;
 use lash::SessionId;
@@ -23,6 +21,11 @@ const PROCESS_ID: &str = "process-operations-crash-recovery";
 const SESSION_ID: &str = "process-operations-crash-target";
 const EVENT_TYPE: &str = "runbook.wake";
 
+#[expect(
+    clippy::expect_used,
+    reason = "the runbook's fixed wake-expiry and stale-claim ages satisfy WakeDeliveryConfig's \
+             validation bounds"
+)]
 fn registry(storage: &PostgresStorage) -> Arc<dyn lash_core::ProcessRegistry> {
     Arc::new(
         storage.process_registry_with_wake_delivery_config(

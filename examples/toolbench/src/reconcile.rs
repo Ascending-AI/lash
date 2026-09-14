@@ -115,6 +115,11 @@ fn sample(rows: Vec<Value>) -> Result<Vec<Value>> {
     }
     Ok(selected)
 }
+#[expect(
+    clippy::expect_used,
+    reason = "writeln! into a String cannot fail, and the comparison objects were built in \
+              this function with string-valued field/status keys"
+)]
 pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
     let rows = std::fs::read_to_string(path)?
         .lines()
@@ -197,33 +202,35 @@ pub(crate) async fn run(path: &Path, key: &str) -> Result<()> {
             row["round"],
             id.unwrap_or("missing id")
         )
-        .unwrap();
+        .expect("report is a String, so formatting cannot fail");
         report.push_str("| Row field | Generation field | Row | Generation | Result | normalized_mismatch (informational) |\n|---|---|---:|---:|---|---|\n");
         for c in &comparisons {
             writeln!(
                 report,
                 "| {} | {} | {} | {} | {} | {} |",
-                c["field"].as_str().unwrap(),
-                c["generation_field"].as_str().unwrap(),
+                c["field"].as_str().expect("comparison field is a string"),
+                c["generation_field"]
+                    .as_str()
+                    .expect("comparison generation_field is a string"),
                 c["row"],
                 c["generation"],
-                c["status"].as_str().unwrap(),
+                c["status"].as_str().expect("comparison status is a string"),
                 normalized(c) && c["status"] == "mismatch"
             )
-            .unwrap();
+            .expect("report is a String, so formatting cannot fail");
         }
         writeln!(
             report,
             "\n| Interrupted | Generation cost |\n|---|---:|\n| {} | {} |\n",
             is_interrupted, generation_cost
         )
-        .unwrap();
+        .expect("report is a String, so formatting cannot fail");
         writeln!(
             report,
             "\ncache_discount: {}; fetch error: {}\n",
             response["data"]["cache_discount"], evidence["generation"]["error"]
         )
-        .unwrap();
+        .expect("report is a String, so formatting cannot fail");
     }
     let counts = format!(
         "Sampled {} rows; queried {queries}; mismatching fields {mismatches}; unavailable native/cost fields {unavailable}; interrupted {interrupted_rows} (non-gating, generation cost shown per row); normalized_mismatch (informational) {normalized_mismatch}.\n",

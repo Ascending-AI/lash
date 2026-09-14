@@ -386,6 +386,11 @@ impl Provider for DevFailureProvider {
 }
 
 impl DevFailureProvider {
+    #[expect(
+        clippy::expect_used,
+        reason = "each DevProviderScenario scripts a cell for every response-producing call \
+                  (see scripted_cell's match)"
+    )]
     fn cell(&self, call: usize) -> String {
         self.scenario
             .scripted_cell(call)
@@ -416,6 +421,10 @@ fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the ReplayRouteChange scenario scripts a cell for every replay-route turn index"
+)]
 fn replay_route_response(request: &LlmRequest) -> LlmResponse {
     let turn = next_replay_route_turn(&request.messages);
     // The table is the single source, so the scripted-cell walk covers this

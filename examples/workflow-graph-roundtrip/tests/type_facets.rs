@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use serde_json::Value;
 use workflow_graph_roundtrip::{AppState, EditableValue, SaveWorkflowResponse, WorkflowDocument};
 
@@ -317,6 +315,12 @@ fn call_with_task<'a>(
         .unwrap_or_else(|| panic!("call with task starting `{task_prefix}`"))
 }
 
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "the call sites select a workflow id the served catalog produced, so the HTTP \
+              round-trip succeeds"
+)]
 async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> WorkflowDocument {
     let response = client
         .post(format!("{base}/workflow/select"))

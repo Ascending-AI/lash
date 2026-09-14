@@ -25,8 +25,6 @@
 //! Every phase prints one JSON `checkpoint` line; the shell runner asserts on
 //! those lines and keeps them as artifacts.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
@@ -200,6 +198,10 @@ async fn probe(database_url: &str, options: PreflightOptions) -> Result<serde_js
     serde_json::to_value(&report).context("serialize the preflight report")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "checkpoints are serde Values that always serialize"
+)]
 fn emit(checkpoint: serde_json::Value) {
     println!(
         "{}",

@@ -915,6 +915,11 @@ impl SessionEventRegistry {
         self.senders.lock_recover().remove(session_id);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "PersistedProductEventLog holds only serde-serializable plain data, so the \
+                  encode cannot fail"
+    )]
     pub(crate) fn persist_snapshot(&self, histories: &HashMap<SessionId, ProductEventHistory>) {
         let Some(path) = self.path.as_deref() else {
             return;
@@ -1346,6 +1351,11 @@ impl ActiveTurns {
         self.persist_snapshot(&ledger.turns, &prompts);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "PersistedActiveTurnsRef holds only serde-serializable plain data, so the \
+                  encode cannot fail"
+    )]
     fn persist_snapshot(
         &self,
         active: &BTreeSet<(SessionId, TurnId)>,

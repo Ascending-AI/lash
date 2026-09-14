@@ -12,6 +12,10 @@ pub(crate) struct Telemetry {
 }
 #[async_trait::async_trait]
 impl TurnActivitySink for Telemetry {
+    #[expect(
+        clippy::expect_used,
+        reason = "TurnActivity is a serde struct, so to_value cannot fail"
+    )]
     async fn emit(&self, activity: TurnActivity) {
         tracing::debug!(target: "toolbench", parent: &self.capture.span(), activity = %self.capture.redact(serde_json::to_value(&activity).expect("activity serializes")), "turn activity");
         self.activities
@@ -98,6 +102,12 @@ impl Telemetry {
             })),
         ))
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "every row starts as a serde_json::json! object or extends values that were \
+                  just proven objects, accounting::Usage serializes, and the dump_errors mutex \
+                  guards only pushes"
+    )]
     pub(crate) fn rows(&self, decisions: &[String], standard: bool) -> Vec<Value> {
         let captured = self.capture.rows();
         let activities = self.activities();
@@ -146,7 +156,7 @@ impl Telemetry {
                     execution_fields(&[], standard)
                 };
                 row.as_object_mut()
-                    .expect("attempt object")
+                    .expect("row is a json! object")
                     .extend(fields.as_object().expect("execution object").clone());
                 rows.push(row);
                 if completed {
@@ -170,20 +180,23 @@ impl Telemetry {
                     "retry_decision":null, "retry_decision_unavailable":"call interrupted before ledger sealed",
                     "retries":offset, "is_retry":offset > 0,
                 });
-                row.as_object_mut()
-                    .unwrap()
-                    .extend(execution_fields(&[], standard).as_object().unwrap().clone());
+                row.as_object_mut().expect("row is a json! object").extend(
+                    execution_fields(&[], standard)
+                        .as_object()
+                        .expect("execution object")
+                        .clone(),
+                );
                 rows.push(row);
             }
         }
         for (index, row) in rows.iter_mut().enumerate() {
             let transport = captured.get(index).cloned().unwrap_or(Value::Null);
             let usage = crate::accounting::Usage::from_raw(&transport["raw_usage"]);
-            row.as_object_mut().unwrap().extend(
+            row.as_object_mut().expect("row is a json! object").extend(
                 serde_json::to_value(usage)
-                    .unwrap()
+                    .expect("usage serializes")
                     .as_object()
-                    .unwrap()
+                    .expect("usage serializes to an object")
                     .clone(),
             );
             row["round"] = (index + 1).into();
@@ -196,7 +209,9 @@ impl Telemetry {
                     transport["response"]["execution_evidence"]["provider_response_id"].clone();
             }
             if let Some(sizes) = transport["request_sizes"].as_object() {
-                row.as_object_mut().unwrap().extend(sizes.clone());
+                row.as_object_mut()
+                    .expect("row is a json! object")
+                    .extend(sizes.clone());
             } else {
                 for key in [
                     "system_prompt_chars",
@@ -231,7 +246,13 @@ impl Telemetry {
                 row["provider_response_id"] = transport["http_response_json"]["id"].clone();
             }
             row["cost_unknown"] = row["cost_usd"].is_null().into();
-            row["capture_errors"] = serde_json::json!(*self.capture.dump_errors.lock().unwrap());
+            row["capture_errors"] = serde_json::json!(
+                *self
+                    .capture
+                    .dump_errors
+                    .lock()
+                    .expect("dump_errors mutex poisoned")
+            );
         }
         rows.into_iter()
             .map(|row| self.capture.redact(row))

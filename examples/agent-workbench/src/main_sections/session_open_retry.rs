@@ -15,6 +15,11 @@ pub(crate) async fn open_session_with_bounded_retry(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "every break out of the retry loop follows a contended attempt that just \
+              recorded last_contended; reaching attempt > 1 requires one"
+)]
 pub(crate) async fn retry_session_open<T, Open, OpenFuture, Trace>(
     mut open: Open,
     mut trace: Trace,

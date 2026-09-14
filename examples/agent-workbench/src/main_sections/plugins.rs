@@ -11,6 +11,11 @@ pub(crate) struct WorkbenchPluginFactory {
 }
 
 impl WorkbenchPluginFactory {
+    #[expect(
+        clippy::expect_used,
+        reason = "in-memory stores open a fresh `Connection::open_in_memory` with no on-disk \
+                  path to collide, so their open cannot fail here"
+    )]
     pub(crate) fn new() -> Self {
         Self {
             mail_world: mail::MailWorld::new(),
@@ -73,6 +78,11 @@ impl PluginFactory for WorkbenchPluginFactory {
         "agent_workbench"
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the contribution wraps statically defined abilities and resources that \
+                  serialize by construction"
+    )]
     fn extension_contributions(&self) -> Vec<lash::plugins::PluginExtensionContribution> {
         vec![
             lash::plugins::PluginExtensionContribution::new(
@@ -445,6 +455,11 @@ pub(crate) fn workbench_note_summary(state: &lash::persistence::SessionReadView)
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the three workbench trigger source types register against distinct split type \
+              names and event types built here from valid object shapes"
+)]
 pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
@@ -482,6 +497,10 @@ pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     resources
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`ui.button.Pressed` and its all-string fields satisfy NamedDataType::object's validation"
+)]
 pub(crate) fn button_pressed_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "ui.button.Pressed",
@@ -494,6 +513,10 @@ pub(crate) fn button_pressed_event_type() -> lashlang::NamedDataType {
     .expect("valid button pressed event type")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`mail.Received` and its all-string fields satisfy NamedDataType::object's validation"
+)]
 pub(crate) fn mail_received_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "mail.Received",
@@ -564,6 +587,10 @@ pub(crate) fn connected_accounts_prompt(mail_world: &mail::MailWorld) -> String 
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`cron.Tick` and its single string field satisfy NamedDataType::object's validation"
+)]
 pub(crate) fn cron_tick_event_type() -> lashlang::NamedDataType {
     lashlang::NamedDataType::object(
         "cron.Tick",
