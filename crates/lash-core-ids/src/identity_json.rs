@@ -22,17 +22,17 @@ const SCHEMA_ANNOTATIONS: &[&str] = &[
     "writeOnly",
 ];
 
-pub(crate) fn payload_leaf(value: &serde_json::Value) -> Vec<u8> {
+pub fn payload_leaf(value: &serde_json::Value) -> Vec<u8> {
     encode_leaf(normalize_payload(value))
 }
 
-pub(crate) fn payloads_equal(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+pub fn payloads_equal(left: &serde_json::Value, right: &serde_json::Value) -> bool {
     payload_leaf(left) == payload_leaf(right)
 }
 
 /// Compares optional JSON through the pre-cutover serialized semantics:
 /// absent, `None`, and an explicit JSON `null` are the same opaque leaf.
-pub(crate) fn optional_payloads_equal(
+pub fn optional_payloads_equal(
     left: Option<&serde_json::Value>,
     right: Option<&serde_json::Value>,
 ) -> bool {
@@ -40,7 +40,7 @@ pub(crate) fn optional_payloads_equal(
     payloads_equal(left.unwrap_or(&null), right.unwrap_or(&null))
 }
 
-pub(crate) fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
+pub fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
     encode_leaf(normalize_schema(value))
 }
 

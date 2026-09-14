@@ -4,6 +4,7 @@ members = [
     "crates/lash-sansio",
     "crates/lash-trace",
     "crates/lash-rlm-types",
+    "crates/lash-core-ids",
     "crates/lash-core",
     "crates/lash-conformance",
     "crates/lash-lashlang-runtime",
@@ -44,6 +45,7 @@ members = [
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.
 default-members = [
+    "crates/lash-core-ids",
     "crates/lash-core",
     "crates/lash-remote-protocol",
     "crates/lash",
@@ -243,6 +245,7 @@ num-traits = "0.2"
 # tag checkout, so published crates depend on the real release version.
 lash = { package = "lash-runtime", path = "crates/lash", version = "=0.0.0-dev" }
 lash-core = { package = "lash-internal-core", path = "crates/lash-core", version = "=0.0.0-dev" }
+lash-core-ids = { package = "lash-internal-core-ids", path = "crates/lash-core-ids", version = "=0.0.0-dev" }
 lash-http-transport = { package = "lash-internal-http-transport", path = "crates/lash-http-transport", version = "=0.0.0-dev" }
 lash-llm-tools = { package = "lash-internal-llm-tools", path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
 lash-llm-transport = { package = "lash-internal-llm-transport", path = "crates/lash-llm-transport", version = "=0.0.0-dev" }

@@ -2,6 +2,8 @@
 WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-conformance:lash-conformance",
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-ids:lash-core-ids",
+    "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core:integration_boundary__test",
     "//crates/lash-core:lash-core",
     "//crates/lash-core:lash-core__unit_test",
@@ -188,6 +190,8 @@ WORKSPACE_COMPILE_TARGETS = [
 WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-conformance:lash-conformance",
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-ids:lash-core-ids",
+    "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core:integration_boundary__test",
     "//crates/lash-core:lash-core",
     "//crates/lash-core:lash-core__unit_test",
@@ -372,6 +376,7 @@ WORKSPACE_CLIPPY_TARGETS = [
 
 WORKSPACE_RUST_SOURCE_TARGETS = [
     "//crates/lash-conformance:rust_sources",
+    "//crates/lash-core-ids:rust_sources",
     "//crates/lash-core:rust_sources",
     "//crates/lash-http-transport:rust_sources",
     "//crates/lash-lashlang-runtime:rust_sources",
@@ -414,6 +419,7 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
 
 WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core:integration_boundary__test",
     "//crates/lash-core:lash-core__unit_test",
     "//crates/lash-core:panic_containment__test",
@@ -543,6 +549,7 @@ WORKSPACE_CARGO_TEST_TARGETS = [
 
 WORKSPACE_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core:integration_boundary__test",
     "//crates/lash-core:lash-core__unit_test",
     "//crates/lash-core:panic_containment__test",
