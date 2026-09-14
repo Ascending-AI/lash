@@ -191,7 +191,7 @@ pub enum DeferredTriggerResolutionError {
     Fold {
         path: String,
         #[source]
-        source: lashlang::LashlangHostCatalogError,
+        source: Box<lashlang::LashlangHostCatalogError>,
     },
 }
 
@@ -336,7 +336,7 @@ pub async fn resolve_and_fold_deferred_triggers(
                     )
                     .map_err(|source| DeferredTriggerResolutionError::Fold {
                         path: path.clone(),
-                        source,
+                        source: Box::new(source),
                     })?;
             }
         }
