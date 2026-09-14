@@ -46,7 +46,7 @@ use type_helpers::{
     union_type,
 };
 mod facets;
-pub(crate) use facets::analyze_workflow_program;
+pub use facets::analyze_workflow_program;
 use facets::{
     expression_spans_by_pointer, recover_workflow_binding, workflow_diagnostic_owner_key,
 };
@@ -54,7 +54,7 @@ use facets::{
 mod tests;
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct WorkflowLinkAnalysis {
+pub struct WorkflowLinkAnalysis {
     nodes: BTreeMap<usize, WorkflowLinkNodeFacts>,
 }
 

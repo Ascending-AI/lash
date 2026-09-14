@@ -39,7 +39,13 @@ pub fn runtime_execution_site_for_workflow_site(
     Some(runtime_site)
 }
 
-pub(super) fn execution_sites(
+/// Every typed execution site an expression contributes, keyed by owner and
+/// AST path.
+///
+/// Execution sites are a compiler/runtime concept, not a syntax one, so this
+/// walk stays in `lashlang` while the projector that calls it lives in
+/// `lash-typescript`.
+pub fn execution_sites(
     expression: &Expr,
     owner: &str,
     path: &[u32],

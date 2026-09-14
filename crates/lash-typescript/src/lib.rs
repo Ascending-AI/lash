@@ -8,6 +8,7 @@ mod diagnostics;
 mod lower;
 mod regex;
 mod signatures;
+pub mod workflow_graph;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH};
 

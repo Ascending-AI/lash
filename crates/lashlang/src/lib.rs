@@ -122,15 +122,23 @@ pub use trigger::{
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
-    GraphRenderError, VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION,
-    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraph,
-    WorkflowGraphBuildError, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowProcess,
-    WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable,
-    node_id_for_execution_site, runtime_execution_site_for_workflow_site,
-    workflow_graph_from_program, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
+    WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
+    WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
+    WorkflowTypedVariable, child_path, execution_sites, node_id_for_execution_site,
+    projected_node_type_facets, runtime_execution_site_for_workflow_site,
+};
+
+/// Internals the workflow-graph projector needs.
+///
+/// The projector lives in `lash-typescript` because every text surface it owns
+/// is TypeScript, but the classification it reads — purity, execution-site
+/// descriptors, link facts — is language-independent and stays here.
+pub use linker::{WorkflowLinkAnalysis, analyze_workflow_program};
+pub use runtime::{
+    RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
 
 pub fn format_parse_diagnostic(source: &str, error: &ParseError) -> String {
