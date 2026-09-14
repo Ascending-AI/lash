@@ -146,6 +146,81 @@ pub trait SessionGraphService: Send + Sync {
     ) -> Result<(), PluginError> {
         Ok(())
     }
+
+    /// Plugin-visible agent-frame switch (FIG-3107).
+    ///
+    /// Same durable semantics as the in-turn `SwitchAgentFrame` control: the
+    /// named frame key, its naming material and reason are journaled with the
+    /// running turn, the switch materializes at that turn's final commit
+    /// through the same agent-frame-switch materializer (fresh frame with
+    /// `initial_nodes`, protocol execution cleared), it is replay-deterministic
+    /// because it derives from the requested frame material, and it is
+    /// idempotent on redrive — a replayed operation id answers the first
+    /// commit's outcome, and a different id naming the already-current frame
+    /// reports `opened = false` instead of failing.
+    ///
+    /// Reachable only under the running session's turn scope: the switch is a
+    /// turn-owned graph operation. A switch for a different session or from a
+    /// lane-less host service is refused; hosts open frames through
+    /// [`crate::SessionRuntime::open_agent_frame`] instead.
+    async fn switch_agent_frame(
+        &self,
+        _session_id: &SessionId,
+        _request: SwitchAgentFrameRequest,
+    ) -> Result<crate::OpenAgentFrameResult, PluginError> {
+        Err(PluginError::Session(
+            "agent-frame switches are unavailable in this session".to_string(),
+        ))
+    }
+}
+
+/// Post-turn plugin-requested agent-frame switch (FIG-3107).
+///
+/// The operation id is the switch's idempotency identity: re-deriving the same
+/// switch (same id) collapses onto the first outcome, and reusing an id for a
+/// different frame is a typed conflict. The frame key names the target frame;
+/// `initial_nodes` seed the fresh frame's history; `task` records the switch's
+/// task label exactly as the in-turn control does.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SwitchAgentFrameRequest {
+    /// Stable idempotency identity of this switch.
+    pub operation_id: String,
+    pub frame_key: crate::FrameKey,
+    /// Reasoning material naming the switch, same authority class as the
+    /// in-turn control's task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Frame-open reason the switch journals at materialization.
+    pub reason: crate::AgentFrameReason,
+    /// Nodes the fresh frame starts with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub initial_nodes: Vec<crate::SessionAppendNode>,
+}
+
+impl SwitchAgentFrameRequest {
+    pub fn new(
+        operation_id: impl Into<String>,
+        frame_key: crate::FrameKey,
+        reason: crate::AgentFrameReason,
+    ) -> Self {
+        Self {
+            operation_id: operation_id.into(),
+            frame_key,
+            task: None,
+            reason,
+            initial_nodes: Vec::new(),
+        }
+    }
+
+    pub fn with_task(mut self, task: impl Into<String>) -> Self {
+        self.task = Some(task.into());
+        self
+    }
+
+    pub fn with_initial_nodes(mut self, initial_nodes: Vec<crate::SessionAppendNode>) -> Self {
+        self.initial_nodes = initial_nodes;
+        self
+    }
 }
 
 /// Result of a single-shot direct LLM call.

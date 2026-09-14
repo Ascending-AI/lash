@@ -349,7 +349,13 @@ impl AgentFrameReason {
         Self::new(Self::INITIAL)
     }
 
-    pub(crate) fn compaction() -> Self {
+    /// Constructs the canonical compaction-frame reason (FIG-3107).
+    ///
+    /// A durable compaction frame is only ever opened through Lash-owned
+    /// compaction or recovery seams; the public constructor exists so a
+    /// plugin-visible recovery switch names the same frame class as the
+    /// runtime's own compaction instead of inventing an ad-hoc reason label.
+    pub fn compaction() -> Self {
         Self::new(Self::COMPACTION)
     }
 

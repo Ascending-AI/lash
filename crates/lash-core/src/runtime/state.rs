@@ -103,6 +103,22 @@ impl RuntimeCheckpointComponents {
         }
     }
 
+    /// Moves the execution-state root and leaves (descriptor, body, and
+    /// commit bookkeeping) from `source` (`FIG-3107`).
+    pub(crate) fn adopt_execution_components_from(&mut self, source: &Self) {
+        self.entries.retain(|key, _| {
+            !(key == crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                || key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX))
+        });
+        for (key, component) in &source.entries {
+            if key == crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                || key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX)
+            {
+                self.entries.insert(key.clone(), component.clone());
+            }
+        }
+    }
+
     pub(crate) fn unproven() -> Self {
         Self {
             completeness: CheckpointComponentCompleteness::Unproven,
@@ -765,6 +781,20 @@ impl RuntimeSessionState {
             head_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
         }
+    }
+
+    /// Re-hydrates the store-owned execution-state components from a freshly
+    /// loaded durable state (`FIG-3107`).
+    ///
+    /// A snapshot-start child of a parent whose last commit released its
+    /// resident bodies otherwise refuses hydration at its first protocol
+    /// restore with `ExecutionStateBodiesReleased`. The durable head still
+    /// carries the bodies, so the child resolves them there instead. The
+    /// parent's other components, its graph, and its residency bookkeeping are
+    /// untouched: only the execution root and its leaves move.
+    pub(crate) fn adopt_execution_components_from(&mut self, source: &Self) {
+        self.checkpoint_components
+            .adopt_execution_components_from(&source.checkpoint_components);
     }
 
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
