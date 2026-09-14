@@ -5,6 +5,10 @@
 
 pub mod conformance;
 
+/// A VM host, a host catalog and compile/execute wrappers, so a test outside
+/// this crate can run a program the way the crate's own unit tests do.
+pub mod harness;
+
 /// Pure AST constructors used by this crate's own unit tests.
 ///
 /// Unavailable to embedders on purpose: it is `cfg(test)` only, not part of the

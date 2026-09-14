@@ -6,68 +6,20 @@ use crate::ast::{
 };
 use crate::runtime::entry_points::compile_program_internal;
 use crate::testing::ast_builders as builders;
+/// The shared test host, named `Host` here because this crate's unit tests have
+/// referred to it that way since before it was published.
+use crate::testing::harness::EchoHost as Host;
+use crate::testing::harness::{
+    compile_labeled_process_program, compile_labeled_program, execute_compiled,
+    execute_compiled_traced, execute_compiled_with_projected_bindings,
+    test_environment as runtime_test_environment,
+};
 use lash_sansio::sync::MutexExt;
 use std::fmt::Write as _;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
-
-#[derive(Default)]
-struct Host;
-
-impl Host {
-    fn perform_resource_operation(
-        operation: ResourceOperation,
-    ) -> Result<Value, ExecutionHostError> {
-        match operation.operation.as_str() {
-            "echo" => {
-                let value = operation
-                    .args
-                    .first()
-                    .and_then(Value::as_record)
-                    .and_then(|record| record.get("value"))
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                Ok(value)
-            }
-            "err" => Err(ExecutionHostError::new("boom")),
-            other => Err(ExecutionHostError::new(format!(
-                "unknown module operation: {other}"
-            ))),
-        }
-    }
-}
-
-impl ExecutionHost for Host {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
-        match op {
-            AbilityOp::ResourceOperation(operation) => {
-                Self::perform_resource_operation(operation).map(AbilityResult::Value)
-            }
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
-                    batch
-                        .operations
-                        .into_iter()
-                        .map(|operation| {
-                            ResourceOperationResult::from_result(Self::perform_resource_operation(
-                                operation,
-                            ))
-                        })
-                        .collect(),
-                ),
-            )),
-            AbilityOp::Await(handle) => match handle {
-                Value::Record(_) => Ok(AbilityResult::Value(Value::Null)),
-                _ => Err(ExecutionHostError::new("expected handle record")),
-            },
-            AbilityOp::Print(_) => Ok(AbilityResult::Unit),
-            AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
-            _ => Err(ExecutionHostError::new("unsupported host ability")),
-        }
-    }
-}
 
 #[derive(Default)]
 struct RejectingAwaitHost;
@@ -356,22 +308,6 @@ fn program_references_a_resource(expr: &Expr) -> bool {
     finder.0
 }
 
-fn compile_labeled_program(program: Program) -> CompiledProgram {
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
-    let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    crate::compile_linked(&linked)
-}
-
-fn compile_labeled_process_program(program: Program, process_name: &str) -> CompiledProgram {
-    let surface = runtime_test_environment().with_language_features(
-        crate::LashlangLanguageFeatures::default().with_label_annotations(),
-    );
-    let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    crate::compile_linked_process(&linked, process_name).expect("process should compile")
-}
-
 fn assert_resource_call_unwrap_without_handle_await(compiled: &CompiledProgram) {
     let instructions = compiled_instruction_listing(compiled);
     assert!(
@@ -408,51 +344,6 @@ fn compile_program(program: &Program) -> CompiledProgram {
     super::entry_points::compile_program_internal(program)
 }
 
-fn runtime_test_environment() -> crate::LashlangHostEnvironment {
-    let mut resources = crate::LashlangHostCatalog::new();
-    resources
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "echo",
-            "echo",
-            crate::TypeExpr::Any,
-            crate::TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-    resources
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "err",
-            "err",
-            crate::TypeExpr::Any,
-            crate::TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-    resources
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "missing",
-            "missing",
-            crate::TypeExpr::Any,
-            crate::TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-    resources
-        .add_module_operation(
-            ["tools"],
-            "Tools",
-            "spawn",
-            "spawn",
-            crate::TypeExpr::Any,
-            crate::TypeExpr::Any,
-        )
-        .expect("host catalog operation must not conflict");
-    crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::all())
-}
-
 async fn execute_program<H: ExecutionHost>(
     program: &Program,
     state: &mut State,
@@ -465,24 +356,6 @@ async fn execute_program<H: ExecutionHost>(
     super::execute(program, state, host).await
 }
 
-async fn execute_compiled<H: ExecutionHost>(
-    program: &CompiledProgram,
-    state: &mut State,
-    host: &H,
-) -> Result<ExecutionOutcome, RuntimeError> {
-    super::execute(program, state, host).await
-}
-
-async fn execute_compiled_with_projected_bindings<H: ExecutionHost>(
-    program: &CompiledProgram,
-    state: &mut State,
-    host: &H,
-    projected: &ProjectedBindings,
-) -> Result<ExecutionOutcome, RuntimeError> {
-    let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
-    super::execute(program, state, &env).await
-}
-
 async fn execute_compiled_with_scratch<H: ExecutionHost>(
     program: &CompiledProgram,
     state: &mut State,
@@ -493,20 +366,6 @@ async fn execute_compiled_with_scratch<H: ExecutionHost>(
     let result = super::execute(program, state, &env).await;
     *scratch = env.take_recycled_scratch().unwrap_or_default();
     result
-}
-
-async fn execute_compiled_traced<H: ExecutionHost>(
-    program: &CompiledProgram,
-    state: &mut State,
-    host: &H,
-) -> Result<ExecutionOutcome, RuntimeFailure> {
-    let env = ExecutionEnvironment::new(host).traced();
-    match super::execute(program, state, &env).await {
-        Ok(outcome) => Ok(outcome),
-        Err(error) => Err(env
-            .take_runtime_failure()
-            .unwrap_or(RuntimeFailure { error, span: None })),
-    }
 }
 
 async fn execute_compiled_process<H: ExecutionHost>(
