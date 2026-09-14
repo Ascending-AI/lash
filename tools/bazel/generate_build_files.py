@@ -126,22 +126,15 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
-    if package_name == "lash-internal-core" and kind == "unit-test":
-        # Partition-owned, but not remotely executable: rustc for the
-        # workspace's largest test binary -- 446 files, over seventeen hundred
-        # cases -- is killed without a diagnostic by CI's executor pool, twice
-        # in a row and at different points in the compile. The same action
-        # succeeds on the developer pool, including at a raised per-target
-        # `memory_kb`, so the budget is not the lever. Compile and run it on
-        # the runner rather than split the binary or drop cases from it.
-        tags.append("no-remote-exec")
     if package_name == "lash-internal-typescript" and kind == "test":
         # Partition-owned, but not remotely executable: the no-abort guarantee
         # forks a dozen children that each parse deliberately deep sources
-        # right up to the stack bound. Under the pool's 4 GiB per-action budget
-        # (`memory_kb` in `.bazelrc`) they are SIGKILLed; the same label passes
-        # locally in 44 s, and CI's Bazel job executes tests locally on its
-        # runner. Pin the placement rather than soften what the test proves.
+        # right up to the stack bound, and their combined footprint exceeds any
+        # single-action memory budget the pool grants -- re-measured against
+        # the raised floor, `the_abort_corpus_survives_without_the_preflight`
+        # and `fuzzed_sources_survive_without_the_preflight` still die of
+        # `signal: 9 (SIGKILL)`. The same label passes locally in 43 s. Pin the
+        # placement rather than soften what the test proves.
         tags.append("no-remote-exec")
     if package_name == "lash-regress" and target_name == "unicodesets":
         tags.append("pr-deferred")
