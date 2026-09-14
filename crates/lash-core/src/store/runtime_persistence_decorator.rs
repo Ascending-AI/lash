@@ -29,71 +29,73 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().admit_session_state(lease).await
     }
 
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError> {
-        self.inner().begin_attachment_write(intent)
+        self.inner().begin_attachment_write(intent).await
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        self.inner().complete_attachment_write(intent, permit)
+        self.inner().complete_attachment_write(intent, permit).await
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        self.inner().abort_attachment_write(intent, permit)
+        self.inner().abort_attachment_write(intent, permit).await
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError> {
-        self.inner().commit_refs(session_id, attachment_ids)
+        self.inner().commit_refs(session_id, attachment_ids).await
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        self.inner().list_uncommitted(older_than_epoch_ms)
+        self.inner().list_uncommitted(older_than_epoch_ms).await
     }
 
-    fn forget_aged_uncommitted_intents(
+    async fn forget_aged_uncommitted_intents(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), StoreError> {
         self.inner()
             .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
+            .await
     }
 
-    fn has_live_ref_for_id(
+    async fn has_live_ref_for_id(
         &self,
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, StoreError> {
         self.inner()
             .has_live_ref_for_id(attachment_id, intent_grace_cutoff_epoch_ms)
+            .await
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
-        self.inner().forget(session_id, attachment_id)
+        self.inner().forget(session_id, attachment_id).await
     }
 
-    fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
-        self.inner().list_all_refs()
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
+        self.inner().list_all_refs().await
     }
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
@@ -561,49 +563,50 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
     }
 }
 
+#[async_trait::async_trait]
 impl<T> AttachmentManifest for T
 where
     T: RuntimePersistenceDecorator + ?Sized,
 {
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError> {
-        RuntimePersistenceDecorator::begin_attachment_write(self, intent)
+        RuntimePersistenceDecorator::begin_attachment_write(self, intent).await
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::complete_attachment_write(self, intent, permit)
+        RuntimePersistenceDecorator::complete_attachment_write(self, intent, permit).await
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
     ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::abort_attachment_write(self, intent, permit)
+        RuntimePersistenceDecorator::abort_attachment_write(self, intent, permit).await
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::commit_refs(self, session_id, attachment_ids)
+        RuntimePersistenceDecorator::commit_refs(self, session_id, attachment_ids).await
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        RuntimePersistenceDecorator::list_uncommitted(self, older_than_epoch_ms)
+        RuntimePersistenceDecorator::list_uncommitted(self, older_than_epoch_ms).await
     }
 
-    fn forget_aged_uncommitted_intents(
+    async fn forget_aged_uncommitted_intents(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), StoreError> {
@@ -611,9 +614,10 @@ where
             self,
             intent_grace_cutoff_epoch_ms,
         )
+        .await
     }
 
-    fn has_live_ref_for_id(
+    async fn has_live_ref_for_id(
         &self,
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
@@ -623,18 +627,19 @@ where
             attachment_id,
             intent_grace_cutoff_epoch_ms,
         )
+        .await
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
-        RuntimePersistenceDecorator::forget(self, session_id, attachment_id)
+        RuntimePersistenceDecorator::forget(self, session_id, attachment_id).await
     }
 
-    fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
-        RuntimePersistenceDecorator::list_all_refs(self)
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
+        RuntimePersistenceDecorator::list_all_refs(self).await
     }
 }
 

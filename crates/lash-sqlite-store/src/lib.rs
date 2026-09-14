@@ -488,10 +488,6 @@ fn process_encode_json<T: serde::Serialize>(value: &T) -> Result<String, lash_co
     })
 }
 
-fn block_on_store<T>(future: impl std::future::Future<Output = T>) -> T {
-    futures_executor::block_on(future)
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PersistedArtifactKind {
     GenericBlob,
@@ -1353,8 +1349,10 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         lash_core::AttachmentManifest::forget_aged_uncommitted_intents(
             &store,
             intent_grace_cutoff_epoch_ms,
-        )?;
-        Ok(lash_core::AttachmentManifest::list_all_refs(&store)?
+        )
+        .await?;
+        Ok(lash_core::AttachmentManifest::list_all_refs(&store)
+            .await?
             .into_iter()
             .collect())
     }
@@ -1375,6 +1373,7 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
     ) -> Result<bool, lash_core::StoreError> {
         let store = self.open_catalog_for_maintenance("root re-check").await?;
         lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
+            .await
     }
 
     fn fence(&self) -> lash_core::AttachmentGcFence {

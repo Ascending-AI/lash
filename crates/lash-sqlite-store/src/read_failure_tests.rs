@@ -327,11 +327,13 @@ async fn absent_rows_remain_honest_successful_outcomes() {
     );
     assert!(
         lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+            .await
             .expect("list uncommitted attachments")
             .is_empty()
     );
     assert!(
         lash_core::AttachmentManifest::list_all_refs(&store)
+            .await
             .expect("list attachment refs")
             .is_empty()
     );
@@ -380,6 +382,7 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     .expect("insert unknown owner kind");
 
     let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+        .await
         .expect_err("unknown SQLite attachment owner kind must refuse");
     assert!(
         matches!(
@@ -415,6 +418,7 @@ async fn bare_process_attachment_owner_refuses_with_canonical_typed_error() {
     .expect("insert bare process owner");
 
     let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+        .await
         .expect_err("bare SQLite process attachment owner must refuse");
     assert!(
         matches!(
@@ -521,7 +525,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     )
     .expect("insert unknown owner kind");
     assert_corrupt(
-        lash_core::AttachmentManifest::list_uncommitted(&store, 0),
+        lash_core::AttachmentManifest::list_uncommitted(&store, 0).await,
         "AttachmentManifest owner kind",
     );
 
@@ -672,11 +676,11 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     );
     assert_storage_failure(
         "AttachmentManifest::list_uncommitted",
-        lash_core::AttachmentManifest::list_uncommitted(&store, 0),
+        lash_core::AttachmentManifest::list_uncommitted(&store, 0).await,
     );
     assert_storage_failure(
         "AttachmentManifest::list_all_refs",
-        lash_core::AttachmentManifest::list_all_refs(&store),
+        lash_core::AttachmentManifest::list_all_refs(&store).await,
     );
 }
 

@@ -372,7 +372,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 lash_core::AttachmentManifest::begin_attachment_write(
                     seed_store.as_ref(),
                     intent.clone(),
-                )?
+                )
+                .await?
             else {
                 panic!("a seeded attachment write must be granted");
             };
@@ -380,7 +381,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 seed_store.as_ref(),
                 &intent,
                 permit,
-            )?;
+            )
+            .await?;
         }
     }
     if let Some((process_id, output)) = case.precompleted_process.clone() {

@@ -526,7 +526,8 @@ async fn attachment_prefix_retention(
                 id: "orphan-turn".into(),
             }),
         },
-    );
+    )
+    .await;
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.policy.clone())

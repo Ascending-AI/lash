@@ -1386,7 +1386,6 @@
       "dependencies": [
         "async-trait",
         "flate2",
-        "futures-executor",
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-lashlang",

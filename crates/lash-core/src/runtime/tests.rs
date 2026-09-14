@@ -160,8 +160,12 @@ pub(crate) mod helpers {
             .expect("put attachment");
         store
             .commit_refs(&request.session_id, std::slice::from_ref(&attachment.id))
+            .await
             .expect("commit attachment ref");
-        assert_eq!(store.list_all_refs().unwrap(), vec![attachment.id.clone()]);
+        assert_eq!(
+            store.list_all_refs().await.unwrap(),
+            vec![attachment.id.clone()]
+        );
 
         let report = crate::reclaim_unreferenced_attachments(
             &factory,

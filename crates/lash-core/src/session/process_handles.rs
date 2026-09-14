@@ -527,7 +527,13 @@ mod tests {
             None,
             crate::TurnContext::default(),
         );
-        assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+        assert!(
+            persistence
+                .list_uncommitted(u64::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(backend.list().await.unwrap().is_empty());
         let handle = RuntimeExecutionContext::process_handle_value(
             &crate::ProcessRef::from_record(&process),
@@ -558,7 +564,13 @@ mod tests {
             )],
             "the completed process attachment must be authorized as await_process output"
         );
-        assert!(persistence.list_uncommitted(u64::MAX).unwrap().is_empty());
+        assert!(
+            persistence
+                .list_uncommitted(u64::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(backend.list().await.unwrap().is_empty());
     }
 

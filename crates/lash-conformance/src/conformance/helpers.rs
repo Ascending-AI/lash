@@ -14,12 +14,13 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
 /// Record one completed attachment write: acquire the write fence, then stamp
 /// the upload evidence. This is the only way a manifest row comes into being,
 /// and the stamp is the only thing that makes a digest adoptable.
-pub(crate) fn record_completed_attachment_write(
+pub(crate) async fn record_completed_attachment_write(
     store: &Arc<dyn crate::RuntimePersistence>,
     intent: crate::AttachmentIntent,
 ) {
     let crate::AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("begin attachment write")
     else {
         panic!(
@@ -29,6 +30,7 @@ pub(crate) fn record_completed_attachment_write(
     };
     store
         .complete_attachment_write(&intent, permit)
+        .await
         .expect("stamp attachment upload evidence");
 }
 

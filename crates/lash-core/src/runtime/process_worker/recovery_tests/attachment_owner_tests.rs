@@ -18,8 +18,9 @@ impl crate::AttachmentRootSet for ParentBoundSessionStoreFactory {
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
         self.store
-            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)?;
-        Ok(self.store.list_all_refs()?.into_iter().collect())
+            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
+            .await?;
+        Ok(self.store.list_all_refs().await?.into_iter().collect())
     }
 
     async fn has_live_attachment_ref(
@@ -29,6 +30,7 @@ impl crate::AttachmentRootSet for ParentBoundSessionStoreFactory {
     ) -> Result<bool, crate::StoreError> {
         self.store
             .has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)
+            .await
     }
 }
 
@@ -249,6 +251,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
 
     let entries = parent_store
         .list_uncommitted(u64::MAX)
+        .await
         .expect("list parent-bound process intents");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].session_id, format!("process-env:{PROCESS_ID}"));
@@ -342,6 +345,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .expect("process owner store exists");
     let entries = store
         .list_uncommitted(u64::MAX)
+        .await
         .expect("list process intents");
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|entry| {
@@ -485,6 +489,7 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
     let first_entries = process_env_store()
         .await
         .list_uncommitted(u64::MAX)
+        .await
         .expect("list first-incarnation process intents");
     assert!(
         !first_entries.is_empty(),
@@ -527,6 +532,7 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
     let second_entries = process_env_store()
         .await
         .list_uncommitted(u64::MAX)
+        .await
         .expect("list second-incarnation process intents");
     assert!(
         !second_entries.is_empty(),

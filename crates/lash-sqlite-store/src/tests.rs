@@ -777,17 +777,20 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
         };
         let lash_core::AttachmentWriteFence::Granted(permit) =
             lash_core::AttachmentManifest::begin_attachment_write(&store, intent.clone())
+                .await
                 .expect("begin write")
         else {
             panic!("a free digest must grant its writer");
         };
         lash_core::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
+            .await
             .expect("stamp upload evidence");
         lash_core::AttachmentManifest::commit_refs(
             &store,
             &SessionId::from("sess-1"),
             std::slice::from_ref(&attachment_id),
         )
+        .await
         .expect("commit ref");
     }
 
@@ -853,17 +856,20 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     };
     let lash_core::AttachmentWriteFence::Granted(live_permit) =
         lash_core::AttachmentManifest::begin_attachment_write(&*store, live_intent.clone())
+            .await
             .expect("begin live attachment write")
     else {
         panic!("a free digest must grant its writer");
     };
     lash_core::AttachmentManifest::complete_attachment_write(&*store, &live_intent, live_permit)
+        .await
         .expect("stamp live attachment upload");
     lash_core::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
         std::slice::from_ref(&attachment.id),
     )
+    .await
     .expect("commit live attachment ref");
 
     let missing_factory = SqliteSessionStoreFactory::new(dir.path().join("wrong-sessions"));

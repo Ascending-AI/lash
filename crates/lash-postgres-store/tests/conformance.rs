@@ -1173,7 +1173,7 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     .expect("insert unknown owner kind");
 
     let store = storage.session_store("unknown-attachment-owner");
-    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0);
+    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0).await;
 
     sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unknown-owner'")
         .execute(storage.pool())
@@ -1238,7 +1238,7 @@ async fn postgres_bare_process_attachment_owner_refuses_with_canonical_typed_err
     .expect("insert bare process owner");
 
     let store = storage.session_store("bare-process-attachment-owner");
-    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0);
+    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0).await;
 
     sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'bare-process-owner'")
         .execute(storage.pool())
@@ -1320,12 +1320,14 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     };
     let lash_core::AttachmentWriteFence::Granted(clock_permit) = store
         .begin_attachment_write(clock_intent.clone())
+        .await
         .expect("begin turn-owned write")
     else {
         panic!("a free digest must grant its writer");
     };
     store
         .complete_attachment_write(&clock_intent, clock_permit)
+        .await
         .expect("stamp turn-owned upload");
     let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store

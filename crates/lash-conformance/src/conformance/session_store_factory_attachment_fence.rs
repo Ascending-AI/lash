@@ -49,6 +49,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     assert!(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .await
                 .expect("first fenced write"),
             crate::AttachmentWriteFence::Granted(_)
         ),
@@ -62,6 +63,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
 
     // Drop the root and the digest becomes condemnable — once.
     crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .await
         .expect("forget the ref");
     assert_eq!(
         condemn().await.expect("condemn"),
@@ -86,6 +88,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     let restoring_intent = intent();
     let restoring_permit =
         match crate::AttachmentManifest::begin_attachment_write(&*store, restoring_intent.clone())
+            .await
             .expect("write against a condemned digest")
         {
             crate::AttachmentWriteFence::Granted(permit) => permit,
@@ -98,6 +101,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         &restoring_intent,
         restoring_permit,
     )
+    .await
     .expect("settle the successful restoring write");
     assert_eq!(
         arm().await.expect("arm after revocation"),
@@ -108,6 +112,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // `Condemned -> Deleting`: a writer now parks instead of putting bytes into
     // an in-flight delete, and only the release lets it through.
     crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .await
         .expect("forget the ref again");
     assert_eq!(
         condemn().await.expect("re-condemn"),
@@ -125,6 +130,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     assert!(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .await
                 .expect("write against an armed digest"),
             crate::AttachmentWriteFence::ReclamationInFlight
         ),
@@ -132,6 +138,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     );
     assert!(
         !crate::AttachmentManifest::list_all_refs(&*store)
+            .await
             .map(|refs| refs.contains(&attachment_id))
             .expect("contains_ref"),
         "a parked writer must record no intent"
@@ -144,6 +151,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     assert!(
         matches!(
             crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+                .await
                 .expect("write after the release"),
             crate::AttachmentWriteFence::Granted(_)
         ),
@@ -155,6 +163,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // cleared its manifest evidence under the same fence, so only a fresh
     // completed write can make it adoptable again.
     crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+        .await
         .expect("forget the ref before the successful-delete path");
     assert_eq!(
         condemn().await.expect("condemn before successful delete"),
@@ -183,6 +192,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         &request.session_id,
         std::slice::from_ref(&attachment_id),
     )
+    .await
     .expect_err("adoption must refuse a digest with no upload evidence");
     assert!(matches!(
         adoption_error,
@@ -192,6 +202,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     let restored_intent = intent();
     let crate::AttachmentWriteFence::Granted(restored_permit) =
         crate::AttachmentManifest::begin_attachment_write(&*store, restored_intent.clone())
+            .await
             .expect("a retired digest grants the next writer")
     else {
         panic!("a retired digest must not park a writer");
@@ -201,11 +212,13 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         &restored_intent,
         restored_permit,
     )
+    .await
     .expect("stamp the restoring upload");
     crate::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
         std::slice::from_ref(&attachment_id),
     )
+    .await
     .expect("a fresh completed write restores adoptability");
 }

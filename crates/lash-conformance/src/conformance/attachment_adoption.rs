@@ -271,10 +271,11 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let committed_id =
         lash_core::attachments::content_id(format!("recovery-committed-{namespace}").as_bytes());
     let survivor_intent = write_intent(&session_id, &survivor_id);
-    record_completed_write(&store, &survivor_intent);
-    record_completed_write(&store, &write_intent(&session_id, &committed_id));
+    record_completed_write(&store, &survivor_intent).await;
+    record_completed_write(&store, &write_intent(&session_id, &committed_id)).await;
     store
         .commit_refs(&session_id, std::slice::from_ref(&committed_id))
+        .await
         .expect("commit unrelated attachment root");
 
     assert_eq!(
@@ -288,12 +289,13 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let abandoned_intent = write_intent(&session_id, &attachment_id);
     let stale_permit = match store
         .begin_attachment_write(abandoned_intent.clone())
+        .await
         .expect("abandoned writer claims Condemned")
     {
         AttachmentWriteFence::Granted(permit) => permit,
         AttachmentWriteFence::ReclamationInFlight => panic!("first restoring writer must win"),
     };
-    let before_reopen = store.list_uncommitted(u64::MAX).unwrap();
+    let before_reopen = store.list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         before_reopen.iter().any(|entry| {
             entry.session_id == session_id && entry.attachment_id == attachment_id
@@ -315,7 +317,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         .await
         .expect("reopen session after factory reconstruction")
         .expect("cold-reopened session exists");
-    let before_recovery = reopened.list_uncommitted(u64::MAX).unwrap();
+    let before_recovery = reopened.list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         before_recovery.iter().any(|entry| {
             entry.session_id == session_id && entry.attachment_id == attachment_id
@@ -327,7 +329,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         .recover_abandoned_attachment_write(&attachment_id)
         .await
         .expect("recover abandoned writer after cold reopen");
-    let after_recovery = reopened.list_uncommitted(u64::MAX).unwrap();
+    let after_recovery = reopened.list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         after_recovery.iter().all(|entry| {
             entry.session_id != session_id || entry.attachment_id != attachment_id
@@ -350,6 +352,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     );
     reopened
         .abort_attachment_write(&abandoned_intent, stale_permit)
+        .await
         .expect("the pre-reopen permit is stale after recovery");
 
     let scoped =
@@ -368,6 +371,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let adopter = create(&reopened_factory, adopter_id.as_str()).await;
     adopter
         .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("another session adopts the restored bytes");
     assert!(
         reopened_factory
@@ -527,6 +531,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionS
     assert!(matches!(
         store
             .begin_attachment_write(restoring_intent(&restoring_condemned))
+            .await
             .expect("restoring writer claims condemnation"),
         AttachmentWriteFence::Granted(_)
     ));
@@ -740,6 +745,7 @@ async fn out_of_band_absence_leaves_no_adoptable_evidence(f: Arc<dyn SessionStor
     ));
     let error = store
         .commit_refs(&session_id, std::slice::from_ref(&reference.id))
+        .await
         .expect_err("bytes nobody uploaded through this store are not adoptable");
     assert!(matches!(
         error,
@@ -759,7 +765,7 @@ async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionSto
         )
         .await
         .unwrap();
-    record_completed_write(&store, &write_intent(&session_id, &reference.id));
+    record_completed_write(&store, &write_intent(&session_id, &reference.id)).await;
     backend.fail_delete(true);
     let report = reclaim_unreferenced_attachments(
         f.as_ref(),
@@ -780,14 +786,16 @@ async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionSto
     // surviving bytes are not adoptable until somebody puts them again.
     let error = store
         .commit_refs(&session_id, std::slice::from_ref(&reference.id))
+        .await
         .expect_err("condemnation cleared this digest's upload evidence");
     assert!(matches!(
         error,
         StoreError::UnknownAttachment { ref digest } if digest == &reference.id
     ));
-    record_completed_write(&store, &write_intent(&session_id, &reference.id));
+    record_completed_write(&store, &write_intent(&session_id, &reference.id)).await;
     store
         .commit_refs(&session_id, std::slice::from_ref(&reference.id))
+        .await
         .expect("a fresh completed write restores adoptability");
     assert!(
         f.has_live_attachment_ref(&reference.id, u64::MAX)
@@ -828,6 +836,7 @@ async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
     );
     let error = store
         .commit_refs(&session_id, std::slice::from_ref(&condemned.id))
+        .await
         .expect_err("a failed re-put certifies no upload");
     assert!(matches!(
         error,
@@ -845,6 +854,7 @@ async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
     assert_eq!(restored.id, condemned.id);
     store
         .commit_refs(&session_id, std::slice::from_ref(&condemned.id))
+        .await
         .expect("the successful re-put makes the digest adoptable again");
 }
 
@@ -903,6 +913,7 @@ async fn competing_writer_survives_failed_reput(f: Arc<dyn SessionStoreFactory>)
     assert_eq!(restored.id, attachment_id);
     second_store
         .commit_refs(&second_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("failed writer rollback does not clobber successful writer");
     assert!(backend.get(&attachment_id).await.is_ok());
 }
@@ -968,6 +979,7 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
     let intent = write_intent(&session_id, &attachment_id);
     let permit = match store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("restoring writer claims Condemned")
     {
         AttachmentWriteFence::Granted(permit) => permit,
@@ -988,12 +1000,14 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
     assert!(matches!(
         store
             .begin_attachment_write(intent.clone())
+            .await
             .expect("same-owner competing write observes the active claim"),
         AttachmentWriteFence::ReclamationInFlight
     ));
 
     store
         .abort_attachment_write(&intent, permit)
+        .await
         .expect("active writer abort restores Condemned");
     assert_eq!(
         f.arm_attachment_delete(&attachment_id).await.unwrap(),
@@ -1023,6 +1037,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     let crashed_store = create(&f, &session_id).await;
     let stale_permit = match crashed_store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("writer claims the prior phase")
     {
         AttachmentWriteFence::Granted(permit) => permit,
@@ -1031,6 +1046,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     assert!(
         crashed_store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .any(|entry| entry.session_id == session_id && entry.attachment_id == attachment_id),
@@ -1039,6 +1055,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     assert!(matches!(
         crashed_store
             .begin_attachment_write(intent.clone())
+            .await
             .expect("same-session concurrent write observes the durable claim"),
         AttachmentWriteFence::ReclamationInFlight
     ));
@@ -1054,6 +1071,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     assert!(
         reopened
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .all(|entry| entry.session_id != session_id || entry.attachment_id != attachment_id),
@@ -1061,6 +1079,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     );
     let fresh_permit = match reopened
         .begin_attachment_write(intent.clone())
+        .await
         .expect("fresh re-put claims the recovered phase")
     {
         AttachmentWriteFence::Granted(permit) => permit,
@@ -1071,15 +1090,18 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
 
     reopened
         .abort_attachment_write(&intent, stale_permit)
+        .await
         .expect("stale pre-recovery abort is a no-op");
     assert!(matches!(
         reopened
             .begin_attachment_write(intent.clone())
+            .await
             .expect("stale abort cannot revoke the fresh claim"),
         AttachmentWriteFence::ReclamationInFlight
     ));
     reopened
         .abort_attachment_write(&intent, fresh_permit)
+        .await
         .expect("fresh abort restores the recovered phase");
     assert_eq!(
         f.arm_attachment_delete(&attachment_id).await.unwrap(),
@@ -1106,6 +1128,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     let adopter = create(&f, adopter_id.as_str()).await;
     adopter
         .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("another session adopts the restored attachment");
 }
 
@@ -1122,6 +1145,7 @@ async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn SessionStor
     let intent = write_intent(&session_id, &attachment_id);
     let permit = match store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("first writer claims Condemned")
     {
         AttachmentWriteFence::Granted(permit) => permit,
@@ -1143,6 +1167,7 @@ async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn SessionStor
 
     store
         .abort_attachment_write(&intent, permit)
+        .await
         .expect("stale writer abort is a no-op");
     assert!(
         f.list_condemnations()
@@ -1157,6 +1182,7 @@ async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn SessionStor
     );
     let error = store
         .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect_err("a digest whose delete is in flight is not adoptable");
     assert!(matches!(
         error,
@@ -1206,6 +1232,7 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
         };
         let permit = match store
             .begin_attachment_write(intent.clone())
+            .await
             .expect("claim the prior phase for a turn-owned restoring write")
         {
             AttachmentWriteFence::Granted(permit) => permit,
@@ -1218,6 +1245,7 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
         match settlement {
             CommittedRestoringSettlement::Abort => store
                 .abort_attachment_write(&intent, permit)
+                .await
                 .expect("settle the late matching abort"),
             CommittedRestoringSettlement::Recover => {
                 factory
@@ -1226,6 +1254,7 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
                     .expect("recover the quiescent committed restoring writer");
                 store
                     .abort_attachment_write(&intent, permit)
+                    .await
                     .expect("the recovered permit is stale");
             }
         }
@@ -1285,6 +1314,7 @@ async fn commit_turn_owned_intent(
     assert!(
         store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .all(|entry| entry.attachment_id != *attachment_id),
@@ -1334,6 +1364,7 @@ async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn Ses
     };
     let permit = match store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("claim the older sweep's condemnation")
     {
         AttachmentWriteFence::Granted(permit) => permit,
@@ -1342,6 +1373,7 @@ async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn Ses
     commit_turn_owned_intent(&store, &request, &turn_id, &attachment_id).await;
     store
         .abort_attachment_write(&intent, permit)
+        .await
         .expect("abort after the intent became committed");
     paused_root.resume.notify_one();
 
@@ -1380,9 +1412,10 @@ fn image_meta() -> AttachmentCreateMeta {
 /// One completed write against the manifest: acquire the fence, then stamp the
 /// upload evidence. This is the only way a manifest row is created by a writer,
 /// and the only thing that makes a digest adoptable.
-fn record_completed_write(store: &Arc<dyn RuntimePersistence>, intent: &AttachmentIntent) {
+async fn record_completed_write(store: &Arc<dyn RuntimePersistence>, intent: &AttachmentIntent) {
     let AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("begin attachment write")
     else {
         panic!(
@@ -1392,6 +1425,7 @@ fn record_completed_write(store: &Arc<dyn RuntimePersistence>, intent: &Attachme
     };
     store
         .complete_attachment_write(intent, permit)
+        .await
         .expect("stamp upload evidence");
 }
 
@@ -1416,12 +1450,14 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
     let intent = write_intent(&session_id, &attachment_id);
     let AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("begin the attempt whose upload will fail")
     else {
         panic!("an unclaimed digest must grant the fence");
     };
     let unstamped = store
         .list_uncommitted(u64::MAX)
+        .await
         .unwrap()
         .into_iter()
         .find(|entry| entry.session_id == session_id && entry.attachment_id == attachment_id)
@@ -1432,6 +1468,7 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
     );
     let error = store
         .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect_err("an unstamped row is not upload evidence");
     assert!(matches!(
         error,
@@ -1446,10 +1483,12 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
 
     store
         .abort_attachment_write(&intent, permit)
+        .await
         .expect("the failed upload rolls its own attempt back");
     assert!(
         store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .all(|entry| entry.session_id != session_id || entry.attachment_id != attachment_id),
@@ -1458,6 +1497,7 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
     assert!(matches!(
         store
             .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+            .await
             .expect_err("the rolled-back digest is still unadoptable"),
         StoreError::UnknownAttachment { .. }
     ));
@@ -1473,18 +1513,21 @@ async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) 
     let intent = write_intent(&session_id, &attachment_id);
     let AttachmentWriteFence::Granted(first) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("first attempt begins")
     else {
         panic!("an unclaimed digest must grant the fence");
     };
     let AttachmentWriteFence::Granted(second) = store
         .begin_attachment_write(intent.clone())
+        .await
         .expect("a retry supersedes the first attempt")
     else {
         panic!("an unclaimed digest must grant the retry");
     };
     let error = store
         .complete_attachment_write(&intent, first)
+        .await
         .expect_err("the superseded attempt cannot stamp the row");
     assert!(matches!(
         error,
@@ -1493,15 +1536,18 @@ async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) 
     assert!(matches!(
         store
             .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+            .await
             .expect_err("a stale completion leaves the row unstamped"),
         StoreError::UnknownAttachment { .. }
     ));
 
     store
         .complete_attachment_write(&intent, second)
+        .await
         .expect("the owning attempt stamps the row");
     store
         .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("the stamped row is upload evidence");
     assert!(
         f.has_live_attachment_ref(&attachment_id, u64::MAX)
@@ -1523,9 +1569,10 @@ async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStor
     let attachment_id =
         lash_core::attachments::content_id(format!("evidence-payload-{namespace}").as_bytes());
 
-    record_completed_write(&uploader, &write_intent(&uploader_id, &attachment_id));
+    record_completed_write(&uploader, &write_intent(&uploader_id, &attachment_id)).await;
     adopter
         .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("the second session adopts the uploaded digest");
 
     drop(uploader);
@@ -1539,6 +1586,7 @@ async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStor
         "the adopter still roots the digest"
     );
     late.commit_refs(&late_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("a third session adopts through the adopter's copied evidence");
     assert!(
         f.has_live_attachment_ref(&attachment_id, u64::MAX)
@@ -1562,19 +1610,23 @@ async fn abort_after_a_foreign_adoption_preserves_that_root(f: Arc<dyn SessionSt
     let intent = write_intent(&uploader_id, &attachment_id);
     let AttachmentWriteFence::Granted(permit) = uploader
         .begin_attachment_write(intent.clone())
+        .await
         .expect("uploader begins")
     else {
         panic!("an unclaimed digest must grant the fence");
     };
     uploader
         .complete_attachment_write(&intent, permit)
+        .await
         .expect("uploader stamps its evidence");
     adopter
         .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("another session adopts the uploaded digest");
 
     uploader
         .abort_attachment_write(&intent, permit)
+        .await
         .expect("a late abort of the uploader's own attempt");
     assert!(
         f.has_live_attachment_ref(&attachment_id, u64::MAX)
@@ -1602,9 +1654,10 @@ async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFac
         lash_core::attachments::content_id(format!("duplicate-put-{namespace}").as_bytes());
     let intent = write_intent(&session_id, &attachment_id);
 
-    record_completed_write(&store, &intent);
+    record_completed_write(&store, &intent).await;
     store
         .commit_refs(&session_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("the uploader commits its own reference");
     assert!(
         f.has_live_attachment_ref(&attachment_id, u64::MAX)
@@ -1612,10 +1665,11 @@ async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFac
             .unwrap()
     );
 
-    record_completed_write(&store, &intent);
+    record_completed_write(&store, &intent).await;
     assert!(
         store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .all(|entry| entry.session_id != session_id || entry.attachment_id != attachment_id),
@@ -1629,6 +1683,7 @@ async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFac
     );
     adopter
         .commit_refs(&adopter_id, std::slice::from_ref(&attachment_id))
+        .await
         .expect("a duplicate put preserves the upload evidence");
 }
 
@@ -1640,10 +1695,11 @@ async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionS
     let known = lash_core::attachments::content_id(format!("batch-known-{namespace}").as_bytes());
     let unknown =
         lash_core::attachments::content_id(format!("batch-unknown-{namespace}").as_bytes());
-    record_completed_write(&store, &write_intent(&session_id, &known));
+    record_completed_write(&store, &write_intent(&session_id, &known)).await;
 
     let error = store
         .commit_refs(&session_id, &[known.clone(), unknown.clone()])
+        .await
         .expect_err("one unknown digest refuses the whole batch");
     assert!(matches!(
         error,
@@ -1656,18 +1712,20 @@ async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionS
     assert!(
         store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .any(|entry| entry.session_id == session_id && entry.attachment_id == known),
         "the refused batch left the evidenced row uncommitted"
     );
     assert!(
-        !store.list_all_refs().unwrap().contains(&unknown),
+        !store.list_all_refs().await.unwrap().contains(&unknown),
         "the refused batch wrote no row for the unknown digest"
     );
 
     store
         .commit_refs(&session_id, std::slice::from_ref(&known))
+        .await
         .expect("the evidenced digest alone adopts");
     assert!(f.has_live_attachment_ref(&known, u64::MAX).await.unwrap());
 }
@@ -1730,13 +1788,14 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     assert!(
         store
             .list_uncommitted(u64::MAX)
+            .await
             .unwrap()
             .iter()
             .any(|entry| entry.attachment_id == ids[0]),
         "a batch with one unadoptable digest adopts none of it"
     );
     assert!(
-        !store.list_all_refs().unwrap().contains(&ids[1]),
+        !store.list_all_refs().await.unwrap().contains(&ids[1]),
         "the refused batch wrote no row for the condemned digest"
     );
     let repeated = store
@@ -1750,7 +1809,7 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
 
     // Release the delete and re-establish the evidence the condemnation cleared.
     f.release_attachment_condemnation(&ids[1]).await.unwrap();
-    record_completed_write(&store, &write_intent(&session_id, &ids[1]));
+    record_completed_write(&store, &write_intent(&session_id, &ids[1])).await;
     store.commit_runtime_state(commit.clone()).await.unwrap();
     assert!(
         store
@@ -1840,7 +1899,11 @@ async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFa
         "typed refusal publishes no graph or head state"
     );
     assert!(
-        !receiver.list_all_refs().unwrap().contains(&reference.id),
+        !receiver
+            .list_all_refs()
+            .await
+            .unwrap()
+            .contains(&reference.id),
         "typed refusal publishes no manifest row"
     );
     assert!(
@@ -2070,11 +2133,13 @@ pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn Sessio
                 intent_at_epoch_ms: 1_000,
                 owner: owner.clone(),
             },
-        );
+        )
+        .await;
     }
 
     let entries = store
         .list_uncommitted(u64::MAX)
+        .await
         .expect("list the manifest rows just written");
     for (digest, owner) in &cases {
         let entry = entries

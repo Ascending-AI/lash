@@ -1,4 +1,4 @@
-//! Attachment write-ahead manifest: the synchronous attachment-tracking surface
+//! Attachment write-ahead manifest: the async attachment-tracking surface
 //! required from every [`SessionCommitStore`](super::SessionCommitStore).
 //!
 //! Split from `store/mod.rs` to keep both modules under the file-size budget;
@@ -438,7 +438,7 @@ pub struct AttachmentManifestEntry {
     pub owner: Option<AttachmentOwner>,
 }
 
-/// The synchronous attachment-manifest surface required from every
+/// The async attachment-manifest surface required from every
 /// [`SessionCommitStore`](super::SessionCommitStore). Used by
 /// [`SessionAttachmentStore`](crate::SessionAttachmentStore)
 /// to record intent rows before `put` and by GC sweeps to reconcile
@@ -449,6 +449,7 @@ pub struct AttachmentManifestEntry {
 /// paste no-op impls via [`impl_noop_attachment_manifest!`](crate::impl_noop_attachment_manifest) and
 /// participate transparently — the fence methods are no-ops, the
 /// scoped wrapper still works, and GC sweeps return empty.
+#[async_trait::async_trait]
 pub trait AttachmentManifest: Send + Sync {
     /// Record the write-ahead intent *and* resolve the digest's condemnation
     /// state in one conditional mutation — the writer half of the attachment GC
@@ -478,7 +479,7 @@ pub trait AttachmentManifest: Send + Sync {
     ///
     /// An authority whose manifest cannot fence must also report
     /// [`AttachmentGcFence::BestEffort`](crate::AttachmentGcFence).
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<AttachmentWriteFence, StoreError>;
@@ -494,7 +495,7 @@ pub trait AttachmentManifest: Send + Sync {
     ///
     /// The write-ahead intent stays in place, and a `Condemned` fact this
     /// attempt claimed is cleared now that the bytes exist.
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
@@ -508,7 +509,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// A `Condemned` fact this attempt claimed is released, unless the same
     /// intent became a committed root while the claim was held; that newer root
     /// supersedes the old unarmed condemnation before an older sweep can arm it.
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: AttachmentWritePermit,
@@ -546,7 +547,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// fence as put and condemn, and revokes an unarmed, unclaimed condemnation
     /// — the fresh committed root supersedes it. The manifest never calls host
     /// blob code; its byte-existence knowledge is the durable upload stamp.
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[crate::AttachmentId],
@@ -556,7 +557,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// `older_than_epoch_ms` without ever being committed. Hosts run
     /// this periodically to find orphans left by crashes between
     /// `begin_attachment_write` and the next turn commit.
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError>;
@@ -580,7 +581,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// backends must implement the owner-death predicate in the same conditional
     /// mutation as the age predicate; a read-then-forget implementation is not
     /// sound.
-    fn forget_aged_uncommitted_intents(
+    async fn forget_aged_uncommitted_intents(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), StoreError> {
@@ -603,14 +604,15 @@ pub trait AttachmentManifest: Send + Sync {
     /// The default is conservative — it treats *any* manifest row for the id as
     /// live (sparing more than strictly necessary, never deleting a referenced
     /// blob). Backends override it with the precise cutoff-aware predicate.
-    fn has_live_ref_for_id(
+    async fn has_live_ref_for_id(
         &self,
         attachment_id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, StoreError> {
         let _ = intent_grace_cutoff_epoch_ms;
         Ok(self
-            .list_all_refs()?
+            .list_all_refs()
+            .await?
             .iter()
             .any(|ref_id| ref_id == attachment_id))
     }
@@ -620,7 +622,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// session's refs are dropped. FIG-653: committed rows needed by retained
     /// graph history cannot be forgotten; GC removes them after the final
     /// retained prefix disappears. Bytes die only after all roots disappear.
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &crate::AttachmentId,
@@ -633,7 +635,7 @@ pub trait AttachmentManifest: Send + Sync {
     /// factory-level [`AttachmentRootSet`](crate::AttachmentRootSet) takes the
     /// root set from a single call rather than by unioning per-session sources.
     /// Feeds mark-and-sweep GC.
-    fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError>;
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError>;
 }
 
 /// Mixin macro for [`SessionCommitStore`](super::SessionCommitStore) implementors
@@ -653,8 +655,9 @@ pub trait AttachmentManifest: Send + Sync {
 #[macro_export]
 macro_rules! impl_noop_attachment_manifest {
     ($ty:ty) => {
+        #[$crate::async_trait]
         impl $crate::AttachmentManifest for $ty {
-            fn begin_attachment_write(
+            async fn begin_attachment_write(
                 &self,
                 _intent: $crate::AttachmentIntent,
             ) -> ::std::result::Result<$crate::AttachmentWriteFence, $crate::StoreError> {
@@ -663,7 +666,7 @@ macro_rules! impl_noop_attachment_manifest {
                 ))
             }
 
-            fn complete_attachment_write(
+            async fn complete_attachment_write(
                 &self,
                 _intent: &$crate::AttachmentIntent,
                 _permit: $crate::AttachmentWritePermit,
@@ -671,7 +674,7 @@ macro_rules! impl_noop_attachment_manifest {
                 Ok(())
             }
 
-            fn abort_attachment_write(
+            async fn abort_attachment_write(
                 &self,
                 _intent: &$crate::AttachmentIntent,
                 _permit: $crate::AttachmentWritePermit,
@@ -679,7 +682,7 @@ macro_rules! impl_noop_attachment_manifest {
                 Ok(())
             }
 
-            fn commit_refs(
+            async fn commit_refs(
                 &self,
                 _session_id: &$crate::SessionId,
                 _attachment_ids: &[$crate::AttachmentId],
@@ -687,7 +690,7 @@ macro_rules! impl_noop_attachment_manifest {
                 Ok(())
             }
 
-            fn list_uncommitted(
+            async fn list_uncommitted(
                 &self,
                 _older_than_epoch_ms: u64,
             ) -> ::std::result::Result<Vec<$crate::AttachmentManifestEntry>, $crate::StoreError>
@@ -695,7 +698,7 @@ macro_rules! impl_noop_attachment_manifest {
                 Ok(Vec::new())
             }
 
-            fn forget(
+            async fn forget(
                 &self,
                 _session_id: &$crate::SessionId,
                 _attachment_id: &$crate::AttachmentId,
@@ -703,7 +706,7 @@ macro_rules! impl_noop_attachment_manifest {
                 Ok(())
             }
 
-            fn list_all_refs(
+            async fn list_all_refs(
                 &self,
             ) -> ::std::result::Result<Vec<$crate::AttachmentId>, $crate::StoreError> {
                 Ok(Vec::new())

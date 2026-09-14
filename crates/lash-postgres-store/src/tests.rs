@@ -1155,9 +1155,9 @@ lash_conformance::checkpoint_claim_probe_tests!({
 /// and puts bytes into a delete that is already in flight. The post-delete
 /// probe is no defence against that: it only fires once the bytes are gone.
 ///
-/// Multi-threaded on purpose: the manifest surface is synchronous, so the
-/// writer blocks a thread on a detached runtime while the pool's IO driver
-/// and the sweeper half keep running on others.
+/// Multi-threaded on purpose: the writer and the sweeper half must really
+/// interleave, so each runs as its own task while the pool's IO driver keeps
+/// running alongside them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -1211,10 +1211,10 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             "round {round}: the digest must start each round rootless and free"
         );
 
-        let writer = tokio::task::spawn_blocking({
+        let writer = tokio::spawn({
             let store = std::sync::Arc::clone(&store);
             let intent = intent.clone();
-            move || lash_core::AttachmentManifest::begin_attachment_write(&*store, intent())
+            async move { lash_core::AttachmentManifest::begin_attachment_write(&*store, intent()).await }
         });
         if round % 2 == 1 {
             // Alternate the stagger so both orderings are exercised: on odd
@@ -1230,6 +1230,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         let fence = writer.await.expect("join writer").expect("fenced write");
 
         let contains_ref = lash_core::AttachmentManifest::list_all_refs(&*store)
+            .await
             .map(|refs| refs.contains(&attachment_id))
             .expect("contains_ref");
         match (armed, fence) {
@@ -1260,6 +1261,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
                     &completed_intent,
                     permit,
                 )
+                .await
                 .expect("complete the winning writer");
             }
             (armed, fence) => panic!(
@@ -1274,6 +1276,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             .expect("release");
         if contains_ref {
             lash_core::AttachmentManifest::forget(&*store, &session_id, &attachment_id)
+                .await
                 .expect("forget the ref");
         }
     }
@@ -1333,6 +1336,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     };
     let lash_core::AttachmentWriteFence::Granted(live_permit) =
         lash_core::AttachmentManifest::begin_attachment_write(&*live_store, live_intent.clone())
+            .await
             .expect("begin live attachment write")
     else {
         panic!("a free digest must grant its writer");
@@ -1342,12 +1346,14 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         &live_intent,
         live_permit,
     )
+    .await
     .expect("stamp live attachment upload");
     lash_core::AttachmentManifest::commit_refs(
         &*live_store,
         &request.session_id,
         std::slice::from_ref(&attachment.id),
     )
+    .await
     .expect("commit live attachment ref");
 
     let result = lash_core::attachments::reclaim_unreferenced_attachments(

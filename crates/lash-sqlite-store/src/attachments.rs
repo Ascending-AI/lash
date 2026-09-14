@@ -1,13 +1,8 @@
 //! The lashlang module-artifact store and the attachment write-ahead manifest.
 //!
-//! Both traits in this module have synchronous-looking call sites in their
-//! consumers but bridge to the async [`SqliteConnection`] underneath:
-//!
-//! * [`lashlang::LashlangArtifactStore`] is itself an `#[async_trait]`, so its
-//!   methods `.await` the connection wrapper directly (matching the the prior store
-//!   store's async surface byte-for-byte).
-//! * [`AttachmentManifest`] is a *synchronous* trait. Its bodies therefore wrap
-//!   the async store work in [`block_on_store`], exactly as the prior store did.
+//! Both traits in this module are `#[async_trait]` surfaces over the async
+//! [`SqliteConnection`]: their bodies `.await` the connection wrapper directly
+//! on the caller's runtime, with no `block_on` and no thread hop.
 //!
 //! Every DB body is a synchronous rusqlite closure handed to `conn.call`
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
@@ -917,15 +912,16 @@ impl Store {
     }
 }
 
+#[async_trait::async_trait]
 impl AttachmentManifest for Store {
     /// The writer half of the GC fence: the condemnation check, the claim, and
     /// the intent upsert are one SQLite transaction, so a sweeper's condemn CAS
     /// either precedes this whole mutation or fails against the intent it wrote.
-    fn begin_attachment_write(
+    async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
     ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
-        block_on_store(async {
+        {
             let attachment_id = intent.attachment_id.as_str().to_string();
             let session_id = intent.session_id.clone();
             let canonical_uri = intent.canonical_uri.as_str().to_string();
@@ -1038,10 +1034,10 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)?
-        })
+        }
     }
 
-    fn complete_attachment_write(
+    async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
@@ -1051,7 +1047,7 @@ impl AttachmentManifest for Store {
         let session_id = intent.session_id.clone();
         let write_id = permit.write_id().as_hex();
         let written_at_ms = crate::clamp_epoch_ms(self.clock.timestamp_ms());
-        block_on_store(async move {
+        {
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
@@ -1091,10 +1087,10 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)?
-        })
+        }
     }
 
-    fn abort_attachment_write(
+    async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
         permit: lash_core::AttachmentWritePermit,
@@ -1102,7 +1098,7 @@ impl AttachmentManifest for Store {
         let attachment_id = intent.attachment_id.as_str().to_string();
         let session_id = intent.session_id.clone();
         let write_id = permit.write_id().as_hex();
-        block_on_store(async move {
+        {
             self.conn
                 .write_flow(move |tx| {
                     let outcome: Result<(), StoreError> = (|| {
@@ -1147,10 +1143,10 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)?
-        })
+        }
     }
 
-    fn commit_refs(
+    async fn commit_refs(
         &self,
         session_id: &SessionId,
         attachment_ids: &[AttachmentId],
@@ -1158,7 +1154,7 @@ impl AttachmentManifest for Store {
         if attachment_ids.is_empty() {
             return Ok(());
         }
-        block_on_store(async {
+        {
             let session_id = SessionId::from(session_id.to_string());
             let attachment_ids = attachment_ids.to_vec();
             let now = self.clock.timestamp_ms() as i64;
@@ -1175,14 +1171,14 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)?
-        })
+        }
     }
 
-    fn list_uncommitted(
+    async fn list_uncommitted(
         &self,
         older_than_epoch_ms: u64,
     ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        block_on_store(async {
+        {
             let older_than = crate::clamp_epoch_ms(older_than_epoch_ms);
             self.conn
                 .call(move |conn| {
@@ -1245,14 +1241,14 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)
-        })
+        }
     }
 
-    fn forget_aged_uncommitted_intents(
+    async fn forget_aged_uncommitted_intents(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<(), StoreError> {
-        block_on_store(async {
+        {
             let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
             let process_registry_attached = self.process_registry_attached;
             self.conn
@@ -1306,15 +1302,15 @@ impl AttachmentManifest for Store {
                 .await
                 .map_err(sqlite_error)?;
             Ok(())
-        })
+        }
     }
 
-    fn has_live_ref_for_id(
+    async fn has_live_ref_for_id(
         &self,
         attachment_id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, StoreError> {
-        block_on_store(async {
+        {
             let attachment_id = attachment_id.as_str().to_string();
             let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
             let sql = live_ref_exists_sql(self.process_registry_attached);
@@ -1326,15 +1322,15 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)
-        })
+        }
     }
 
-    fn forget(
+    async fn forget(
         &self,
         session_id: &SessionId,
         attachment_id: &AttachmentId,
     ) -> Result<(), StoreError> {
-        block_on_store(async {
+        {
             let session_id = SessionId::from(session_id.to_string());
             let attachment_id = attachment_id.as_str().to_string();
             self.conn
@@ -1353,11 +1349,11 @@ impl AttachmentManifest for Store {
                 .await
                 .map_err(sqlite_error)?;
             Ok(())
-        })
+        }
     }
 
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        block_on_store(async {
+    async fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
+        {
             self.conn
                 .call(move |conn| {
                     let mut stmt =
@@ -1370,6 +1366,6 @@ impl AttachmentManifest for Store {
                 })
                 .await
                 .map_err(sqlite_error)
-        })
+        }
     }
 }
