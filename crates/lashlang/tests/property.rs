@@ -1,3 +1,17 @@
+//! Property tests over the IR, the VM and the snapshot encoding.
+//!
+//! ADR 0096 makes TypeScript the sole authored RLM dialect, so every generated
+//! program below is TypeScript lowered through `lash_typescript`, and the
+//! generators emit TypeScript rather than the retired surface. The type-literal
+//! generator emits `TypeExpr` directly: `Type { .. }` had no TypeScript
+//! spelling, and the JSON-schema law it pins is a property of the IR.
+//!
+//! The code→graph→code laws moved out with the workflow-graph lens: rendering
+//! and re-reading a program's canonical source is the lens's own contract, and
+//! the lens is a TypeScript-facing surface under FIG-3033. Its round-trip law
+//! is pinned there against the TypeScript printer rather than here against a
+//! retired one.
+
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
@@ -5,8 +19,7 @@ use std::sync::Arc;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ImageValue,
     ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, Record, ResourceHandle, Snapshot, State, Value, canonical_program_ir,
-    canonical_program_source, parse,
+    ProjectedValue, Record, ResourceHandle, Snapshot, State, TypeExpr, TypeField, Value,
 };
 use proptest::prelude::*;
 
@@ -98,7 +111,7 @@ enum GenValue {
     Record(Vec<(String, GenValue)>),
 }
 
-fn lashlang_string_strategy() -> impl Strategy<Value = String> {
+fn generated_string_strategy() -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
             proptest::char::range(' ', '~'),
@@ -158,22 +171,48 @@ impl GenValue {
 }
 
 fn ident_strategy() -> impl Strategy<Value = String> {
-    "[a-z_][a-z0-9_]{0,10}".prop_filter("reserved lashlang keyword", |ident| {
+    "[a-z_][a-z0-9_]{0,10}".prop_filter("reserved TypeScript name", |ident| {
         !matches!(
             ident.as_str(),
             "if" | "else"
                 | "for"
+                | "of"
                 | "in"
-                | "finish"
-                | "submit"
-                | "print"
-                | "call"
+                | "do"
+                | "while"
+                | "break"
+                | "continue"
+                | "return"
+                | "function"
+                | "class"
+                | "new"
+                | "this"
+                | "typeof"
+                | "instanceof"
+                | "void"
+                | "delete"
+                | "try"
+                | "catch"
+                | "finally"
+                | "throw"
+                | "switch"
+                | "case"
+                | "default"
+                | "const"
+                | "let"
+                | "var"
+                | "await"
+                | "async"
+                | "yield"
                 | "true"
                 | "false"
                 | "null"
-                | "and"
-                | "or"
-                | "not"
+                | "undefined"
+                | "finish"
+                | "print"
+                | "start"
+                | "sleep"
+                | "wake"
         )
     })
 }
@@ -183,7 +222,7 @@ fn gen_value_strategy() -> impl Strategy<Value = GenValue> {
         Just(GenValue::Null),
         any::<bool>().prop_map(GenValue::Bool),
         (-10_000i32..=10_000i32).prop_map(GenValue::Number),
-        lashlang_string_strategy().prop_map(GenValue::String),
+        generated_string_strategy().prop_map(GenValue::String),
     ];
 
     leaf.prop_recursive(4, 64, 8, |inner| {
@@ -346,409 +385,6 @@ fn assert_canonical_value_round_trip(expected: &Value, actual: &Value) {
     }
 }
 
-fn generated_workflow_corpus(ident: &str, value: &str) -> Vec<(&'static str, String)> {
-    let ident = format!("generated_{ident}");
-    vec![
-        ("data", format!("{ident} = {value}\nfinish {ident}\n")),
-        (
-            "call",
-            format!(
-                "@label(title: \"Generated call\", description: \"Metadata survives\")\n{ident} = await tools.echo({{ value: {value} }})?\nfinish {ident}\n"
-            ),
-        ),
-        (
-            "effect",
-            format!(
-                "@label(title: \"Generated effect\", description: \"Metadata survives\")\nprint {value}\nfinish {value}\n"
-            ),
-        ),
-        (
-            "terminal",
-            format!("process {ident}_terminal() {{\n  fail {value}\n}}\n"),
-        ),
-        (
-            "if_forms",
-            format!(
-                "{ident} = (true ? {value} : null)\nif true {{\n  print {ident}\n}} else if false {{\n  print null\n}} else {{\n  print {value}\n}}\nfinish {ident}\n"
-            ),
-        ),
-        (
-            "for",
-            format!("for item in [1, 2] {{\n  print item\n}}\nfinish {value}\n"),
-        ),
-        (
-            "comprehension",
-            format!("{ident} = [item for item in [1, 2, 3] if item > 1]\nfinish {ident}\n"),
-        ),
-        (
-            "process",
-            format!(
-                "@label(title: \"Generated process\", description: \"Metadata survives\")\nprocess {ident}() {{\n  wake {value}\n  finish {value}\n}}\n"
-            ),
-        ),
-        (
-            "while",
-            "count = 0\nwhile count < 2 { count = count + 1 }\nfinish count\n".to_string(),
-        ),
-        (
-            "stateful_for",
-            "total = 0\nfor item in [1, 2] { total = total + item\nintroduced = item }\nfinish [total, introduced]\n".to_string(),
-        ),
-        (
-            "state_update_path",
-            "state = { count: 0 }\nstate.count = 1\nfinish state\n".to_string(),
-        ),
-        (
-            "state_update_simple",
-            format!("{ident} = null\n{ident} = {value}\nfinish {ident}\n"),
-        ),
-        (
-            "type_ref_data",
-            "type Generated = { value: str }\nschema = Type { nested: Generated }\nfinish schema\n"
-                .to_string(),
-        ),
-        (
-            "computation",
-            "process generated_worker() { finish 1 }\nruns = [start generated_worker(), start generated_worker()]\ntupled = (await runs[0], await runs[1])\nlisted = [await runs[0], await runs[1]]\nrecorded = { value: await runs[0] }\nbuilt = len(await runs)\nbinary = (await runs[0] + 1)\nunary = not await runs[0]\nfield = (await runs[0]).value\nindexed = (await runs)[0]\nunusual = (await runs[0])??\nfinish unusual\n".to_string(),
-        ),
-        (
-            "scoped_for",
-            "item = 99\nitems = [1, 2]\nfor item in items { print item }\nselected = [item for item in items if item > 0]\nfinish item\n"
-                .to_string(),
-        ),
-    ]
-}
-
-fn graph_has_required_variant(graph: &lashlang::WorkflowGraph, variant: &str) -> bool {
-    match variant {
-        "data" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Data { .. })),
-        "call" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Call { .. })),
-        "effect" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Effect { .. })),
-        "terminal" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Terminal { .. })),
-        "if_forms" => {
-            let mut has_expression_if = false;
-            let mut has_direct_else_if = false;
-            for node in graph.nodes() {
-                if let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::If {
-                    then_is_block,
-                    else_is_block,
-                    ..
-                }) = node.kind
-                {
-                    has_expression_if |= !then_is_block && !else_is_block;
-                    has_direct_else_if |= then_is_block && !else_is_block;
-                }
-            }
-            has_expression_if && has_direct_else_if
-        }
-        "for" | "stateful_for" | "scoped_for" => graph.nodes().any(|node| {
-            matches!(
-                node.kind,
-                lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For { .. })
-            )
-        }),
-        "while" => graph.nodes().any(|node| {
-            matches!(
-                node.kind,
-                lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While { .. })
-            )
-        }),
-        "comprehension" => graph.nodes().any(|node| {
-            matches!(
-                node.kind,
-                lashlang::WorkflowNodeKind::Container(
-                    lashlang::WorkflowContainer::ListComprehension { .. }
-                )
-            )
-        }),
-        "process" => graph
-            .declarations
-            .iter()
-            .any(|declaration| matches!(declaration, lashlang::WorkflowDeclaration::Process(_))),
-        "state_update_path" | "state_update_simple" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::StateUpdate { .. })),
-        "type_ref_data" => graph.nodes().any(|node| {
-            matches!(
-                &node.kind,
-                lashlang::WorkflowNodeKind::Data {
-                    expression,
-                    ..
-                } if expression.starts_with("Type {")
-            )
-        }),
-        "computation" => graph
-            .nodes()
-            .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Computation { .. })),
-        _ => false,
-    }
-}
-
-fn promoted_invalid_graph_is_typed(graph: &lashlang::WorkflowGraph, variant: &str) -> bool {
-    let mut invalid = graph.clone();
-    #[allow(
-        clippy::needless_late_init,
-        reason = "the mutation-heavy match arms stay substantially clearer without expression nesting"
-    )]
-    let expected;
-    match variant {
-        "data" => {
-            let Some(node) = invalid
-                .main
-                .nodes
-                .iter_mut()
-                .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Data { .. }))
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Data { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "call" => {
-            let Some(node) = invalid
-                .main
-                .nodes
-                .iter_mut()
-                .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Call { .. }))
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Call { binding, .. } = &mut node.kind else {
-                return false;
-            };
-            *binding = Some("1 + 2".to_string());
-            expected = "invalid_assignment_target";
-        }
-        "effect" => {
-            let Some(node) = invalid
-                .main
-                .nodes
-                .iter_mut()
-                .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Effect { .. }))
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Effect { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "terminal" => {
-            let Some(process) =
-                invalid
-                    .declarations
-                    .iter_mut()
-                    .find_map(|declaration| match declaration {
-                        lashlang::WorkflowDeclaration::Process(process) => Some(process),
-                        lashlang::WorkflowDeclaration::Type(_)
-                        | lashlang::WorkflowDeclaration::Function(_) => None,
-                    })
-            else {
-                return false;
-            };
-            let Some(node) = process
-                .body
-                .nodes
-                .iter_mut()
-                .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Terminal { .. }))
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Terminal { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "if_forms" => {
-            let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
-                matches!(
-                    node.kind,
-                    lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::If {
-                        then_is_block: false,
-                        ..
-                    })
-                )
-            }) else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::If {
-                else_is_block,
-                ..
-            }) = &mut node.kind
-            else {
-                return false;
-            };
-            *else_is_block = true;
-            expected = "invalid_payload";
-        }
-        "for" | "stateful_for" | "scoped_for" => {
-            let Some(node) = invalid.nodes().find(|node| {
-                matches!(
-                    node.kind,
-                    lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For { .. })
-                )
-            }) else {
-                return false;
-            };
-            let id = node.id.clone();
-            let Some(node) = invalid.main.nodes.iter_mut().find(|node| node.id == id) else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::For {
-                iterable,
-                ..
-            }) = &mut node.kind
-            else {
-                return false;
-            };
-            *iterable = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "while" => {
-            let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
-                matches!(
-                    node.kind,
-                    lashlang::WorkflowNodeKind::Container(
-                        lashlang::WorkflowContainer::While { .. }
-                    )
-                )
-            }) else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While {
-                condition,
-                ..
-            }) = &mut node.kind
-            else {
-                return false;
-            };
-            *condition = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "comprehension" => {
-            let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
-                matches!(
-                    node.kind,
-                    lashlang::WorkflowNodeKind::Container(
-                        lashlang::WorkflowContainer::ListComprehension { .. }
-                    )
-                )
-            }) else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Container(
-                lashlang::WorkflowContainer::ListComprehension { clauses, .. },
-            ) = &mut node.kind
-            else {
-                return false;
-            };
-            clauses.clear();
-            expected = "invalid_payload";
-        }
-        "state_update_path" | "state_update_simple" => {
-            let Some(node) =
-                invalid.main.nodes.iter_mut().find(|node| {
-                    matches!(node.kind, lashlang::WorkflowNodeKind::StateUpdate { .. })
-                })
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::StateUpdate { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "type_ref_data" => {
-            let Some(node) = invalid.main.nodes.iter_mut().find(|node| {
-                matches!(
-                    &node.kind,
-                    lashlang::WorkflowNodeKind::Data {
-                        expression,
-                        ..
-                    } if expression.starts_with("Type {")
-                )
-            }) else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Data { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "print null".to_string();
-            expected = "invalid_payload";
-        }
-        "computation" => {
-            let Some(node) =
-                invalid.main.nodes.iter_mut().find(|node| {
-                    matches!(node.kind, lashlang::WorkflowNodeKind::Computation { .. })
-                })
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Computation { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        "process" => {
-            let Some(process) =
-                invalid
-                    .declarations
-                    .iter_mut()
-                    .find_map(|declaration| match declaration {
-                        lashlang::WorkflowDeclaration::Process(process) => Some(process),
-                        lashlang::WorkflowDeclaration::Type(_)
-                        | lashlang::WorkflowDeclaration::Function(_) => None,
-                    })
-            else {
-                return false;
-            };
-            let Some(node) = process
-                .body
-                .nodes
-                .iter_mut()
-                .find(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Effect { .. }))
-            else {
-                return false;
-            };
-            let lashlang::WorkflowNodeKind::Effect { expression, .. } = &mut node.kind else {
-                return false;
-            };
-            *expression = "{".to_string();
-            expected = "invalid_expression";
-        }
-        _ => return false,
-    }
-
-    matches!(
-        (expected, lashlang::workflow_graph_to_source(&invalid)),
-        (
-            "invalid_payload",
-            Err(lashlang::GraphRenderError::InvalidNodePayload { .. })
-        ) | (
-            "invalid_expression",
-            Err(lashlang::GraphRenderError::InvalidExpression { .. })
-        ) | (
-            "invalid_assignment_target",
-            Err(lashlang::GraphRenderError::InvalidAssignmentTarget { .. })
-        )
-    )
-}
-
 /// One statement in a generated heap-shaping program.
 ///
 /// The interesting states for the persistence oracle are the ones a real
@@ -767,21 +403,29 @@ enum HeapStep {
 }
 
 impl HeapStep {
-    fn to_source(&self) -> String {
+    fn to_source(&self, index: usize) -> String {
         match self {
-            Self::Seed(n) => format!("base = [[{n}], [{}]]\n", n.wrapping_add(1)),
-            Self::Alias => "alias = base\n".to_string(),
-            Self::PushRow(n) => format!("base = push(base, [{n}])\n"),
-            Self::ConcatRow(n) => format!("base = base + [[{n}]]\n"),
-            Self::NestInRecord => "holder = { rows: base, tag: \"held\" }\n".to_string(),
-            Self::MutateFirst(n) => format!("base[0] = [{n}]\n"),
-            Self::Discard => "scratch = [[9], [8], [7]]\nscratch = 0\n".to_string(),
-            Self::IterateCopy => {
-                "copies = []\nfor row in base { copies = push(copies, row) }\n".to_string()
+            Self::Seed(n) => format!("base = [[{n}], [{}]];\n", n.wrapping_add(1)),
+            Self::Alias => "alias = base;\n".to_string(),
+            Self::PushRow(n) => format!("base.push([{n}]);\n"),
+            Self::ConcatRow(n) => format!("base = base.concat([[{n}]]);\n"),
+            Self::NestInRecord => "holder = { rows: base, tag: \"held\" };\n".to_string(),
+            Self::MutateFirst(n) => format!("base[0] = [{n}];\n"),
+            Self::Discard => {
+                format!("let scratch{index} = [[9], [8], [7]];\nscratch{index} = 0;\n")
             }
+            Self::IterateCopy => format!(
+                "let copies{index} = [];\nfor (const row of base) {{ copies{index} = copies{index}.concat([row]); }}\n"
+            ),
         }
     }
 }
+
+/// The prologue every generated heap program needs.
+///
+/// TypeScript binds names before they are assigned, so the containers the
+/// steps reshape are declared once up front; the steps themselves only assign.
+const HEAP_PROLOGUE: &str = "let base = [];\nlet alias = null;\nlet holder = null;\n";
 
 fn heap_step_strategy() -> impl Strategy<Value = HeapStep> {
     prop_oneof![
@@ -813,7 +457,7 @@ proptest! {
 
     #[test]
     fn parse_never_panics_on_arbitrary_input(source in ".*") {
-        let result = catch_unwind(AssertUnwindSafe(|| parse(&source)));
+        let result = catch_unwind(AssertUnwindSafe(|| lash_typescript::parse(&source)));
         prop_assert!(result.is_ok(), "parse panicked for input: {source:?}");
     }
 
@@ -831,7 +475,7 @@ proptest! {
         value in gen_value_strategy()
     ) {
         let expected = value.to_value();
-        let source = format!("{ident} = {}\nfinish {ident}\n", value.to_source());
+        let source = format!("const {ident} = {};\nfinish({ident});\n", value.to_source());
         let host = DeterministicHost;
         let mut state = State::new();
 
@@ -843,92 +487,6 @@ proptest! {
         prop_assert_eq!(actual, expected.clone());
         let globals = state.globals();
         prop_assert_eq!(globals.get(&ident), Some(&expected));
-    }
-
-    #[test]
-    fn generated_value_programs_round_trip_through_canonical_source(
-        ident in ident_strategy(),
-        value in gen_value_strategy()
-    ) {
-        let source = format!("{ident} = {}\nfinish {ident}\n", value.to_source());
-        let program = parse(&source).expect("generated source should parse");
-        let rendered = canonical_program_source(&program).expect("canonical source should render");
-        let reparsed = parse(&rendered).expect("canonical source should parse");
-
-        prop_assert_eq!(canonical_program_ir(reparsed), canonical_program_ir(program));
-    }
-
-    #[test]
-    fn generated_workflows_obey_code_graph_code_laws(
-        ident in ident_strategy(),
-        value in gen_value_strategy(),
-    ) {
-        let value = value.to_source();
-        for (variant, source) in generated_workflow_corpus(&ident, &value) {
-            let input = parse(&source).expect("generated workflow should parse");
-            let canonical = canonical_program_source(&input).expect("canonical workflow source");
-            let graph = lashlang::workflow_graph_from_source(&canonical)
-                .expect("canonical source should project");
-            prop_assert!(
-                graph_has_required_variant(&graph, variant),
-                "{variant} did not project to its required workflow graph kind"
-            );
-
-            let rendered = lashlang::workflow_graph_to_source(&graph)
-                .expect("projected graph should render");
-
-            // GetPut on canonical source.
-            prop_assert_eq!(&rendered, &canonical, "GetPut failed for {}", variant);
-            // Canonical structural fixpoint (spans are ignored by Program::PartialEq).
-            prop_assert_eq!(
-                parse(&rendered).unwrap(),
-                parse(&canonical).unwrap(),
-                "canonical AST fixpoint failed for {}",
-                variant
-            );
-            // PutGet for graphs produced by source projection.
-            prop_assert_eq!(
-                lashlang::workflow_graph_from_source(&rendered).unwrap(),
-                graph.clone(),
-                "PutGet failed for {}",
-                variant
-            );
-
-            // Every invalid document is rejected through the typed render surface.
-            let mut unsupported = graph.clone();
-            unsupported.schema_version = lashlang::WORKFLOW_GRAPH_SCHEMA_VERSION + 1;
-            let unsupported_is_typed = matches!(
-                lashlang::workflow_graph_to_source(&unsupported),
-                Err(lashlang::GraphRenderError::UnsupportedSchemaVersion { .. })
-            );
-            prop_assert!(unsupported_is_typed);
-
-            prop_assert!(
-                !graph
-                    .nodes()
-                    .any(|node| matches!(node.kind, lashlang::WorkflowNodeKind::Opaque { .. })),
-                "promoted construct unexpectedly projected as opaque for {variant}"
-            );
-            prop_assert!(
-                promoted_invalid_graph_is_typed(&graph, variant),
-                "invalid promoted graph did not return its typed error for {variant}"
-            );
-
-            if source.contains("@label") {
-                let has_label = graph.nodes().any(|node| {
-                    node.name_source == lashlang::WorkflowNodeNameSource::Label
-                        && node.description.as_deref() == Some("Metadata survives")
-                }) || graph.declarations.iter().any(|declaration| {
-                    matches!(
-                        declaration,
-                        lashlang::WorkflowDeclaration::Process(process)
-                            if process.name_source == lashlang::WorkflowNodeNameSource::Label
-                                && process.description.as_deref() == Some("Metadata survives")
-                    )
-                });
-                prop_assert!(has_label, "@label metadata was lost for {variant}");
-            }
-        }
     }
 
 
@@ -944,7 +502,12 @@ proptest! {
     fn heap_backed_state_round_trips_as_an_equal_snapshot(
         steps in heap_program_strategy()
     ) {
-        let source = steps.iter().map(HeapStep::to_source).collect::<String>() + "finish 0\n";
+        let body = steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| step.to_source(index))
+            .collect::<String>();
+        let source = format!("{HEAP_PROLOGUE}{body}finish(0);\n");
         let host = DeterministicHost;
         let mut state = State::new();
         prop_assume!(run_execute(&source, &mut state, &host).is_ok());
@@ -959,7 +522,7 @@ proptest! {
         );
 
         let mut restored = State::from_snapshot(decoded);
-        let read = "finish base\n";
+        let read = "finish(base);\n";
         let original = run_execute(read, &mut state, &host);
         let continued = run_execute(read, &mut restored, &host);
         prop_assert_eq!(original.is_ok(), continued.is_ok());
@@ -1024,7 +587,10 @@ proptest! {
             .iter()
             .map(|(key, value)| (key.clone(), value.to_value()))
             .collect();
-        let source = format!("result = {}\nfinish result\n", value.to_source());
+        let source = format!(
+            "const roundtrip_result = {};\nfinish(roundtrip_result);\n",
+            value.to_source()
+        );
         let host = DeterministicHost;
 
         let mut fresh = State::from_snapshot(Snapshot::new(base_globals.clone()));
@@ -1049,18 +615,19 @@ proptest! {
     fn tool_result_contract_is_stable_for_generated_values(
         value in gen_value_strategy()
     ) {
+        // A TypeScript tool call yields the host's value directly and throws on
+        // failure, so the contract pinned here is that the value survives the
+        // round trip through the host boundary unchanged.
         let source = format!(
-            "r = await tools.echo({{ value: {} }})\nfinish r\n",
+            "const tool_result = await tools.echo({{ value: {} }});\nfinish(tool_result);\n",
             value.to_source()
         );
         let host = DeterministicHost;
         let mut state = State::new();
 
         let result = finished(run_execute(&source, &mut state, &host).expect("tool call should succeed"));
-        let record = result.as_record().expect("tool result should be a record");
 
-        prop_assert_eq!(record.get("ok"), Some(&Value::Bool(true)));
-        prop_assert_eq!(record.get("value"), Some(&value.to_value()));
+        prop_assert_eq!(result, value.to_value());
     }
 
     #[test]
@@ -1071,7 +638,7 @@ proptest! {
     ) {
         let expected = if condition { yes.to_value() } else { no.to_value() };
         let source = format!(
-            "result = {} ? {} : {}\nfinish result\n",
+            "const ternary_result = {} ? {} : {};\nfinish(ternary_result);\n",
             if condition { "true" } else { "false" },
             yes.to_source(),
             no.to_source()
@@ -1088,10 +655,18 @@ proptest! {
     fn generated_type_literal_always_produces_valid_json_schema(
         ty in gen_type_strategy(6)
     ) {
-        let source = format!("x = {}\nfinish x\n", ty.to_source());
+        // Type literals have no TypeScript spelling (ADR 0096 keeps the type
+        // language in the IR), so the program is built from the public AST.
+        let program = lashlang::Program::block(vec![lashlang::Expr::Finish(Box::new(
+            lashlang::Expr::TypeLiteral(Box::new(ty.to_type_expr())),
+        ))]);
         let host = DeterministicHost;
         let mut state = State::new();
-        let outcome = run_execute(&source, &mut state, &host);
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(lashlang::execute(&program, &mut state, &host));
         let value = finished(outcome.expect("Type literal should execute"));
         let inner = lashlang::unwrap_type_value(&value).expect("wrapped type");
         let schema = inner.as_record().expect("schema record");
@@ -1116,44 +691,41 @@ enum GenType {
 }
 
 impl GenType {
-    fn to_source(&self) -> String {
-        // Only Object is a valid top-level Type literal; others appear as
-        // field types. Caller must wrap scalars/lists/enums in a field.
+    /// Lowers the generated shape into the IR's own type language.
+    ///
+    /// Only `Object` is a valid top-level type literal; the other variants
+    /// appear as field types, so the caller wraps them in a field.
+    fn to_type_expr(&self) -> TypeExpr {
         match self {
-            Self::Scalar(name) => (*name).to_string(),
+            Self::Scalar("str") => TypeExpr::Str,
+            Self::Scalar("int") => TypeExpr::Int,
+            Self::Scalar("float") => TypeExpr::Float,
+            Self::Scalar("bool") => TypeExpr::Bool,
+            Self::Scalar("dict") => TypeExpr::Dict,
+            Self::Scalar("any") => TypeExpr::Any,
+            Self::Scalar(other) => panic!("unexpected generated scalar: {other}"),
             Self::Enum(values) => {
-                let rendered: Vec<String> = values.iter().map(|v| encode_string(v)).collect();
-                format!("enum[{}]", rendered.join(", "))
+                TypeExpr::Enum(values.iter().map(|value| value.as_str().into()).collect())
             }
-            Self::List(inner) => format!("list[{}]", inner.to_source()),
-            Self::Object(fields) => {
-                let rendered: Vec<String> = fields
+            Self::List(inner) => TypeExpr::List(Box::new(inner.to_type_expr())),
+            Self::Object(fields) => TypeExpr::Object(
+                fields
                     .iter()
-                    .map(|(name, ty, optional)| {
-                        let opt = if *optional { "?" } else { "" };
-                        format!("{name}: {}{opt}", ty.to_source())
+                    .map(|(name, ty, optional)| TypeField {
+                        name: name.as_str().into(),
+                        ty: ty.to_type_expr(),
+                        optional: *optional,
                     })
-                    .collect();
-                format!("Type {{ {} }}", rendered.join(", "))
-            }
+                    .collect(),
+            ),
         }
     }
 }
 
 fn gen_field_name() -> impl Strategy<Value = String> {
-    // Lowercase ASCII identifiers to avoid collision with keywords.
-    "[a-z][a-z0-9_]{0,6}".prop_map(|s| {
-        // Avoid reserved identifiers that could shadow keywords.
-        const RESERVED: &[&str] = &[
-            "if", "else", "for", "in", "start", "await", "cancel", "finish", "submit", "print",
-            "call", "and", "or", "not", "true", "false", "null",
-        ];
-        if RESERVED.iter().any(|r| *r == s) {
-            format!("{s}_")
-        } else {
-            s
-        }
-    })
+    // Field names live in the IR's type language, not in any dialect's
+    // namespace, so no keyword filtering is needed here.
+    "[a-z][a-z0-9_]{0,6}"
 }
 
 fn gen_enum_value() -> impl Strategy<Value = String> {
