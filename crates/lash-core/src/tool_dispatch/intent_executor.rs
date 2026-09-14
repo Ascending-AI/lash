@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use std::collections::BTreeMap;
 
@@ -355,7 +354,7 @@ async fn execute_one(
     match intent {
         crate::ToolIntent::StartProcess(intent) => {
             let mut request = intent.request.clone();
-            request.id = ProcessId::from(identity.replay_key.clone());
+            request.id = identity.recorded_process_id();
             let summary = context
                 .processes
                 .start_from_recorded_intent(&intent.session_id, request, scope)
@@ -481,6 +480,7 @@ fn error_message(error: &crate::PluginError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessId;
 
     fn signal(session_id: &SessionId, payload: serde_json::Value) -> crate::ToolIntent {
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {

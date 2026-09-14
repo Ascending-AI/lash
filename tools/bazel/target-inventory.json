@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 39,
-  "cargo_target_count": 119,
-  "generated_label_count": 174,
+  "cargo_target_count": 120,
+  "generated_label_count": 175,
   "packages": [
     {
       "declared_features": [],
@@ -1249,6 +1249,12 @@
           "cargo": "schema_congruence",
           "kind": "test",
           "label": "//crates/lash-sim:schema_congruence__test",
+          "tags": []
+        },
+        {
+          "cargo": "signal_replay_key_constructor",
+          "kind": "test",
+          "label": "//crates/lash-sim:signal_replay_key_constructor__test",
           "tags": []
         },
         {

@@ -1553,7 +1553,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let event_type = crate::process_signal_event_type(&signal_name)?;
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-            format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+            crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
         );
         let process_ref = self.registry.resolve_process_ref(process_id).await?;
         let command = crate::ProcessCommand::Signal {
@@ -2040,7 +2040,7 @@ impl crate::ProcessService for MockSessionManager {
             .append_event(
                 process_id,
                 crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
-                    format!("process:{process_id}:signal.{signal_name}:{signal_id}"),
+                    crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
                 ),
             )
             .await

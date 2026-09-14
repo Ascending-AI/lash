@@ -194,7 +194,7 @@ pub(crate) fn process_await_event_invocation(
     signal_name: &str,
     ordinal: u64,
 ) -> RuntimeEffectInvocation {
-    let suffix = format!("process:{process_id}:signal.{signal_name}:await:{ordinal}");
+    let suffix = crate::process_signal_await_key(process_id, signal_name, ordinal);
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
         return child_effect_invocation(

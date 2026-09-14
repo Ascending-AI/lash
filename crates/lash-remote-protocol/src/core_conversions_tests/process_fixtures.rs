@@ -54,7 +54,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
         kind: lash_core::WaitKind::Signal {
             name: "ready".to_string(),
             event_type: "signal.ready".to_string(),
-            key: format!("process:{process_id}:signal.ready:1"),
+            key: lash_core::runtime::process_signal_wait_key(process_id, "ready", 1),
             ordinal: 1,
         },
         since_ms: 10,
