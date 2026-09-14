@@ -169,6 +169,10 @@ const PROVIDER_STOP_VARIATION_EXCLUSIONS: &[(&str, &str)] = &[(
     "OpenAI Responses emits no provider wire stop field",
 )];
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub fn provider_stop_fixture(
     dialect: ProviderStopDialect,
     variation: ProviderStopVariation,

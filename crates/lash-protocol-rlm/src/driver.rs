@@ -98,6 +98,10 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the dialect registry validates its execution surface at construction; render_execution_section only errs on an unvalidated catalog"
+)]
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
@@ -284,6 +288,10 @@ struct RlmContextProjector {
 }
 
 impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
+    #[expect(
+        clippy::expect_used,
+        reason = "recorded turn options are validated by the plugin at session open; decode_rlm_options only errs on options that validation already refused"
+    )]
     fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");

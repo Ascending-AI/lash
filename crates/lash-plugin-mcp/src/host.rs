@@ -452,6 +452,10 @@ impl ClientHandler for LashMcpClientHandler {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "iterate over a non-empty validator error list guarded by `if let Err(...)` on the same line, so next() is always Some"
+)]
 fn validate_elicitation_response(
     request: &CreateElicitationRequestParams,
     response: &CreateElicitationResult,

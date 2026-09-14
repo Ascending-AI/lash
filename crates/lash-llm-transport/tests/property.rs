@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Duration;
 
@@ -10,6 +8,10 @@ use lash_llm_transport::proptest_support::{
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response};
 use proptest::prelude::*;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the proptest fixture stream must drive cleanly; a failure is the property under test, not something to propagate"
+)]
 fn frame_events(body: LlmHttpBody) -> Vec<String> {
     let mut events: Vec<String> = Vec::new();
     tokio::runtime::Builder::new_current_thread()

@@ -587,6 +587,10 @@ async fn stale_owner_ttl_preserves_live_successor(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn stale_head_transaction_is_rejected(
     session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,
@@ -636,6 +640,10 @@ async fn stale_head_transaction_is_rejected(
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn final_commit_retry_and_conflict_are_fenced(
     session_id: &SessionId,
     store: Arc<dyn RuntimePersistence>,

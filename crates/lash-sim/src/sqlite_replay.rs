@@ -730,6 +730,10 @@ impl SqliteRuntimeReplayWorld {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn run_provider_turn_task(
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,

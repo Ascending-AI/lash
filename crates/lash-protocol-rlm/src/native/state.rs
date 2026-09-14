@@ -38,6 +38,10 @@ struct Envelope {
     state: RlmDriverState,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the envelope carries a u32 schema version and crate-owned driver state, so serde_json encoding cannot fail"
+)]
 pub(super) fn rlm_driver_state(state: RlmDriverState) -> lash_core::ProtocolDriverState {
     lash_core::ProtocolDriverState::new(
         crate::plugin::RLM_PROTOCOL_PLUGIN_ID,

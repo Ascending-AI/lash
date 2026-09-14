@@ -1,5 +1,9 @@
 use super::*;
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn compare_plugin_state(
     sqlite_root: &Path,
     postgres: &PostgresStorage,

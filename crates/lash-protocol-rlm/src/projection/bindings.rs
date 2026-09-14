@@ -166,6 +166,10 @@ impl RlmProjectedBindings {
             .collect()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "projected bindings refuse duplicate names at assembly, so try_insert in this one-shot build cannot conflict"
+    )]
     pub(crate) async fn into_projected_bindings(
         self,
         resolver: Arc<dyn ProjectionResolver>,

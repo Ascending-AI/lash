@@ -3,6 +3,10 @@ use lash_rlm_types::RlmTermination;
 
 /// Only transport prose changes. Runtime, language and standard library copy
 /// comes verbatim from the dialect's authoritative teaching.
+#[expect(
+    clippy::expect_used,
+    reason = "only transport prose changes; the dialect's authoritative execution section validates its catalog by construction"
+)]
 pub(crate) fn execution_section(
     dialect: &TypescriptDialect,
     features: crate::protocol::RlmPromptFeatures,

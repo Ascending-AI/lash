@@ -324,6 +324,10 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, FixedScriptRunnerError>
 {
     let initial_nodes = vec![lash_core::SessionAppendNode::message(

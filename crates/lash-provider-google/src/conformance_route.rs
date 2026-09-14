@@ -3,6 +3,10 @@ use lash_core::provider::Provider;
 
 use crate::GoogleOAuthProvider;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the conformance output was minted by the same route literal above, so it always accepts it back"
+)]
 pub(super) fn stamp_google_replay_origin(parts: &mut [LlmOutputPart]) {
     let route = GoogleOAuthProvider::new(
         "access",

@@ -359,6 +359,10 @@ impl LifecycleActor {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a u64 generation increments once per connection; exhaustion is unreachable within any real process lifetime"
+    )]
     async fn connect_and_run(
         &mut self,
         initial_reply: Option<oneshot::Sender<Result<(), McpError>>>,

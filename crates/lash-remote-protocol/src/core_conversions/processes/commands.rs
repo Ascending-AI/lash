@@ -3,6 +3,10 @@ use super::*;
 impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
     type Error = RemoteProtocolError;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "validate() above refuses a missing lifecycle policy before this unwrap is reachable"
+    )]
     fn try_from(value: RemoteProcessStartRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteProcessStartRequest {

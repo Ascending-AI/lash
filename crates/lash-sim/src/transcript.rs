@@ -226,6 +226,10 @@ fn observed_str<'event>(boundary: &'event DeliveredBoundary, field: &str) -> Opt
         .and_then(serde_json::Value::as_str)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
     let mut entry = Entry::commit(
         Actor::session(write.attributed_session().to_string()),

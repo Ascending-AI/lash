@@ -29,6 +29,10 @@ pub(crate) fn test_config() -> TurnMachineConfig {
     test_config_with_termination(RlmTermination::default())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixed RlmTermination fixture always satisfies the typed-options validation"
+)]
 pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(
         lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
@@ -129,6 +133,10 @@ pub(crate) fn find_done(effects: &[Effect]) -> Option<(&lash_sansio::MessageSequ
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the checkpoint is a crate-owned serde round-trip fixture; serialization cannot fail"
+)]
 pub(crate) fn roundtrip_turn_checkpoint(
     checkpoint: lash_sansio::TurnCheckpoint<lash_core::HostTurnProtocol>,
 ) -> lash_sansio::TurnCheckpoint<lash_core::HostTurnProtocol> {
@@ -152,6 +160,10 @@ pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<RlmTrajectoryEntr
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the assertion one line above pins the count to exactly one diagnostic, so next() is Some and the payload is the object the driver built"
+)]
 pub(crate) fn single_llm_extraction_payload(machine: &TurnMachine) -> serde_json::Value {
     let payloads: Vec<_> = machine
         .events()
@@ -181,6 +193,10 @@ pub(crate) fn single_llm_extraction_payload(machine: &TurnMachine) -> serde_json
     payload
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the payload is asserted to be the five-key extraction object this fn names, so the reads below always land"
+)]
 pub(crate) fn assert_no_legacy_llm_extraction_keys(payload: &serde_json::Value) {
     let object = payload.as_object().expect("diagnostic payload object");
     assert_eq!(
@@ -496,6 +512,10 @@ impl RlmProtocolScenario {
         self
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: scenarios drive supported checkpoints, non-empty frame key material and crate-owned entries; failure is the scenario under test"
+    )]
     pub(crate) fn run(self) -> RlmProtocolRun {
         let build_config = || {
             let mut config = if let Some(options) = self.protocol_turn_options.clone() {
@@ -670,6 +690,10 @@ pub(crate) struct RlmProtocolExpectations {
 }
 
 impl RlmProtocolExpectations {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: frame key material is a fixed non-empty fixture and the trajectory entry is crate-owned; a failure is the expectation under test"
+    )]
     pub(crate) fn assert(&self, scenario_name: &str, run: &RlmProtocolRun, machine: &TurnMachine) {
         if self.initial_request_tools_empty {
             let request = run
@@ -998,6 +1022,10 @@ struct PluginStreamRun {
     abort_requested: bool,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: fixture drivers must succeed; any refusal is the property under test and panics with the case name"
+)]
 fn drive_plugin_stream(
     plugins: &PluginSession,
     chunks: &[String],

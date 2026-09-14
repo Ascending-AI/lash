@@ -13,6 +13,10 @@ pub fn known_attachment_acceptors<'a>(
     snapshot.acceptors(source)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "only provider_file sources lack a caller MIME; every other AttachmentSource variant carries one"
+)]
 pub fn unsupported_attachment_capability(
     provider: &str,
     source: &AttachmentSource,

@@ -294,6 +294,10 @@ impl BackendFaultLane {
     /// A fresh store factory armed with its own fault injector.
     ///
     /// `case_root` is only used by the SQLite lane, whose database is a file.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub fn armed_factory(
         &self,
         case_root: &std::path::Path,
@@ -338,6 +342,10 @@ impl Default for GeneratedBackendFaultHarness {
 }
 
 impl GeneratedBackendFaultHarness {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn new(injector_enabled: bool) -> Self {
         let root = tempfile::tempdir().expect("create generated SQLite fault root");
         let injector = SqliteFaultInjector::default();

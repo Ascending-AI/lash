@@ -717,6 +717,10 @@ impl GeneratedRuntimeWorld {
     /// delivery barrier spins on `schedule_finished_provider_turns` until it
     /// lands), or a suspend turn yet to park (the driver spins on
     /// `schedule_parked_suspend_resolutions` while any remains).
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn flush_staged_admissions(&mut self, scheduler: &mut BoundaryScheduler) {
         loop {
             let next_pending_at = scheduler.min_pending_at();
@@ -1100,6 +1104,10 @@ impl GeneratedRuntimeWorld {
     /// turn to completion. The observed masquerades as the matching runtime
     /// boundary (tool/exec/durable) for the abstract store, with suspend/resume
     /// evidence in a normalized-away field.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn resolve_suspended_turn(
         &mut self,
         event: &BoundaryEvent,
@@ -1232,6 +1240,10 @@ fn set_runtime_completion_ready_at(event: &mut BoundaryEvent, ready_at: u64) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn run_provider_turn_task(
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,

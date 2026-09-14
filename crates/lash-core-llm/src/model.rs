@@ -159,6 +159,10 @@ impl ModelSpecBuilder {
 }
 
 impl Default for ModelSpec {
+    #[expect(
+        clippy::expect_used,
+        reason = "NonZeroUsize::new(1) on a literal one is always Some"
+    )]
     fn default() -> Self {
         Self::new(
             String::new(),
@@ -223,6 +227,10 @@ impl ModelLimits {
 }
 
 impl Default for ModelLimits {
+    #[expect(
+        clippy::expect_used,
+        reason = "NonZeroUsize::new(1) on a literal one is always Some"
+    )]
     fn default() -> Self {
         Self {
             context_window_tokens: NonZeroUsize::new(1).expect("one is non-zero"),

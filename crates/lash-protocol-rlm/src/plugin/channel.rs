@@ -29,6 +29,10 @@ pub(super) fn without_channel(options: &ProtocolTurnOptions) -> ProtocolTurnOpti
     }
     options
 }
+#[expect(
+    clippy::expect_used,
+    reason = "RlmChannel is a crate-owned enum of strings, so serde_json encoding cannot fail"
+)]
 pub(super) fn record_channel(
     mut options: ProtocolTurnOptions,
     channel: RlmChannel,
@@ -36,6 +40,10 @@ pub(super) fn record_channel(
     options.payload["channel"] = serde_json::to_value(channel).expect("channel serializes");
     options
 }
+#[expect(
+    clippy::expect_used,
+    reason = "RlmChannel is a crate-owned enum of strings, both sides decoded from the same recorded payload, so serialization cannot fail"
+)]
 pub(super) fn validate_channel(
     options: &ProtocolTurnOptions,
     requested: RlmChannel,

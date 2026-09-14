@@ -9,6 +9,10 @@ pub(super) fn scenario_contract_manifests() -> Vec<ScenarioContractManifest> {
     ]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scenario_contract_manifest(
     contracts: &'static [ScenarioContractSpec],
 ) -> ScenarioContractManifest {

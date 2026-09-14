@@ -7,8 +7,6 @@
 //! Notify gating — that gating is the harness artifact under test). Compares
 //! committed assistant message + cumulative provider exchange count per turn.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::path::Path;
@@ -36,6 +34,10 @@ use lash_sim::runtime_providers::{
 
 const PROVIDER_KIND: &str = OPENAI_COMPATIBLE;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn scripts(n: usize) -> Vec<ProviderWireScript> {
     let texts: Vec<String> = (1..=n).map(|i| format!("answer {i}")).collect();
     runtime_scripts_for_texts(PROVIDER_KIND, &texts).expect("scripts")
@@ -57,6 +59,10 @@ async fn build_core(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn build_core_with_effect_host(
     store_factory: Arc<dyn SessionStoreFactory>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
@@ -194,6 +200,10 @@ async fn build_in_memory(n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTran
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn build_sqlite(dir: &Path, n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
     std::fs::create_dir_all(dir).expect("create sqlite dir");
     let process_env_store: Arc<dyn ProcessExecutionEnvStore> = Arc::new(
@@ -212,6 +222,10 @@ async fn build_sqlite(dir: &Path, n_scripts: usize) -> (LashCore, Arc<ScriptedLl
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn build_sqlite_with_effect_host(
     dir: &Path,
     n_scripts: usize,
@@ -248,6 +262,10 @@ struct TurnObs {
 /// (its AfterWork checkpoint sees the already-cancelled row), then subsequent
 /// turns. `t1` is both the active_turn_id and turn 1's turn_id (as in the
 /// trace, where active_turn_id == the running turn's boundary id).
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn drive_cancel_before_turn(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
@@ -287,6 +305,10 @@ async fn drive_cancel_before_turn(
 
 /// Task-literal ordering: run turn 1, THEN enqueue + cancel an active-turn
 /// input targeting turn 1 (already finished), then subsequent turns.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn drive_cancel_after_turn(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
@@ -328,6 +350,10 @@ async fn drive_cancel_after_turn(
 /// Control: enqueue an active-turn input targeting turn 1 and DO NOT cancel,
 /// then run turn 1 (whose AfterWork checkpoint should claim and inject it,
 /// driving an extra exchange), then turn 2.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn drive_no_cancel_control(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
@@ -361,6 +387,10 @@ async fn drive_no_cancel_control(
 /// Claim-then-cancel: enqueue active-turn input targeting turn 1, run turn 1
 /// (its AfterWork checkpoint CLAIMS and completes the input -> extra exchange),
 /// THEN cancel (must observe the post-claim terminal state), then run turn 2.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn drive_claim_then_cancel(
     core: &LashCore,
     transport: &Arc<ScriptedLlmHttpTransport>,
@@ -520,6 +550,10 @@ struct FirstPartyCancelObs {
     next_turn_succeeded: bool,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn drive_first_party_cancel_before_start(
     core: &LashCore,
     session_id: &SessionId,

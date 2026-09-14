@@ -176,6 +176,10 @@ const ATTACHMENT_MANIFEST_EXCLUSIONS: &[(&str, &str)] = &[
 ///
 /// A method is fallible when its signature (everything before the body brace
 /// or the trailing semicolon) returns `Result` or the maintenance alias.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn fallible_trait_methods(source: &str, trait_name: &str) -> Vec<String> {
     let needle = format!("pub trait {trait_name}");
     let trait_start = source

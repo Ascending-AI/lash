@@ -1160,6 +1160,10 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 /// Drive `machine` until it is done or `max_llm_calls` provider calls have
 /// been answered, answering each call with `reply` and each exec with
 /// `exec_result`. Returns the number of provider calls the machine made.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixture scripts every provider call and expects only cells it scripted; a mismatch is the stall scenario under test"
+)]
 fn drive_stalling_turn(
     machine: &mut TurnMachine,
     reply: &str,
@@ -1575,6 +1579,10 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
 
 /// Answer the completion checkpoint a finishing turn asks for, and return the
 /// effects that follow it — where `Done` lives.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: find_checkpoint above proves the effects carry the completion checkpoint this fn answers"
+)]
 fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) -> Vec<Effect> {
     let (checkpoint_id, _) = find_checkpoint(effects).expect("completion checkpoint");
     machine.handle_response(Response::Checkpoint {
@@ -1584,6 +1592,10 @@ fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) ->
     drain_effects(machine)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the fixed RlmTermination fixture always satisfies the typed-options validation"
+)]
 fn finish_required_options() -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
         termination: Some(RlmTermination::FinishRequired { schema: None }),

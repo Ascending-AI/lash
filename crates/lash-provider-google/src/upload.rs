@@ -235,6 +235,10 @@ impl GoogleOAuthProvider {
         Ok(UploadedAttachmentRef { uri })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "validate_attachments refuses a Stored source whose bytes are unresolved before any upload path runs"
+    )]
     pub(crate) async fn prepare_attachment_parts(
         &self,
         access_token: &str,

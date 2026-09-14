@@ -212,6 +212,10 @@ pub(super) fn corrupt_input_cases() -> Vec<GeneratedCase> {
 impl BackendRunner {
     /// Make one persisted record undecodable, stashing the original so the
     /// case can restore it.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(super) async fn seed_corrupt_record(
         &mut self,
         target: CorruptTarget,
@@ -442,6 +446,10 @@ impl BackendRunner {
     /// the PostgreSQL leg runs against one database for the whole
     /// differential, so a corruption left behind would be another case's
     /// unexplained failure.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     pub(super) async fn restore_corrupt_record(
         &mut self,
         target: CorruptTarget,
@@ -460,6 +468,10 @@ impl BackendRunner {
 
 /// Put the original bytes back. Separate from the step so the RAII guard below
 /// can run it on a path that never reaches the restore step.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn restore_corrupt_record_raw(
     raw_reader: &RawDurableReader,
     session_id: &SessionId,
@@ -593,6 +605,10 @@ pub(super) async fn restore_corrupt_record_raw(
 /// still the normal path -- it is a compared step, and the digest must show the
 /// row coming back; this guard only covers the paths that never reach it.
 impl Drop for BackendRunner {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn drop(&mut self) {
         let (Some(backup), Some(target)) = (
             self.surface.corrupt_backup.take(),

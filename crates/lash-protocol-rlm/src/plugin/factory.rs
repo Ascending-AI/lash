@@ -164,6 +164,10 @@ impl RlmProtocolPluginFactory {
     ///
     /// Panics if a conflicting value was already recorded: that is a wiring
     /// bug, not a runtime condition.
+    #[expect(
+        clippy::expect_used,
+        reason = "documented panicking builder half of record_process_lifecycle; the Err half is the wiring bug this panic names"
+    )]
     pub fn with_process_lifecycle(self, process_lifecycle_available: bool) -> Self {
         self.record_process_lifecycle(process_lifecycle_available)
             .expect("conflicting process-lifecycle availability recorded on RLM protocol factory");

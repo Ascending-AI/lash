@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;

@@ -216,6 +216,10 @@ impl<C: Credential> CredentialManager<C> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "builder method takes &mut self before any clone shared the Arc, so get_mut always wins"
+    )]
     pub fn with_persist<F, Fut>(mut self, persist: F) -> Self
     where
         F: Fn(C) -> Fut + Send + Sync + 'static,

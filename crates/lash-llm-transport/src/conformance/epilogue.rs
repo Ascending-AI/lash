@@ -18,6 +18,10 @@ pub enum EpilogueScenario {
 
 /// Drive real adapters: terminal-evidence failure wins over an empty response;
 /// a terminal output cap remains an output cap even when no text was produced.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the conformance law fixes which side of the Result each scenario produces, so expect_err/expect assert the scenario contract itself"
+)]
 pub async fn completion_epilogue_conformance<F, Fut>(mut complete: F)
 where
     F: FnMut(EpilogueScenario) -> Fut,

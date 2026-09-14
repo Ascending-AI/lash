@@ -44,10 +44,18 @@ pub fn schema_leaf(value: &serde_json::Value) -> Vec<u8> {
     encode_leaf(normalize_schema(value))
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "serializing an in-memory serde_json::Value cannot fail"
+)]
 fn encode_leaf(normalized: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&normalized).expect("serializing a JSON value cannot fail")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "0.0 is finite, so serde_json::Number::from_f64 always returns Some"
+)]
 fn normalize_payload(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::String(_) => {

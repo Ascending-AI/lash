@@ -1198,6 +1198,10 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
 /// behavior to a repeat. It is derived state, not new information, and it lives
 /// in the diagnostic for the same reason the count does: the driver's only
 /// durable view of the turn is what the turn committed.
+#[expect(
+    clippy::expect_used,
+    reason = "count_payload is built by this fn as a serde_json::json! object, so as_object_mut is always Some"
+)]
 fn llm_extraction_payload(
     turn_id: &TurnId,
     reply_fingerprint: &str,

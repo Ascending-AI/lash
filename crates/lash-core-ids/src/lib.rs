@@ -6,8 +6,6 @@
 //! live in their own crate and `lash-core` re-exports every one of them at its
 //! original path.
 
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 pub mod clock;
 pub mod identity_json;
 pub mod operational_metrics;

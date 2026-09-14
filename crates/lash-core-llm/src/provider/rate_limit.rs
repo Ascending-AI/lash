@@ -95,6 +95,10 @@ impl ProviderRateLimiter {
         Arc::clone(&self.state.lock_recover().clock)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the gate semaphore is never closed (no close() anywhere in this crate), and acquire_owned only fails on a closed semaphore"
+    )]
     pub async fn admit(
         &self,
         provider: &dyn Provider,

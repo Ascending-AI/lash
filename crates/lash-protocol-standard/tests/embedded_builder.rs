@@ -1,5 +1,3 @@
-#![expect(clippy::expect_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -9,6 +7,10 @@ use lash_core::{
 };
 use lash_sqlite_store::Store;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a fixed, always-valid model spec; any builder refusal is a broken test fixture"
+)]
 fn test_model_spec() -> ModelSpec {
     ModelSpec::builder("gpt-5.4-mini")
         .context_window_tokens(200_000)

@@ -36,6 +36,10 @@ impl GoogleOAuthProvider {
 
     pub(crate) const PROVIDER_KIND: &'static str = "google_oauth";
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this arm only matches Inline/Stored sources, which always carry a MIME, and validate_attachments refuses unresolved stored bytes before any part is built"
+    )]
     pub(crate) fn inline_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
         match source {
             AttachmentSource::ProviderFile { id, .. } => {
@@ -60,6 +64,10 @@ impl GoogleOAuthProvider {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Stored sources always carry attachment_ref.media_type; only ProviderFile can lack a caller MIME"
+    )]
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
         for (message_index, message) in req.messages.iter().enumerate() {
             for source in message.blocks.iter().filter_map(|block| match block {
@@ -116,6 +124,11 @@ impl GoogleOAuthProvider {
         Some(signature.to_string())
     }
 
+    #[expect(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        reason = "every content entry here is built by this fn with `parts` as a JSON array; the merge guard re-checks is_array and the sort sees the entries it built"
+    )]
     pub(crate) fn build_contents_with_attachment_parts(
         &self,
         req: &LlmRequest,

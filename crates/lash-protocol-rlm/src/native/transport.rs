@@ -40,6 +40,10 @@ struct Envelope {
     transport: Transport,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the envelope carries a u32 schema version and crate-owned transport data, so serde_json encoding cannot fail"
+)]
 fn event(transport: Transport) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {

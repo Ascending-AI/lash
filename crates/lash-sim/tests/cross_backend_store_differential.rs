@@ -12,8 +12,6 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
-#![expect(clippy::expect_used, clippy::unwrap_used, reason = "FIG-2784 pass 2")]
-
 use lash_sansio::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -330,6 +328,10 @@ impl NodeSpec {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn materialize(self, session_id: &SessionId) -> SessionNodeRecord {
         let frame_key = differential_frame_key(self.node_id);
         SessionNodeRecord {
@@ -362,6 +364,10 @@ impl NodeSpec {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn differential_frame_key(node_id: &str) -> lash_core::FrameKey {
     lash_core::FrameKey::from_caller_material(&format!("differential-frame:{node_id}"))
         .expect("non-empty differential frame material")
@@ -732,6 +738,10 @@ struct CheckpointComponentRefs {
     components: BTreeMap<String, lash_core::CheckpointComponentDescriptor>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     let tool_state = serde_json::from_value::<ToolState>(serde_json::json!({
         "generation": 7,
@@ -793,6 +803,10 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn checkpoint_from_spec(
     spec: CheckpointSpec,
     prior_refs: Option<&CheckpointComponentRefs>,
@@ -872,6 +886,10 @@ fn differential_usage_delta() -> TokenLedgerEntry {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn differential_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
@@ -880,6 +898,10 @@ fn differential_attachment_id() -> AttachmentId {
 const DIFFERENTIAL_PROCESS_OWNER_ID: &str = "differential-process-owner";
 const DIFFERENTIAL_PROCESS_OWNER_INCARNATION: u64 = 7;
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn differential_process_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-process-attachment").expect("valid attachment id")
 }
@@ -993,6 +1015,10 @@ fn decode_lease_owner(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8> {
     // The in-memory backend holds records rather than rows, so it has no
     // `node_json` to read back; this side of the comparison has to produce one.
@@ -1007,11 +1033,19 @@ fn normalized_in_memory_node_json(node: &lash_core::SessionNodeRecord) -> Vec<u8
     normalized_sql_node_json(&body)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn normalized_sql_node_json(node_json: &str) -> Vec<u8> {
     let value = serde_json::from_str(node_json).expect("decode SQL durable node");
     normalized_node_json(value)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode normalized durable node")
 }
@@ -1057,6 +1091,10 @@ struct BackendRunner {
 }
 
 impl BackendRunner {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn store(&self) -> Arc<dyn ConformancePersistence> {
         Arc::clone(
             self.store
@@ -1065,6 +1103,10 @@ impl BackendRunner {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn factory(&self) -> Arc<dyn ConformanceSessionStoreFactory> {
         Arc::clone(
             self.factory
@@ -1094,6 +1136,10 @@ impl BackendRunner {
         );
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn build_lifecycle_core(&self) -> lash::LashCore {
         let transport = Arc::new(
             lash_sim::ScriptedLlmHttpTransport::from_scripts([])
@@ -1129,6 +1175,10 @@ impl BackendRunner {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     fn lease(&self, slot: LeaseSlot) -> &lash_core::SessionExecutionLease {
         match slot {
             LeaseSlot::First => self.first_lease.as_ref(),
@@ -1144,6 +1194,10 @@ impl BackendRunner {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
     async fn apply(
         &mut self,
         operation: &StoreOperation,
@@ -1759,6 +1813,10 @@ fn normalized_store_error(_backend: &str, error: &StoreError) -> String {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &PostgresStorage) {
     let create_request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -1898,6 +1956,10 @@ async fn runners_for_case(
     .await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn runners_for_case_with_clock(
     case: CaseName,
     sqlite_root: &Path,
@@ -2047,6 +2109,10 @@ async fn runners_for_case_with_clock(
     ]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 fn run_nonce() -> String {
     let epoch_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

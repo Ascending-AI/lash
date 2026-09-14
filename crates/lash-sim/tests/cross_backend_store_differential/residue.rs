@@ -228,6 +228,10 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
     ),
 ];
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) fn sqlite_residue_digest(path: &Path, session_id: &SessionId) -> ResidueDigest {
     let connection = rusqlite::Connection::open(path).expect("open SQLite residue reader");
     connection

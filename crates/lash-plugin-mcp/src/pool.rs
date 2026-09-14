@@ -1179,6 +1179,10 @@ impl McpEntry {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the warn branch runs only when the is_none_or arm reported a version, which requires peer_info() to be Some"
+    )]
     fn peer_supports_ping(&self, peer: &Peer<RoleClient>) -> bool {
         let ping_supported = peer.peer_info().is_none_or(|info| {
             info.protocol_version.as_str() < ProtocolVersion::V_2026_07_28.as_str()
