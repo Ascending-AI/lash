@@ -44,9 +44,16 @@ pub(super) fn statement_text(
     }
 }
 
-pub(super) fn assign_target_text(target: &AssignTarget) -> String {
-    typescript_assign_target_source(target)
-        .expect("an assignment target parsed from canonical source must remain sourceable")
+pub(super) fn assign_target_text(target: &AssignTarget, allow_non_sourceable: bool) -> String {
+    match typescript_assign_target_source(target) {
+        Ok(text) => text,
+        // A lowered program projected for a trace may bind a generated
+        // destructuring temporary, which has no authored spelling.
+        Err(error) if allow_non_sourceable => format!("<non-sourceable target: {error}>"),
+        Err(_) => {
+            panic!("an assignment target parsed from canonical source must remain sourceable")
+        }
+    }
 }
 
 pub(super) fn workflow_clause(

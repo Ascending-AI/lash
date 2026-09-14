@@ -385,7 +385,7 @@ impl<'a> GraphProjector<'a> {
         if let Some((target, value)) = printer::assignment_sugar(expression) {
             return (
                 WorkflowNodeKind::StateUpdate {
-                    target: assign_target_text(&target),
+                    target: assign_target_text(&target, self.allow_non_sourceable_expressions),
                     expression: self.expression_text(value),
                 },
                 format!("update {}", target.root),
@@ -398,7 +398,7 @@ impl<'a> GraphProjector<'a> {
         {
             return (
                 WorkflowNodeKind::StateUpdate {
-                    target: assign_target_text(target),
+                    target: assign_target_text(target, self.allow_non_sourceable_expressions),
                     expression: self.expression_text(expr),
                 },
                 format!("update {}", target.root),
@@ -429,7 +429,9 @@ impl<'a> GraphProjector<'a> {
                 outputs.extend(versions.merge_outputs(&then_versions, &else_versions));
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::If {
-                        binding: binding.as_ref().map(assign_target_text),
+                        binding: binding.as_ref().map(|target| {
+                            assign_target_text(target, self.allow_non_sourceable_expressions)
+                        }),
                         condition: self.expression_text(condition),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
                         // The lowerer spells a missing `else` as the unit
@@ -536,7 +538,9 @@ impl<'a> GraphProjector<'a> {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                        binding: binding.as_ref().map(assign_target_text),
+                        binding: binding.as_ref().map(|target| {
+                            assign_target_text(target, self.allow_non_sourceable_expressions)
+                        }),
                         clauses: clauses
                             .iter()
                             .map(|clause| self.workflow_clause(clause))
@@ -589,7 +593,9 @@ impl<'a> GraphProjector<'a> {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
                     WorkflowNodeKind::Data {
-                        binding: binding.as_ref().map(assign_target_text),
+                        binding: binding.as_ref().map(|target| {
+                            assign_target_text(target, self.allow_non_sourceable_expressions)
+                        }),
                         expression: self.expression_text(value),
                     },
                     data_name(value),
@@ -601,7 +607,9 @@ impl<'a> GraphProjector<'a> {
                 if let Some(operation) = first_receiver_operation(value) {
                     (
                         WorkflowNodeKind::Call {
-                            binding: binding.as_ref().map(assign_target_text),
+                            binding: binding.as_ref().map(|target| {
+                                assign_target_text(target, self.allow_non_sourceable_expressions)
+                            }),
                             operation: operation.to_string(),
                             expression: self.expression_text(value),
                         },
@@ -612,7 +620,9 @@ impl<'a> GraphProjector<'a> {
                     let name = effect_name(value, &effect);
                     (
                         WorkflowNodeKind::Effect {
-                            binding: binding.as_ref().map(assign_target_text),
+                            binding: binding.as_ref().map(|target| {
+                                assign_target_text(target, self.allow_non_sourceable_expressions)
+                            }),
                             effect,
                             expression: self.expression_text(value),
                         },
@@ -622,7 +632,9 @@ impl<'a> GraphProjector<'a> {
                 } else {
                     (
                         WorkflowNodeKind::Computation {
-                            binding: binding.as_ref().map(assign_target_text),
+                            binding: binding.as_ref().map(|target| {
+                                assign_target_text(target, self.allow_non_sourceable_expressions)
+                            }),
                             expression: self.expression_text(value),
                         },
                         computation_name(value),
