@@ -20,7 +20,7 @@ pub struct RealizedNodeTimestamp {
     pub timestamp: String,
 }
 
-pub(crate) mod facade_ops {
+pub mod facade_ops {
     use super::*;
 
     /// Presentation-projection helpers for hosts rendering a [`SessionNodeRecord`].
@@ -97,7 +97,7 @@ pub(crate) mod facade_ops {
     }
 }
 
-pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
+pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
     NodeId::new(format!(
         "draft-node/v3/{}",
@@ -264,7 +264,7 @@ struct StoredSessionNodeBody {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SessionNodeDraft {
+pub struct SessionNodeDraft {
     payload: SessionNodeDraftPayload,
 }
 
@@ -285,7 +285,7 @@ impl SessionNodeDraft {
         }
     }
 
-    pub(crate) fn plugin(plugin_type: impl Into<String>, body: serde_json::Value) -> Self {
+    pub fn plugin(plugin_type: impl Into<String>, body: serde_json::Value) -> Self {
         Self {
             payload: SessionNodeDraftPayload::Plugin {
                 plugin_type: plugin_type.into(),
@@ -300,7 +300,7 @@ impl SessionNodeDraft {
         }
     }
 
-    pub(crate) fn event(event: SessionHistoryRecord) -> Self {
+    pub fn event(event: SessionHistoryRecord) -> Self {
         match event {
             SessionHistoryRecord::Conversation(record) => Self::message(record.to_message()),
             SessionHistoryRecord::Protocol(event) => Self::protocol_event(event),
@@ -464,8 +464,8 @@ pub(crate) struct ActiveReadReplacement {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveReadProjection {
-    pub(crate) active_events: Vec<SessionHistoryRecord>,
-    pub(crate) active_messages: Vec<Message>,
+    pub active_events: Vec<SessionHistoryRecord>,
+    pub active_messages: Vec<Message>,
 }
 
 pub(crate) struct ActiveReadPrefix<'a> {
@@ -475,9 +475,9 @@ pub(crate) struct ActiveReadPrefix<'a> {
 
 #[derive(Clone, Debug)]
 pub struct SessionReadModel {
-    pub(crate) active_events: Arc<Vec<SessionHistoryRecord>>,
+    pub active_events: Arc<Vec<SessionHistoryRecord>>,
     pub messages: Arc<Vec<Message>>,
-    pub(crate) prompt_render_cache: Arc<BaseRenderCache>,
+    pub prompt_render_cache: Arc<BaseRenderCache>,
 }
 
 /// Failure to resolve an explicitly requested frame on the active session path.
@@ -493,7 +493,7 @@ pub enum SessionGraphScopeError {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SessionGraphAppendBuilder {
+pub struct SessionGraphAppendBuilder {
     existing_ids: HashSet<NodeId>,
     leaf_node_id: Option<NodeId>,
     draft_namespace: String,
@@ -501,15 +501,15 @@ pub(crate) struct SessionGraphAppendBuilder {
 }
 
 impl SessionGraphAppendBuilder {
-    pub(crate) fn leaf_node_id(&self) -> Option<&NodeId> {
+    pub fn leaf_node_id(&self) -> Option<&NodeId> {
         self.leaf_node_id.as_ref()
     }
 
-    pub(crate) fn set_leaf_node_id(&mut self, leaf_node_id: Option<NodeId>) {
+    pub fn set_leaf_node_id(&mut self, leaf_node_id: Option<NodeId>) {
         self.leaf_node_id = leaf_node_id;
     }
 
-    pub(crate) fn remap_node_ids(&mut self, mapping: &[(NodeId, NodeId)]) {
+    pub fn remap_node_ids(&mut self, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
@@ -526,7 +526,7 @@ impl SessionGraphAppendBuilder {
         }
     }
 
-    pub(crate) fn append_messages_at<I>(
+    pub fn append_messages_at<I>(
         &mut self,
         messages: I,
         timestamp: String,
@@ -540,7 +540,7 @@ impl SessionGraphAppendBuilder {
         )
     }
 
-    pub(crate) fn append_events_at<I>(
+    pub fn append_events_at<I>(
         &mut self,
         events: I,
         timestamp: String,
@@ -551,7 +551,7 @@ impl SessionGraphAppendBuilder {
         self.append_drafts_at(events.into_iter().map(SessionNodeDraft::event), timestamp)
     }
 
-    pub(crate) fn append_drafts_at<I>(
+    pub fn append_drafts_at<I>(
         &mut self,
         drafts: I,
         timestamp: String,
@@ -919,7 +919,7 @@ impl SessionGraph {
     /// This is deliberately crate-private and named for auditability. It is only appropriate when
     /// the nodes are derived from an already-validated resident graph by an operation that
     /// preserves identity, parent topology, and leaf membership.
-    pub(crate) fn from_validated_nodes(
+    pub fn from_validated_nodes(
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
@@ -961,7 +961,7 @@ impl SessionGraph {
         self.append_builder_in_namespace(namespace)
     }
 
-    pub(crate) fn append_builder_in_namespace(
+    pub fn append_builder_in_namespace(
         &self,
         draft_namespace: impl Into<String>,
     ) -> SessionGraphAppendBuilder {
@@ -982,7 +982,7 @@ impl SessionGraph {
         Arc::make_mut(&mut self.inner)
     }
 
-    pub(crate) fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
+    pub fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
@@ -1259,7 +1259,7 @@ impl SessionGraph {
         Ok(frames)
     }
 
-    pub(crate) fn append_node_drafts_at<I>(
+    pub fn append_node_drafts_at<I>(
         &mut self,
         draft_namespace: &str,
         drafts: I,
@@ -1397,7 +1397,7 @@ impl SessionGraph {
         )
     }
 
-    pub(crate) fn try_trim_to_active_path(&self) -> Result<SessionGraph, crate::StoreError> {
+    pub fn try_trim_to_active_path(&self) -> Result<SessionGraph, crate::StoreError> {
         let by_id = graph_node_indices(self)?;
         let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
         path.reverse();
@@ -1620,7 +1620,7 @@ pub(crate) fn build_active_read_replacement<'a>(
     }
 }
 
-pub(crate) fn build_active_read_projection<'a>(
+pub fn build_active_read_projection<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
     messages: &[Message],
 ) -> ActiveReadProjection {

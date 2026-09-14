@@ -4,8 +4,8 @@ use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 mod attachment_manifest;
 mod checkpoint;
-pub(crate) mod namespace;
-pub(crate) mod process_key;
+pub mod namespace;
+pub mod process_key;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
     EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,
@@ -29,7 +29,7 @@ mod retention;
 pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
-pub(crate) mod session_execution_lease;
+pub mod session_execution_lease;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
@@ -515,7 +515,7 @@ impl RuntimeCommit {
     /// commits from silently acquiring another unrelated settlement side
     /// effect. Usage is deliberately allowed because it has its own durable
     /// exactly-once identity.
-    pub(crate) fn debug_assert_append_envelope_scope(&self) {
+    pub fn debug_assert_append_envelope_scope(&self) {
         let RuntimeCommit {
             commit_budget: _,
             session_id: _,
@@ -601,7 +601,7 @@ impl RuntimeCommit {
             .collect()
     }
 
-    pub(crate) fn validate_claim_settlement(
+    pub fn validate_claim_settlement(
         &self,
         originating_queue_claims: &[crate::QueuedWorkCompletion],
         originating_turn_input_claims: &[crate::TurnInputCompletion],
@@ -619,7 +619,7 @@ impl RuntimeCommit {
         commit_identity::turn_commit_hash(self)
     }
 
-    pub(crate) fn persisted_state_with_operation_and_budget(
+    pub fn persisted_state_with_operation_and_budget(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
@@ -643,7 +643,7 @@ impl RuntimeCommit {
         Ok((commit, persisted_node_ids))
     }
 
-    pub(crate) fn persisted_state_with_operation_and_staged_usage_and_budget(
+    pub fn persisted_state_with_operation_and_staged_usage_and_budget(
         state: &mut crate::RuntimeSessionState,
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
@@ -667,7 +667,7 @@ impl RuntimeCommit {
         Ok((commit, persisted_node_ids))
     }
 
-    pub(crate) fn persisted_state_with_graph_commit_and_operation_and_budget(
+    pub fn persisted_state_with_graph_commit_and_operation_and_budget(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -684,7 +684,7 @@ impl RuntimeCommit {
         )
     }
 
-    pub(crate) fn persisted_state_with_graph_commit_and_staged_usage_and_budget(
+    pub fn persisted_state_with_graph_commit_and_staged_usage_and_budget(
         state: &crate::RuntimeSessionState,
         graph: GraphAppend,
         usage_deltas: &[RuntimeUsageDelta],

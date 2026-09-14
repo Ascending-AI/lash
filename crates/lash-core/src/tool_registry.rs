@@ -11,7 +11,7 @@ use crate::{
 
 #[cfg(test)]
 use self::facade_ops::ToolRegistryFacadeOps;
-use self::facade_ops::ToolStateFacadeOps;
+use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
 
 mod state;
 pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};

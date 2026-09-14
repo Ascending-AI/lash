@@ -1,10 +1,10 @@
 //! Read projection of a session's durable graph.
 
-use lash_sansio::core_support::MessageSequenceCoreSupport;
 use crate::facade_support::SessionGraphFacadeOps;
-use std::sync::OnceLock;
 use crate::{RuntimeSessionState, SessionId, SessionPolicy, SessionSnapshot};
+use lash_sansio::core_support::MessageSequenceCoreSupport;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
 pub struct SessionReadView(Arc<SessionReadState>);
@@ -78,7 +78,7 @@ impl SessionReadView {
         })))
     }
 
-    pub(crate) fn from_runtime_state(
+    pub fn from_runtime_state(
         state: &RuntimeSessionState,
         policy: SessionPolicy,
         protocol_turn_options: crate::ProtocolTurnOptions,
@@ -96,7 +96,7 @@ impl SessionReadView {
         })))
     }
 
-    pub(crate) fn derived_from_persisted_state(
+    pub fn derived_from_persisted_state(
         state: &RuntimeSessionState,
         policy: SessionPolicy,
         turn_index: usize,
@@ -190,7 +190,7 @@ impl SessionReadView {
         crate::ChronologicalProjection::from_read_model(&self.0.read_model)
     }
 
-    pub(crate) fn shared_chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
+    pub fn shared_chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
         Arc::clone(self.0.chronological_projection.get_or_init(|| {
             Arc::new(crate::ChronologicalProjection::from_read_model(
                 &self.0.read_model,

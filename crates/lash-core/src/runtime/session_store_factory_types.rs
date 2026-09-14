@@ -1,3 +1,4 @@
+pub use lash_core_store::session_identity::SessionStoreCreateRequest;
 use crate::{NodeId, SessionId};
 use crate::{SessionPolicy, SessionRelation};
 

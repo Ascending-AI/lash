@@ -1,3 +1,4 @@
+pub use lash_core_store::turn_input_vocabulary::*;
 use crate::SessionId;
 use crate::TurnId;
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
@@ -8,9 +9,6 @@ use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
 
 
 
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
 
 
 
@@ -105,6 +103,15 @@ pub(crate) enum TurnInputDrive {
 }
 
 impl TurnInputDrive {
+    pub(crate) fn materialize_turn_input(&self) -> TurnInput {
+        match self {
+            Self::Claimed(claim) => claim.materialize_turn_input(),
+            Self::Unclaimed(unclaimed) => {
+                lash_core_store::turn_input_vocabulary::materialize_turn_input(&unclaimed.inputs)
+            }
+        }
+    }
+
     pub(crate) fn inputs(&self) -> &[PendingTurnInput] {
         match self {
             Self::Claimed(claim) => &claim.inputs,
@@ -180,33 +187,6 @@ impl TurnInputDrive {
 
 
 
-impl crate::TurnInput {
-    /// The part of this input a durable acceptance row can carry.
-    ///
-    /// `protocol_extension` and live `TurnContext` plugin inputs are
-    /// process-local handles that no store can hold, so the acceptance commit
-    /// records everything else and the caller driving the turn keeps the live
-    /// state (ADR 0069). A worker that later recovers the row drives exactly
-    /// this projection.
-    ///
-    /// `trace_turn_id` is dropped for the same reason: it labels one drive
-    /// attempt, not the input. A recovered row is driven under the recovering
-    /// worker's own execution scope, and a persisted trace id from the
-    /// abandoned attempt would collide with it
-    /// ([`RuntimeErrorCode::ExecutionScopeTurnIdMismatch`](crate::RuntimeErrorCode::ExecutionScopeTurnIdMismatch)),
-    /// making an accepted direct turn unrecoverable — exactly the property
-    /// ADR 0069 exists to guarantee.
-    #[must_use]
-    pub(crate) fn durable_projection(&self) -> Self {
-        Self {
-            items: self.items.clone(),
-            protocol_turn_options: self.protocol_turn_options.clone(),
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: crate::TurnContext::default(),
-        }
-    }
-}
 
 
 

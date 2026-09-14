@@ -1,3 +1,4 @@
+pub use lash_core_store::tool_state::{ReconfigureError, ToolRegistrationKind};
 use super::*;
 
 #[derive(Clone, PartialEq)]

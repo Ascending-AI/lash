@@ -1,3 +1,4 @@
+pub use lash_core_store::effect_identity::*;
 use crate::ProcessId;
 use crate::SessionId;
 use std::sync::Arc;

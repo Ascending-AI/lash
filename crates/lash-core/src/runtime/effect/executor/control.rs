@@ -1,3 +1,4 @@
+pub use lash_core_store::await_event_identity::*;
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
@@ -1360,7 +1361,7 @@ pub trait EffectHost: AwaitEventResolver {
         &'a self,
         scoped: &'a ScopedEffectController<'_>,
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        let binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+        let binding_id = super::turn_control_binding_id_for_scope(
             &self.turn_control_binding_id(),
             scoped.execution_scope(),
         )?;
@@ -1384,7 +1385,7 @@ pub trait EffectHost: AwaitEventResolver {
                     ));
                 };
                 let controller_binding_id =
-                    super::turn_control_authority::turn_control_binding_id_for_scope(
+                    super::turn_control_binding_id_for_scope(
                         &controller_authority_id,
                         scoped.execution_scope(),
                     )?;
@@ -1575,7 +1576,7 @@ impl TurnCancelClosureOwnerBinding {
         scope: &ExecutionScope,
         admitted_binding_id: &str,
     ) -> Result<(), RuntimeError> {
-        let owner_binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+        let owner_binding_id = super::turn_control_binding_id_for_scope(
             &self.owner.turn_control_binding_id(),
             scope,
         )?;

@@ -90,7 +90,7 @@ pub struct TurnFailureEvidence {
 }
 
 impl TurnFailureEvidence {
-    pub(crate) fn from_llm_failure(
+    pub fn from_llm_failure(
         error: &crate::sansio::LlmCallError,
         call_record: &crate::LlmCallRecord,
     ) -> Option<Self> {

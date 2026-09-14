@@ -135,7 +135,7 @@ impl RuntimeCheckpointComponents {
     /// into deletions. The caller must propagate the typed
     /// [`crate::StoreError::IncompleteCheckpointComponentSet`] refusal rather
     /// than constructing a destination commit from partial state.
-    pub(crate) fn complete_for_new_session(&self) -> Result<(), crate::StoreError> {
+    pub fn complete_for_new_session(&self) -> Result<(), crate::StoreError> {
         match self.completeness {
             CheckpointComponentCompleteness::Complete => Ok(()),
             CheckpointComponentCompleteness::Unproven => {
@@ -913,7 +913,7 @@ impl RuntimeSessionState {
         self.refresh_current_frame_projection();
     }
 
-    pub(crate) fn append_active_conversation_messages_with_clock(
+    pub fn append_active_conversation_messages_with_clock(
         &mut self,
         messages: &[Message],
         clock: &dyn crate::Clock,
@@ -979,7 +979,7 @@ impl RuntimeSessionState {
         self.checkpoint_components.set_plugin_state(snapshot);
     }
 
-    pub(crate) fn plugin_state_is_dirty(&self) -> bool {
+    pub fn plugin_state_is_dirty(&self) -> bool {
         self.checkpoint_components
             .component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
             .is_some_and(|component| component.dirty)
@@ -1057,7 +1057,7 @@ impl RuntimeSessionState {
     /// accepted execution bodies stay resident, replaced at the next commit,
     /// so a same-frame restore rebuilds from them instead of from nothing
     /// (FIG-2521).
-    pub(crate) fn discard_runtime_snapshots_retaining_accepted_execution(&mut self) {
+    pub fn discard_runtime_snapshots_retaining_accepted_execution(&mut self) {
         self.checkpoint_components
             .discard_known_bodies(true, AcceptedExecutionRetention::Resident);
     }
@@ -1079,7 +1079,7 @@ impl RuntimeSessionState {
     /// (ADR 0051's "neither" class — it only mutates state the runtime owns).
     /// Downstream tests reach the same staging through
     /// `lash_core::testing::stage_execution_state_components`.
-    pub(crate) fn set_execution_state_components(
+    pub fn set_execution_state_components(
         &mut self,
         snapshot: crate::plugin::ExecutionStateSnapshot,
     ) -> Result<(), crate::StoreError> {
@@ -1096,7 +1096,7 @@ impl RuntimeSessionState {
     /// keeps exactly that bookkeeping; only a leaf the set never held is
     /// staged with its body. The root is staged as changed: a capture may
     /// carry appended seed globals the durable root does not.
-    pub(crate) fn stage_restored_execution_state(
+    pub fn stage_restored_execution_state(
         &mut self,
         restored: crate::plugin::HydratedExecutionState,
     ) -> Result<(), crate::StoreError> {
@@ -1131,7 +1131,7 @@ impl RuntimeSessionState {
         self.refresh_plugin_states_with(plugins, |source| source.export_plugin_state());
     }
 
-    pub(crate) fn capture_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
+    pub fn capture_plugin_states(&mut self, plugins: &dyn SessionPluginStateSource) {
         self.refresh_plugin_states_with(plugins, |source| source.capture_plugin_state());
     }
 
@@ -1157,11 +1157,7 @@ impl RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
-    #[expect(
-        clippy::expect_used,
-        reason = "`FrameNodeId::new` rejects only the empty string"
-    )]
-    pub(crate) fn refresh_current_frame_projection(&mut self) {
+    pub fn refresh_current_frame_projection(&mut self) {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
@@ -1273,7 +1269,7 @@ impl RuntimeSessionState {
     }
 }
 
-pub(crate) mod facade_ops {
+pub mod facade_ops {
     use super::*;
 
     /// Facade-internal operations for [`RuntimeSessionState`].
@@ -1416,14 +1412,14 @@ pub(crate) fn apply_session_checkpoint(
 /// process-local lease facts are installed by the caller. The provider
 /// resolver is also live-owned, but it lives outside `RuntimeSessionState`
 /// and is never touched by adoption.
-pub(crate) struct LiveOwnedSessionFacts {
+pub struct LiveOwnedSessionFacts {
     pub(crate) session_id: Option<SessionId>,
     pub(crate) turn_budget: crate::TurnBudget,
 }
 
 impl LiveOwnedSessionFacts {
     /// Capture the live-owned facts of the policy about to be overwritten.
-    pub(crate) fn of(policy: &SessionPolicy) -> Self {
+    pub fn of(policy: &SessionPolicy) -> Self {
         Self {
             session_id: policy.session_id.clone(),
             turn_budget: policy.turn_budget,
@@ -1441,7 +1437,7 @@ impl LiveOwnedSessionFacts {
 /// [`LiveOwnedSessionFacts`] plus whatever the target state carries for facts
 /// the head does not represent (for example the live-policy flags
 /// `autonomous` and `no_progress_budget`).
-pub(crate) fn adopt_durable_head(
+pub fn adopt_durable_head(
     state: &mut RuntimeSessionState,
     head: &crate::store::SessionHead,
     checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
@@ -1535,7 +1531,7 @@ pub fn boundary_operation(
     )
 }
 
-pub(crate) fn derive_graph_commit_node_ids(
+pub fn derive_graph_commit_node_ids(
     state: &mut RuntimeSessionState,
     graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
@@ -1545,11 +1541,7 @@ pub(crate) fn derive_graph_commit_node_ids(
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "derived graph node identities are non-empty"
-)]
-pub(crate) fn apply_graph_commit_node_id_mapping(
+pub fn apply_graph_commit_node_id_mapping(
     state: &mut RuntimeSessionState,
     mapping: &[(crate::NodeId, crate::NodeId)],
 ) -> Result<(), crate::StoreError> {
@@ -1568,7 +1560,7 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
     Ok(())
 }
 
-pub(crate) fn receipt_append_node_ids(
+pub fn receipt_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
     requested_node_count: usize,
 ) -> Result<Vec<crate::NodeId>, crate::StoreError> {
@@ -1585,8 +1577,7 @@ pub(crate) fn receipt_append_node_ids(
         .collect())
 }
 
-
-pub(crate) fn resolve_append_node_ids(
+pub fn resolve_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
     locally_derived_node_ids: Vec<crate::NodeId>,
 ) -> Result<Vec<crate::NodeId>, crate::StoreError> {
@@ -1665,7 +1656,7 @@ pub fn open_agent_frame_in_state_with_clock(
 /// Builds the node drafts an append request materializes, with fallback
 /// message ids derived from the append's draft namespace so the same request
 /// yields the same drafts wherever it is folded.
-pub(crate) fn session_append_node_drafts(
+pub fn session_append_node_drafts(
     nodes: &[crate::SessionAppendNode],
     draft_namespace: &str,
 ) -> Vec<crate::session_graph::SessionNodeDraft> {
@@ -1730,3 +1721,29 @@ pub trait SessionPluginStateSource {
     /// Unfiltered capture, as the runtime commits it.
     fn capture_plugin_state(&self) -> crate::PluginState;
 }
+
+impl<T> SessionPluginStateSource for std::sync::Arc<T>
+where
+    T: SessionPluginStateSource + ?Sized,
+{
+    fn tool_state_generation(&self) -> u64 {
+        T::tool_state_generation(self)
+    }
+
+    fn export_tool_state(&self) -> crate::ToolState {
+        T::export_tool_state(self)
+    }
+
+    fn plugin_state_generations(&self) -> std::collections::BTreeMap<String, u64> {
+        T::plugin_state_generations(self)
+    }
+
+    fn export_plugin_state(&self) -> crate::PluginState {
+        T::export_plugin_state(self)
+    }
+
+    fn capture_plugin_state(&self) -> crate::PluginState {
+        T::capture_plugin_state(self)
+    }
+}
+

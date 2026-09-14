@@ -4,14 +4,14 @@
 //! payloads, and the checkpoint boundary rule stores filter on. The ingress
 //! driver that normalizes and applies them stays in `lash-core`.
 
-use std::any::Any;
-use std::fmt;
 use crate::{
     CheckpointKind, PluginMessage, RuntimeError, RuntimeErrorCode, SessionId, TurnCancelOriginHint,
     TurnCause, TurnId,
 };
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 /// Mint a newly created pending turn-input ID from explicit deterministic facts.
@@ -624,7 +624,7 @@ fn initial_turn_applications(
         })
         .collect()
 }
-fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
+pub fn materialize_turn_input(inputs: &[PendingTurnInput]) -> TurnInput {
     let mut input_items = Vec::new();
     let mut protocol_turn_options = None;
     let mut trace_turn_id = None;
@@ -904,20 +904,20 @@ impl TurnContext {
         self.local_cancel_origin = hint;
     }
 
-    pub(crate) fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
+    pub fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
         self.local_cancel_origin.clone()
     }
 
-    pub(crate) fn mark_selected_queued_work_drain(&mut self) {
+    pub fn mark_selected_queued_work_drain(&mut self) {
         self.claim_checkpoint_queued_work = false;
         self.enforce_selected_queued_work_cost_bound = true;
     }
 
-    pub(crate) fn enforces_selected_queued_work_cost_bound(&self) -> bool {
+    pub fn enforces_selected_queued_work_cost_bound(&self) -> bool {
         self.enforce_selected_queued_work_cost_bound
     }
 
-    pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
+    pub fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
         if self.claim_checkpoint_queued_work {
             default_limit
         } else {
@@ -964,31 +964,31 @@ impl TurnContext {
         &self.prompt
     }
 }
-    impl facade_ops::TurnContextFacadeOps for TurnContext {
-        fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
-            self.plugin_inputs.contains(plugin_id)
-        }
-
-        fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
-            self.prompt.template = Some(template);
-        }
-
-        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
-            self.prompt.add_contribution(contribution);
-        }
-
-        fn replace_prompt_slot(
-            &mut self,
-            slot: crate::PromptSlot,
-            contributions: impl IntoIterator<Item = crate::PromptContribution>,
-        ) {
-            self.prompt.replace_slot(slot, contributions);
-        }
-
-        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
-            self.prompt.clear_slot(slot);
-        }
+impl facade_ops::TurnContextFacadeOps for TurnContext {
+    fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
+        self.plugin_inputs.contains(plugin_id)
     }
+
+    fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
+        self.prompt.template = Some(template);
+    }
+
+    fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
+        self.prompt.add_contribution(contribution);
+    }
+
+    fn replace_prompt_slot(
+        &mut self,
+        slot: crate::PromptSlot,
+        contributions: impl IntoIterator<Item = crate::PromptContribution>,
+    ) {
+        self.prompt.replace_slot(slot, contributions);
+    }
+
+    fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
+        self.prompt.clear_slot(slot);
+    }
+}
 impl fmt::Debug for TurnContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TurnContext")
@@ -1045,7 +1045,6 @@ impl TurnActivityId {
 }
 
 pub mod facade_ops {
-    
 
     /// Facade-internal operations for [`TurnContext`].
     ///
@@ -1112,3 +1111,31 @@ turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
     Cancelled => "cancelled",
     Completed => "completed",
 });
+
+impl TurnInput {
+    /// The part of this input a durable acceptance row can carry.
+    ///
+    /// `protocol_extension` and live `TurnContext` plugin inputs are
+    /// process-local handles that no store can hold, so the acceptance commit
+    /// records everything else and the caller driving the turn keeps the live
+    /// state (ADR 0069). A worker that later recovers the row drives exactly
+    /// this projection.
+    ///
+    /// `trace_turn_id` is dropped for the same reason: it labels one drive
+    /// attempt, not the input. A recovered row is driven under the recovering
+    /// worker's own execution scope, and a persisted trace id from the
+    /// abandoned attempt would collide with it
+    /// ([`RuntimeErrorCode::ExecutionScopeTurnIdMismatch`](crate::RuntimeErrorCode::ExecutionScopeTurnIdMismatch)),
+    /// making an accepted direct turn unrecoverable — exactly the property
+    /// ADR 0069 exists to guarantee.
+    #[must_use]
+    pub fn durable_projection(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            protocol_turn_options: self.protocol_turn_options.clone(),
+            trace_turn_id: None,
+            protocol_extension: None,
+            turn_context: crate::TurnContext::default(),
+        }
+    }
+}

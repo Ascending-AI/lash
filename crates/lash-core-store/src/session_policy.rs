@@ -41,7 +41,7 @@ pub struct SessionPolicy {
     pub generation: crate::GenerationOptions,
 }
 impl SessionPolicy {
-    pub(crate) fn replace_model_retaining_attachment_acceptance(&mut self, mut model: ModelSpec) {
+    pub fn replace_model_retaining_attachment_acceptance(&mut self, mut model: ModelSpec) {
         model.capability.attachment_acceptance =
             self.model.capability.attachment_acceptance.clone();
         self.model = model;
@@ -168,7 +168,7 @@ impl Default for ApplyConfigPatch {
     }
 }
 impl ApplyConfigPatch {
-    pub(super) fn between(previous: &crate::SessionPolicy, next: &crate::SessionPolicy) -> Self {
+    pub fn between(previous: &crate::SessionPolicy, next: &crate::SessionPolicy) -> Self {
         Self {
             provider_id: (previous.provider_id != next.provider_id)
                 .then(|| next.provider_id.clone()),
@@ -181,7 +181,7 @@ impl ApplyConfigPatch {
         }
     }
 
-    pub(super) fn validate(&self) -> Result<(), crate::RuntimeError> {
+    pub fn validate(&self) -> Result<(), crate::RuntimeError> {
         if self.schema_version != crate::store::SESSION_HEAD_META_SCHEMA_VERSION {
             return Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::SessionCommandClaim,
@@ -213,7 +213,7 @@ impl ApplyConfigPatch {
         }
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.provider_id.is_none()
             && self.model.is_none()
             && self.prompt.is_none()
@@ -228,7 +228,7 @@ impl ApplyConfigPatch {
     /// Policy-homed fields land through [`Self::apply_to`]; the protocol turn
     /// options land on their runtime-state home. Both publications happen only
     /// after the durable head accepted the same values.
-    pub(super) fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
+    pub fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
         self.apply_to(&mut state.policy);
         if let Some(access) = self.tool_access.as_ref() {
             state.authority.tool_access = access.clone();

@@ -17,7 +17,7 @@ fn same_turn_input_settlement(
         }
 }
 
-pub(super) fn validate_claim_settlement(
+pub fn validate_claim_settlement(
     commit: &RuntimeCommit,
     originating_queue_claims: &[crate::QueuedWorkCompletion],
     originating_turn_input_claims: &[crate::TurnInputCompletion],

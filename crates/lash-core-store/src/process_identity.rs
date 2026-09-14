@@ -1,8 +1,8 @@
 //! Durable process identity and lifecycle vocabulary.
 
-use std::fmt;
 use crate::{ProcessId, SessionId};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// durable references pin this value so they cannot silently rebind after the
 /// name is pruned and registered again.
@@ -37,6 +37,10 @@ impl fmt::Display for ProcessIncarnation {
         self.0.fmt(formatter)
     }
 }
+/// Structural identity of one process lifetime.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct ProcessRef {
     pub process_id: ProcessId,
     pub incarnation: ProcessIncarnation,
@@ -153,7 +157,6 @@ pub enum ProcessStatus {
     CallerDeparted,
 }
 impl ProcessStatus {
-
     /// Whether the row is still on the live worklist.
     ///
     /// This is the Rust twin of the `status IN (...)` predicate every backend
@@ -279,7 +282,7 @@ impl fmt::Display for ProcessExecutionEnvRef {
         formatter.write_str(&self.0)
     }
 }
-fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
+pub fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
         "process-env:v6:blake3:{}",
         crate::stable_hash::blake3_hex("lash-process-env/v6", bytes)
@@ -316,7 +319,6 @@ pub fn wake_payload_value_to_string(value: &serde_json::Value) -> String {
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| value.to_string())
 }
-
 
 /// The identity pair a durable process record projects.
 ///
@@ -365,7 +367,6 @@ macro_rules! lifecycle_vocabulary {
         }
     };
 }
-
 
 lifecycle_vocabulary!(ProcessStatus, label, by_ref {
     Running => "running",

@@ -7,6 +7,10 @@
 //! Split out of `plugin/mod.rs` for file size; `pub use` there keeps
 //! the outer module path.
 
+pub use lash_core_store::execution_state::{
+    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
+};
+
 use crate::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;

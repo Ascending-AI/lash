@@ -1,6 +1,10 @@
 use crate::SessionError;
 use crate::SessionId;
 
+pub use lash_core_store::runtime_error::{
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, runtime_error_from_store_commit,
+};
+
 
 
 

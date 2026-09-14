@@ -1,3 +1,4 @@
+pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

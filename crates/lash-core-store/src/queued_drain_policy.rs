@@ -241,7 +241,7 @@ impl QueuedDrainPolicy for DrainModePolicy {
 /// configurations naming the same mode hold the *same* policy, which is what
 /// lets configuration equality compare policies by identity without lying about
 /// custom implementations.
-pub(crate) fn shared_drain_mode_policy(mode: DrainMode) -> Arc<dyn QueuedDrainPolicy> {
+pub fn shared_drain_mode_policy(mode: DrainMode) -> Arc<dyn QueuedDrainPolicy> {
     static ONE_AT_A_TIME: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> =
         std::sync::OnceLock::new();
     static ALL: std::sync::OnceLock<Arc<dyn QueuedDrainPolicy>> = std::sync::OnceLock::new();
@@ -267,7 +267,7 @@ pub fn default_queued_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
 /// Exact selections bypass the configured policy entirely (see
 /// [`select_exact_turn_work_claim_prefix`](crate::store::queued_work::select_exact_turn_work_claim_prefix)),
 /// so this stands in for it rather than competing with it.
-pub(crate) fn exact_selection_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
+pub fn exact_selection_drain_policy() -> Arc<dyn QueuedDrainPolicy> {
     shared_drain_mode_policy(DrainMode::All)
 }
 

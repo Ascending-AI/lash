@@ -1,4 +1,4 @@
-use crate::{CausalRef};
+use crate::CausalRef;
 use serde::{Deserialize, Serialize};
 
 use crate::{EffectAddress, ProcessId, SessionId, TurnId};
@@ -16,7 +16,7 @@ pub fn process_transfer_set_preimage(process_ids: &[ProcessId]) -> Vec<u8> {
     identity.finish()
 }
 
-pub(super) fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
+pub fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
     crate::stable_identity::rendered_hash(
         "process-transfer-set",
         PROCESS_TRANSFER_FAMILY_VERSION,
@@ -326,5 +326,3 @@ impl RuntimeInvocation {
         }
     }
 }
-
-

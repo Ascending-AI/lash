@@ -20,15 +20,15 @@ pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod runtime_error;
+pub mod session_execution_lease;
+pub mod session_graph;
+pub(crate) mod session_graph_integrity;
+pub mod session_graph_legacy_response;
 pub mod session_identity;
 pub mod session_policy;
 mod session_policy_serde;
 pub mod session_read_view;
 pub mod session_state;
-pub mod session_execution_lease;
-pub mod session_graph;
-pub(crate) mod session_graph_integrity;
-pub mod session_graph_legacy_response;
 pub mod store;
 pub mod tool_state;
 pub mod turn_control_binding;
@@ -46,52 +46,49 @@ pub mod store_backend_support;
 // `crate::Item` paths they carried inside `lash-core`; they are deliberately
 // crate-internal, so this crate's public surface is the modules alone.
 pub(crate) use lash_core_ids::clock::{Clock, ClockWallTime, SystemClock};
-pub(crate) use lash_core_ids::{
-    operational_metrics, stable_hash, stable_identity,
-};
 #[cfg(feature = "perf-witness")]
 pub(crate) use lash_core_ids::perf_witness;
+pub(crate) use lash_core_ids::{operational_metrics, stable_hash, stable_identity};
 pub(crate) use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model::ModelSpec;
 pub(crate) use lash_core_llm::provider;
+pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
+pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
 pub(crate) use lash_sansio::llm::types::{
-    AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, LlmOutputPart,
-    ProtocolPosition, ProviderFileScope,
+    AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, LlmOutputPart, ProtocolPosition,
+    ProviderFileScope,
 };
 pub(crate) use lash_sansio::session_model::{
     ConversationRecord, ProtocolEvent, PruneState, TurnBudget,
 };
+pub(crate) use lash_sansio::session_model::{
+    NoProgressBudget, message::BaseRenderCache, message::MessageSequence,
+};
+pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
+pub(crate) use lash_sansio::{AcceptedInjectedTurnInput, PromptUsage};
 pub(crate) use lash_sansio::{
-    AttachmentId, AttachmentMaterializationNotice, AttachmentRef,
-    AttachmentTypeMetadata, BatchId, CausalRef, CheckpointKind, EffectAddress, ExecutionScope,
-    FrameKey, InputId, Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage,
-    ProcessId, PromptContribution, PromptLayer, SessionAppendNode, SessionId, TokenUsage, TurnId,
+    AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
+    CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, Message,
+    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
+    PromptContribution, PromptLayer, SessionAppendNode, SessionId, TokenUsage, TurnId,
     TurnOutputSource, render_turn_causes_prompt, shared_parts,
 };
-pub(crate) use lash_sansio::session_model::{NoProgressBudget, message::BaseRenderCache, message::MessageSequence};
-pub(crate) use lash_sansio::{AcceptedInjectedTurnInput, PromptUsage};
-pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
-pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
-pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 
-pub(crate) type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
+pub(crate) type SessionHistoryRecord =
+    lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;
 
 // Items the moved modules name at the crate root because `lash-core`'s
 // `lib.rs` re-exported them there.
 pub(crate) use attachments::SessionAttachmentStore;
-pub(crate) use queued_drain_policy::{
-    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-};
+pub(crate) use queued_drain_policy::{QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest};
 pub(crate) use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload, SessionNodeRecord,
 };
 pub(crate) use store::{
-    AttachmentManifestEntry, AttachmentOwner,
-    AttachmentWriteToken, BlobRef, CheckpointComponentDescriptor,
-    GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity, OperationId,
-    QueuedWorkClaimOutcome, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
-    AppendRequestIdentity, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
+    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
+    OperationId, QueuedWorkClaimOutcome, RuntimePersistence, SelectedQueuedWorkClaimOutcome,
+    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseObservation, SessionMeta, StoreError,
     WorkClaim,
 };
@@ -101,6 +98,9 @@ pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedge
 pub(crate) use execution_state::{
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
 };
+pub(crate) use lash_sansio::{
+    TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnCause,
+};
 pub(crate) use plugin_state::PluginState;
 pub(crate) use process_identity::{
     ObserverInheritance, ProcessExecutionEnvSpec, ProcessIncarnation, ProcessRef, ProcessStatus,
@@ -108,8 +108,8 @@ pub(crate) use process_identity::{
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
     DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-    QueuedWorkPayload, SessionCommand,
+    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
@@ -130,38 +130,30 @@ pub(crate) use turn_control_vocabulary::{
 pub(crate) use turn_input_vocabulary::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    TurnInputApplication, TurnInputClaimData, TurnInputCompletion,
-    TurnInputIngress, TurnInputState,
-};
-pub(crate) use lash_sansio::{
-    TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnCause,
+    TurnInputApplication, TurnInputClaimData, TurnInputCompletion, TurnInputIngress,
+    TurnInputState,
 };
 
 pub(crate) use await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 pub(crate) use chronological::ChronologicalProjection;
-pub(crate) use effect_identity::{
-    RuntimeEffectKind, RuntimeInvocation,
-};
+pub(crate) use effect_identity::{RuntimeEffectKind, RuntimeInvocation};
+pub(crate) use lash_core_llm::provider::ProviderHandle;
 pub(crate) use lash_sansio::ToolIntentIdentity;
+pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};
 pub(crate) use queued_work_vocabulary::QueuedWorkClaim;
 pub(crate) use session_graph::SessionGraphScopeError;
 pub(crate) use store::queued_work::QueuedWorkClass;
 pub(crate) use turn_control_vocabulary::TurnCancelOriginHint;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
-pub(crate) use turn_input_vocabulary::{
-    InputItem, TurnContext,
-    TurnInput,
-};
-pub(crate) use lash_core_llm::provider::ProviderHandle;
-pub(crate) use message_projection::plugin_message_to_message;
+pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
 
 /// Path shim: the moved modules keep the `crate::facade_support::*` paths they
 /// carried inside `lash-core`. Only the facade operations whose receivers live
 /// in this crate are reachable here.
 pub(crate) mod facade_support {
     pub(crate) use crate::session_graph::facade_ops::SessionGraphFacadeOps;
-    
+
     pub(crate) use crate::tool_state::facade_ops::ToolStateFacadeOps;
     pub(crate) use lash_sansio::visible_response_text_from_parts;
 }
@@ -170,8 +162,8 @@ pub(crate) mod facade_support {
 /// `crate::session_model`.
 pub(crate) mod session_model {
     pub(crate) use crate::{
-        ConversationRecord, Message, ProtocolEvent, SessionHistoryRecord, SessionPolicy, TokenUsage,
-        plugin_message_to_message,
+        ConversationRecord, Message, ProtocolEvent, SessionHistoryRecord, SessionPolicy,
+        TokenUsage, plugin_message_to_message,
     };
     pub(crate) use lash_sansio::session_model::message;
 }
@@ -189,9 +181,9 @@ pub(crate) mod runtime {
     }
 }
 
-pub(crate) use lash_sansio as sansio;
 pub(crate) use attachments::AttachmentSourcePolicy;
 pub(crate) use input_normalization::NormalizedItem;
+pub(crate) use lash_sansio as sansio;
 pub(crate) use lash_sansio::llm::capability::ReasoningSelection;
 pub(crate) use lash_sansio::llm::types::LlmCallRecord;
 pub(crate) use lash_sansio::session_model::prompt::{PromptSlot, PromptTemplate};
@@ -202,8 +194,8 @@ pub(crate) use session_identity::{
     OpenAgentFrameRequest, OpenAgentFrameResult, SessionStoreCreateRequest,
 };
 pub(crate) use session_policy::ApplyConfigPatch;
-pub(crate) use store::work_claim::WorkCompletion;
 pub(crate) use store::OrphanedTurnInputScope;
+pub(crate) use store::work_claim::WorkCompletion;
 pub(crate) use turn_input_vocabulary::TurnActivityId;
 
 /// Path shim: the durable half of what `lash-core` exposes as `crate::plugin`.

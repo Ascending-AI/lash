@@ -3,6 +3,7 @@
 //!
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`.
 
+pub use lash_core_store::session_policy::*;
 use crate::SessionError;
 use crate::provider::ProviderHandle;
 

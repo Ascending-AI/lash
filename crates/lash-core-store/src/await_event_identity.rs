@@ -1,7 +1,7 @@
 //! Durable await-event wait identity.
 
-use serde::{Deserialize, Serialize};
 use crate::{ExecutionScope, ProcessId, RuntimeError};
+use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AwaitEventWaitIdentity {
@@ -49,7 +49,7 @@ impl AwaitEventWaitIdentity {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = match self {
             Self::ToolCompletion { tool_call_id } => tool_call_id.trim().is_empty(),
             Self::ProcessSignal {

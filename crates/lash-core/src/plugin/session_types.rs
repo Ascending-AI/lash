@@ -1,3 +1,11 @@
+pub use lash_core_store::session_identity::{
+    AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
+    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage,
+    SessionObserverIntent, SessionObserverIntentAttribution, SessionRelation, SessionSnapshot,
+    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+};
+pub use lash_core_store::session_identity::facade_ops;
+
 use crate::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -25,27 +33,6 @@ pub struct SessionObservedProcessReceipt {
     pub attribution: SessionObserverIntentAttribution,
     pub outcome: SessionObservedProcessOutcome,
 }
-
-/// Why a session still owes one process-observer edge.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-
-
-
-
-
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionObservedProcessOutcome {
@@ -112,19 +99,6 @@ pub enum SessionPluginSource {
 
 
 
-pub(crate) mod facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`AgentFrameReason`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait AgentFrameReasonFacadeOps {
-        fn continue_as() -> Self;
-    }
-
-
-}
 
 
 

@@ -955,7 +955,7 @@ const QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION: u8 = 3;
 /// the timestamp is fixed-width. Persisted tokens remain opaque at validation
 /// boundaries: release, settlement, and recovery compare the carried token with
 /// the stored token and never rederive it, so pre-v3 claims stay valid.
-pub(crate) fn derive_claim_lease_token(
+pub fn derive_claim_lease_token(
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     claim_id: &str,

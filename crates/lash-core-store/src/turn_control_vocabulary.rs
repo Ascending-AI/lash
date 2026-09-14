@@ -4,11 +4,14 @@
 //! commit settles against. The turn-control host, its cancellation tokens and
 //! the effect-executor gate stay in `lash-core`.
 
+use crate::{
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId,
+    TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnId,
+};
 use lash_sansio::sync::MutexExt;
-use std::sync::Mutex;
-use crate::{AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, RuntimeError, SessionId, TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Stable routing identity for one foreground turn.
 ///
@@ -32,7 +35,7 @@ impl TurnAddress {
         ExecutionScope::turn(&self.session_id, &self.turn_id)
     }
 
-    fn validate(&self) -> Result<(), RuntimeError> {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
         Ok(self.execution_scope().validate()?)
     }
 }
@@ -356,7 +359,7 @@ impl TurnCancelRequest {
         self.undelivered == accepted.undelivered && self.mode.is_stronger_than(accepted.mode)
     }
 
-    fn validate(&self) -> Result<(), RuntimeError> {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
         self.address.validate()?;
         if self.request_id.trim().is_empty() {
             return Err(RuntimeError::new(
@@ -367,7 +370,7 @@ impl TurnCancelRequest {
         Ok(())
     }
 
-    pub(crate) fn evidence(&self) -> TurnCancellationEvidence {
+    pub fn evidence(&self) -> TurnCancellationEvidence {
         TurnCancellationEvidence {
             request_id: self.request_id.clone(),
             origin: self.origin.clone(),
@@ -389,7 +392,6 @@ pub struct TurnCancelRequestRecord {
 fn turn_cancel_disposition_is_defer(disposition: &TurnCancelDisposition) -> bool {
     matches!(disposition, TurnCancelDisposition::Defer)
 }
-
 
 /// Shared origin hint for a process-local cancellation token.
 ///
@@ -427,11 +429,11 @@ impl TurnCancelOriginHint {
         state.after_step_requested = true;
     }
 
-    pub(crate) fn after_step_requested(&self) -> bool {
+    pub fn after_step_requested(&self) -> bool {
         self.state.lock_recover().after_step_requested
     }
 
-    pub(crate) fn get(&self) -> Option<String> {
+    pub fn get(&self) -> Option<String> {
         let state = self.state.lock_recover();
         state
             .observed_origin

@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolStateEntry {
-    pub(super) manifest: ToolManifest,
+    pub manifest: ToolManifest,
     /// True when this tool was not resolvable from any registered source at
     /// export time (e.g. a detached MCP server). Orphaned entries keep their
     /// last-known manifest, are excluded from the Tool Catalog (non-members
     /// until their source returns), and rebind automatically when a source
     /// re-advertises the same tool id.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(super) orphaned: bool,
+    pub orphaned: bool,
     /// ToolId-keyed host curation intent. Authority exclusions are transient
     /// policy and never change this bit. Hosts toggle it via
     /// `set_tool_membership`.
@@ -22,16 +22,16 @@ pub struct ToolStateEntry {
         default = "is_member_default",
         skip_serializing_if = "is_default_member"
     )]
-    pub(super) member: bool,
+    pub member: bool,
     /// Persisted registration-lane hint. Missing values from pre-cutover
     /// snapshots decode as leaf registrations; on rebind the live source is
     /// authoritative and re-derives the effective lane.
     #[serde(default, skip_serializing_if = "is_leaf_registration")]
-    pub(super) registration_kind: ToolRegistrationKind,
+    pub registration_kind: ToolRegistrationKind,
 }
 impl ToolStateEntry {
     #[cfg(test)]
-    pub(crate) fn new(manifest: ToolManifest) -> Self {
+    pub fn new(manifest: ToolManifest) -> Self {
         Self {
             manifest,
             orphaned: false,
@@ -45,7 +45,7 @@ impl ToolStateEntry {
         self.manifest.clone()
     }
 
-    pub(super) fn stored_manifest(&self) -> &ToolManifest {
+    pub fn stored_manifest(&self) -> &ToolManifest {
         &self.manifest
     }
 
@@ -61,11 +61,11 @@ impl ToolStateEntry {
 }
 #[derive(Clone, Debug, Default)]
 pub struct ToolState {
-    pub(super) generation: u64,
+    pub generation: u64,
     pub(super) tools: Arc<BTreeMap<ToolId, ToolStateEntry>>,
 }
 impl ToolState {
-    pub(crate) fn new(generation: u64, tools: BTreeMap<ToolId, ToolStateEntry>) -> Self {
+    pub fn new(generation: u64, tools: BTreeMap<ToolId, ToolStateEntry>) -> Self {
         Self {
             generation,
             tools: Arc::new(tools),
@@ -73,7 +73,7 @@ impl ToolState {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn with_generation(mut self, generation: u64) -> Self {
+    pub fn with_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
     }
@@ -115,7 +115,7 @@ impl ToolState {
         Arc::make_mut(&mut self.tools).remove(id)
     }
 
-    pub(crate) fn entries(&self) -> &BTreeMap<ToolId, ToolStateEntry> {
+    pub fn entries(&self) -> &BTreeMap<ToolId, ToolStateEntry> {
         self.tools.as_ref()
     }
 }
@@ -158,7 +158,7 @@ impl<'de> Deserialize<'de> for ToolState {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ToolRegistrationKind {
+pub enum ToolRegistrationKind {
     #[default]
     Leaf,
     Orchestrating,
@@ -229,7 +229,6 @@ pub mod facade_ops {
             Ok(())
         }
     }
-
 }
 
 #[derive(Debug, thiserror::Error)]

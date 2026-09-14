@@ -1,3 +1,4 @@
+pub use lash_core_store::process_identity::*;
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -26,42 +27,6 @@ pub use lifecycle::*;
 pub use lash_sansio::handle::HandleId;
 pub use lash_sansio::{ProcessId, SessionId};
 pub type ProcessOutcome = ProcessAwaitOutput;
-
-/// Store-minted identity of one lifetime of a reusable [`ProcessId`].
-///
-/// The value is the process registry change sequence allocated by the
-/// registration transaction. A bare process id is only a host-facing name;
-/// durable references pin this value so they cannot silently rebind after the
-/// name is pruned and registered again.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    schemars::JsonSchema,
-)]
-
-
-
-
-
-
-/// Structural identity of one process lifetime.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
-)]
-
-
-
-
-
-
 /// Opaque position in a store's Process Change Feed.
 ///
 /// The wrapped sequence is meaningful only to the registry backend that issued

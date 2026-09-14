@@ -83,20 +83,20 @@ impl ProtocolTurnOptions {
         serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
     }
 }
-    impl facade_ops::ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
-        fn merged_with_override(&self, override_options: &Self) -> Self {
-            match (&self.payload, &override_options.payload) {
-                (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
-                    let mut payload = base.clone();
-                    payload.extend(overrides.clone());
-                    Self {
-                        payload: serde_json::Value::Object(payload),
-                    }
+impl facade_ops::ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
+    fn merged_with_override(&self, override_options: &Self) -> Self {
+        match (&self.payload, &override_options.payload) {
+            (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
+                let mut payload = base.clone();
+                payload.extend(overrides.clone());
+                Self {
+                    payload: serde_json::Value::Object(payload),
                 }
-                _ => override_options.clone(),
             }
+            _ => override_options.clone(),
         }
     }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -170,7 +170,6 @@ fn ensure_protocol_turn_options_schema_version(
 }
 
 pub mod facade_ops {
-    
 
     /// Facade-internal operations for [`ProtocolTurnOptions`].
     ///

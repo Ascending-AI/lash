@@ -1319,7 +1319,7 @@ impl SessionAttachmentStore {
         self.max_attachment_bytes
     }
 
-    pub(crate) fn reconfigured_max_attachment_bytes(
+    pub fn reconfigured_max_attachment_bytes(
         &self,
         max_attachment_bytes: Option<u64>,
     ) -> Self {
@@ -1391,7 +1391,7 @@ impl SessionAttachmentStore {
     /// Returns the unique attachment intents recorded by the active durable
     /// turn. The runtime uses this turn-side evidence while assembling the
     /// commit budget; stores are never queried during admission.
-    pub(crate) fn recorded_turn_intent_ids(&self, turn_id: &TurnId) -> BTreeSet<AttachmentId> {
+    pub fn recorded_turn_intent_ids(&self, turn_id: &TurnId) -> BTreeSet<AttachmentId> {
         let recorded = self.owner.lock_recover().as_ref().and_then(|owner| {
             matches!(&owner.owner, crate::AttachmentOwner::Turn { id } if id == turn_id.as_str())
                 .then(|| Arc::clone(&owner.recorded_intent_ids))
@@ -1711,7 +1711,7 @@ pub async fn resolve_llm_request_attachments(
     Ok(request)
 }
 
-pub(crate) fn attachment_materialization_notice(
+pub fn attachment_materialization_notice(
     snapshot: &crate::provider::AttachmentCapabilitySnapshot,
     source: &crate::AttachmentSource,
 ) -> Option<crate::AttachmentMaterializationNotice> {
@@ -1726,7 +1726,7 @@ pub(crate) fn attachment_materialization_notice(
 /// attachment envelopes byte-for-byte identical. On the degradation path the
 /// effect outcome is journaled under the turn-effect invocation key, so its
 /// recorded response wins on replay instead of dispatch running again.
-pub(crate) fn degrade_unmaterializable_request_attachments(
+pub fn degrade_unmaterializable_request_attachments(
     request: &mut Arc<crate::llm::types::LlmRequest>,
 ) -> Vec<crate::AttachmentMaterializationNotice> {
     let notices = request

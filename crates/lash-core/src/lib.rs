@@ -17,7 +17,8 @@
 pub use async_trait::async_trait;
 
 pub use lash_core_store::attachments;
-pub mod chronological;
+pub use lash_core_store::protocol_turn_options::ProtocolTurnOptions;
+pub use lash_core_store::chronological;
 pub mod direct;
 pub(crate) use lash_core_ids::identity_json;
 pub use lash_core_llm::llm;
@@ -178,7 +179,7 @@ pub mod facade_support {
     pub use crate::direct::DirectPart;
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
-    pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
+    pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
@@ -236,7 +237,7 @@ pub mod facade_support {
     pub use crate::plugin::TurnPluginDirective;
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
-    pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
+    pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
@@ -380,7 +381,7 @@ pub mod facade_support {
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::ensure_durable_effect_input;
-    pub use crate::runtime::facade_ops::TurnContextFacadeOps;
+    pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_wake_delivery;
@@ -400,7 +401,7 @@ pub mod facade_support {
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
         crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
     }
-    pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
+    pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
@@ -410,7 +411,7 @@ pub mod facade_support {
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
-    pub use crate::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
+    pub use lash_core_store::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
     pub use crate::session_graph::frame_node_id;
     pub use crate::session_model::ConversationRecord;
     pub use crate::session_model::GenerationOverlay;
@@ -428,7 +429,8 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
     pub use crate::tool_registry::ToolStateEntry;
-    pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+    pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
+    pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReceipt;
@@ -706,7 +708,6 @@ pub(crate) mod facade_ops {
 
 
 }
-
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 /// Durable protocol-driver state owned by protocol-engine implementors.
 ///

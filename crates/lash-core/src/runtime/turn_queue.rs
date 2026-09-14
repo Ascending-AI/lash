@@ -1,3 +1,4 @@
+pub use lash_core_store::queued_work_vocabulary::*;
 use super::process::ProcessWakeDelivery;
 use crate::ProcessId;
 use crate::SessionId;

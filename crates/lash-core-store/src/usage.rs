@@ -289,7 +289,7 @@ impl LedgerUsageDisposition {
     /// identity: a repeat of a hole already held is idempotent, and a
     /// disagreeing generation attribution is refused. Returns the conflict for
     /// the checked path; the saturating path keeps the row it already holds.
-    pub(crate) fn absorb_saturating(&mut self, other: &Self) -> Option<UsageDispositionError> {
+    pub fn absorb_saturating(&mut self, other: &Self) -> Option<UsageDispositionError> {
         let (Self::Unreported { attempts }, Self::Unreported { attempts: incoming }) =
             (self, other)
         else {

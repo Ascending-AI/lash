@@ -1125,18 +1125,12 @@ impl RuntimeEffectControllerError {
 
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
     /// while executing or replaying a runtime effect.
-    pub fn with_summary(
-        mut self,
-        summary: crate::RuntimeEffectReplayMismatchReport,
-    ) -> Self {
+    pub fn with_summary(mut self, summary: crate::RuntimeEffectReplayMismatchReport) -> Self {
         self.summary = Some(summary);
         self
     }
 
-    pub fn wrong_outcome(
-        expected: RuntimeEffectKind,
-        actual: RuntimeEffectKind,
-    ) -> Self {
+    pub fn wrong_outcome(expected: RuntimeEffectKind, actual: RuntimeEffectKind) -> Self {
         Self::new(
             RuntimeErrorCode::RuntimeEffectWrongOutcome,
             format!(

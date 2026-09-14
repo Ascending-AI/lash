@@ -8,7 +8,7 @@ use crate::{SessionExecutionLease, SessionExecutionLeaseAcquisition};
 
 /// Report a successful claim, including the atomic displacement evidence when
 /// this claim took the lane over from a lapsed holder.
-pub(crate) fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
+pub fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
     let lease = &acquisition.lease;
     tracing::info!(
         session_id = %lease.session_id,
@@ -54,7 +54,7 @@ fn trace_taken_over(
     );
 }
 
-pub(crate) fn trace_busy(
+pub fn trace_busy(
     session_id: &SessionId,
     claimant: &crate::LeaseOwnerIdentity,
     claimant_executor_id: &str,

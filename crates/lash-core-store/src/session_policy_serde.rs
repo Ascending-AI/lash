@@ -13,8 +13,8 @@
 //! wire until it is named here -- so a field this file does not mention is a
 //! runtime-only field by construction.
 
-use crate::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
 use crate::SessionId;
+use crate::{ModelSpec, NoProgressBudget, SessionPolicy, TurnBudget};
 
 impl serde::Serialize for SessionPolicy {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

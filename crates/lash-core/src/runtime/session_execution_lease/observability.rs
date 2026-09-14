@@ -63,4 +63,3 @@ pub fn trace_commit_cas_rejected(
         "the commit's head compare-and-set was rejected; another writer published first"
     );
 }
-

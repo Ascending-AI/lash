@@ -1,3 +1,4 @@
+pub use lash_core_store::process_identity::*;
 use crate::SessionId;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;

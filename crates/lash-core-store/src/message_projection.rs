@@ -4,10 +4,7 @@ use crate::{Message, Part, PluginMessage};
 use lash_sansio::session_model::{message, reassign_part_ids};
 use std::sync::Arc;
 
-pub fn plugin_message_to_message(
-    plugin_message: &PluginMessage,
-    fallback_id: &str,
-) -> Message {
+pub fn plugin_message_to_message(plugin_message: &PluginMessage, fallback_id: &str) -> Message {
     let message_id = plugin_message
         .id
         .as_deref()

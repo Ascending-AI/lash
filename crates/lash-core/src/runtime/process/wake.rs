@@ -1,3 +1,4 @@
+pub use lash_core_store::process_identity::{process_wake_turn_cause, process_wake_turn_text};
 use crate::plugin::PluginError;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};

@@ -218,4 +218,3 @@ mod tests {
         assert_eq!(controller_error.summary, Some(summary));
     }
 }
-

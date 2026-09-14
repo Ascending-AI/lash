@@ -1,3 +1,4 @@
+pub use lash_core_store::turn_input_vocabulary::*;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 #[cfg(feature = "testing")]
@@ -49,7 +50,7 @@ mod process;
 mod process_worker;
 pub(crate) use process_worker::ensure_process_execution_permit;
 pub use process_worker::release_process_execution_permit_while;
-mod queued_drain_policy;
+use lash_core_store::queued_drain_policy;
 pub use native_substrate::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
 mod session_administration;
@@ -94,7 +95,7 @@ pub mod turn_control;
 #[cfg(not(feature = "testing"))]
 pub(crate) mod turn_control;
 mod turn_driver;
-mod turn_failure_evidence;
+use lash_core_store::turn_failure_evidence;
 mod turn_graph_editor;
 pub use turn_failure_evidence::{
     ChargeSafetyRefusalEvidence, TurnFailureEvidence, TurnFailurePartialOutput,
@@ -110,9 +111,9 @@ pub mod turn_queue;
 #[cfg(not(feature = "testing"))]
 mod turn_queue;
 #[cfg(feature = "testing")]
-pub mod usage;
+pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
-mod usage;
+pub(crate) use lash_core_store::usage;
 mod worker_capacity;
 
 use std::any::Any;

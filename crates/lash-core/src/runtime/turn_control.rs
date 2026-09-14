@@ -1,3 +1,5 @@
+pub use lash_core_store::turn_control_vocabulary::*;
+pub use lash_core_store::turn_control_binding::*;
 use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
@@ -333,9 +335,10 @@ impl TurnWorkDriver {
             == crate::TurnControlAuthorityOwner::SessionStore)
             .then(|| store.turn_cancellation_authority())
             .flatten();
-        let store_resolver = store_authority
-            .as_ref()
-            .map(|authority| authority.resolver());
+        let store_resolver = store_authority.as_ref().map(|authority| {
+            crate::runtime::effect::executor::concrete_turn_cancellation_authority(authority)
+                .resolver()
+        });
         let resolver: &dyn AwaitEventResolver = store_resolver
             .as_ref()
             .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());
@@ -620,9 +623,10 @@ impl TurnWorkDriver {
             == crate::TurnControlAuthorityOwner::SessionStore)
             .then(|| store.turn_cancellation_authority())
             .flatten();
-        let store_resolver = store_authority
-            .as_ref()
-            .map(|authority| authority.resolver());
+        let store_resolver = store_authority.as_ref().map(|authority| {
+            crate::runtime::effect::executor::concrete_turn_cancellation_authority(authority)
+                .resolver()
+        });
         let resolver: &dyn AwaitEventResolver = store_resolver
             .as_ref()
             .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());

@@ -14,7 +14,7 @@ pub enum SessionExecutionLeaseRenewalInstallMismatch {
 }
 
 impl SessionExecutionLeaseRenewalInstallMismatch {
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Session => "session",
             Self::OwnerIncarnation => "owner_incarnation",

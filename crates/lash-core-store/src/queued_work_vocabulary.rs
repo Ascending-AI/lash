@@ -4,7 +4,9 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use crate::{PluginMessage, ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput};
+use crate::{
+    PluginMessage, ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

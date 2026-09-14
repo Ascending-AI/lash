@@ -5,7 +5,9 @@
 //! and the lifecycle services stay in `lash-core`.
 
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::{PluginOptions, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition};
+use crate::{
+    PluginOptions, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -153,7 +155,7 @@ impl AgentFrameReason {
         Self::new(Self::INITIAL)
     }
 
-    pub(crate) fn compaction() -> Self {
+    pub fn compaction() -> Self {
         Self::new(Self::COMPACTION)
     }
 
