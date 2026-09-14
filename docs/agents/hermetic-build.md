@@ -152,8 +152,10 @@ with a Cargo-owned live-service suite is not by itself a Bazel blocker.
 The four binaries that `tools/bazel/cargo_owned_nextest_filter.txt` once
 selected are in the partition as of 2026-09-14, which retires the
 `Test Cargo workspace partition` Rust run on trusted events entirely — the job
-now runs only for the agent-workbench binary, and only when
-`examples/agent-workbench/**` changed. Each blocker was fixed as a test defect
+now runs only for the agent-workbench binary, and only when the diff touches
+that binary's first-party dependency closure, which `scripts/ci_plan.py`
+derives from the workspace manifests (or on a push to main, which always runs
+it). Each blocker was fixed as a test defect
 rather than exempted:
 
 - `//crates/lash-core:integration_boundary__test` shelled out to `cargo
