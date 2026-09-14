@@ -2,6 +2,7 @@
 
 use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::SessionId;
+use lash_sansio::sync::MutexExt;
 use tracing::Instrument;
 
 /// Typed idempotency key for one host-submitted tool intent.
@@ -1229,9 +1230,17 @@ impl ToolIntentIngress {
             .control
             .effect_host
             .scoped(self.scope.clone())?;
+        #[expect(
+            clippy::expect_used,
+            reason = "the scope comes from the effect host's own `scoped` handle, which \
+                      is admitted by construction"
+        )]
         let invocation = lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(scoped.execution_scope().clone(), replay_key.clone())
-                .expect("tool intent ingress carries an admitted effect scope"),
+                .expect(
+                    "the scope comes from the effect host's own `scoped` handle, which \
+                     is admitted by construction",
+                ),
             lash_core::RuntimeAttribution::for_session(self.session_id.clone()),
             format!("tool-intent-ingress:{}", identity.intent_index),
         )
@@ -1254,10 +1263,7 @@ impl ToolIntentIngress {
         let outcome_observer: lash_core::ProcessOutcomeObserver = {
             let store_realization = std::sync::Arc::clone(&store_realization);
             std::sync::Arc::new(move |_, realization| {
-                *store_realization
-                    .lock()
-                    .expect("tool intent ingress realization verdict is never poisoned") =
-                    Some(realization);
+                *store_realization.lock_recover() = Some(realization);
             })
         };
         let outcome = scoped
@@ -1294,10 +1300,7 @@ impl ToolIntentIngress {
                 "tool-intent ingress effect returned a non-process outcome".to_string(),
             )));
         };
-        let replayed = match *store_realization
-            .lock()
-            .expect("tool intent ingress realization verdict is never poisoned")
-        {
+        let replayed = match *store_realization.lock_recover() {
             // Local execution never ran: the journal replayed this effect.
             None => true,
             Some(realization) => realization.is_coalesced(),

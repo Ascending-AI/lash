@@ -10,6 +10,15 @@
 //! Compiled for unit tests and, behind the default-on `testing` feature, for
 //! integration tests and downstream harnesses.
 
+// Test-support module: a broken harness assumption must abort the test loudly
+// rather than be folded into a provider error the test under way would then
+// report as a provider defect. Clippy's `allow-expect-in-tests` reaches
+// `#[test]` functions only, not the scripted server they drive.
+#![expect(
+    clippy::expect_used,
+    reason = "test-support harness: a broken setup assumption aborts the test"
+)]
+
 use lash_sansio::sync::MutexExt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};

@@ -671,6 +671,11 @@ impl LashCore {
             .into());
         }
         let process = if let Some(process) = administration.process() {
+            #[expect(
+                clippy::expect_used,
+                reason = "the scope comes from the session's own live controller, which \
+                          is admitted by construction"
+            )]
             let invocation = RuntimeEffectInvocation::new(
                 lash_core::EffectAddress::new(
                     lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
@@ -679,7 +684,10 @@ impl LashCore {
                     .clone(),
                     format!("{session_id}:delete-session"),
                 )
-                .expect("session deletion carries an admitted effect scope"),
+                .expect(
+                    "the scope comes from the session's own live controller, which is \
+                     admitted by construction",
+                ),
                 lash_core::RuntimeAttribution::for_session(session_id.clone()),
                 format!("process:delete-session:{session_id}"),
             );

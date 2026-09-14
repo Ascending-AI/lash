@@ -275,6 +275,11 @@ impl Processes {
         Ok(filter.clone())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope is the caller's own live execution scope, which is admitted \
+                  by construction"
+    )]
     fn process_invocation(
         command: &lash_core::ProcessCommand,
         scope: &lash_core::ExecutionScope,
@@ -483,11 +488,18 @@ impl Processes {
             .ok_or(EmbedError::MissingProcessRegistry)?
             .resolve_process_ref(process_id)
             .await?;
+        #[expect(
+            clippy::expect_used,
+            reason = "an execution scope is a struct of opaque string identities, whose \
+                      serialization has no failing case"
+        )]
         let command = lash_core::ProcessCommand::Cancel {
             process_ref,
             origin: lash_core::CancelOrigin::OperatorRequested,
-            requester: serde_json::to_string(scoped_effect_controller.execution_scope())
-                .expect("execution scopes contain only serializable identities"),
+            requester: serde_json::to_string(scoped_effect_controller.execution_scope()).expect(
+                "an execution scope is a struct of opaque string identities, whose \
+                     serialization has no failing case",
+            ),
             attribution: None,
         };
         let outcome = self

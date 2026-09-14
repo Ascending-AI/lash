@@ -1,6 +1,16 @@
 //! Test helpers for embedders. Enable with `lash = { ..., features = ["testing"] }`
 //! to script model responses in integration tests without a live provider.
 
+// Test-support module: these helpers run inside a test and a broken fixture
+// assumption must abort it loudly rather than be reshaped into a runtime error
+// the test under way would then report as a runtime defect. Clippy's
+// `allow-expect-in-tests` reaches `#[test]` functions only, not the fixtures
+// they call.
+#![expect(
+    clippy::expect_used,
+    reason = "test-support fixtures: a broken setup assumption aborts the test"
+)]
+
 pub use lash_core::TestLocalProcessRegistry;
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.

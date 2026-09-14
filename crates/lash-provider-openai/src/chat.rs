@@ -87,6 +87,12 @@ impl OpenAiCompatibleProvider {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "`validate_chat_attachments` runs over the same request first and \
+                  refuses every source that is not an image with resolved bytes, so \
+                  both are present by the time the part is built"
+    )]
     fn chat_attachment_part(req: &LlmRequest, source: &AttachmentSource) -> Value {
         let media_type = source.media_type().expect("validated image source");
         let url = match source {

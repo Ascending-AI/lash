@@ -178,7 +178,14 @@ impl RlmSessionExt for crate::LashSession {
         .await
         .map_err(|err| RlmSessionConfigError::Session(EmbedError::Session(err)))??;
         self.runtime.publish_from(&runtime);
-        Ok(resolved.expect("a successful protocol-options update resolves the RLM config"))
+        #[expect(
+            clippy::expect_used,
+            reason = "the closure above assigns `resolved` on its only successful exit, \
+                      and every other exit already returned an error"
+        )]
+        let resolved =
+            resolved.expect("a successful protocol-options update resolves the RLM config");
+        Ok(resolved)
     }
 }
 

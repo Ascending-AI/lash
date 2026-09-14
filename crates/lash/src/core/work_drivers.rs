@@ -222,6 +222,12 @@ impl NativeSubstrateSlot {
 
     /// Resolve host work ports for a session host. Idempotent: the once-guard
     /// ensures native ports are constructed once.
+    #[expect(
+        clippy::expect_used,
+        reason = "every value assembled here was validated when the setup was built: \
+                  the builder refuses an invalid work cadence, execution concurrency \
+                  or substrate config before it can reach this resolution"
+    )]
     pub(crate) async fn ports(&self) -> ResolvedPorts {
         self.drivers
             .get_or_init(|| async {

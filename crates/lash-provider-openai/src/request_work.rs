@@ -12,6 +12,11 @@ const BLOCKING_THRESHOLD: usize = 64 * 1024;
 const EXCERPT_BYTES: usize = 4096;
 
 pub(crate) fn attachment_data_url(media_type: &str, bytes: &[u8]) -> String {
+    #[expect(
+        clippy::expect_used,
+        reason = "`encoded_len` only declines when the encoded length overflows `usize`, \
+                  which cannot happen for a slice already held in memory"
+    )]
     let encoded_len = base64::encoded_len(bytes.len(), true).expect("attachment fits in memory");
     let mut url = String::with_capacity(5 + media_type.len() + 8 + encoded_len);
     url.push_str("data:");
@@ -121,6 +126,11 @@ pub(crate) fn body_prefix(body: &str) -> &str {
 
 /// Serialize diagnostics into a bounded writer rather than materializing a
 /// full JSON String solely to truncate it on an error path.
+#[expect(
+    clippy::expect_used,
+    reason = "serializing a `serde_json::Value` into an in-memory writer cannot fail, \
+              and the UTF-8 prefix is re-split at a boundary `valid_up_to` just reported"
+)]
 pub(crate) fn json_excerpt(value: &serde_json::Value) -> String {
     struct ExcerptWriter {
         prefix: Vec<u8>,
