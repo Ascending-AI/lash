@@ -18,19 +18,28 @@ use super::*;
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
-        from: 96,
-        to: 97,
-        // Component 97 creates the named process-definition registry
-        // (FIG-2995). The table arrives empty in any predecessor, so a
-        // creation-only migration carries it; no column elsewhere moves.
+        from: 94,
+        to: 96,
+        // Component 95 (the source-call contract capture) and component 96
+        // (the SleepSpec encoding) were refusal-only cutovers, and component
+        // 97 creates the named process-definition registry (FIG-2995) beside
+        // them. No predecessor records existed at any of these moves, so the
+        // retained endpoint now carries all three: a pre-cutover store is
+        // refused at open rather than migrated (its schema lacks the
+        // registry relation and the retained trigger capture).
         source_missing_tables: &["lash_process_definitions"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         introduced_relations: &["lash_process_definitions"],
-        statements: &[
-            "CREATE TABLE IF NOT EXISTS lash_process_definitions (definition_id TEXT PRIMARY KEY, owner_scope TEXT NOT NULL, name TEXT NOT NULL, revision BIGINT NOT NULL, fingerprint TEXT NOT NULL, lifecycle TEXT NOT NULL, deleted_at_ms BIGINT, change_seq BIGINT NOT NULL, created_at_ms BIGINT NOT NULL, updated_at_ms BIGINT NOT NULL, record_json TEXT NOT NULL, CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)), UNIQUE(owner_scope, name))",
-            "CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_registrant ON lash_process_definitions(owner_scope, name)",
-            "CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_change ON lash_process_definitions(change_seq)",
-        ],
+        statements: &[],
+    },
+    SchemaMigration {
+        from: 95,
+        to: 96,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
     },
 ];

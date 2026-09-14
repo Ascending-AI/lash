@@ -127,7 +127,7 @@ def fail(message):
 # own `RefusalKind::as_str` literals, so a rename cannot go unnoticed until a
 # container gate runs.
 EXPECTED_REFUSAL_KINDS = {
-    "refused_divergent_store": "divergent_artifacts",
+    "refused_divergent_store": "no_applicable_migration",
     "refused_older_store": "no_applicable_migration",
     "refused_newer_store": "no_applicable_migration",
     "recreated_store": "no_applicable_migration",
@@ -236,11 +236,11 @@ for refusal, checkpoint_name in (
     expected_kind = EXPECTED_REFUSAL_KINDS[checkpoint_name]
     if refusal.get("refusal_kind") != expected_kind:
         fail(f"refusal was not the {expected_kind!r} kind its phase proves: {refusal}")
-# For FIG-2995 the pre-cutover generation is non-destructive (a creation-only
-# DDL cutover), so the divergent refusal names the artifact list its migration
-# source published instead of clearing it.
-if not divergent["divergent_artifacts"]:
-    fail(f"non-destructive pre-cutover refusal omitted migration artifacts: {divergent}")
+# Destructive generations carry no migration arm, so the immediate
+# predecessor is the ordinary reject-and-recreate refusal and has no
+# migration-divergence artifact list.
+if divergent["divergent_artifacts"]:
+    fail(f"destructive pre-cutover refusal named migration artifacts: {divergent}")
 if stale["found_version"] >= divergent["found_version"]:
     fail(f"older-store refusal was not older: {stale}")
 if stale["current_artifact_count"] != 0:
