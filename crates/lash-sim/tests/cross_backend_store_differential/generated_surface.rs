@@ -591,8 +591,8 @@ impl SurfaceRunner {
                         },
                         kind: lash_core::ToolIntentKind::StartProcess,
                         result: serde_json::json!({
-                            "__handle__": "process",
-                            "id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                            "__handle__": "lash",
+                            "id": "p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                             "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                             "incarnation": 1,
                             "kind": "external",
@@ -612,8 +612,8 @@ impl SurfaceRunner {
                         },
                         kind: lash_core::ToolIntentKind::StartProcess,
                         result: serde_json::json!({
-                            "__handle__": "process",
-                            "id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                            "__handle__": "lash",
+                            "id": "p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                             "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                             "incarnation": 2,
                             "kind": "external",
@@ -657,11 +657,11 @@ impl SurfaceRunner {
                                     {"type": "text", "text": "{\"ok\":true}"},
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"incarnation\":1,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"lash\",\"id\":\"p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"incarnation\":1,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]"
                                     },
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"incarnation\":2,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"lash\",\"id\":\"p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"incarnation\":2,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]"
                                     }
                                 ]
                             },
@@ -679,8 +679,8 @@ impl SurfaceRunner {
                                     },
                                     "kind": "start_process",
                                     "result": {
-                                        "__handle__": "process",
-                                        "id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                                        "__handle__": "lash",
+                                        "id": "p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                                         "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                                         "incarnation": 1,
                                         "kind": "external",
@@ -699,8 +699,8 @@ impl SurfaceRunner {
                                     },
                                     "kind": "start_process",
                                     "result": {
-                                        "__handle__": "process",
-                                        "id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                                        "__handle__": "lash",
+                                        "id": "p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                                         "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
                                         "incarnation": 2,
                                         "kind": "external",
