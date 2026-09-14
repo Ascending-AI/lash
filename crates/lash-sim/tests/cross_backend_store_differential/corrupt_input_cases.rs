@@ -434,6 +434,7 @@ impl BackendRunner {
             self.name
         );
         self.surface.corrupt_backup = Some(backup);
+        self.surface.corrupt_target = Some(target);
         Ok(None)
     }
 
@@ -451,7 +452,22 @@ impl BackendRunner {
             .corrupt_backup
             .take()
             .expect("generated sequence seeds corruption before restoring it");
-        match &self.raw_reader {
+        self.surface.corrupt_target = None;
+        restore_corrupt_record_raw(&self.raw_reader, &session_id, target, backup).await;
+        Ok(None)
+    }
+}
+
+/// Put the original bytes back. Separate from the step so the RAII guard below
+/// can run it on a path that never reaches the restore step.
+pub(super) async fn restore_corrupt_record_raw(
+    raw_reader: &RawDurableReader,
+    session_id: &SessionId,
+    target: CorruptTarget,
+    backup: CorruptBackup,
+) {
+    {
+        match raw_reader {
             RawDurableReader::InMemory { .. } => unreachable!("in-memory is not corrupted"),
             RawDurableReader::Sqlite { path, .. } => {
                 let connection =
@@ -467,7 +483,7 @@ impl BackendRunner {
                                  WHERE session_id = ?1 AND node_id = ?2",
                                 rusqlite::params![
                                     session_id.as_str(),
-                                    scoped_node_id(&session_id, "root"),
+                                    scoped_node_id(session_id, "root"),
                                     backup.text.expect("graph-node backup is text")
                                 ],
                             )
@@ -521,7 +537,7 @@ impl BackendRunner {
                          WHERE session_id = $1 AND node_id = $2",
                     )
                     .bind(session_id.as_str())
-                    .bind(scoped_node_id(&session_id, "root"))
+                    .bind(scoped_node_id(session_id, "root"))
                     .bind(backup.text.expect("graph-node backup is text"))
                     .execute(pool)
                     .await
@@ -564,6 +580,48 @@ impl BackendRunner {
                 }
             },
         }
-        Ok(None)
+    }
+}
+
+/// Restore-on-drop for the corrupt-input cases.
+///
+/// Checkpoint manifest blobs are content-addressed and shared across sessions,
+/// and every case in this suite runs against one PostgreSQL database. A case
+/// that panics or breaks out of its step loop between the seed step and the
+/// restore step would otherwise leave the shared blob corrupt, failing every
+/// later run of the suite until the database is recreated. The restore step is
+/// still the normal path -- it is a compared step, and the digest must show the
+/// row coming back; this guard only covers the paths that never reach it.
+impl Drop for BackendRunner {
+    fn drop(&mut self) {
+        let (Some(backup), Some(target)) = (
+            self.surface.corrupt_backup.take(),
+            self.surface.corrupt_target.take(),
+        ) else {
+            return;
+        };
+        let reader = &self.raw_reader;
+        let session_id = self.session_id.clone();
+        // A dedicated runtime on its own thread: `Drop` cannot await, and this
+        // may run while unwinding inside the harness's own runtime.
+        let restored = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("build corrupt-record restoration runtime")
+                        .block_on(restore_corrupt_record_raw(
+                            reader,
+                            &session_id,
+                            target,
+                            backup,
+                        ));
+                })
+                .join()
+        });
+        if restored.is_err() && !std::thread::panicking() {
+            panic!("failed to restore a corrupt record while dropping the backend runner");
+        }
     }
 }

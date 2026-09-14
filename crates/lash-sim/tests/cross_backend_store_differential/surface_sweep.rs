@@ -33,6 +33,7 @@ fn unheld_lease_fence(session_id: &SessionId) -> lash_core::SessionExecutionLeas
 pub(super) struct SurfaceScratch {
     pub(super) answer: Option<String>,
     pub(super) corrupt_backup: Option<CorruptBackup>,
+    pub(super) corrupt_target: Option<corrupt_input_cases::CorruptTarget>,
     pub(super) batch_id: Option<String>,
     pub(super) queued_work_claim: Option<QueuedWorkClaim>,
     pub(super) turn_input_claim: Option<TurnInputClaim>,
@@ -69,6 +70,9 @@ pub(super) enum SurfaceMethod {
     CancelPendingTurnInputs,
     CancelPendingTurnInputSuffix,
     OrphanedActiveTurnIds,
+    AbortUnknownAttachmentWrite,
+    CommitUnknownAttachmentRefs,
+    ForgetUnknownAttachment,
     Vacuum,
 }
 
@@ -105,8 +109,25 @@ impl SurfaceMethod {
             Self::CancelPendingTurnInputs => "surface:cancel_pending_turn_inputs",
             Self::CancelPendingTurnInputSuffix => "surface:cancel_pending_turn_input_suffix",
             Self::OrphanedActiveTurnIds => "surface:orphaned_active_turn_ids",
+            Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
+            Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
+            Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
             Self::Vacuum => "surface:vacuum",
         }
+    }
+}
+
+fn unknown_attachment_id() -> AttachmentId {
+    AttachmentId::parse(UNKNOWN_ATTACHMENT_ID).expect("the unknown-attachment id must parse")
+}
+
+fn unknown_attachment_intent(session_id: &SessionId) -> lash_core::AttachmentIntent {
+    lash_core::AttachmentIntent {
+        attachment_id: unknown_attachment_id(),
+        session_id: session_id.clone(),
+        canonical_uri: format!("lash-attachment://blake3/{UNKNOWN_ATTACHMENT_ID}"),
+        intent_at_epoch_ms: 1_000,
+        owner: None,
     }
 }
 
@@ -115,6 +136,11 @@ fn surface(method: SurfaceMethod) -> StoreOperation {
 }
 
 const UNKNOWN_BATCH_ID: &str = "fig-2841-unknown-batch";
+/// An attachment id no case ever writes. The manifest drivers use
+/// it so the inventory covers those methods without mutating an attachment the
+/// surrounding case depends on: an unknown entity is itself a refusal driver,
+/// and whatever a backend answers, the no-residue law still applies.
+const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
 
 /// Every fallible method in the inventory, driven against a live session.
@@ -163,6 +189,9 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
+            surface(SurfaceMethod::AbortUnknownAttachmentWrite),
+            surface(SurfaceMethod::CommitUnknownAttachmentRefs),
+            surface(SurfaceMethod::ForgetUnknownAttachment),
             surface(SurfaceMethod::Vacuum),
         ],
     }
@@ -203,6 +232,9 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::ClaimLeadingReadySessionCommand),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
+            surface(SurfaceMethod::AbortUnknownAttachmentWrite),
+            surface(SurfaceMethod::CommitUnknownAttachmentRefs),
+            surface(SurfaceMethod::ForgetUnknownAttachment),
             surface(SurfaceMethod::Vacuum),
         ],
     }
@@ -491,6 +523,24 @@ impl BackendRunner {
                     .await?;
                 format!("turn_ids={}", turn_ids.len())
             }
+            SurfaceMethod::AbortUnknownAttachmentWrite => {
+                let intent = unknown_attachment_intent(&session_id);
+                let outcome = store
+                    .begin_attachment_write(intent.clone())
+                    .and_then(|fence| match fence {
+                        lash_core::AttachmentWriteFence::Granted(permit) => store
+                            .abort_attachment_write(&intent, permit)
+                            .map(|()| "aborted"),
+                        _ => Ok("not_granted"),
+                    })?;
+                format!("outcome={outcome}")
+            }
+            SurfaceMethod::CommitUnknownAttachmentRefs => store
+                .commit_refs(&session_id, &[unknown_attachment_id()])
+                .map(|()| "committed".to_string())?,
+            SurfaceMethod::ForgetUnknownAttachment => store
+                .forget(&session_id, &unknown_attachment_id())
+                .map(|()| "forgotten".to_string())?,
             SurfaceMethod::Vacuum => {
                 let report = store
                     .vacuum()
