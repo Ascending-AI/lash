@@ -5,8 +5,10 @@
 > and teardown. This runbook adds only the approval scenarios.
 
 
-> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
-> below is retained as an acceptance contract and is not currently executable. See the
+> **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
+> journals and the application data. A step below still marked blocked stays blocked until its
+> own row is re-authored. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 

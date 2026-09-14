@@ -6,8 +6,10 @@
 > only the reconnect-resilience scenario.
 
 
-> **Blocked process-restart phase (FIG-1164).** Any Workbench process-only restart step
-> below is retained as an acceptance contract and is not currently executable. See the
+> **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
+> same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
+> journals and the application data. A step below still marked blocked stays blocked until its
+> own row is re-authored. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -81,13 +83,14 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 
 ## Scenario-specific golden rules
 
-1. **Replace only the web process (blocked by FIG-1164).** A `down`/`up` pair destroys the
-   durable invocation this scenario depends on, and destructive reset is equally invalid. The
-   historical narrow commands were `bash scripts/agent-workbench-dev.sh restart --port <p>` and
-   `just agent-workbench-restart <p>`; both now refuse safely. Do not execute this phase until a
-   verified immutable same-configuration host restart exists. That mechanism must keep the
-   Restate container **id and start time unchanged**, change the Workbench **PID**, and use the
-   same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR`. An unchanged PID or different
+1. **Replace only the web process.** A `down`/`up` pair destroys the durable invocation this
+   scenario depends on, and destructive reset is equally invalid. The narrow command is
+   `bash scripts/agent-workbench-dev.sh restart --port <p>` (`just agent-workbench-restart <p>`),
+   which replaces only the Workbench process and keeps the Restate engine, its journals and the
+   application data. Run it with the same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR`
+   and the same `RESTATE_AUTHORITY_ID` as boot; the launcher refuses rather than replacing
+   anything if they differ. Then gate the outcome yourself: the Restate container **id and
+   start time unchanged**, and a changed Workbench **PID**. An unchanged PID or a different
    durable directory voids the phase.
 2. **Gate on the phase, and read it where the phase actually lives.** The phase is not a
    single element. `#shellStatus` is hidden **exactly** when the phase is `live`, and its
@@ -222,11 +225,12 @@ Note also that the interruption is deliberately *not* an interruption of executi
 was submitted to Restate, so the sleep is durable and the replacement process picks the
 invocation back up.
 
-**2b — restart only the web process (blocked by FIG-1164).** Stop this scenario here. Retain
-`bash scripts/agent-workbench-dev.sh restart --port <p>` as the historical command, but do not
-execute it until a verified immutable same-configuration host restart exists. Run that mechanism
-with the exported data and run directories, then gate that the recorded PID is gone and the new
-PID differs, the Restate container id and `StartedAt` are unchanged, and `/healthz` answers again.
+**2b — restart only the web process.** Run
+`bash scripts/agent-workbench-dev.sh restart --port <p>` with the exported data and run
+directories, in the shell that still exports this row's `RESTATE_AUTHORITY_ID`. It is
+non-destructive: the Restate journals and the application data are retained, and no deployment
+is re-registered. Then gate that the recorded PID is gone and the new PID differs, the Restate
+container id and `StartedAt` are unchanged, and `/healthz` answers again.
 
 **2c — require the phase to leave live and return, unassisted.** From the sampler timeline,
 require at least one sample whose phase is `reconnecting` or `unavailable`, and a later
