@@ -11,9 +11,18 @@
 //! unchanged: sharing is exactly the shape the reported failures produced.
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Snapshot, State,
-    Value, compile, execute,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr, Program,
+    Snapshot, State, Value, compile_ast, execute,
 };
+
+// `a::list`/`a::number` build IR nodes; the bare `list`/`number` below build
+// the `Value`s the assertions compare against.
+use crate::ast_support as a;
+
+/// `push(<list>, <item>)` — the IR's non-mutating append.
+fn push(list_expr: Expr, item: Expr) -> Expr {
+    a::call("push", vec![list_expr, item])
+}
 
 #[derive(Default)]
 struct ProbeHost;
@@ -36,9 +45,14 @@ fn finished(outcome: ExecutionOutcome) -> Value {
     }
 }
 
-/// Runs `code` against `state` and returns the value it finishes with.
-async fn run(state: &mut State, code: &str) -> Value {
-    let compiled = compile(code).expect("probe cell should compile");
+/// Runs `cell` against `state` and returns the value it finishes with.
+///
+/// The probes are built from the IR rather than authored: what they pin is the
+/// heap's behaviour under aliasing and snapshotting, which is a property of the
+/// IR and not of any dialect (ADR 0096). The program each one replaces is kept
+/// verbatim as a comment above it.
+async fn run(state: &mut State, cell: Program) -> Value {
+    let compiled = compile_ast(&cell).expect("probe cell should compile");
     finished(
         execute(&compiled, state, &ProbeHost)
             .await
@@ -75,11 +89,40 @@ fn number(value: f64) -> Value {
 #[tokio::test(flavor = "current_thread")]
 async fn optimized_concat_insertion_shares_the_appended_binding() {
     let mut state = State::new();
-    run(&mut state, "x = [1]\nacc = []\nfinish 0").await;
+    // x = [1]
+    // acc = []
+    // finish 0
+    run(
+        &mut state,
+        a::program(vec![
+            a::assign("x", a::list(vec![a::number(1.0)])),
+            a::assign("acc", a::list(Vec::new())),
+            a::finish(a::number(0.0)),
+        ]),
+    )
+    .await;
     let mut state = round_trip(&state);
-    run(&mut state, "acc = acc + [x]\nfinish 0").await;
+    // acc = acc + [x]
+    // finish 0
+    run(
+        &mut state,
+        a::program(vec![
+            a::assign("acc", a::add(a::var("acc"), a::list(vec![a::var("x")]))),
+            a::finish(a::number(0.0)),
+        ]),
+    )
+    .await;
     let mut state = round_trip(&state);
-    let value = run(&mut state, "x = push(x, 2)\nfinish acc").await;
+    // x = push(x, 2)
+    // finish acc
+    let value = run(
+        &mut state,
+        a::program(vec![
+            a::assign("x", push(a::var("x"), a::number(2.0))),
+            a::finish(a::var("acc")),
+        ]),
+    )
+    .await;
 
     assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
@@ -87,9 +130,20 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
 /// Sol probe 1, single cell: the same concat without a snapshot boundary.
 #[tokio::test(flavor = "current_thread")]
 async fn optimized_concat_insertion_shares_within_one_cell() {
+    // x = [1]
+    // acc = []
+    // acc = acc + [x]
+    // x = push(x, 2)
+    // finish acc
     let value = run(
         &mut State::new(),
-        "x = [1]\nacc = []\nacc = acc + [x]\nx = push(x, 2)\nfinish acc",
+        a::program(vec![
+            a::assign("x", a::list(vec![a::number(1.0)])),
+            a::assign("acc", a::list(Vec::new())),
+            a::assign("acc", a::add(a::var("acc"), a::list(vec![a::var("x")]))),
+            a::assign("x", push(a::var("x"), a::number(2.0))),
+            a::finish(a::var("acc")),
+        ]),
     )
     .await;
 
@@ -99,9 +153,22 @@ async fn optimized_concat_insertion_shares_within_one_cell() {
 /// The general concat form copies the right operand's members too.
 #[tokio::test(flavor = "current_thread")]
 async fn general_concat_copies_the_right_operand_members() {
+    // x = [1]
+    // b = [x, x]
+    // acc = []
+    // acc = acc + b
+    // x = push(x, 2)
+    // finish acc
     let value = run(
         &mut State::new(),
-        "x = [1]\nb = [x, x]\nacc = []\nacc = acc + b\nx = push(x, 2)\nfinish acc",
+        a::program(vec![
+            a::assign("x", a::list(vec![a::number(1.0)])),
+            a::assign("b", a::list(vec![a::var("x"), a::var("x")])),
+            a::assign("acc", a::list(Vec::new())),
+            a::assign("acc", a::add(a::var("acc"), a::var("b"))),
+            a::assign("x", push(a::var("x"), a::number(2.0))),
+            a::finish(a::var("acc")),
+        ]),
     )
     .await;
 
@@ -115,9 +182,24 @@ async fn general_concat_copies_the_right_operand_members() {
 /// the fused slot form rather than through the operand stack.
 #[tokio::test(flavor = "current_thread")]
 async fn slot_concat_copies_the_right_operand_members() {
+    // x = [1]
+    // b = [x]
+    // acc = []
+    // acc = acc + b
+    // b = push(b, 9)
+    // x = push(x, 2)
+    // finish acc
     let value = run(
         &mut State::new(),
-        "x = [1]\nb = [x]\nacc = []\nacc = acc + b\nb = push(b, 9)\nx = push(x, 2)\nfinish acc",
+        a::program(vec![
+            a::assign("x", a::list(vec![a::number(1.0)])),
+            a::assign("b", a::list(vec![a::var("x")])),
+            a::assign("acc", a::list(Vec::new())),
+            a::assign("acc", a::add(a::var("acc"), a::var("b"))),
+            a::assign("b", push(a::var("b"), a::number(9.0))),
+            a::assign("x", push(a::var("x"), a::number(2.0))),
+            a::finish(a::var("acc")),
+        ]),
     )
     .await;
 
@@ -133,15 +215,33 @@ async fn slot_concat_copies_the_right_operand_members() {
 #[tokio::test(flavor = "current_thread")]
 async fn aliased_root_with_a_nested_container_round_trips() {
     let mut state = State::new();
+    // child = [1]
+    // pair = (child,)
+    // alias = pair
+    // finish 0
     run(
         &mut state,
-        "child = [1]\npair = (child,)\nalias = pair\nfinish 0",
+        a::program(vec![
+            a::assign("child", a::list(vec![a::number(1.0)])),
+            a::assign("pair", a::tuple(vec![a::var("child")])),
+            a::assign("alias", a::var("pair")),
+            a::finish(a::number(0.0)),
+        ]),
     )
     .await;
     let mut restored = round_trip(&state);
+    // child = push(child, 2)
+    // finish [pair, alias, child]
     let value = run(
         &mut restored,
-        "child = push(child, 2)\nfinish [pair, alias, child]",
+        a::program(vec![
+            a::assign("child", push(a::var("child"), a::number(2.0))),
+            a::finish(a::list(vec![
+                a::var("pair"),
+                a::var("alias"),
+                a::var("child"),
+            ])),
+        ]),
     )
     .await;
 
@@ -162,7 +262,15 @@ async fn aliased_root_with_a_nested_container_round_trips() {
 /// hang or a stack overflow.
 #[tokio::test(flavor = "current_thread")]
 async fn self_insertion_builds_a_cycle_the_host_boundary_refuses() {
-    let compiled = compile("a = []\na = push(a, a)\nfinish a").expect("probe cell should compile");
+    // a = []
+    // a = push(a, a)
+    // finish a
+    let compiled = compile_ast(&a::program(vec![
+        a::assign("a", a::list(Vec::new())),
+        a::assign("a", push(a::var("a"), a::var("a"))),
+        a::finish(a::var("a")),
+    ]))
+    .expect("probe cell should compile");
     let mut state = State::new();
     let error = execute(&compiled, &mut state, &ProbeHost)
         .await
@@ -176,13 +284,37 @@ async fn self_insertion_builds_a_cycle_the_host_boundary_refuses() {
 #[tokio::test(flavor = "current_thread")]
 async fn accumulated_rows_aliased_to_a_second_root_round_trip() {
     let mut state = State::new();
+    // acc = []
+    // for i in range(0, 3) { acc = push(acc, [i, [i]]) }
+    // b = acc
+    // finish 0
     run(
         &mut state,
-        "acc = []\nfor i in range(0, 3) { acc = push(acc, [i, [i]]) }\nb = acc\nfinish 0",
+        a::program(vec![
+            a::assign("acc", a::list(Vec::new())),
+            a::for_range(
+                "i",
+                3.0,
+                vec![a::assign(
+                    "acc",
+                    push(
+                        a::var("acc"),
+                        a::list(vec![a::var("i"), a::list(vec![a::var("i")])]),
+                    ),
+                )],
+            ),
+            a::assign("b", a::var("acc")),
+            a::finish(a::number(0.0)),
+        ]),
     )
     .await;
     let mut restored = round_trip(&state);
-    let value = run(&mut restored, "finish [acc, b]").await;
+    // finish [acc, b]
+    let value = run(
+        &mut restored,
+        a::program(vec![a::finish(a::list(vec![a::var("acc"), a::var("b")]))]),
+    )
+    .await;
 
     let rows = list(vec![
         list(vec![number(0.0), list(vec![number(0.0)])]),
@@ -196,9 +328,27 @@ async fn accumulated_rows_aliased_to_a_second_root_round_trip() {
 /// observes later appends (ADR 0096), and the snapshot still decodes.
 #[tokio::test(flavor = "current_thread")]
 async fn aliased_accumulator_observes_later_appends() {
+    // acc = []
+    // for i in range(0, 2) { acc = push(acc, [i]) }
+    // b = acc
+    // acc = push(acc, [9])
+    // finish b
     let value = run(
         &mut State::new(),
-        "acc = []\nfor i in range(0, 2) { acc = push(acc, [i]) }\nb = acc\nacc = push(acc, [9])\nfinish b",
+        a::program(vec![
+            a::assign("acc", a::list(Vec::new())),
+            a::for_range(
+                "i",
+                2.0,
+                vec![a::assign(
+                    "acc",
+                    push(a::var("acc"), a::list(vec![a::var("i")])),
+                )],
+            ),
+            a::assign("b", a::var("acc")),
+            a::assign("acc", push(a::var("acc"), a::list(vec![a::number(9.0)]))),
+            a::finish(a::var("b")),
+        ]),
     )
     .await;
 
@@ -218,16 +368,42 @@ async fn aliased_accumulator_observes_later_appends() {
 #[tokio::test(flavor = "current_thread")]
 async fn descendant_read_into_a_new_binding_shares_the_descendant() {
     let mut state = State::new();
+    // tree = { rows: [[1], [2]] }
+    // first = tree.rows[0]
+    // first = push(first, 99)
+    // copy = tree
+    // copy.rows[1] = [7]
+    // finish [tree, first, copy]
     let value = run(
         &mut state,
-        r#"
-        tree = { rows: [[1], [2]] }
-        first = tree.rows[0]
-        first = push(first, 99)
-        copy = tree
-        copy.rows[1] = [7]
-        finish [tree, first, copy]
-        "#,
+        a::program(vec![
+            a::assign(
+                "tree",
+                a::record(vec![(
+                    "rows",
+                    a::list(vec![
+                        a::list(vec![a::number(1.0)]),
+                        a::list(vec![a::number(2.0)]),
+                    ]),
+                )]),
+            ),
+            a::assign(
+                "first",
+                a::index(a::field(a::var("tree"), "rows"), a::number(0.0)),
+            ),
+            a::assign("first", push(a::var("first"), a::number(99.0))),
+            a::assign("copy", a::var("tree")),
+            a::assign_path(
+                "copy",
+                vec![a::field_step("rows"), a::index_step(a::number(1.0))],
+                a::list(vec![a::number(7.0)]),
+            ),
+            a::finish(a::list(vec![
+                a::var("tree"),
+                a::var("first"),
+                a::var("copy"),
+            ])),
+        ]),
     )
     .await;
 
@@ -268,23 +444,56 @@ async fn descendant_read_into_a_new_binding_shares_the_descendant() {
 #[tokio::test(flavor = "current_thread")]
 async fn multi_root_program_state_always_decodes() {
     let mut state = State::new();
+    // base = [[1], [2]]
+    // alias = base
+    // pair = (base, alias)
+    // record = { left: base, right: pair }
+    // rows = [item for item in base]
+    // joined = base + alias
+    // appended = []
+    // appended = appended + [record]
+    // finish 0
     run(
         &mut state,
-        r#"
-        base = [[1], [2]]
-        alias = base
-        pair = (base, alias)
-        record = { left: base, right: pair }
-        rows = [item for item in base]
-        joined = base + alias
-        appended = []
-        appended = appended + [record]
-        finish 0
-        "#,
+        a::program(vec![
+            a::assign(
+                "base",
+                a::list(vec![
+                    a::list(vec![a::number(1.0)]),
+                    a::list(vec![a::number(2.0)]),
+                ]),
+            ),
+            a::assign("alias", a::var("base")),
+            a::assign("pair", a::tuple(vec![a::var("base"), a::var("alias")])),
+            a::assign(
+                "record",
+                a::record(vec![("left", a::var("base")), ("right", a::var("pair"))]),
+            ),
+            a::assign(
+                "rows",
+                a::comprehension(a::var("item"), "item", a::var("base")),
+            ),
+            a::assign("joined", a::add(a::var("base"), a::var("alias"))),
+            a::assign("appended", a::list(Vec::new())),
+            a::assign(
+                "appended",
+                a::add(a::var("appended"), a::list(vec![a::var("record")])),
+            ),
+            a::finish(a::number(0.0)),
+        ]),
     )
     .await;
     let mut restored = round_trip(&state);
-    run(&mut restored, "base = push(base, [3])\nfinish 0").await;
+    // base = push(base, [3])
+    // finish 0
+    run(
+        &mut restored,
+        a::program(vec![
+            a::assign("base", push(a::var("base"), a::list(vec![a::number(3.0)]))),
+            a::finish(a::number(0.0)),
+        ]),
+    )
+    .await;
     let restored = round_trip(&restored);
 
     assert_eq!(
@@ -308,16 +517,36 @@ async fn multi_root_program_state_always_decodes() {
 #[tokio::test(flavor = "current_thread")]
 async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
     let mut state = State::new();
+    // kept = [[1], [2]]
+    // for n in range(0, 40) {
+    //   scratch = [{ n: n }, { n: n + 1 }]
+    // }
+    // kept = push(kept, [3])
+    // finish 0
     run(
         &mut state,
-        r#"
-        kept = [[1], [2]]
-        for n in range(0, 40) {
-          scratch = [{ n: n }, { n: n + 1 }]
-        }
-        kept = push(kept, [3])
-        finish 0
-        "#,
+        a::program(vec![
+            a::assign(
+                "kept",
+                a::list(vec![
+                    a::list(vec![a::number(1.0)]),
+                    a::list(vec![a::number(2.0)]),
+                ]),
+            ),
+            a::for_range(
+                "n",
+                40.0,
+                vec![a::assign(
+                    "scratch",
+                    a::list(vec![
+                        a::record(vec![("n", a::var("n"))]),
+                        a::record(vec![("n", a::add(a::var("n"), a::number(1.0)))]),
+                    ]),
+                )],
+            ),
+            a::assign("kept", push(a::var("kept"), a::list(vec![a::number(3.0)]))),
+            a::finish(a::number(0.0)),
+        ]),
     )
     .await;
 
@@ -340,7 +569,16 @@ async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
     // And the equality is not vacuous: a state with different heap contents
     // compares unequal.
     let mut other = State::from_snapshot(decoded);
-    run(&mut other, "kept = push(kept, [4])\nfinish 0").await;
+    // kept = push(kept, [4])
+    // finish 0
+    run(
+        &mut other,
+        a::program(vec![
+            a::assign("kept", push(a::var("kept"), a::list(vec![a::number(4.0)]))),
+            a::finish(a::number(0.0)),
+        ]),
+    )
+    .await;
     assert_ne!(other.snapshot(), snapshot);
 }
 
@@ -353,22 +591,45 @@ async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
 #[tokio::test(flavor = "current_thread")]
 async fn formatting_a_container_binding_renders_it() {
     let mut state = State::new();
+    // xs = [1, 2]
+    // rec = { a: 1 }
+    // tup = (1, 2)
+    // built = []
+    // for n in range(0, 3) { built = push(built, n) }
+    // finish [
+    //   format("{0}", xs),
+    //   format("{0}", rec),
+    //   format("{0}", tup),
+    //   format("{0}", built),
+    //   format("list is {0} and record is {1}", xs, rec)
+    // ]
     let value = run(
         &mut state,
-        r#"
-        xs = [1, 2]
-        rec = { a: 1 }
-        tup = (1, 2)
-        built = []
-        for n in range(0, 3) { built = push(built, n) }
-        finish [
-          format("{0}", xs),
-          format("{0}", rec),
-          format("{0}", tup),
-          format("{0}", built),
-          format("list is {0} and record is {1}", xs, rec)
-        ]
-        "#,
+        a::program(vec![
+            a::assign("xs", a::list(vec![a::number(1.0), a::number(2.0)])),
+            a::assign("rec", a::record(vec![("a", a::number(1.0))])),
+            a::assign("tup", a::tuple(vec![a::number(1.0), a::number(2.0)])),
+            a::assign("built", a::list(Vec::new())),
+            a::for_range(
+                "n",
+                3.0,
+                vec![a::assign("built", push(a::var("built"), a::var("n")))],
+            ),
+            a::finish(a::list(vec![
+                a::call("format", vec![a::string("{0}"), a::var("xs")]),
+                a::call("format", vec![a::string("{0}"), a::var("rec")]),
+                a::call("format", vec![a::string("{0}"), a::var("tup")]),
+                a::call("format", vec![a::string("{0}"), a::var("built")]),
+                a::call(
+                    "format",
+                    vec![
+                        a::string("list is {0} and record is {1}"),
+                        a::var("xs"),
+                        a::var("rec"),
+                    ],
+                ),
+            ])),
+        ]),
     )
     .await;
 
@@ -394,8 +655,16 @@ async fn formatting_a_container_binding_renders_it() {
 #[tokio::test(flavor = "current_thread")]
 async fn arithmetic_on_a_container_binding_names_the_container_type() {
     let mut state = State::new();
-    let compiled =
-        compile("xs = [1, 2]\nfinish format(\"{0}\", xs + 1)").expect("program should compile");
+    // xs = [1, 2]
+    // finish format("{0}", xs + 1)
+    let compiled = compile_ast(&a::program(vec![
+        a::assign("xs", a::list(vec![a::number(1.0), a::number(2.0)])),
+        a::finish(a::call(
+            "format",
+            vec![a::string("{0}"), a::add(a::var("xs"), a::number(1.0))],
+        )),
+    ]))
+    .expect("program should compile");
     let error = execute(&compiled, &mut state, &ProbeHost)
         .await
         .expect_err("adding a number to a list should fail");
@@ -409,27 +678,4 @@ async fn arithmetic_on_a_container_binding_names_the_container_type() {
         !message.contains("heap_ref"),
         "error must not leak the heap representation: {message}"
     );
-}
-
-/// The transient-borrow rule leans on assignment being a statement.
-///
-/// A transient holder — an operand, the last-value register, a loop cursor —
-/// may name an object a slot owns, and that is safe because no assignment can
-/// run while operands are pending: an assignment is a statement, so the stack is
-/// empty at every store. If assignment became an expression, `f(x = [1], x)`
-/// would put a durable store between two live operands and the borrow could
-/// outlive what it borrowed from. This pins the language property the heap layer
-/// depends on and does not itself check.
-#[tokio::test(flavor = "current_thread")]
-async fn assignment_is_a_statement_not_an_expression() {
-    for source in [
-        "xs = [1]\nfinish [xs = [2], xs]",
-        "xs = [1]\nfinish len(xs = [2])",
-        "xs = [1]\nys = (xs = [2])\nfinish ys",
-    ] {
-        assert!(
-            compile(source).is_err(),
-            "assignment must not parse as an expression: {source:?}"
-        );
-    }
 }

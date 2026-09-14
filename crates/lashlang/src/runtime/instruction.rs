@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
-use crate::lexer::Span;
+use crate::span::Span;
 use crate::tracking::LashlangExecutionSite;
 
 use super::record::{Symbol, intern_symbol, symbol_name};

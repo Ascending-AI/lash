@@ -1,5 +1,30 @@
 use super::*;
 
+use lashlang::testing::ast_builders as b;
+
+/// `finish { <name>: <expr>, .. }` — the shape every projection witness reads
+/// its bindings back with. ADR 0096 retired the Lashlang front-end, so these
+/// cells state their AST; the source each stood for is kept at the call site.
+fn finish_record(fields: &[(&str, lashlang::Expr)]) -> lashlang::Program {
+    b::program(vec![b::finish(b::record(
+        fields
+            .iter()
+            .map(|(name, expr)| (*name, expr.clone()))
+            .collect(),
+    ))])
+}
+
+/// `seed = [{ nested: [1] }]`
+fn seed_nested_one() -> lashlang::Program {
+    b::program(vec![b::assign(
+        "seed",
+        b::list(vec![b::record(vec![(
+            "nested",
+            b::list(vec![b::num(1.0)]),
+        )])]),
+    )])
+}
+
 #[test]
 pub(super) fn projected_history_is_available_without_clobbering_executor_globals() {
     block_on(async {
@@ -14,9 +39,11 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
             .expect("patch diary");
 
         let projected = projected_history(vec![FlowValue::String("hello".into())]);
-        let compiled =
-            lashlang::compile("finish { history_len: len(history), diary_len: len(diary) }")
-                .expect("compile");
+        let compiled = lashlang::compile_ast(&finish_record(&[
+            ("history_len", b::builtin("len", vec![b::var("history")])),
+            ("diary_len", b::builtin("len", vec![b::var("diary")])),
+        ]))
+        .expect("compile");
         let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
             .await
             .expect("execute");
@@ -35,7 +62,11 @@ pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
         let mut state = RlmExecutionState::new();
 
         let projected = projected_history(Vec::new());
-        let compiled = lashlang::compile("finish { history_len: len(history) }").expect("compile");
+        let compiled = lashlang::compile_ast(&finish_record(&[(
+            "history_len",
+            b::builtin("len", vec![b::var("history")]),
+        )]))
+        .expect("compile");
         let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
             .await
             .expect("execute");
@@ -101,7 +132,7 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
+        let setup = lashlang::compile_ast(&seed_nested_one()).expect("compile setup");
         execute_with_projected(&setup, &mut state.rlm, &projected)
             .await
             .expect("execute setup");
@@ -117,7 +148,8 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
             )
             .expect("patch heap-backed state");
 
-        let finish = lashlang::compile("finish diary").expect("compile finish");
+        let finish = lashlang::compile_ast(&b::program(vec![b::finish(b::var("diary"))]))
+            .expect("compile finish");
         assert_eq!(
             execute_with_projected(&finish, &mut state.rlm, &projected)
                 .await
@@ -151,7 +183,7 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::compile("seed = [{ nested: [1] }]").expect("compile setup");
+        let setup = lashlang::compile_ast(&seed_nested_one()).expect("compile setup");
         execute_with_projected(&setup, &mut state.rlm, &projected)
             .await
             .expect("execute setup");
@@ -205,7 +237,11 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = lashlang::compile("seed = [1]").expect("compile setup");
+        let setup = lashlang::compile_ast(&b::program(vec![b::assign(
+            "seed",
+            b::list(vec![b::num(1.0)]),
+        )]))
+        .expect("compile setup");
         execute_with_projected(&setup, &mut state.rlm, &projected)
             .await
             .expect("execute setup");
@@ -243,8 +279,22 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
 pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_restore() {
     block_on(async {
         let projected = ProjectedBindings::new();
-        let setup = lashlang::compile("history = [{ role: \"user\" }]\nkept = [{ nested: [2] }]")
-            .expect("compile setup");
+        // history = [{ role: "user" }]
+        // kept = [{ nested: [2] }]
+        let setup = lashlang::compile_ast(&b::program(vec![
+            b::assign(
+                "history",
+                b::list(vec![b::record(vec![("role", b::string("user"))])]),
+            ),
+            b::assign(
+                "kept",
+                b::list(vec![b::record(vec![(
+                    "nested",
+                    b::list(vec![b::num(2.0)]),
+                )])]),
+            ),
+        ]))
+        .expect("compile setup");
         let mut state = lashlang::State::new();
         execute_with_projected(&setup, &mut state, &projected)
             .await
@@ -279,8 +329,11 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
         .expect("rehydrate heap-backed projected value");
         crate::projection::prune_reserved_projected_bindings(&mut state);
 
-        let finish =
-            lashlang::compile("finish { doc: doc, kept: kept }").expect("compile post-patch read");
+        let finish = lashlang::compile_ast(&finish_record(&[
+            ("doc", b::var("doc")),
+            ("kept", b::var("kept")),
+        ]))
+        .expect("compile post-patch read");
         let expected =
             ExecutionOutcome::Finished(FlowValue::Record(Arc::new(FlowRecord::from_iter([
                 (
@@ -508,9 +561,11 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             ProjectedValue::scalar("current_query", FlowValue::String("host".into())),
         );
 
-        let compiled =
-            lashlang::compile("finish { chars: len(current_query), value: current_query }")
-                .expect("compile read");
+        let compiled = lashlang::compile_ast(&finish_record(&[
+            ("chars", b::builtin("len", vec![b::var("current_query")])),
+            ("value", b::var("current_query")),
+        ]))
+        .expect("compile read");
         let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
             .await
             .expect("execute read");
@@ -528,7 +583,11 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
                 .is_none()
         );
 
-        let compiled = lashlang::compile("current_query = \"local\"").expect("compile write");
+        let compiled = lashlang::compile_ast(&b::program(vec![b::assign(
+            "current_query",
+            b::string("local"),
+        )]))
+        .expect("compile write");
         let env = ExecutionEnvironment::new(&NoopHost)
             .traced()
             .with_projected_bindings(projected.clone());

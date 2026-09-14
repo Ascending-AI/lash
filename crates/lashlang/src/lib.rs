@@ -4,14 +4,13 @@ mod artifact;
 mod ast;
 mod builtins;
 mod compile;
+mod identifier;
 mod identity;
 mod introspection;
 mod json_schema;
-mod lexer;
 mod linker;
-mod parser;
 mod runtime;
-mod source;
+mod span;
 mod tracking;
 mod trigger;
 mod typed_output;
@@ -58,14 +57,12 @@ pub use json_schema::{
     json_schema_to_type_expr, type_expr_to_json_schema,
 };
 pub use lash_sansio::MediaType;
-pub use lexer::{LexError, Span, Token, TokenKind, lex};
 pub use linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkError, LinkedModule, NamedDataType, NamedDataTypeError,
     OperationContract, OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding,
     ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
 };
-pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
 pub use runtime::{
     AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
     CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
@@ -84,7 +81,7 @@ pub use runtime::{
     SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value, ValueProjectionContext,
     ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome, compile, compile_ast,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome, compile_ast,
     compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
     execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
@@ -99,16 +96,12 @@ pub use runtime::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
 };
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
+pub use span::Span;
 
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
 pub const BYTECODE_FORMAT_VERSION: u32 = 15;
-pub use source::{
-    CanonicalSourceError, canonical_assign_target_source, canonical_expression_source,
-    canonical_process_source, canonical_process_source_with_requirements, canonical_program_source,
-    canonical_program_source_with_requirements,
-};
 pub use tracking::{
     LashlangBranchSite, LashlangExecutionCallSite, LashlangExecutionChild,
     LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection,
@@ -142,14 +135,6 @@ pub use linker::{WorkflowLinkAnalysis, analyze_workflow_program};
 pub use runtime::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
-
-pub fn format_parse_diagnostic(source: &str, error: &ParseError) -> String {
-    let span = error.span().unwrap_or(Span {
-        start: error.offset(),
-        end: error.offset(),
-    });
-    format_source_diagnostic(source, span, &error.to_string(), parse_hint(error))
-}
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {
     let Some(span) = span else {
@@ -220,21 +205,6 @@ fn link_hint(error: &LinkError) -> Option<String> {
     (!suggestions.is_empty()).then(|| format!("{prefix}{}", suggestions.join(", ")))
 }
 
-fn parse_hint(error: &ParseError) -> Option<&'static str> {
-    match error {
-        ParseError::Unexpected { found, .. } if found == "`if`" => {
-            Some("use `cond ? yes : no` for inline conditionals")
-        }
-        ParseError::Unexpected { found, .. } if found == "`for`" => Some(
-            "`for` is a statement. Put it on its own line, not inside an expression or record literal.",
-        ),
-        ParseError::DeclarativeTriggerRemoved { .. } => Some(
-            "construct a host-provided trigger source value and call the trigger registry register operation",
-        ),
-        _ => None,
-    }
-}
-
 fn runtime_hint(error: &RuntimeError) -> Option<&'static str> {
     match error {
         RuntimeError::UnwrappedToolResultFailed { .. } => {
@@ -285,6 +255,53 @@ fn line_column_snippet(source: &str, offset: usize) -> (usize, usize, usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::ast_builders as b;
+
+    /// `finish <value>`
+    fn finish_number(value: f64) -> Program {
+        b::program(vec![b::finish(b::num(value))])
+    }
+
+    /// `finish (await tools.read_file({ path: "." }))?`
+    fn read_file_program() -> Program {
+        b::program(vec![b::finish(b::module_call(
+            &["tools"],
+            "read_file",
+            vec![b::record(vec![("path", b::string("."))])],
+        ))])
+    }
+
+    /// `finish persisted` — links only where `persisted` is a live global.
+    fn finish_persisted() -> Program {
+        b::program(vec![b::finish(b::var("persisted"))])
+    }
+
+    /// A program no host environment links, used where a cache hit must not
+    /// reach the linker at all.
+    fn unlinkable_program() -> Program {
+        b::program(vec![b::finish(b::var("never_bound_anywhere"))])
+    }
+
+    /// Two statements, with the second one's span stated as the whole of the
+    /// second line of `source`.
+    ///
+    /// The runtime blames a failure on the span table the front-end supplied,
+    /// so a test that pins `--> line 2, column 1` has to state the offsets its
+    /// rendering is read against (ADR 0096: nothing in this crate parses).
+    fn second_line_program(first: Expr, second: Expr, source: &str) -> Program {
+        let first_line = source
+            .split('\n')
+            .next()
+            .expect("the witness has two lines")
+            .len();
+        let program = b::with_source_spans(
+            b::program(vec![first, second]),
+            &[(&[1], first_line + 1, source.len())],
+        );
+        // The VM reads the per-statement table, so the statement spans are
+        // stated alongside the expression one the renderer reads.
+        b::with_expression_spans(program, &[(0, first_line), (first_line + 1, source.len())])
+    }
 
     struct Host;
 
@@ -329,14 +346,10 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn compile_reports_parse_errors() {
-        let err = compile("if true").expect_err("parse should fail");
-        assert!(matches!(err, ParseError::Expected { .. }));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
     async fn execute_reports_runtime_errors() {
-        let compiled = compile("finish missing").expect("source should compile");
+        // finish missing
+        let compiled = compile_ast(&b::program(vec![b::finish(b::var("missing"))]))
+            .expect("the program should compile");
         let mut state = State::new();
         let err = execute(&compiled, &mut state, &Host)
             .await
@@ -353,19 +366,6 @@ mod tests {
         assert_eq!(
             format_message_with_hint("tool failed", Some("inspect `.error`")),
             "tool failed\nhint: inspect `.error`"
-        );
-    }
-
-    #[test]
-    fn removed_declarative_trigger_parse_hint_is_stable() {
-        let error = ParseError::DeclarativeTriggerRemoved {
-            span: Span { start: 0, end: 8 },
-        };
-        assert_eq!(
-            parse_hint(&error),
-            Some(
-                "construct a host-provided trigger source value and call the trigger registry register operation"
-            )
         );
     }
 
@@ -394,7 +394,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn traced_environment_records_source_location() {
         let source = "x = 1\nfinish missing";
-        let compiled = compile(source).expect("source should compile");
+        let compiled = compile_ast(&second_line_program(
+            b::assign("x", b::num(1.0)),
+            b::finish(b::var("missing")),
+            source,
+        ))
+        .expect("the program should compile");
         let mut state = State::new();
         let env = ExecutionEnvironment::new(&Host).traced();
         execute(&compiled, &mut state, &env)
@@ -413,7 +418,9 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn compile_prewarm_and_environment_scratch_execution_work_together() {
         prewarm();
-        let compiled = compile("finish 7").expect("source should compile");
+        // finish 7
+        let compiled = compile_ast(&b::program(vec![b::finish(b::num(7.0))]))
+            .expect("the program should compile");
         let mut state = State::new();
         let env = ExecutionEnvironment::new(&Host)
             .traced()
@@ -428,13 +435,11 @@ mod tests {
     #[test]
     fn compiled_program_cache_reuses_source_and_tracks_lru_stats() {
         let mut cache = CompiledProgramCache::with_capacity(2);
-        let first = cache.get_or_compile("finish 1").expect("compile first");
-        let second = cache.get_or_compile("finish 1").expect("compile cache hit");
-        let same_ast = cache
-            .get_or_compile("finish 1\n")
-            .expect("compile source-distinct program");
-        let other = cache.get_or_compile("finish 2").expect("compile second");
-        let third = cache.get_or_compile("finish 3").expect("compile third");
+        let first = cache.get_or_compile_ast("finish 1", finish_number(1.0));
+        let second = cache.get_or_compile_ast("finish 1", finish_number(1.0));
+        let same_ast = cache.get_or_compile_ast("finish 1\n", finish_number(1.0));
+        let other = cache.get_or_compile_ast("finish 2", finish_number(2.0));
+        let third = cache.get_or_compile_ast("finish 3", finish_number(3.0));
 
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert!(!std::sync::Arc::ptr_eq(&first, &same_ast));
@@ -463,13 +468,13 @@ mod tests {
         let mut cache = LinkedProgramCache::with_capacity(2);
 
         let first = cache
-            .get_or_compile(source, &base_environment)
-            .expect("compile first linked program");
+            .get_or_compile_ast(source, read_file_program(), &base_environment)
+            .expect("link first program");
         let second = cache
-            .get_or_compile(source, &base_environment)
+            .get_or_compile_ast(source, read_file_program(), &base_environment)
             .expect("reuse same surface");
         let extra = cache
-            .get_or_compile(source, &extra_environment)
+            .get_or_compile_ast(source, read_file_program(), &extra_environment)
             .expect("reuse when unrelated tools are added");
 
         assert!(std::sync::Arc::ptr_eq(&first, &second));
@@ -487,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn linked_program_cache_hit_does_not_reparse_the_source() {
+    fn linked_program_cache_hit_does_not_relink_the_program() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
         let environment = LashlangHostEnvironment::new(
             LashlangHostCatalog::tool_default(["read_file"]),
@@ -496,20 +501,17 @@ mod tests {
         let mut cache = LinkedProgramCache::with_capacity(2);
 
         let first = cache
-            .get_or_compile(source, &environment)
-            .expect("compile first linked program");
-        let after_miss = crate::parser::parse_calls();
+            .get_or_compile_ast(source, read_file_program(), &environment)
+            .expect("link first program");
 
+        // A hit is served without touching the program it is handed, which is
+        // the work this cache exists to skip. Handing it a program that cannot
+        // link proves the hit never reaches the linker.
         let second = cache
-            .get_or_compile(source, &environment)
+            .get_or_compile_ast(source, unlinkable_program(), &environment)
             .expect("reuse the cached linked program");
 
         assert!(std::sync::Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            crate::parser::parse_calls(),
-            after_miss,
-            "a linked-program cache hit must not re-parse its source"
-        );
         assert_eq!(cache.stats().hits, 1);
         assert_eq!(cache.stats().misses, 1);
     }
@@ -568,16 +570,20 @@ mod tests {
         let mut cache = LinkedProgramCache::with_capacity(4);
 
         let first = cache
-            .get_or_compile(source, &base_environment)
-            .expect("compile first linked program");
+            .get_or_compile_ast(source, read_file_program(), &base_environment)
+            .expect("link first program");
         let newline = cache
-            .get_or_compile(&format!("{source}\n"), &base_environment)
-            .expect("compile source-distinct linked program");
+            .get_or_compile_ast(
+                &format!("{source}\n"),
+                read_file_program(),
+                &base_environment,
+            )
+            .expect("link source-distinct program");
         let changed = cache
-            .get_or_compile(source, &changed_environment)
-            .expect("compile changed surface requirement");
+            .get_or_compile_ast(source, read_file_program(), &changed_environment)
+            .expect("link changed surface requirement");
         let missing = cache
-            .get_or_compile(source, &missing_environment)
+            .get_or_compile_ast(source, read_file_program(), &missing_environment)
             .expect_err("missing resource operation should not reuse cached program");
 
         assert!(!std::sync::Arc::ptr_eq(&first, &newline));
@@ -588,10 +594,7 @@ mod tests {
         );
         assert!(matches!(
             missing,
-            LinkedProgramCacheError::Link(LinkError::UnknownResourceOperation {
-                operation,
-                ..
-            }) if operation == "read_file"
+            LinkError::UnknownResourceOperation { operation, .. } if operation == "read_file"
         ));
 
         let stats = cache.stats();
@@ -609,19 +612,18 @@ mod tests {
         let mut cache = LinkedProgramCache::with_capacity(2);
 
         let linked = cache
-            .get_or_compile(source, &available)
+            .get_or_compile_ast(source, finish_persisted(), &available)
             .expect("live global should link");
         assert_eq!(
             linked.linked_module().artifact.host_requirements.globals,
             ["persisted".to_string()].into_iter().collect()
         );
         let error = cache
-            .get_or_compile(source, &missing)
+            .get_or_compile_ast(source, finish_persisted(), &missing)
             .expect_err("cache hit must not bypass current globals");
         assert!(matches!(
             error,
-            LinkedProgramCacheError::Link(LinkError::UnknownName { name, .. })
-                if name == "persisted"
+            LinkError::UnknownName { name, .. } if name == "persisted"
         ));
         assert_eq!(cache.stats().hits, 0);
         assert_eq!(cache.stats().misses, 2);
@@ -629,14 +631,21 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn execute_with_diagnostics_covers_representative_runtime_failures() {
-        let cases = [
+        let cases: [(&str, Expr, Expr, &str, &str); 4] = [
             (
                 "x = 1\nfinish ({ ok: false, error: \"boom\" })?",
+                b::assign("x", b::num(1.0)),
+                b::finish(b::unwrap(b::record(vec![
+                    ("ok", b::bool_lit(false)),
+                    ("error", b::string("boom")),
+                ]))),
                 "`?` unwrapped failed tool result: boom",
                 "finish ({ ok: false, error: \"boom\" })?",
             ),
             (
                 "x = 1\nfinish len(true)",
+                b::assign("x", b::num(1.0)),
+                b::finish(b::builtin("len", vec![b::bool_lit(true)])),
                 "`len` requires a string, tuple, list, record, or null",
                 "finish len(true)",
             ),
@@ -645,14 +654,23 @@ mod tests {
             // the values that still refuse to be read through.
             (
                 "x = null\nfinish x.field",
+                b::assign("x", b::null()),
+                b::finish(b::field(b::var("x"), "field")),
                 "can't read `.field` from null",
                 "finish x.field",
             ),
-            ("x = null\nfinish x[0]", "can't index null", "finish x[0]"),
+            (
+                "x = null\nfinish x[0]",
+                b::assign("x", b::null()),
+                b::finish(b::index(b::var("x"), b::num(0.0))),
+                "can't index null",
+                "finish x[0]",
+            ),
         ];
 
-        for (source, expected_error, expected_snippet) in cases {
-            let compiled = compile(source).expect("source should compile");
+        for (source, first, second, expected_error, expected_snippet) in cases {
+            let compiled = compile_ast(&second_line_program(first, second, source))
+                .expect("the program should compile");
             let mut state = State::new();
             let env = ExecutionEnvironment::new(&Host).traced();
             execute(&compiled, &mut state, &env)
@@ -671,7 +689,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn execute_success_path_uses_host() {
         let linked = LinkedModule::link(
-            parse("v = await tools.anything({})? finish v").expect("source should parse"),
+            // v = await tools.anything({})?
+            // finish v
+            b::program(vec![
+                b::assign("v", b::module_call(&["tools"], "anything", vec![])),
+                b::finish(b::var("v")),
+            ]),
             LashlangHostEnvironment::new(
                 LashlangHostCatalog::tool_default(["anything"]),
                 LashlangAbilities::default(),
@@ -694,7 +717,9 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn execute_allows_finish_null() {
-        let compiled = compile("finish null").expect("source should compile");
+        // finish null
+        let compiled = compile_ast(&b::program(vec![b::finish(b::null())]))
+            .expect("the program should compile");
         let mut state = State::new();
         let outcome = execute(&compiled, &mut state, &Host)
             .await

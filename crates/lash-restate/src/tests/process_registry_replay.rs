@@ -1,5 +1,7 @@
 use super::*;
+
 use lashlang::LashlangArtifactStore as _;
+use lashlang::testing::ast_builders as b;
 
 #[tokio::test]
 pub(super) async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
@@ -53,8 +55,15 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let module = lashlang::parse("process scan(root: str) { finish root }")
-        .expect("lashlang process module");
+    // process scan(root: str) { finish root }
+    let module = b::module(
+        vec![b::process(
+            "scan",
+            vec![b::param("root", lashlang::TypeExpr::Str)],
+            b::finish(b::var("root")),
+        )],
+        Vec::new(),
+    );
     let catalog = lashlang::LashlangHostCatalog::new();
     let linked_module = lashlang::LinkedModule::link(
         module.clone(),

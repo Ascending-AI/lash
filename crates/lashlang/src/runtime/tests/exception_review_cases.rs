@@ -345,39 +345,6 @@ async fn a_cleanup_chain_is_exactly_once_across_a_process_boundary() {
     );
 }
 
-/// `Try` and `Throw` decline canonical source at every nesting, which is what
-/// keeps them out of the source-language projections such as the workflow
-/// graph. Textual `?` is unaffected.
-#[test]
-fn the_renderer_declines_try_and_throw_at_every_nesting() {
-    let nested = Expr::Record(vec![(
-        "field".into(),
-        Expr::Binary {
-            op: crate::BinaryOp::Add,
-            left: Box::new(Expr::Number(1.0)),
-            right: Box::new(exception_try(Expr::Number(2.0), None, Some(Expr::Null))),
-        },
-    )]);
-    assert!(matches!(
-        crate::canonical_expression_source(&nested)
-            .expect_err("a nested try must decline canonical source"),
-        crate::CanonicalSourceError::NonSourceableExpression { .. }
-    ));
-
-    let nested_throw = Expr::List(vec![Expr::Throw(Box::new(Expr::Number(1.0)))]);
-    assert!(matches!(
-        crate::canonical_expression_source(&nested_throw)
-            .expect_err("a nested throw must decline canonical source"),
-        crate::CanonicalSourceError::NonSourceableExpression { .. }
-    ));
-
-    let unwrap = Expr::ResultUnwrap(Box::new(Expr::Variable("value".into())));
-    assert_eq!(
-        crate::canonical_expression_source(&unwrap).expect("`?` renders"),
-        "value?"
-    );
-}
-
 /// A v2-shaped blob must fail closed rather than default its missing stacks,
 /// and rolling the version back on an otherwise valid body is refused too.
 #[tokio::test(flavor = "current_thread")]

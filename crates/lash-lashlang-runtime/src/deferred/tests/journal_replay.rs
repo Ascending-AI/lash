@@ -1,8 +1,14 @@
 use super::*;
+use lashlang::testing::ast_builders as b;
 
 #[tokio::test]
 async fn recorded_unavailable_masks_incompatible_surface_before_environment_validation() {
-    let program = lashlang::parse(r#"await web.now({})?"#).expect("parse");
+    // await web.now({})?
+    let program = b::program(vec![b::module_call(
+        &["web"],
+        "now",
+        vec![b::record(Vec::new())],
+    )]);
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources
         .add_module_operation(

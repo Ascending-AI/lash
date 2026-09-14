@@ -1,5 +1,7 @@
 use super::*;
 
+use lashlang::testing::ast_builders as b;
+
 #[test]
 pub(super) fn missing_segment_handover_distinguishes_superseded_orphan_from_current_input() {
     let latest = lash_core::PersistedSegmentHandover {
@@ -854,20 +856,34 @@ pub(super) async fn segmented_child_await_registration(
     process_id: &ProcessId,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
-    let module = lashlang::parse(
-        r#"
-        process child() {
-          finish { from: "child" }
-        }
-
-        process main() {
-          handle = start child()
-          result = (await handle)?
-          finish result.from
-        }
-        "#,
-    )
-    .expect("parse segmented child-await law");
+    // process child() {
+    //   finish { from: "child" }
+    // }
+    //
+    // process main() {
+    //   handle = start child()
+    //   result = (await handle)?
+    //   finish result.from
+    // }
+    let module = b::module(
+        vec![
+            b::process(
+                "child",
+                Vec::new(),
+                b::finish(b::record(vec![("from", b::string("child"))])),
+            ),
+            b::process(
+                "main",
+                Vec::new(),
+                b::block(vec![
+                    b::assign("handle", b::start("child", Vec::new())),
+                    b::assign("result", b::unwrap(b::await_expr(b::var("handle")))),
+                    b::finish(b::field(b::var("result"), "from")),
+                ]),
+            ),
+        ],
+        Vec::new(),
+    );
     let linked = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(
@@ -1077,15 +1093,28 @@ pub(super) async fn snapshot_lashlang_registration(
     process_id: &ProcessId,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
-    let module = lashlang::parse(
-        r#"
-        process main() {
-          called = await tools.snapshot_echo({ line: "restored" })?
-          finish called.echo
-        }
-        "#,
-    )
-    .expect("snapshot lashlang module");
+    // process main() {
+    //   called = await tools.snapshot_echo({ line: "restored" })?
+    //   finish called.echo
+    // }
+    let module = b::module(
+        vec![b::process(
+            "main",
+            Vec::new(),
+            b::block(vec![
+                b::assign(
+                    "called",
+                    b::module_call(
+                        &["tools"],
+                        "snapshot_echo",
+                        vec![b::record(vec![("line", b::string("restored"))])],
+                    ),
+                ),
+                b::finish(b::field(b::var("called"), "echo")),
+            ]),
+        )],
+        Vec::new(),
+    );
     let contract = SnapshotRecoveryTool::definition().contract();
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources

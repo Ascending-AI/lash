@@ -1,5 +1,104 @@
 use super::*;
 
+use lashlang::testing::ast_builders as b;
+
+/// `process <name>(<params>) -> <return_ty> { finish <body> }` as a one-process
+/// module. ADR 0096 retired the Lashlang front-end, so the fixtures that used
+/// to be written as source state their AST instead; the source each one stood
+/// for is kept as a comment at the call site.
+fn process_module(
+    name: &str,
+    params: Vec<lashlang::ProcessParam>,
+    return_ty: lashlang::TypeExpr,
+    body: lashlang::Expr,
+) -> lashlang::Program {
+    b::module(
+        vec![b::process_returning(
+            name,
+            params,
+            return_ty,
+            b::finish(body),
+        )],
+        Vec::new(),
+    )
+}
+
+/// The labelled workflow witness, whose Lashlang source is spelled out at the
+/// call site: labelled statements, an if/else, a `for`, a comprehension and a
+/// `while`.
+fn labeled_workflow_program() -> lashlang::Program {
+    b::program(vec![
+        b::labelled(
+            b::label("Seed value", None),
+            b::assign("value", b::num(1.0)),
+        ),
+        b::if_else(
+            b::bool_lit(true),
+            b::block(vec![b::labelled(
+                b::label("Selected print", None),
+                b::print(b::var("value")),
+            )]),
+            b::block(vec![b::labelled(
+                b::label("Skipped print", None),
+                b::print(b::num(0.0)),
+            )]),
+        ),
+        b::for_in(
+            "item",
+            b::list(vec![b::num(1.0), b::num(2.0)]),
+            b::block(vec![b::labelled(
+                b::label("For print", None),
+                b::print(b::var("item")),
+            )]),
+        ),
+        b::assign(
+            "measured",
+            b::comprehension(
+                b::builtin("len", vec![b::list(vec![b::var("item")])]),
+                vec![b::comprehension_for(
+                    "item",
+                    b::list(vec![b::num(1.0), b::num(2.0)]),
+                )],
+            ),
+        ),
+        b::assign("count", b::num(0.0)),
+        b::while_loop(
+            b::binary(b::var("count"), lashlang::BinaryOp::Less, b::num(1.0)),
+            b::block(vec![
+                b::labelled(b::label("Loop print", None), b::print(b::var("count"))),
+                b::assign(
+                    "count",
+                    b::binary(b::var("count"), lashlang::BinaryOp::Add, b::num(1.0)),
+                ),
+            ]),
+        ),
+        b::labelled(b::label("Finish value", None), b::finish(b::var("value"))),
+    ])
+}
+
+/// `process scan(root: str) -> str { finish root }`
+fn scan_module() -> lashlang::Program {
+    process_module(
+        "scan",
+        vec![b::param("root", lashlang::TypeExpr::Str)],
+        lashlang::TypeExpr::Str,
+        b::var("root"),
+    )
+}
+
+/// `process handler(<first>: <first_ty>, <second>: str) -> bool { finish true }`
+fn handler_module(first: &str, first_ty: lashlang::TypeExpr, second: &str) -> lashlang::Program {
+    process_module(
+        "handler",
+        vec![
+            b::param(first, first_ty),
+            b::param(second, lashlang::TypeExpr::Str),
+        ],
+        lashlang::TypeExpr::Bool,
+        b::bool_lit(true),
+    )
+}
+
 /// Attempt bound the bridge tests stamp onto prepared child starts. Production
 /// reads it from the host config once per segment; these tests only need a
 /// stable non-zero value so the fingerprint stays comparable across cases.
@@ -151,8 +250,10 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
         LashlangAbilities::all(),
     )
     .with_language_features(lashlang::LashlangLanguageFeatures::default().with_label_annotations());
+    let program = labeled_workflow_program();
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source,
+        program: program.clone(),
         environment: &environment,
     })
     .expect("labeled workflow compiles");
@@ -161,9 +262,7 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     // form — so it projects the parsed program rather than the source: the
     // program projection is language-agnostic and does not round-trip through
     // canonical TypeScript.
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_program(
-        &lashlang::parse(source).expect("labeled workflow parses"),
-    );
+    let graph = lash_typescript::workflow_graph::workflow_graph_from_program(&program);
     let trace_map = trace_lashlang_main_map(&output.artifact);
 
     let container_kinds = graph
@@ -726,6 +825,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
+        program: scan_module(),
         environment: &environment,
     })
     .expect("module compiles");
@@ -793,6 +893,7 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
+        program: scan_module(),
         environment: &required_environment,
     })
     .expect("module compiles");
@@ -984,26 +1085,59 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     );
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: str, other: str) -> bool { finish true }",
+        program: handler_module("event", lashlang::TypeExpr::Str, "other"),
         environment: &environment,
     })
     .expect("matching handler compiles");
     let mismatching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(payload: str, other: str) -> bool { finish true }",
+        program: handler_module("payload", lashlang::TypeExpr::Str, "other"),
         environment: &environment,
     })
     .expect("mismatching handler compiles");
     let wrong_type = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: int, other: str) -> bool { finish true }",
+        program: handler_module("event", lashlang::TypeExpr::Int, "other"),
         environment: &environment,
     })
     .expect("wrong-type handler compiles");
     let wrong_order = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(other: str, event: str) -> bool { finish true }",
+        program: handler_module("other", lashlang::TypeExpr::Str, "event"),
         environment: &environment,
     })
     .expect("wrong-order handler compiles");
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "type Handler = Process<(event: str, other: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
+        program: b::module(
+            vec![
+                b::type_decl(
+                    "Handler",
+                    b::process_type(
+                        vec![
+                            b::param("event", lashlang::TypeExpr::Str),
+                            b::param("other", lashlang::TypeExpr::Str),
+                        ],
+                        lashlang::TypeExpr::Bool,
+                    ),
+                ),
+                b::type_decl(
+                    "Envelope",
+                    lashlang::TypeExpr::Object(vec![b::type_field(
+                        "handler",
+                        lashlang::TypeExpr::Ref("Handler".into()),
+                        false,
+                    )]),
+                ),
+                b::process_returning(
+                    "install",
+                    vec![b::param("envelope", lashlang::TypeExpr::Ref("Envelope".into()))],
+                    lashlang::TypeExpr::Bool,
+                    b::finish(b::bool_lit(true)),
+                ),
+            ],
+            Vec::new(),
+        ),
         environment: &environment,
     })
     .expect("receiver compiles");
@@ -1208,6 +1342,12 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(value: str) -> bool { finish true }",
+        program: process_module(
+            "install",
+            vec![b::param("value", lashlang::TypeExpr::Str)],
+            lashlang::TypeExpr::Bool,
+            b::bool_lit(true),
+        ),
         environment: &environment,
     })
     .expect("receiver compiles");
@@ -1271,6 +1411,21 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     );
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(handler: Process<(event: str), bool> | str) -> bool { finish true }",
+        program: process_module(
+            "install",
+            vec![b::param(
+                "handler",
+                lashlang::TypeExpr::Union(vec![
+                    b::process_type(
+                        vec![b::param("event", lashlang::TypeExpr::Str)],
+                        lashlang::TypeExpr::Bool,
+                    ),
+                    lashlang::TypeExpr::Str,
+                ]),
+            )],
+            lashlang::TypeExpr::Bool,
+            b::bool_lit(true),
+        ),
         environment: &environment,
     })
     .expect("union receiver compiles");
@@ -1472,6 +1627,7 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
+        program: scan_module(),
         environment: &environment,
     })
     .expect("module compiles");

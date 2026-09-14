@@ -27,10 +27,6 @@ impl<'program> From<&'program CompiledProgram> for ExecutableProgram<'program> {
     }
 }
 
-pub fn compile(source: &str) -> Result<CompiledProgram, crate::parser::ParseError> {
-    crate::parse(source).map(|program| compile_program_internal(&program))
-}
-
 /// Compiles a program assembled through the AST API.
 ///
 /// This is the entry point for AST-only nodes such as user functions, calls,

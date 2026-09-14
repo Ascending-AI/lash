@@ -614,18 +614,37 @@ fn linked_artifact_materializes_explicit_and_generated_keys_into_register_calls(
     let linked =
         LinkedModule::link(program, full_host_environment()).expect("link manifest module");
 
-    let canonical = linked
-        .artifact
-        .canonical_source()
-        .expect("canonical linked source");
-    assert!(
-        canonical.contains(&format!("subscription_key: \"{derived_key}\"")),
-        "{canonical}"
-    );
-    assert!(
-        canonical.contains("subscription_key: \"evening-scan\""),
-        "{canonical}"
-    );
+    // The key the linker derived and the key the program stated both reach the
+    // artifact as literals on the register call, which is what a replaying host
+    // matches a registration on. The IR is read directly: the crate no longer
+    // renders source to read it back out of (ADR 0096).
+    let keys = subscription_keys(&linked.artifact.canonical_ir);
+    assert!(keys.contains(&derived_key), "{keys:?}");
+    assert!(keys.contains(&"evening-scan".to_string()), "{keys:?}");
+}
+
+/// Every `subscription_key:` string literal in `program`, in walk order.
+fn subscription_keys(program: &Program) -> Vec<String> {
+    struct Keys(Vec<String>);
+
+    impl crate::ExprVisitor for Keys {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if let Expr::Record(fields) = expr {
+                for (name, value) in fields {
+                    if name == "subscription_key"
+                        && let Expr::String(text) = value
+                    {
+                        self.0.push(text.to_string());
+                    }
+                }
+            }
+            crate::walk_expr(self, expr);
+        }
+    }
+
+    let mut keys = Keys(Vec::new());
+    crate::ExprVisitor::visit_expr(&mut keys, &program.main);
+    keys.0
 }
 
 #[test]

@@ -24,12 +24,11 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     )?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          value = wait_signal("ready")
-          finish value
-        }
-        "#,
+        // process main() signals { ready: any } {
+        //   value = wait_signal("ready")
+        //   finish value
+        // }
+        wait_signal_process(lashlang::TypeExpr::Any, b::var("value")),
         "main",
     )
     .await;

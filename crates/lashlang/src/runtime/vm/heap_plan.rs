@@ -253,7 +253,11 @@ mod tests {
     #[test]
     fn function_opcodes_keep_closure_references_inside_the_vm() {
         use crate::runtime::Instruction as I;
-        let program = crate::compile("finish 0").expect("a trivial program compiles");
+        // finish 0
+        let program = crate::compile_ast(&crate::testing::ast_builders::program(vec![
+            crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
+        ]))
+        .expect("a trivial program compiles");
         let chunk = &program.chunk;
         let function_opcodes = [
             I::MakeClosure {

@@ -1,5 +1,7 @@
 use super::*;
 
+use lashlang::testing::ast_builders as b;
+
 #[tokio::test]
 pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -249,9 +251,15 @@ pub(super) async fn trigger_lashlang_registration(
     process_id: &ProcessId,
     resource: &str,
 ) -> ProcessRegistration {
-    let module =
-        lashlang::parse("process notify(resource: str) { finish { triggered: resource } }")
-            .expect("lashlang trigger module");
+    // process notify(resource: str) { finish { triggered: resource } }
+    let module = b::module(
+        vec![b::process(
+            "notify",
+            vec![b::param("resource", lashlang::TypeExpr::Str)],
+            b::finish(b::record(vec![("triggered", b::var("resource"))])),
+        )],
+        Vec::new(),
+    );
     let linked_module = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(
@@ -411,16 +419,30 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
 pub(super) async fn sleeping_then_tool_process_registration(
     process_id: &ProcessId,
 ) -> ProcessRegistration {
-    let module = lashlang::parse(
-        r#"
-        process worker() {
-          sleep for "5m"
-          called = await tools.snapshot_echo({ line: "after wake" })?
-          finish called.echo
-        }
-        "#,
-    )
-    .expect("parse sleeping post-wake-effect process");
+    // process worker() {
+    //   sleep for "5m"
+    //   called = await tools.snapshot_echo({ line: "after wake" })?
+    //   finish called.echo
+    // }
+    let module = b::module(
+        vec![b::process(
+            "worker",
+            Vec::new(),
+            b::block(vec![
+                b::sleep_for(b::string("5m")),
+                b::assign(
+                    "called",
+                    b::module_call(
+                        &["tools"],
+                        "snapshot_echo",
+                        vec![b::record(vec![("line", b::string("after wake"))])],
+                    ),
+                ),
+                b::finish(b::field(b::var("called"), "echo")),
+            ]),
+        )],
+        Vec::new(),
+    );
     let contract = SnapshotRecoveryTool::definition().contract();
     let mut resources = lashlang::LashlangHostCatalog::new();
     resources

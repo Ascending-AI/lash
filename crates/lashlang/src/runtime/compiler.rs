@@ -21,7 +21,7 @@ use crate::ast::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionExpr, JavaScriptLogicalOp,
     LabelMetadata, ListComprehensionClause, ProcessStartExpr, Program, TypeExpr, UnaryOp,
 };
-use crate::lexer::Span;
+use crate::span::Span;
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};
 
 use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};

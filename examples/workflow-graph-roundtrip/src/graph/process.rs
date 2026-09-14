@@ -2,7 +2,6 @@ use lash::ProcessId;
 use lashlang::{
     ProcessParam, ProcessSignalDecl, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource,
     WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
-    parse_type_expression,
 };
 
 use crate::{EditableProcessField, NodeData, RenderErrorResponse};
@@ -154,15 +153,31 @@ fn editable_identifier(
         })
 }
 
+/// Reads back a type the editor wrote, as the inverse of [`format_type_expr`].
+///
+/// ADR 0096 retired the Lashlang front-end, and with it the general
+/// type-expression grammar this used to call. The vocabulary is not a loss:
+/// the graph only ever renders a process parameter or signal schema, and the
+/// TypeScript printer can spell exactly the scalar schemas below — anything
+/// richer had no way back out to source. So the closed set is stated here.
 fn editable_process_type(
     process_id: &ProcessId,
     field: &str,
     value: &str,
 ) -> Result<lashlang::TypeExpr, RenderErrorResponse> {
-    parse_type_expression(value).map_err(|error| {
-        RenderErrorResponse::invalid_node_payload(
+    match value.trim() {
+        "any" => Ok(lashlang::TypeExpr::Any),
+        "null" => Ok(lashlang::TypeExpr::Null),
+        "str" | "string" => Ok(lashlang::TypeExpr::Str),
+        "int" => Ok(lashlang::TypeExpr::Int),
+        "float" => Ok(lashlang::TypeExpr::Float),
+        "bool" | "boolean" => Ok(lashlang::TypeExpr::Bool),
+        other => Err(RenderErrorResponse::invalid_node_payload(
             process_id,
-            format!("`data.{field}` is not a valid type expression: {error}"),
-        )
-    })
+            format!(
+                "`data.{field}` is not a valid type expression: `{other}` is not one of \
+                 any, null, str, int, float, bool"
+            ),
+        )),
+    }
 }

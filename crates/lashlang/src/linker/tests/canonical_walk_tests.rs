@@ -147,10 +147,13 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
         let analysis = analyze_workflow_program(&program, &full_host_environment());
 
         let facts = statement_facts(&analysis, &statements(&program)[0]);
-        assert!(facts.diagnostics.iter().any(|diagnostic| {
-            diagnostic.error.kind() == "unknown_name"
-                && diagnostic.error.to_string().contains("missing")
-        }));
+        assert!(
+            facts.diagnostics.iter().any(|diagnostic| {
+                diagnostic.error.kind() == "unknown_name"
+                    && diagnostic.error.to_string().contains("missing")
+            }),
+            "the recovered diagnostic must reach the owning statement for {source}"
+        );
     }
 }
 

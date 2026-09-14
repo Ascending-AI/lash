@@ -341,6 +341,16 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lashlang/src/runtime/state.rs:LASHLANG_SNAPSHOT_VERSION": (
         "sha256:294f7111ef9bfc2d934213f174516de111d8dde72413fd0be1163f5fbd78ccee"
     ),
+    # FIG-3020 (live): `Span` moved verbatim from crates/lashlang/src/lexer.rs
+    # to crates/lashlang/src/span.rs (the path in versioned-surfaces.toml
+    # follows it) when the authored surface was deleted; same derives, same two
+    # usize fields, no serde change, so the serialized bytes are identical and
+    # VM_CONTINUATION_FORMAT_VERSION stays 14. Any further guarded-shape drift
+    # re-fails the gate.
+    "crates/lashlang/src/runtime/vm/continuation.rs:"
+    "VM_CONTINUATION_FORMAT_VERSION": (
+        "sha256:3be27b55f201a7b5e39f3c668f7d4508b33a6ea7527cc4e85b65d53dea1c45ae"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

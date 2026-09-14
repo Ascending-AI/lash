@@ -35,12 +35,5 @@ test = false
 doc = false
 bench = false
 
-[[bin]]
-name = "lashlang_source"
-path = "fuzz_targets/lashlang_source.rs"
-test = false
-doc = false
-bench = false
-
 [profile.release]
 debug = 1

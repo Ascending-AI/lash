@@ -277,8 +277,17 @@ impl RlmProtocolPluginFactory {
                     diagnostic: Some(err.to_string()),
                 })
             })?;
+        let program = lash_typescript::parse(&request.source).map_err(|diagnostic| {
+            lashlang::ModuleCompileError::parse_failure(
+                &request.source,
+                diagnostic.span.map(|span| span.start),
+                diagnostic.message.clone(),
+                lash_typescript::format_diagnostic(&request.source, &diagnostic),
+            )
+        })?;
         lashlang::compile_module(lashlang::ModuleCompileRequest {
             source: &request.source,
+            program,
             environment: &surface.host_environment,
         })
     }
@@ -461,14 +470,16 @@ mod label_annotation_tests {
             .expect("host environment")
     }
 
+    /// `@label(title: "Answer") finish "ok"` — a label annotation has no
+    /// TypeScript form, so the witness states the AST the host feature gate
+    /// rejects.
     fn labelled_program() -> lashlang::Program {
-        lashlang::parse(
-            r#"
-            @label(title: "Answer")
-            finish "ok"
-            "#,
-        )
-        .expect("parse labelled program")
+        use lashlang::testing::ast_builders as b;
+
+        b::program(vec![b::labelled(
+            b::label("Answer", None),
+            b::finish(b::string("ok")),
+        )])
     }
 
     #[test]

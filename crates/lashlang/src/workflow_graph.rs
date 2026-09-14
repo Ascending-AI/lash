@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::LashlangExecutionSite;
 use crate::ast::{FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl, TypeExpr};
-use crate::lexer::Span;
+use crate::span::Span;
 use crate::tracking::WorkflowExecutionSite;
 
 mod execution_sites;

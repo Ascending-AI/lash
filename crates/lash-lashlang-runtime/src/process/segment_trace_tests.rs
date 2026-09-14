@@ -5,6 +5,13 @@ use super::{
     record_segment_boundary_decline, resolve_child_max_attempts, validate_lashlang_program_hash,
 };
 
+/// `finish null`
+fn finish_null() -> lashlang::Program {
+    use lashlang::testing::ast_builders as b;
+
+    b::program(vec![b::finish(b::null())])
+}
+
 #[test]
 fn process_trace_session_attribution_comes_only_from_a_session_originator() {
     let identity = |originator: lash_core::ProcessOriginator| {
@@ -65,7 +72,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         10,
         "capture this fixture only from predecessor writer commit ccab40166"
     );
-    let program = lashlang::compile("finish null").expect("compile fixture program");
+    let program = lashlang::compile_ast(&finish_null()).expect("compile fixture program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -185,7 +192,7 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
     // so it no longer exercises the envelope mismatch. Synthesize the immediate
     // predecessor instead: a v6 payload is exactly a v7 payload with the
     // attempt bound absent.
-    let program = lashlang::compile("finish null").expect("compile predecessor program");
+    let program = lashlang::compile_ast(&finish_null()).expect("compile predecessor program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -232,7 +239,7 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
 
 #[test]
 fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
-    let program = lashlang::compile("finish null").expect("compile pinning program");
+    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();

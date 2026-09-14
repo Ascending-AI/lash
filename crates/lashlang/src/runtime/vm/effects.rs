@@ -1,7 +1,7 @@
 use lash_core::ProcessId;
 use std::sync::Arc;
 
-use crate::lexer::Span;
+use crate::span::Span;
 use crate::{LashlangExecutionCallSite, LashlangExecutionChild};
 
 use super::super::access::prototype_chain_data_key_error;
