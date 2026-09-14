@@ -14,6 +14,7 @@ mod rejections;
 #[cfg(test)]
 mod tests;
 mod traversal;
+mod types;
 
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
@@ -21,6 +22,7 @@ use prototype_chain::{
     check_property_key, is_prototype_chain_property, prototype_access_rejection,
 };
 use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
+pub(crate) use types::{TypeAnnotation, TypeAnnotationField, TypeShape};
 
 /// Maximum source-level statement or expression nesting accepted by the
 /// TypeScript dialect. This is deliberately below the shared AST and 2 MiB
@@ -129,7 +131,10 @@ pub(crate) struct SwitchCase {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Pattern {
-    Ident(String),
+    /// A bound name, with the type annotation written on it if there was one.
+    /// The annotation is decorative everywhere but a `defineProcess.run`
+    /// parameter, where it becomes the process's declared input type.
+    Ident(String, Option<TypeAnnotation>),
     Rest(Box<Pattern>),
     Member {
         object: Box<Expr>,
@@ -864,9 +869,14 @@ impl Adapter {
     fn convert_pattern_inner(&self, pattern: &swc::Pat) -> Result<Pattern, Diagnostic> {
         let span = Some(source_span(pattern.span()));
         Ok(match pattern {
-            swc::Pat::Ident(name) => Pattern::Ident(name.id.sym.to_string()),
+            swc::Pat::Ident(name) => Pattern::Ident(
+                name.id.sym.to_string(),
+                name.type_ann
+                    .as_ref()
+                    .map(|annotation| types::convert_type(&annotation.type_ann)),
+            ),
             swc::Pat::Expr(expr) => match self.convert_expr(expr)? {
-                Expr::Ident(name, _) => Pattern::Ident(name),
+                Expr::Ident(name, _) => Pattern::Ident(name, None),
                 Expr::Member {
                     object, property, ..
                 } => Pattern::Member { object, property },
@@ -916,7 +926,7 @@ impl Adapter {
                             });
                         }
                         swc::ObjectPatProp::Assign(property) => {
-                            let target = Pattern::Ident(property.key.id.sym.to_string());
+                            let target = Pattern::Ident(property.key.id.sym.to_string(), None);
                             let value = match property.value.as_deref() {
                                 Some(default) => Pattern::Assign {
                                     target: Box::new(target),
@@ -993,7 +1003,7 @@ impl Adapter {
             .map(|param| self.convert_pattern(&param.pat))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .filter(|param| !matches!(param, Pattern::Ident(name) if name == "this"))
+            .filter(|param| !matches!(param, Pattern::Ident(name, _) if name == "this"))
             .collect();
         let body = function.body.as_ref().ok_or_else(|| {
             reject_refusal(
@@ -1102,7 +1112,7 @@ impl Adapter {
                     .map(|param| self.convert_pattern(param))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .filter(|param| !matches!(param, Pattern::Ident(name) if name == "this"))
+                    .filter(|param| !matches!(param, Pattern::Ident(name, _) if name == "this"))
                     .collect();
                 let body = match function.body.as_ref() {
                     swc::BlockStmtOrExpr::BlockStmt(block) => {

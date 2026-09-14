@@ -182,7 +182,7 @@ fn collect_assignment_target(target: &TsAssignTarget, assigned: &mut BTreeSet<St
 
 fn collect_pattern_targets(pattern: &Pattern, assigned: &mut BTreeSet<String>) {
     match pattern {
-        Pattern::Ident(name) => {
+        Pattern::Ident(name, _) => {
             assigned.insert(name.clone());
         }
         Pattern::Rest(target) => collect_pattern_targets(target, assigned),

@@ -56,11 +56,13 @@
             "params": [
               {
                 "name": "tick",
-                "ty": "Any"
+                "ty": {
+                  "Ref": "timer.Tick"
+                }
               },
               {
                 "name": "label",
-                "ty": "Any"
+                "ty": "Str"
               }
             ],
             "return_ty": "Null"
@@ -201,7 +203,7 @@
     "exports": {
       "processes": {
         "remember": {
-          "component": "293f5b86186ecbe88db634eed1a1d0fdfea41ef54c8f04c9450caeb21727da0e",
+          "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
           "pos": 0
         }
       }
@@ -333,26 +335,26 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:9e1417c200eff9e1962852ddf01234e96178aa1998e3f9446c3db01b0cf42207",
-    "module_ref": "lashlang:v2:blake3:70923333181bad53ed127573b53e5a5984eaf403171f3696153dd0be45be2348"
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
+    "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
       "remember": {
-        "component": "293f5b86186ecbe88db634eed1a1d0fdfea41ef54c8f04c9450caeb21727da0e",
+        "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:9e1417c200eff9e1962852ddf01234e96178aa1998e3f9446c3db01b0cf42207",
-  "module_ref": "lashlang:v2:blake3:70923333181bad53ed127573b53e5a5984eaf403171f3696153dd0be45be2348",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
+  "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:9e1417c200eff9e1962852ddf01234e96178aa1998e3f9446c3db01b0cf42207",
-    "module_ref": "lashlang:v2:blake3:70923333181bad53ed127573b53e5a5984eaf403171f3696153dd0be45be2348",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
+    "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
     "process_name": "remember",
     "process_ref": {
-      "component": "293f5b86186ecbe88db634eed1a1d0fdfea41ef54c8f04c9450caeb21727da0e",
+      "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
       "pos": 0
     }
   },
@@ -418,11 +420,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:9e1417c200eff9e1962852ddf01234e96178aa1998e3f9446c3db01b0cf42207",
-        "module_ref": "lashlang:v2:blake3:70923333181bad53ed127573b53e5a5984eaf403171f3696153dd0be45be2348",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
+        "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
         "process_name": "remember",
         "process_ref": {
-          "component": "293f5b86186ecbe88db634eed1a1d0fdfea41ef54c8f04c9450caeb21727da0e",
+          "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
           "pos": 0
         }
       },
@@ -431,11 +433,11 @@
     "target_identity": {
       "definition": {
         "$lash_process": true,
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:9e1417c200eff9e1962852ddf01234e96178aa1998e3f9446c3db01b0cf42207",
-        "module_ref": "lashlang:v2:blake3:70923333181bad53ed127573b53e5a5984eaf403171f3696153dd0be45be2348",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:69d429c2cd254619b6475f7f2bb01ca8dda85a731adf40e774779a04b9f25868",
+        "module_ref": "lashlang:v2:blake3:83311de8789da365e18676b9aed3944ac91a10df6d11f509e3bfc14498db8ef2",
         "process_name": "remember",
         "process_ref": {
-          "component": "293f5b86186ecbe88db634eed1a1d0fdfea41ef54c8f04c9450caeb21727da0e",
+          "component": "d667cc43ed0abfeb185d6d8db454580ee45518dfd332f7f22a5d9f00d4d61828",
           "pos": 0
         }
       },

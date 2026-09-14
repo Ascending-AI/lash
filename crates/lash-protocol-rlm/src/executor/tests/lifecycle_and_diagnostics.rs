@@ -1054,17 +1054,20 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // Re-pinned by the single-language cutover (ADR 0096): the instruction
         // set lost the deep-copy instructions the retired surface compiled to,
         // so this program's canonical IR — and the digest keyed off it — is a
-        // different constant. What the pair asserts is unchanged.
+        // different constant. Re-pinned again by FIG-3071, which moved
+        // `LASHLANG_SEMANTIC_HASH_VERSION` to v10 because a declared process
+        // parameter type now reaches module identity. What the pair asserts is
+        // unchanged.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:13e6da183c102549baed8e41:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:f6ae06e92c1f06a37bd5865a:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:13e6da183c102549baed8e41:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:f6ae06e92c1f06a37bd5865a:1"
             )
         );
 
@@ -1078,11 +1081,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/6d4051cb9fd2d577d5f2a601b8ecfb69c5ef7f66b4ec1577a4e30f72add67dc9"
+            "frame-key/v2/955b0e8d0ab0024f85739d2d4bf653e7b7920525139f5a3c1d8ae8ebd34ee570"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/6d4051cb9fd2d577d5f2a601b8ecfb69c5ef7f66b4ec1577a4e30f72add67dc9"
+            "frame-key/v2/955b0e8d0ab0024f85739d2d4bf653e7b7920525139f5a3c1d8ae8ebd34ee570"
         );
     });
 }

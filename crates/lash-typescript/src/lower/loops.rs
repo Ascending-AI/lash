@@ -228,7 +228,7 @@ fn assign_target_names_binding(target: &TsAssignTarget, binding: &str) -> bool {
 fn pattern_names_binding(pattern: &Pattern, binding: &str) -> bool {
     pattern_any(
         pattern,
-        &mut |pattern| matches!(pattern, Pattern::Ident(name) if name == binding),
+        &mut |pattern| matches!(pattern, Pattern::Ident(name, _) if name == binding),
     )
 }
 
@@ -262,7 +262,7 @@ fn pattern_any(pattern: &Pattern, predicate: &mut impl FnMut(&Pattern) -> bool) 
         return true;
     }
     match pattern {
-        Pattern::Ident(_) | Pattern::Member { .. } => false,
+        Pattern::Ident(..) | Pattern::Member { .. } => false,
         Pattern::Rest(target) | Pattern::Assign { target, .. } => pattern_any(target, predicate),
         Pattern::Array { elements, rest } => {
             elements

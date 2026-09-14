@@ -63,6 +63,7 @@ pub enum DiagnosticCode {
     ProcessRunLiteralRequired,
     ProcessCaptureUnsupported,
     ProcessTargetStaticRequired,
+    ProcessParamTypeUnsupported,
     TriggerSourceEventAccess,
     TriggerEventRemoved,
     TriggerInputsLiteralRequired,
@@ -144,6 +145,7 @@ impl DiagnosticCode {
         Self::ProcessRunLiteralRequired,
         Self::ProcessCaptureUnsupported,
         Self::ProcessTargetStaticRequired,
+        Self::ProcessParamTypeUnsupported,
         Self::TriggerSourceEventAccess,
         Self::TriggerEventRemoved,
         Self::TriggerInputsLiteralRequired,
@@ -289,6 +291,9 @@ impl DiagnosticCode {
             Self::ProcessTargetStaticRequired => {
                 "name a top-level `defineProcess` binding directly"
             }
+            Self::ProcessParamTypeUnsupported => {
+                "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
+            }
             Self::TriggerSourceEventAccess
             | Self::TriggerEventRemoved
             | Self::TriggerInputsLiteralRequired => {
@@ -374,6 +379,7 @@ impl DiagnosticCode {
             | Self::ProcessSignalsLiteralRequired
             | Self::ProcessRunLiteralRequired
             | Self::ProcessTargetStaticRequired
+            | Self::ProcessParamTypeUnsupported
             | Self::TriggerSourceEventAccess
             | Self::TriggerEventRemoved
             | Self::TriggerInputsLiteralRequired => CodeClassification::AlwaysRefusal,
@@ -463,6 +469,7 @@ impl DiagnosticCode {
             Self::ProcessRunLiteralRequired => "TS_PROCESS_RUN_LITERAL_REQUIRED",
             Self::ProcessCaptureUnsupported => "TS_PROCESS_CAPTURE_UNSUPPORTED",
             Self::ProcessTargetStaticRequired => "TS_PROCESS_TARGET_STATIC_REQUIRED",
+            Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
             Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",
             Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",
             Self::TriggerInputsLiteralRequired => "TS_TRIGGER_INPUTS_LITERAL_REQUIRED",
@@ -794,6 +801,8 @@ mod tests {
                 include_str!("lower/process_wrapper.rs"),
             ),
             ("lower/triggers.rs", include_str!("lower/triggers.rs")),
+            ("lower/param_types.rs", include_str!("lower/param_types.rs")),
+            ("adapter/types.rs", include_str!("adapter/types.rs")),
             (
                 "adapter/rejections.rs",
                 include_str!("adapter/rejections.rs"),

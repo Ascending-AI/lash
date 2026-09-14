@@ -27,6 +27,7 @@ mod constructs;
 mod entry;
 mod graph;
 mod json_replacer;
+mod param_types;
 mod process_wrapper;
 mod regex;
 mod spans;
@@ -36,6 +37,7 @@ use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
+use param_types::process_param_type;
 pub(crate) use process_wrapper::process_run_body_path;
 use triggers::{
     is_trigger_registration_operation, names_the_retired_trigger_event,
@@ -632,7 +634,7 @@ impl Lowerer {
                             for name in names {
                                 self.declare(&name, BindingKind::Catch, false, false)?;
                             }
-                            if let Pattern::Ident(name) = pattern {
+                            if let Pattern::Ident(name, _) = pattern {
                                 self.initialize(name);
                                 self.binding(name)?.internal.clone()
                             } else {
@@ -788,9 +790,9 @@ impl Lowerer {
             };
             params.push(slot.as_str().into());
             match pattern {
-                Pattern::Ident(name) => self.initialize(name),
-                Pattern::Rest(target) if matches!(target.as_ref(), Pattern::Ident(_)) => {
-                    if let Pattern::Ident(name) = target.as_ref() {
+                Pattern::Ident(name, _) => self.initialize(name),
+                Pattern::Rest(target) if matches!(target.as_ref(), Pattern::Ident(..)) => {
+                    if let Pattern::Ident(name, _) = target.as_ref() {
                         self.initialize(name);
                     }
                 }
@@ -1100,14 +1102,27 @@ impl Lowerer {
                 None,
             ));
         }
+        // The lowerer emits one runtime parameter per source parameter, in
+        // order, so the declared types line up by index. Only a plain named
+        // parameter can carry one: a destructured or defaulted parameter has
+        // no single name to blame and stays gradual.
         let params = function
             .params
             .iter()
-            .map(|name| ProcessParam {
-                name: name.clone(),
-                ty: TypeExpr::Any,
+            .enumerate()
+            .map(|(index, slot)| {
+                let ty = match run.params.get(index) {
+                    Some(Pattern::Ident(source_name, Some(annotation))) => {
+                        process_param_type(process_name, source_name, annotation)?
+                    }
+                    _ => TypeExpr::Any,
+                };
+                Ok(ProcessParam {
+                    name: slot.clone(),
+                    ty,
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
         let call_args = function
             .params
             .iter()
