@@ -47,7 +47,7 @@ fn code_block_failure_conversion_preserves_kind_and_message() {
     let remote = RemoteTurnActivity::from_core(
         3,
         lash_core::TurnActivity::independent(lash_core::TurnEvent::CodeBlockCompleted {
-            language: "lashlang".to_string(),
+            language: "typescript".to_string(),
             output: String::new(),
             error: Some(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,

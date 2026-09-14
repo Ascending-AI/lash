@@ -290,7 +290,7 @@ mod tests {
             id: "activity-1".to_string(),
             correlation_id: "correlation-1".to_string(),
             event: RemoteTurnEvent::CodeBlockCompleted {
-                language: "lashlang".to_string(),
+                language: "typescript".to_string(),
                 output: String::new(),
                 error: Some(RemoteCellFailure {
                     kind: RemoteCellFailureKind::Host,
