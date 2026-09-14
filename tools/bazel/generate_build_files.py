@@ -429,13 +429,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             extra_compile_data.append("//:durable_fixtures")
         if package["name"] == "lash-sim" and kind == "test":
             extra_compile_data.extend([
-                # The cross-backend differential's completeness gate reads the
-                # real store trait definitions with `include_str!`, so the
-                # lash-core sources are compile inputs of these tests.
-                "//crates/lash-core:package_files",
                 "//crates/lash-postgres-store:package_files",
                 "//crates/lash-sqlite-store:package_files",
             ])
+            if target["name"] == "cross_backend_store_differential":
+                # Its completeness gates read the real store trait definitions
+                # with `include_str!`, so the lash-core sources are compile
+                # inputs of this test and of no other lash-sim test.
+                extra_compile_data.append("//crates/lash-core:package_files")
         if (
             package["name"] == "lash-sim"
             and target["name"] == "signal_replay_key_constructor"

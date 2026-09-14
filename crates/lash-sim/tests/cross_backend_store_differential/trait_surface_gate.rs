@@ -13,11 +13,14 @@
 /// Trait sources that define the gated surface.
 const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core/src/store/mod.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core/src/attachments.rs");
+const ATTACHMENT_MANIFEST_SOURCE: &str =
+    include_str!("../../../lash-core/src/store/attachment_manifest.rs");
 
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.
 const HARNESS_SOURCES: &[&str] = &[
     include_str!("../cross_backend_store_differential.rs"),
+    include_str!("attachment_seeding.rs"),
     include_str!("checkpoint_cases.rs"),
     include_str!("coalesced_batch_oracles.rs"),
     include_str!("corrupt_input_cases.rs"),
@@ -29,7 +32,14 @@ const HARNESS_SOURCES: &[&str] = &[
     include_str!("residue.rs"),
     include_str!("session_meta_layout.rs"),
     include_str!("surface_sweep.rs"),
+    include_str!("trait_surface_gate.rs"),
 ];
+
+/// This file's own source, used to prove `HARNESS_SOURCES` lists every module
+/// the harness declares. A module missing from the list is invisible to
+/// `harness_drives`, so a method driven only from there reads as undriven --
+/// or, worse, a method dropped there reads as still covered.
+const GATE_SOURCE: &str = include_str!("trait_surface_gate.rs");
 
 /// The gated store traits. `RuntimePersistence` is the blanket alias over the
 /// first five, so covering them covers the whole runtime-store surface.
@@ -131,6 +141,34 @@ const ATTACHMENT_STORE_EXCLUSIONS: &[(&str, &str)] = &[
         "head",
         "blob-byte store, not a session-row store; compared by \
          attachment_blob_store_differential_agrees",
+    ),
+];
+
+/// Fallible [`AttachmentManifest`] methods the harness deliberately does not
+/// drive. `AttachmentManifest` is a supertrait of `SessionCommitStore`, so its
+/// surface is part of the runtime store contract this differential gates.
+const ATTACHMENT_MANIFEST_EXCLUSIONS: &[(&str, &str)] = &[
+    (
+        "list_uncommitted",
+        "factory-wide read: both durable backends hold one manifest for every session the factory \
+         owns, so this answers with the other cases' intents in the one shared PostgreSQL \
+         database and its answer is neither stable nor session-scoped. Owned by the attachment \
+         manifest conformance suite, which owns its database",
+    ),
+    (
+        "list_all_refs",
+        "factory-wide read over every session the factory owns; see list_uncommitted",
+    ),
+    (
+        "has_live_ref_for_id",
+        "factory-wide liveness predicate feeding the GC lever, answered over every session the \
+         factory owns; owned by the session_delete_blob_reclaim suite",
+    ),
+    (
+        "forget_aged_uncommitted_intents",
+        "factory-wide sweep: it forgets aged intents belonging to every session the factory owns, \
+         so a sweep launched mid-run would collect the other cases' intents and report their loss \
+         as this harness's own defect. Same argument as StoreMaintenance::gc_unreachable",
     ),
 ];
 
@@ -241,6 +279,25 @@ fn store_trait_surface_is_fully_gated() {
         }
     }
 
+    for method in fallible_trait_methods(ATTACHMENT_MANIFEST_SOURCE, "AttachmentManifest") {
+        let exclusion = ATTACHMENT_MANIFEST_EXCLUSIONS
+            .iter()
+            .find(|(name, _)| *name == method);
+        let driven = harness_drives(&method);
+        match (driven, exclusion) {
+            (true, None) => covered += 1,
+            (false, Some((_, reason))) => {
+                assert!(
+                    !reason.trim().is_empty(),
+                    "exclusion for `AttachmentManifest::{method}` carries no reason"
+                );
+                excluded += 1;
+            }
+            (true, Some(_)) => stale_exclusions.push(format!("AttachmentManifest::{method}")),
+            (false, None) => missing.push(format!("AttachmentManifest::{method}")),
+        }
+    }
+
     // The attachment blob store's method names (`put`, `get`, `list`, ...) are
     // too generic to detect by call site, so its surface is gated by requiring
     // a reason for every declared fallible method instead.
@@ -274,13 +331,44 @@ fn store_trait_surface_is_fully_gated() {
     // A floor, not a pin: covering more methods must never fail the gate, but
     // silently dropping drivers until the inventory is a token sample must.
     assert!(
-        covered >= 34,
+        covered >= 39,
         "the differential drives only {covered} fallible store-trait methods; \
          the inventory has been narrowed"
     );
     assert_eq!(
         excluded,
-        SESSION_STORE_EXCLUSIONS.len() + ATTACHMENT_STORE_EXCLUSIONS.len(),
+        SESSION_STORE_EXCLUSIONS.len()
+            + ATTACHMENT_STORE_EXCLUSIONS.len()
+            + ATTACHMENT_MANIFEST_EXCLUSIONS.len(),
         "every exclusion must name a method the gated traits still declare"
+    );
+}
+
+/// Every module the harness declares must be listed in `HARNESS_SOURCES`.
+///
+/// `harness_drives` greps only the listed sources, so a module missing from
+/// the list makes the gate lie in both directions: a method driven only from
+/// the unlisted module reads as undriven, and a driver deleted there reads as
+/// still present.
+#[test]
+fn every_harness_module_is_listed_as_a_gate_source() {
+    let root = HARNESS_SOURCES[0];
+    let mut unlisted = Vec::new();
+    for line in root.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("mod ") else {
+            continue;
+        };
+        let Some(module) = rest.strip_suffix(';') else {
+            continue;
+        };
+        if !GATE_SOURCE.contains(&format!("include_str!(\"{module}.rs\")")) {
+            unlisted.push(module.to_string());
+        }
+    }
+    assert!(
+        unlisted.is_empty(),
+        "these harness modules are not listed in HARNESS_SOURCES, so the completeness gate \
+         cannot see the methods they drive: {unlisted:?}"
     );
 }
