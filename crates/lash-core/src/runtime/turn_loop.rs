@@ -113,6 +113,9 @@ fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
                 TurnStop::ProviderError => Outcome::Failed {
                     done_reason: Failure::ProviderError,
                 },
+                TurnStop::ContextOverflow => Outcome::Failed {
+                    done_reason: Failure::ContextOverflow,
+                },
                 TurnStop::PluginAbort => Outcome::Failed {
                     done_reason: Failure::PluginAbort,
                 },

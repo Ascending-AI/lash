@@ -157,7 +157,16 @@ pub use usage_activity::*;
 // event types, an unstorable process id, and an execution env that contradicts
 // the input kind. A window-66 peer may still send those shapes; refusing them
 // narrows the accepted record set, so peers must adopt 67.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 67;
+// Windows 68-70 are deliberately reserved, not skipped by accident: they are
+// held for bump members that are planned but not yet open, so those lanes can
+// take a window without renumbering this one. Nothing decodes them, and the
+// refusal test below pins that a peer speaking 68, 69 or 70 is rejected by this
+// build exactly as an older peer is.
+// Window 71: FIG-1272 gives a context-window overflow its own turn stop,
+// `RemoteTurnStop::ContextOverflow`, instead of collapsing it into
+// `ProviderError`. A window-67 peer decoding a window-71 turn report would
+// reject the unknown stop tag, so peers must adopt 71.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 71;
 
 /// One versioned remote-protocol message.
 ///
@@ -329,6 +338,10 @@ pub use core_conversions::{RemoteTurnActivitySink, replay_collected_activities};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/context_overflow.rs"]
+mod context_overflow_tests;
 
 #[cfg(test)]
 mod versioned_decode_tests;

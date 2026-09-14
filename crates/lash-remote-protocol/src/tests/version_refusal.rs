@@ -126,7 +126,45 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 67,
+            expected: 71,
         })
     ));
+}
+
+/// Captured by main's Envelope writer at 24736fac5; no hand-edited wire bytes.
+#[test]
+fn historical_remote_protocol_generation_67_is_refused() {
+    const PREDECESSOR: u32 = 67;
+    let bytes = include_bytes!("../../tests/fixtures/remote-envelope-v67.json");
+    let predecessor: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(predecessor["protocol_version"], PREDECESSOR);
+    let error = match Envelope::<EmptyEnvelopeBody>::decode_json(bytes) {
+        Ok(_) => panic!("generation-67 remote envelope must be refused"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: PREDECESSOR,
+            expected: REMOTE_PROTOCOL_VERSION,
+        }
+    ));
+}
+
+/// Windows 68-70 are claimed by other bump members that have not landed here,
+/// so a peer speaking any of them is refused by this build too.
+#[test]
+fn unlanded_intermediate_remote_protocol_generations_are_refused() {
+    for predecessor in [68, 69, 70] {
+        assert!(
+            matches!(
+                decode_empty_envelope(predecessor),
+                Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                    actual,
+                    expected: REMOTE_PROTOCOL_VERSION,
+                }) if actual == predecessor
+            ),
+            "generation {predecessor} must be refused"
+        );
+    }
 }
