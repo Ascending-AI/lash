@@ -261,7 +261,7 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     (
         "trigger_occurrences",
         Bounded {
-            lever: "reclaim_trigger_occurrences; terminally armed cutoff and no deliveries",
+            lever: "reclaim_trigger_occurrences for fired rows; terminally armed cutoff and no deliveries. Non-fired audit rows: prune_non_fired_occurrences, an explicit host cutoff on the recorded epoch (ADR 0067, 2026-09-14)",
         },
     ),
     (

@@ -38,6 +38,7 @@ where
     zero_match_occurrence_is_immediately_reclaimable(make()).await;
     matched_occurrence_waits_for_terminal_deliveries(make()).await;
     cutoff_defers_but_never_initiates_occurrence_reclaim(make()).await;
+    host_audit_cutoff_reclaims_only_non_fired_occurrences(make()).await;
     null_source_occurrence_replay_is_idempotent(make()).await;
     first_ingress_and_replay_share_canonical_subscription_order(make()).await;
 }
@@ -1844,6 +1845,172 @@ async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crat
                 reason: "session_retired".to_string(),
             }
     }));
+}
+
+/// Law: the host audit-retention cutoff reclaims exactly the non-fired
+/// occurrence rows recorded before it, and nothing else. Its two halves:
+/// `prune_non_fired_occurrences` never reaches a fired row or an audit row
+/// recorded at or after the cutoff, and the ordinary retention paths
+/// (`reclaim_trigger_occurrences`, `reconcile_trigger_retention`) still cannot
+/// touch a non-fired row at any cutoff. Audit rows are also reported as
+/// retained history, never as stuck fan-out.
+async fn host_audit_cutoff_reclaims_only_non_fired_occurrences(
+    store: Arc<dyn crate::TriggerStore>,
+) {
+    let session = SessionId::from("audit-cutoff-session".to_string());
+    mutate(
+        &store,
+        "audit-cutoff-register",
+        register_command(
+            &session,
+            sample_draft(
+                &session,
+                "audit-cutoff-key",
+                "audit-cutoff-source",
+                "audit-cutoff-worker",
+            ),
+        ),
+    )
+    .await;
+
+    let matched = store
+        .ingest_occurrence(button_occurrence("audit-cutoff-source", "audit-fired"))
+        .await
+        .expect("ingest matched fired occurrence");
+    assert_eq!(
+        matched.reservations.len(),
+        1,
+        "the fired occurrence must hold a live fan-out for the negative half of this law"
+    );
+    store
+        .ingest_occurrence(button_occurrence(
+            "audit-cutoff-zero-match",
+            "audit-zero-match",
+        ))
+        .await
+        .expect("ingest zero-match fired occurrence");
+    let dropped = store
+        .ingest_occurrence(
+            button_occurrence("audit-cutoff-source", "audit-dropped").with_outcome(
+                crate::TriggerOccurrenceOutcome::Dropped {
+                    reason: "tick_suppressed".to_string(),
+                },
+            ),
+        )
+        .await
+        .expect("record a non-fired audit occurrence");
+    assert!(dropped.reservations.is_empty());
+    let dropped_at_ms = dropped.occurrence.occurred_at_ms;
+
+    // Ordinary reclamation: the audit row is retained history, not a blocker,
+    // and the live fan-out count no longer conflates the two.
+    let reclaimed = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("ordinary occurrence reclamation completes");
+    assert_eq!(reclaimed.inspected_occurrence_count, 3);
+    assert_eq!(
+        reclaimed.reclaimed_occurrence_count, 1,
+        "only the armed zero-match fired occurrence is reclaimable"
+    );
+    assert_eq!(
+        reclaimed.live_fan_out_count, 1,
+        "audit history must not be reported as stuck fan-out"
+    );
+    assert_eq!(reclaimed.audit_retained_count, 1);
+    assert_eq!(reclaimed.grace_deferred_count, 0);
+    assert_eq!(reclaimed.reinspection_deferred_count, 0);
+
+    // Half one, negative: the cutoff names rows recorded strictly before it.
+    assert_eq!(
+        store
+            .prune_non_fired_occurrences(dropped_at_ms)
+            .await
+            .expect("audit cutoff at the recorded instant"),
+        0,
+        "a row recorded at the cutoff itself was not recorded before it"
+    );
+    assert_eq!(
+        occurrence_ids(&store).await.len(),
+        2,
+        "an ineffective cutoff deletes nothing"
+    );
+
+    // Half one, positive: it reclaims exactly the audit row it names.
+    assert_eq!(
+        store
+            .prune_non_fired_occurrences(dropped_at_ms + 1)
+            .await
+            .expect("audit cutoff past the recorded instant"),
+        1
+    );
+    let survivors = store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("list after the audit cutoff");
+    assert_eq!(survivors.len(), 1);
+    assert_eq!(
+        survivors[0].occurrence_id, matched.occurrence.occurrence_id,
+        "the fired occurrence is never selected by the audit cutoff; survivors={survivors:?}"
+    );
+    let deliveries = store
+        .list_deliveries()
+        .await
+        .expect("list deliveries after the audit cutoff");
+    assert_eq!(
+        deliveries.len(),
+        1,
+        "the fired occurrence keeps its live delivery through the audit cutoff"
+    );
+    assert_eq!(
+        deliveries[0].occurrence.occurrence_id,
+        matched.occurrence.occurrence_id
+    );
+
+    // Half two: ordinary retention still cannot touch a fresh non-fired row,
+    // at any cutoff, even once its scoped session is gone.
+    store
+        .ingest_occurrence(
+            button_occurrence("audit-cutoff-source", "audit-dropped-again").with_outcome(
+                crate::TriggerOccurrenceOutcome::Dropped {
+                    reason: "tick_suppressed".to_string(),
+                },
+            ),
+        )
+        .await
+        .expect("record a second non-fired audit occurrence");
+    let widest = store
+        .reclaim_trigger_occurrences(u64::MAX)
+        .await
+        .expect("widest ordinary cutoff completes");
+    assert_eq!(
+        widest.reclaimed_occurrence_count, 0,
+        "the widest ordinary cutoff cannot reclaim audit history"
+    );
+    assert_eq!(widest.audit_retained_count, 1);
+    let reconciled = store
+        .reconcile_trigger_retention(&[], &[session])
+        .await
+        .expect("reconcile after the audit-cutoff session is gone");
+    assert_eq!(
+        reconciled.reclaimed_occurrence_count, 0,
+        "delivery-fan-out retention cannot reclaim audit history"
+    );
+    assert_eq!(
+        occurrence_ids(&store).await.len(),
+        2,
+        "the fired row and the fresh audit row both survive ordinary retention"
+    );
+}
+
+async fn occurrence_ids(store: &Arc<dyn crate::TriggerStore>) -> Vec<String> {
+    store
+        .list_occurrences(crate::TriggerOccurrenceFilter::default())
+        .await
+        .expect("list occurrences")
+        .into_iter()
+        .map(|record| record.occurrence_id)
+        .collect()
 }
 
 async fn null_source_occurrence_replay_is_idempotent(store: Arc<dyn crate::TriggerStore>) {

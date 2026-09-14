@@ -973,14 +973,23 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                      SELECT COUNT(*) AS inspected_count,
                                             COUNT(*) FILTER (
                                                 WHERE reclaimable_at_ms IS NULL
-                                                   OR COALESCE(
+                                                  AND COALESCE(
+                                                          json_extract(
+                                                              record_json,
+                                                              '$.outcome.kind'
+                                                          ),
+                                                          'fired'
+                                                      ) = 'fired'
+                                            ) AS live_fan_out_count,
+                                            COUNT(*) FILTER (
+                                                WHERE COALESCE(
                                                           json_extract(
                                                               record_json,
                                                               '$.outcome.kind'
                                                           ),
                                                           'fired'
                                                       ) != 'fired'
-                                            ) AS live_fan_out_count,
+                                            ) AS audit_retained_count,
                                             COUNT(*) FILTER (
                                                 WHERE reclaimable_at_ms > ?1
                                                   AND COALESCE(
@@ -1005,6 +1014,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                  SELECT scope.inspected_count,
                                         scope.live_fan_out_count,
                                         scope.grace_deferred_count,
+                                        scope.audit_retained_count,
                                         candidates.occurrence_id
                                  FROM scope
                                  LEFT JOIN candidates ON TRUE
@@ -1021,7 +1031,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                     row.get::<_, i64>(0)?,
                                     row.get::<_, i64>(1)?,
                                     row.get::<_, i64>(2)?,
-                                    row.get::<_, Option<String>>(3)?,
+                                    row.get::<_, i64>(3)?,
+                                    row.get::<_, Option<String>>(4)?,
                                 ))
                             })
                             .map_err(|error| {
@@ -1041,6 +1052,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         inspected_occurrence_count: first.0 as usize,
                         live_fan_out_count: first.1 as usize,
                         grace_deferred_count: first.2 as usize,
+                        audit_retained_count: first.3 as usize,
                         ..lash_core::TriggerOccurrenceReclamationReport::default()
                     };
                     *partial_for_call
@@ -1048,7 +1060,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = report.clone();
                     let candidates = rows
                         .into_iter()
-                        .filter_map(|(_, _, _, occurrence_id)| occurrence_id)
+                        .filter_map(|(_, _, _, _, occurrence_id)| occurrence_id)
                         .collect::<Vec<_>>();
 
                     for occurrence_id in candidates {
@@ -1159,6 +1171,27 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 AND length(owner_scope) > 5
                             )
                      )",
+                    params![cutoff_epoch_ms],
+                )
+            })
+            .await
+            .map_err(process_sqlite_error)
+    }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, lash_core::PluginError> {
+        let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM trigger_occurrences
+                     WHERE occurred_at_ms < ?1
+                       AND COALESCE(
+                               json_extract(record_json, '$.outcome.kind'),
+                               'fired'
+                           ) != 'fired'",
                     params![cutoff_epoch_ms],
                 )
             })
