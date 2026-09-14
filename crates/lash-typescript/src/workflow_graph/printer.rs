@@ -268,6 +268,9 @@ impl Printer {
 
     fn statement(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
         let prefix = indent(level);
+        // The lowerer gives each statement in a block a value by wrapping it;
+        // the statement the user wrote is inside that wrapper.
+        let expression = authored_statement(expression);
         match expression {
             // The lowerer's unit completion value. It is not something a user
             // wrote, and `undefined;` is not a statement worth showing.
@@ -316,7 +319,17 @@ impl Printer {
                     other => {
                         let mut else_bound = bound.clone();
                         out.push_str(" else ");
-                        out.push_str(&self.block(other, level, &mut else_bound)?);
+                        // An `else if` chain lowers to a block holding the one
+                        // nested `if`, so a block of that shape prints back as
+                        // the chain the author wrote rather than a nested block.
+                        match else_if_chain(other) {
+                            Some(chain) => out.push_str(
+                                self.statement(chain, level, &mut else_bound)?
+                                    .trim_start()
+                                    .trim_end_matches('\n'),
+                            ),
+                            None => out.push_str(&self.block(other, level, &mut else_bound)?),
+                        }
                     }
                 }
                 out.push('\n');
@@ -335,7 +348,8 @@ impl Printer {
                     let mut body_bound = bound.clone();
                     body_bound.push(authored.to_string());
                     return Ok(format!(
-                        "{prefix}for (const {} of {}) {}\n",
+                        "{prefix}for ({} {} of {}) {}\n",
+                        element_binding_kind(body, authored),
                         self.identifier("loop binding", authored)?,
                         self.expression(iterable)?,
                         self.block_statements(
@@ -351,7 +365,8 @@ impl Printer {
                 let mut body_bound = bound.clone();
                 body_bound.push(binding.to_string());
                 Ok(format!(
-                    "{prefix}for (const {} of {}) {}\n",
+                    "{prefix}for ({} {} of {}) {}\n",
+                    element_binding_kind(statement_block_contents(body), binding.as_str()),
                     self.identifier("loop binding", binding.as_str())?,
                     self.expression(iterable)?,
                     self.block(body, level, &mut body_bound)?
@@ -966,6 +981,59 @@ pub(super) fn block_wrapper_inner(expression: &Expr) -> Option<&Expr> {
 /// value, stores through the pinned base and completes with the stored value.
 /// Every binding in that block is generated, so the block prints and projects
 /// as the one assignment the user wrote.
+/// One authored statement, stripped of the completion-value wrapper.
+///
+/// The lowerer gives every statement in a block a value by wrapping it as
+/// `Block([statement, <completion value>])`. Neither the printer nor the
+/// projector wants that wrapper: it is not something anyone wrote.
+pub(super) fn authored_statement(expression: &Expr) -> &Expr {
+    let Expr::Block(statements) = expression else {
+        return expression;
+    };
+    match statements.as_slice() {
+        [single, last]
+            if lashlang::is_pure_expr(last) && assignment_sugar(expression).is_none() =>
+        {
+            authored_statement(single)
+        }
+        _ => expression,
+    }
+}
+
+/// `let` when the loop body reassigns its element binding, `const` otherwise.
+///
+/// The lowerer erases the declaration kind — it copies the element into the
+/// authored binding either way — so the kind is recovered from whether the body
+/// writes the binding back, which is the only thing `const` would have refused.
+fn element_binding_kind(body: &[Expr], authored: &str) -> &'static str {
+    fn reassigns(expression: &Expr, authored: &str) -> bool {
+        if let Expr::Assign { target, .. } = expression
+            && target.root.as_str() == authored
+        {
+            return true;
+        }
+        expression
+            .children()
+            .any(|child| reassigns(child, authored))
+    }
+
+    if body.iter().any(|statement| reassigns(statement, authored)) {
+        "let"
+    } else {
+        "const"
+    }
+}
+
+/// The single nested `if` an `else if` chain lowers to, if this is one.
+pub(super) fn else_if_chain(expression: &Expr) -> Option<&Expr> {
+    match statement_block_contents(expression) {
+        [nested @ Expr::If { then_block, .. }] if matches!(then_block.as_ref(), Expr::Block(_)) => {
+            Some(nested)
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn assignment_sugar(expression: &Expr) -> Option<(AssignTarget, &Expr)> {
     let Expr::Block(statements) = expression else {
         return None;

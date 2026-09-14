@@ -296,6 +296,18 @@ impl<'a> GraphProjector<'a> {
             if let Some(start) = start {
                 path.push((start + index) as u32);
             }
+            // A statement the lowerer wrapped to give it a value is projected
+            // as the statement itself, one AST step further down.
+            let mut expression = expression;
+            while let statement = printer::authored_statement(expression)
+                && !std::ptr::eq(
+                    std::ptr::from_ref(statement),
+                    std::ptr::from_ref(expression),
+                )
+            {
+                path = lashlang::child_path(&path, 0);
+                expression = statement;
+            }
             let node = self.project_node(expression, owner, &path, versions);
             add_dependency_edges(&mut subgraph.edges, &node, expression, versions);
             if node_is_sequenced(&node) {
@@ -417,11 +429,13 @@ impl<'a> GraphProjector<'a> {
                         condition: self.expression_text(condition),
                         then_is_block: matches!(then_block.as_ref(), Expr::Block(_)),
                         // The lowerer spells a missing `else` as the unit
-                        // value, which renders as the empty block it was.
+                        // value, which renders as the empty block it was, and
+                        // an `else if` chain as a block holding the one nested
+                        // `if` — which is the chain, not a block branch.
                         else_is_block: matches!(
                             else_block.as_ref(),
                             Expr::Block(_) | Expr::Undefined
-                        ),
+                        ) && printer::else_if_chain(else_block).is_none(),
                         then_graph: Box::new(then_graph),
                         else_graph: Box::new(else_graph),
                     }),
@@ -548,14 +562,24 @@ impl<'a> GraphProjector<'a> {
             // Statement shapes the lens does not decompose into workflow
             // structure yet travel as their own canonical TypeScript text, so
             // a host still sees and edits exactly what was authored.
-            Expr::Try(_) | Expr::Throw(_) | Expr::Return(_) => (
+            // TypeScript has no cell-only `finish` inside a process: a run
+            // body ends by returning, and that return is the process's finish.
+            Expr::Return(_) => (
+                WorkflowNodeKind::Terminal {
+                    terminal: WorkflowTerminalKind::Finish,
+                    expression: self.statement_text(value, versions),
+                },
+                "return".to_string(),
+                Vec::new(),
+            ),
+            Expr::Try(_) | Expr::Throw(_) => (
                 WorkflowNodeKind::Opaque {
                     source: self.statement_text(value, versions),
                 },
                 opaque_name(value).to_string(),
                 Vec::new(),
             ),
-            _ if (lashlang::is_pure_expr(value) || matches!(value, Expr::TypeLiteral(_)))
+            _ if (is_pure_value(value) || matches!(value, Expr::TypeLiteral(_)))
                 && binding.is_some() =>
             {
                 let outputs = assignment_output(binding.as_ref(), versions);
@@ -985,7 +1009,14 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
             expression,
             effect,
         } => {
-            let expression = parse_expression_field(node, "expression", expression, context)?;
+            // Loop control carries no payload and is not an expression the
+            // language will parse outside its loop, so it renders from the
+            // effect kind rather than from its own text.
+            let expression = match effect {
+                WorkflowEffectKind::Break => Expr::Break,
+                WorkflowEffectKind::Continue => Expr::Continue,
+                _ => parse_expression_field(node, "expression", expression, context)?,
+            };
             if effect_kind(&expression).as_ref() != Some(effect) {
                 return invalid_payload(node, "effect kind does not match its expression");
             }
@@ -1020,11 +1051,20 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
             terminal,
             expression,
         } => {
-            let expression = parse_expression_field(node, "expression", expression, context)?;
+            // A process terminal is a `return` statement, which is not an
+            // expression the language will parse in expression position.
+            let expression = match context.scope {
+                RenderScope::Process => parse_opaque_statement(node, expression, context)?,
+                RenderScope::Main => {
+                    parse_expression_field(node, "expression", expression, context)?
+                }
+            };
             let valid = matches!(
                 (terminal, &expression),
-                (WorkflowTerminalKind::Finish, Expr::Finish(_))
-                    | (WorkflowTerminalKind::Fail, Expr::Fail(_))
+                (
+                    WorkflowTerminalKind::Finish,
+                    Expr::Finish(_) | Expr::Return(_)
+                ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
             );
             if !valid {
                 return invalid_payload(node, "terminal kind does not match its expression");
@@ -1338,7 +1378,17 @@ fn loop_outputs(
 }
 
 fn collect_assignment_roots(expression: &Expr, assigned: &mut BTreeSet<String>) {
-    if let Expr::Assign { target, .. } = expression {
+    // A member assignment lowers to a block writing generated temporaries, so
+    // the write the loop publishes is the one the author spelled, and the
+    // temporaries it travels through are never a loop-carried variable.
+    if let Some((target, value)) = printer::assignment_sugar(expression) {
+        assigned.insert(target.root.to_string());
+        collect_assignment_roots(value, assigned);
+        return;
+    }
+    if let Expr::Assign { target, .. } = expression
+        && !target.root.starts_with(crate::GENERATED_BINDING_PREFIX)
+    {
         assigned.insert(target.root.to_string());
     }
     for child in expression.children() {
@@ -1482,6 +1532,24 @@ fn kind_tag(kind: &WorkflowNodeKind) -> &'static str {
 
 fn hex_digest(domain: &str, bytes: &[u8]) -> String {
     lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
+}
+
+/// Purity as the lens means it.
+///
+/// `await` on a value that may or may not be a promise lowers to a builtin
+/// whose arguments are pure, so `is_pure_expr` alone would call an awaited
+/// composite a constant and project it as data rather than as the computation
+/// it is.
+fn is_pure_value(expression: &Expr) -> bool {
+    lashlang::is_pure_expr(expression) && !awaits(expression)
+}
+
+fn awaits(expression: &Expr) -> bool {
+    match expression {
+        Expr::Await(_) => true,
+        Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending" => true,
+        _ => expression.children().any(awaits),
+    }
 }
 
 /// The derived name of an opaque statement node.

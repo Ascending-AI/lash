@@ -134,12 +134,17 @@ pub(super) fn parse_expression_field(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let program = crate::parse_workflow_fragment(text, &globals, &context.process_bindings())
-        .map_err(|error| GraphRenderError::InvalidExpression {
-            node_id: node.id.to_string(),
-            field,
-            message: error.to_string(),
-        })?;
+    // An expression field is read in expression position, so it parses inside
+    // parentheses: `{ count: 0 }` is an object literal here, and a bare
+    // statement parse would read it as a labelled block.
+    let parenthesized = format!("(\n{text}\n)");
+    let program =
+        crate::parse_workflow_fragment(&parenthesized, &globals, &context.process_bindings())
+            .map_err(|error| GraphRenderError::InvalidExpression {
+                node_id: node.id.to_string(),
+                field,
+                message: error.to_string(),
+            })?;
     if !program.declarations.is_empty() {
         return Err(GraphRenderError::InvalidExpression {
             node_id: node.id.to_string(),

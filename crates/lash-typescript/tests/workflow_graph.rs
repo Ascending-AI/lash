@@ -915,7 +915,7 @@ const recorded = { value: await runs[0] };
 const binary = (await runs[0]) + 1;
 const unary = !(await runs[0]);
 const field = (await runs[0]).value;
-const indexed = runs[0];
+const indexed = (await runs)[0];
 finish(indexed);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
