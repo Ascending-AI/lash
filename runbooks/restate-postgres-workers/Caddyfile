@@ -9,11 +9,9 @@
 		lb_policy round_robin
 		lb_try_duration 5s
 		lb_try_interval 250ms
-		health_uri /discover
+		health_port 18101
+		health_uri /health
 		health_interval 1s
 		health_timeout 1s
-		health_headers {
-			Accept application/vnd.restate.endpointmanifest.v3+json
-		}
 	}
 }
