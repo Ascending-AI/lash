@@ -69,19 +69,28 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    consecutive failed executions with the same non-empty error are a FAIL; quote the
    repeated error in the scorecard. Do not discard failed iterations once a later one
    succeeds.
-9. **The row proves its own identity.** The rendered dialect badge,
-   `/api/state.settings.rlm_dialect`, code-block language, and execution events must all
-   read `typescript`. Record the served provider model from the row's model-call
-   evidence. A mismatch or unrecorded model substitution is a mislabeled row and triggers
-   Abort/RCA.
+9. **The row proves its own identity.** [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
+   left the page with no dialect badge and `/api/state.settings` with no `rlm_dialect` key —
+   `examples/agent-workbench/src/main_sections/tests/ui_contract.rs` asserts that absence on
+   purpose, because a badge would be a second place a language could be claimed from. Do not
+   gate on either. The live witnesses are the transcript's code-block `language` and the
+   turn's `exec_code_completed` events, which must all read `typescript`; `/api/state.settings`
+   carries only `model`, `model_variant`, `model_variants`, `session_id` and `session_name`.
+   Record the served provider model from the row's model-call evidence, and pin
+   `OPENROUTER_MODEL` explicitly: the workbench default is a different provider's model, so an
+   unpinned row silently changes tier. A mismatch or unrecorded model substitution is a
+   mislabeled row and triggers Abort/RCA.
 10. **Start from nothing.** Use the fixed allocations below. The row gets its own session
     id, data directory, run directory, artifacts, ports, Restate and Postgres containers,
     and trace, none of them carried over from an earlier run.
 
 ## Working material
 
-Require non-empty `OPENROUTER_API_KEY` and `TAVILY_API_KEY` from the repository's ignored
-`.env`; missing credentials are a harness gap → Abort. Set
+Require a non-empty `OPENROUTER_API_KEY` from the repository's ignored `.env`; a missing
+credential is a harness gap → Abort. The web tools need no key of their own: the workbench
+mounts the keyless Parallel Search MCP (`WORKBENCH_SEARCH_MCP_SERVER = "parallel"`,
+`https://search.parallel.ai/mcp`), so do not require `TAVILY_API_KEY` or any other search
+credential. Set
 `OPENROUTER_MODEL=openai/gpt-5.6-sol` and `AGENT_WORKBENCH_OPEN=0`. Never log
 credential values.
 
@@ -118,25 +127,34 @@ the workbench port closed and both exact containers absent. Preserve artifacts, 
 the row's data and run directories only after evidence has been copied.
 
 Browser truth is the scoped page
-`/?session_id=<session-id>`, especially the rendered dialect badge, running/idle pill,
-`#timeline .message.user`, `#timeline .message.assistant`, completed/failed code blocks,
-and nested web-tool rows. HTTP truth is `/healthz` plus
+`/?session_id=<session-id>`, especially the running/idle pill,
+`#timeline .message.user`, `#timeline .message.assistant`, completed/failed code blocks
+(whose header names the language), and nested web-tool rows. HTTP truth is `/healthz` plus
 `/api/state?session_id=<session-id>`. Durable truth is the row's non-tombstoned
-`lash_graph_nodes` ancestry in its dedicated Postgres container. Trace truth is the row's
+`lash_graph_nodes` ancestry in its dedicated Postgres container; that container runs on the
+host network with its port as a postgres CLI flag, so nothing is published to the host and the
+read path is
+`docker exec <postgres-container> psql -h 127.0.0.1 -p <postgres> -U lash -d lash`. Its
+`lash_graph_nodes` columns are `session_id, node_id, parent_node_id, generation,
+frame_node_id, node_json, tombstoned`; the rendered pair lives in the `Conversation` events
+inside `node_json`. Trace truth is the row's
 `data/trace.jsonl` and `data/lashlang-execution.jsonl`, filtered by the exact session id.
 The `lashlang-` filename names the IR and the VM that wrote the records, not an authoring
 language.
 Compare assistant text without conflating Markdown bytes with visible text: API and durable
 message Markdown must agree byte-for-byte, while the DOM must equal that Markdown after the
-page's own `renderMarkdownBlocks` projection.
+page's own `renderMarkdownBlocks` projection. That projection is deliberately small:
+`renderInlineMarkdown` handles only `` `code` ``, `**strong**` and `*em*`, plus block-level
+lists and fences, and has no link rule — an inline `[text](url)` stays literal in the DOM and
+is not a rendering defect.
 
 ## Phase 0 — Boot and prove the fresh row
 
 Do: boot the row, poll `/healthz` to 200, then open its scoped page with
 `wait_until="domcontentloaded"` and explicit waiting assertions.
 
-Expect: the composer is visible; the rendered session id equals the scoped id and the
-rendered dialect reads `typescript`; `/api/state.settings` agrees; the transcript is empty;
+Expect: the composer is visible; the rendered session id equals the scoped id;
+`/api/state.settings` reports the pinned model; the transcript is empty;
 the page is idle; the API has no active turns; the dedicated Postgres store has no graph
 rows for the session; and the trace has no turn, code-execution, or tool-call record for the
 session. Record the configured model from state, but treat the served-model evidence after
@@ -161,7 +179,7 @@ Do: order all of this turn's code execution completions and nested tool activity
 position. Save them as `02-execution-history.json`; save every successful web result used
 by the answer, without credentials, as `02-live-sources.json`.
 
-Expect: every code block and execution event reads `typescript`; every agent tool is
+Expect: every code block `language` and execution event reads `typescript`; every agent tool is
 on the validation-only allow-list; at least one successful web result identifies Utrecht
 and supports all four answer facts; and golden rule 8 finds no repeated-identical-error
 loop. If it does, stop and quote the exact repeated error rather than continuing to judge
@@ -196,7 +214,7 @@ generic “looks good.”
 | Gate | Objective gate | Result | Evidence |
 | --- | --- | --- | --- |
 | Fresh isolated boot | six explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
-| Dialect and model identity | badge, state, code/execution events read `typescript`; served model recorded | | `00-identities.json`, `01-finished-trace.json` |
+| Dialect and model identity | code-block `language` and execution events read `typescript`; no badge or `settings.rlm_dialect` is expected; served model recorded and pinned | | `00-identities.json`, `01-finished-trace.json` |
 | Do → expect completion | running observed; then idle + no active turn + one completed/final-value terminal within five minutes | | `01-finished.png`, state, trace |
 | Validation-only tools | every agent tool is a Parallel web-search or web-fetch MCP call | | `02-execution-history.json` |
 | Live source support | successful Utrecht current-condition result supports temperature, condition, humidity, and wind | | `02-live-sources.json` |
