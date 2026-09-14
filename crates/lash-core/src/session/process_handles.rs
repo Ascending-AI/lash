@@ -488,6 +488,8 @@ mod tests {
             session_graph: host.clone(),
             processes: host,
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
             )),
@@ -654,6 +656,8 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
             )),
@@ -824,6 +828,8 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
             )),
@@ -933,6 +939,8 @@ mod tests {
             session_graph: host.clone(),
             processes: host.clone(),
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
             )),

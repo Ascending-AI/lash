@@ -915,7 +915,10 @@ async fn transient_route_failure_retries_the_same_identity_and_revocation_refuse
 }
 
 #[tokio::test]
-async fn trigger_store_rejects_mismatched_target_label() {
+async fn trigger_store_accepts_a_target_label_independent_of_the_identity() {
+    // FIG-2995: the target_label gate is gone. The label is host-facing
+    // presentation only and no longer proves anything about the durable
+    // identity, so a mismatch no longer refuses registration.
     let store = InMemoryTriggerStore::default();
     let draft = TriggerSubscriptionDraft::for_process(
         "mismatched-label",
@@ -929,7 +932,7 @@ async fn trigger_store_rejects_mismatched_target_label() {
     )
     .with_target_label("other");
 
-    let err = store
+    store
         .execute_command(
             "mismatched-label",
             TriggerCommand::Register {
@@ -940,8 +943,7 @@ async fn trigger_store_rejects_mismatched_target_label() {
         )
         .await
         .expect("store execution")
-        .expect_err("mismatched target labels should be rejected");
-    assert!(err.to_string().contains("target_label must match"));
+        .expect("a label no longer gates registration");
 }
 
 #[tokio::test]

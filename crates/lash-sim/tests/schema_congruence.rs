@@ -113,6 +113,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "trigger_mutation_receipts",
         "lash_trigger_mutation_receipts",
     ),
+    pair("process_definitions", "lash_process_definitions"),
     pair("trigger_occurrences", "lash_trigger_occurrences"),
     pair("trigger_subscriptions", "lash_trigger_subscriptions"),
     pair(

@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 76,
+  "source_commit": "023dd85246b4",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2995 process-definition registry tables",
+  "artifacts": {
+    "postgres-expected.json": "f6e0b3ee11debc5e3ce154497325362e2fd55c6cead55ae4a78f9dc015e2fb03",
+    "sqlite-expected.json": "6e84d1bae8de1c583783dda6366ffba4a276878e324272e6651112f68df047e6"
+  }
+}

@@ -301,6 +301,26 @@ CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
 
 
 --
+-- Name: lash_process_definitions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_process_definitions (
+    definition_id text NOT NULL,
+    owner_scope text NOT NULL,
+    name text NOT NULL,
+    revision bigint NOT NULL,
+    fingerprint text NOT NULL,
+    lifecycle text NOT NULL,
+    deleted_at_ms bigint,
+    change_seq bigint NOT NULL,
+    created_at_ms bigint NOT NULL,
+    updated_at_ms bigint NOT NULL,
+    record_json text NOT NULL,
+    CONSTRAINT ck_process_definitions_lifecycle CHECK ((((lifecycle = ANY (ARRAY['enabled'::text, 'disabled'::text])) AND (deleted_at_ms IS NULL)) OR ((lifecycle = 'tombstoned'::text) AND (deleted_at_ms IS NOT NULL))))
+);
+
+
+--
 -- Name: lash_process_events; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -993,6 +1013,12 @@ INSERT INTO lash_durable_read_fixture.lash_process_change_clock VALUES (true, 8,
 
 
 --
+-- Data for Name: lash_process_definitions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_process_events; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1085,7 +1111,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 96);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 97);
 
 
 --
@@ -1401,6 +1427,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_artifact_cleanup
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_change_clock
     ADD CONSTRAINT lash_process_change_clock_pkey PRIMARY KEY (singleton);
+
+
+--
+-- Name: lash_process_definitions lash_process_definitions_owner_scope_name_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_definitions
+    ADD CONSTRAINT lash_process_definitions_owner_scope_name_key UNIQUE (owner_scope, name);
+
+
+--
+-- Name: lash_process_definitions lash_process_definitions_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_process_definitions
+    ADD CONSTRAINT lash_process_definitions_pkey PRIMARY KEY (definition_id);
 
 
 --
@@ -1789,6 +1831,20 @@ CREATE INDEX idx_lash_pending_turn_inputs_claim ON lash_durable_read_fixture.las
 --
 
 CREATE INDEX idx_lash_pending_turn_inputs_session ON lash_durable_read_fixture.lash_pending_turn_inputs USING btree (session_id, state, enqueue_seq);
+
+
+--
+-- Name: idx_lash_process_definitions_change; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_process_definitions_change ON lash_durable_read_fixture.lash_process_definitions USING btree (change_seq);
+
+
+--
+-- Name: idx_lash_process_definitions_registrant; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_process_definitions_registrant ON lash_durable_read_fixture.lash_process_definitions USING btree (owner_scope, name);
 
 
 --

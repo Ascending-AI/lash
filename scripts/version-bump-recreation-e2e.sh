@@ -236,9 +236,9 @@ for refusal, checkpoint_name in (
     expected_kind = EXPECTED_REFUSAL_KINDS[checkpoint_name]
     if refusal.get("refusal_kind") != expected_kind:
         fail(f"refusal was not the {expected_kind!r} kind its phase proves: {refusal}")
-# Destructive generations deliberately carry no migration arm, so the immediate
-# predecessor is the ordinary reject-and-recreate refusal and has no migration-
-# divergence artifact list.
+# Destructive generations carry no migration arm, so the immediate
+# predecessor is the ordinary reject-and-recreate refusal and has no
+# migration-divergence artifact list.
 if divergent["divergent_artifacts"]:
     fail(f"destructive pre-cutover refusal named migration artifacts: {divergent}")
 if stale["found_version"] >= divergent["found_version"]:

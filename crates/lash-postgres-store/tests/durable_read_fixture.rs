@@ -23,6 +23,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const LATEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-76-023dd85246b4/postgres-expected.json",
+];
 const LATEST_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-75-63f3438c/postgres-expected.json",
 ];
@@ -149,7 +152,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 96);
+    assert_eq!(PostgresStorage::schema_version(), 97);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

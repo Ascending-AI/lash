@@ -436,6 +436,13 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
         "content-addressed byte store shared across every session in the one database this suite \
          runs against; the rows this session can reach are compared by `checkpoint_blobs`",
     ),
+    (
+        "process_definitions",
+        "definition-registry surface: this fixture wires no ProcessDefinitionRegistry, so no \
+         driven operation can write it, and the row is keyed by its owner scope rather than by a \
+         session, so a session-scoped digest query could not read it either; owned by the \
+         registry suites (FIG-2995)",
+    ),
 ];
 
 /// Every `CREATE TABLE` name declared by the SQLite schema, deduplicated.

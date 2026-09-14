@@ -19,12 +19,23 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 94,
-        to: 95,
-        // Component 95 installs no relation and no column: what a component-94
-        // store lacks is the source contract and provider route inside each
-        // trigger subscription record document. The lists are keyed to the
-        // floor, not to one generation, so a relation or column introduced
-        // after 95 belongs here too.
+        to: 96,
+        // Component 95 (the source-call contract capture) and component 96
+        // (the SleepSpec encoding) were refusal-only cutovers, and component
+        // 97 creates the named process-definition registry (FIG-2995) beside
+        // them. No predecessor records existed at any of these moves, so the
+        // retained endpoint now carries all three: a pre-cutover store is
+        // refused at open rather than migrated (its schema lacks the
+        // registry relation and the retained trigger capture).
+        source_missing_tables: &["lash_process_definitions"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["lash_process_definitions"],
+        statements: &[],
+    },
+    SchemaMigration {
+        from: 95,
+        to: 96,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],

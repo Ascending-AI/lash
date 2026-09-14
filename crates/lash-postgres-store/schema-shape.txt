@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 96
+version 97
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -156,6 +156,20 @@ table lash_process_change_clock
   column singleton boolean not-null default
   column tombstone_compaction_horizon bigint not-null default
   primary-key (singleton)
+table lash_process_definitions
+  column change_seq bigint not-null
+  column created_at_ms bigint not-null
+  column definition_id text not-null
+  column deleted_at_ms bigint nullable
+  column fingerprint text not-null
+  column lifecycle text not-null
+  column name text not-null
+  column owner_scope text not-null
+  column record_json text not-null
+  column revision bigint not-null
+  column updated_at_ms bigint not-null
+  unique (owner_scope, name)
+  primary-key (definition_id)
 table lash_process_events
   column event_json text not-null
   column event_type text not-null

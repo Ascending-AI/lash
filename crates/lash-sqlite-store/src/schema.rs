@@ -463,6 +463,38 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
     session_id      TEXT PRIMARY KEY,
     revoked_at_ms   INTEGER NOT NULL
 );
+
+-- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
+-- name, revision, pinned definition fingerprint, lifecycle tombstone and
+-- change sequence, unique on owner scope and name. Written only by the
+-- RegisterProcessDefinition intent under revision-and-fingerprint
+-- compare-and-swap. The pinned ProcessDefinitionRef travels in record_json;
+-- the fingerprint column is what the CAS fence compares. The lifecycle is
+-- the FIG-1951 one-column enum with a paired-nullable delete timestamp, not
+-- the two-boolean layout the trigger table still carries. Session-scoped
+-- names follow the ADR 0049 deletion frontier; host- and platform-scoped
+-- tombstones are never collected (ADR 0067).
+CREATE TABLE IF NOT EXISTS process_definitions (
+    definition_id  TEXT PRIMARY KEY,
+    owner_scope    TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    revision       INTEGER NOT NULL,
+    fingerprint    TEXT NOT NULL,
+    lifecycle      TEXT NOT NULL,
+    deleted_at_ms  INTEGER,
+    change_seq     INTEGER NOT NULL,
+    created_at_ms  INTEGER NOT NULL,
+    updated_at_ms  INTEGER NOT NULL,
+    record_json    TEXT NOT NULL,
+    CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
+    UNIQUE(owner_scope, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_process_definitions_registrant
+    ON process_definitions(owner_scope, name);
+CREATE INDEX IF NOT EXISTS idx_process_definitions_change
+    ON process_definitions(change_seq);
+
 CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
     ON artifact_owners(owner_kind, owner_id);
 ";
@@ -655,7 +687,12 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// `cancel_requested_at_ms` instead of a boolean, and gains the partial index a
 /// pending-cancel list reads. A pre-63 database has the boolean column, so it
 /// is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 64;
+/// Bumped to 65 for FIG-2995's named process-definition registry: a single
+/// new table, the one durable home for a registered definition record. A
+/// pre-65 database holds no registry rows, so the whole catalog is recreated
+/// under the reject-and-recreate policy rather than migrated midwifing a
+/// registry into a database that never had one.
+pub(crate) const SCHEMA_VERSION: i32 = 65;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

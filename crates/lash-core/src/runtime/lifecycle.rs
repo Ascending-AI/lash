@@ -588,6 +588,9 @@ impl LashRuntime {
         if let Some(store) = env.trigger_store.as_ref() {
             embedded = embedded.with_trigger_store(Arc::clone(store));
         }
+        if let Some(registry) = env.process_definitions.as_ref() {
+            embedded = embedded.with_process_definition_registry(Arc::clone(registry));
+        }
         Self::assemble_runtime(
             policy,
             embedded,

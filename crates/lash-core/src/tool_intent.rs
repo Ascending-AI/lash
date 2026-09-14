@@ -245,6 +245,16 @@ pub struct RegisterProcessDefinitionIntent {
     /// Host-facing label, never part of the definition's identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The registered name this declaration claims. Tool input only: the
+    /// durable row pins the resolved reference, never this name. `None`
+    /// refuses realization because an unnamed registration cannot be
+    /// addressed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The revision the caller last observed under `name`. `None` creates a
+    /// fresh slot; a stale value conflicts with the live row (FIG-2995 CAS).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -595,6 +605,8 @@ mod tests {
                     definition: serde_json::Value::Null,
                     env_spec: None,
                     label: None,
+                    name: None,
+                    expected_revision: None,
                 }))
             }
             ToolIntentKind::RegisterTrigger => {

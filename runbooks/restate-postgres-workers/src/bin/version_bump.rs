@@ -60,7 +60,7 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 94;
 /// Component 94 already had every current table.
-const POST_FLOOR_TABLES: [&str; 0] = [];
+const POST_FLOOR_TABLES: [&str; 1] = ["lash_process_definitions"];
 /// The post-floor indexes the fixture must drop by name. Component 95 and 96
 /// installed none: both moved document content, not DDL.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
@@ -69,7 +69,7 @@ const POST_FLOOR_INDEXES: [&str; 0] = [];
 const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 0] = [];
+const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_process_definitions"];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the

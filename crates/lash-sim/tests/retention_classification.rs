@@ -254,6 +254,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
     ("tool_intent_submissions", KnownGap { issue: "FIG-1509" }),
     (
+        "process_definitions",
+        LifecycleOwned {
+            scope: "session-owner reconciliation; host/platform name fences intentionally permanent (ADR 0067, FIG-2995)",
+        },
+    ),
+    (
         "trigger_subscriptions",
         LifecycleOwned {
             scope: "session-owner reconciliation; host/platform fences intentionally permanent",
@@ -368,7 +374,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 49, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 50, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

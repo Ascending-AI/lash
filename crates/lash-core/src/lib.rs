@@ -42,6 +42,7 @@ pub mod panic_containment {
 pub use lash_core_ids::perf_witness;
 pub mod plugin;
 mod plugin_stack;
+pub mod process_registry;
 mod protocol_build;
 /// Provider components for pluggable LLM backends.
 ///
@@ -827,6 +828,10 @@ pub use runtime::drive_with_event_pump;
 // effect hosts (e.g. lash-restate's workflows) and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
+pub use process_registry::{
+    InMemoryProcessDefinitionRegistry, ProcessDefinitionExpectation, ProcessDefinitionLifecycle,
+    ProcessDefinitionRecord, ProcessDefinitionRegistration, ProcessDefinitionRegistry,
+};
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,

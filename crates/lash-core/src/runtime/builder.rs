@@ -22,6 +22,7 @@ pub struct EmbeddedRuntimeBuilder {
     core: RuntimeHostConfig,
     session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     trigger_store: Option<Arc<dyn crate::TriggerStore>>,
+    process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     store: Option<Arc<dyn RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn RuntimePersistence>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
@@ -65,6 +66,7 @@ impl EmbeddedRuntimeBuilder {
             core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             session_store_factory: None,
             trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
+            process_definitions: None,
             store: None,
             attachment_manifest_store: None,
             process_registry: None,
@@ -191,6 +193,14 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
         self.trigger_store = Some(store);
+        self
+    }
+
+    pub fn with_process_definition_registry(
+        mut self,
+        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.process_definitions = Some(registry);
         self
     }
 
@@ -376,6 +386,7 @@ impl EmbeddedRuntimeBuilder {
             core: self.core,
             session_store_factory: self.session_store_factory,
             trigger_store: self.trigger_store,
+            process_definitions: self.process_definitions,
         };
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.

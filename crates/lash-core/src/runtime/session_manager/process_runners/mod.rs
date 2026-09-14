@@ -121,6 +121,8 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             session_graph: services.graph_service(),
             processes: services.model_tool_process_service(),
             trigger_router: services.trigger_router(),
+            process_definitions: services.process_definition_registry(),
+            process_engines: services.process_engines().clone(),
             effect_controller,
             direct_completions,
             parent_invocation: self.dispatch_parent_invocation,

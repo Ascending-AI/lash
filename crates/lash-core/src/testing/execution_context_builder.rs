@@ -217,6 +217,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
         };
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             plugins,
             tools: self.provider,
             tool_registry: None,
