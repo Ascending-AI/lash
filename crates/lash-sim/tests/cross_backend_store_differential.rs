@@ -46,6 +46,8 @@ mod attachment_seeding;
 mod checkpoint_cases;
 #[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
 mod coalesced_batch_oracles;
+#[path = "cross_backend_store_differential/corrupt_input_cases.rs"]
+mod corrupt_input_cases;
 #[path = "cross_backend_store_differential/fork_cases.rs"]
 mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
@@ -56,10 +58,19 @@ mod observations;
 mod plugin_state_case;
 #[path = "cross_backend_store_differential/raw_durable_reader.rs"]
 mod raw_durable_reader;
+#[path = "cross_backend_store_differential/residue.rs"]
+mod residue;
 #[path = "cross_backend_store_differential/session_meta_layout.rs"]
 mod session_meta_layout;
+#[path = "cross_backend_store_differential/surface_sweep.rs"]
+mod surface_sweep;
+#[path = "cross_backend_store_differential/trait_surface_gate.rs"]
+mod trait_surface_gate;
+use corrupt_input_cases::CorruptTarget;
 use observations::*;
+use residue::*;
 use session_meta_layout::verify_independent_session_meta_layout;
+use surface_sweep::{SurfaceMethod, SurfaceScratch};
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
@@ -87,6 +98,26 @@ enum CaseName {
     QueuedWorkClaimAndAbandon,
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
+    StoreSurfaceSweep,
+    RefusedSurfaceOnDeletedSession,
+    CorruptGraphNodeRefusals,
+    CorruptPendingTurnInputRefusals,
+    CorruptQueuedWorkRefusals,
+    CorruptPriorCheckpointRefusals,
+}
+
+/// How a case's observations are compared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComparisonMode {
+    /// Every backend, compared through the decoded durable digest.
+    Decoded,
+    /// The two SQL backends only, compared without decoding any row.
+    ///
+    /// A deliberately undecodable record is not a state the in-memory
+    /// reference store can hold, and the decoded digest cannot read one. See
+    /// `corrupt_input_cases.rs` for why this narrows the backend set without
+    /// weakening the comparison.
+    RawOnly,
 }
 
 impl CaseName {
@@ -113,6 +144,28 @@ impl CaseName {
             Self::QueuedWorkClaimAndAbandon => "queued_work_claim_abandon_preserves_fencing_token",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
+            Self::StoreSurfaceSweep => "store_surface_sweep",
+            Self::RefusedSurfaceOnDeletedSession => {
+                "refused_surface_on_deleted_session_leaves_no_residue"
+            }
+            Self::CorruptGraphNodeRefusals => "corrupt_graph_node_refuses_every_reader",
+            Self::CorruptPendingTurnInputRefusals => {
+                "corrupt_pending_turn_input_refuses_list_and_claim"
+            }
+            Self::CorruptQueuedWorkRefusals => "corrupt_queued_work_refuses_list_and_claim",
+            Self::CorruptPriorCheckpointRefusals => {
+                "corrupt_prior_checkpoint_refuses_read_modify_write"
+            }
+        }
+    }
+
+    fn comparison(self) -> ComparisonMode {
+        match self {
+            Self::CorruptGraphNodeRefusals
+            | Self::CorruptPendingTurnInputRefusals
+            | Self::CorruptQueuedWorkRefusals
+            | Self::CorruptPriorCheckpointRefusals => ComparisonMode::RawOnly,
+            _ => ComparisonMode::Decoded,
         }
     }
 }
@@ -180,6 +233,20 @@ enum StoreOperation {
     AdmitOnHandle {
         handle_alias: &'static str,
     },
+    /// One fallible store-trait method from the operation inventory. See
+    /// `surface_sweep.rs`; the inventory is gated by `trait_surface_gate.rs`.
+    DriveSurface {
+        method: SurfaceMethod,
+    },
+    /// Make one persisted record undecodable on the SQL backends.
+    SeedCorruptRecord {
+        target: CorruptTarget,
+    },
+    /// Put the original record back, so a shared content-addressed blob is
+    /// never left corrupt for a later case.
+    RestoreCorruptRecord {
+        target: CorruptTarget,
+    },
     SaveMetaOnHandle {
         handle_alias: &'static str,
     },
@@ -228,6 +295,9 @@ impl StoreOperation {
             Self::SaveMetaOnHandle { .. } => "save_meta_on_handle",
             Self::CommitOnHandle { .. } => "commit_on_handle",
             Self::ObserveSessionAbsent { .. } => "observe_session_absent",
+            Self::DriveSurface { method } => method.label(),
+            Self::SeedCorruptRecord { target } => target.seed_label(),
+            Self::RestoreCorruptRecord { target } => target.restore_label(),
         }
     }
 }
@@ -566,6 +636,8 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 StoreOperation::AttemptAdmission,
             ],
         },
+        surface_sweep::surface_sweep_case(),
+        surface_sweep::refused_surface_on_deleted_session_case(),
         GeneratedCase {
             name: CaseName::StaleHandleAfterDelete,
             operations: vec![
@@ -587,6 +659,11 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
     ]
+    .into_iter()
+    // Last: these are the only cases that leave the shared PostgreSQL
+    // database temporarily holding a corrupt record, and each restores it.
+    .chain(corrupt_input_cases::corrupt_input_cases())
+    .collect()
 }
 
 fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
@@ -937,367 +1014,6 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode normalized durable node")
 }
 
-async fn read_sqlite_durable_state(
-    path: &Path,
-    session_id: &SessionId,
-    store: &Arc<dyn ConformancePersistence>,
-) -> RawDurableState {
-    let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
-    connection
-        .busy_timeout(Duration::from_secs(15))
-        .expect("configure SQLite durable reader busy timeout");
-    connection
-        .pragma_update(None, "journal_mode", "WAL")
-        .expect("configure SQLite durable reader WAL mode");
-    connection
-        .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
-        .expect("configure SQLite durable reader pragmas");
-
-    let head: Option<(i64, Option<String>, Option<String>)> = connection
-        .query_row(
-            "SELECT head_revision, leaf_node_id, checkpoint_ref
-             FROM session_head
-             WHERE session_id = ?1",
-            [session_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()
-        .expect("read SQLite durable head");
-    let (head_revision, leaf_node_id, checkpoint_ref) = head.map_or(
-        (None, None, None),
-        |(revision, leaf_node_id, checkpoint_ref)| {
-            (
-                Some(revision as u64),
-                leaf_node_id,
-                checkpoint_ref.map(BlobRef),
-            )
-        },
-    );
-    let checkpoint = read_sqlite_checkpoint_observation(path, checkpoint_ref);
-    let durable_nodes = {
-        let mut statement = connection
-            .prepare(
-                "SELECT generation, node_id, parent_node_id, node_json
-                 FROM graph_nodes
-                 WHERE session_id = ?1 AND tombstoned = 0
-                 ORDER BY generation ASC",
-            )
-            .expect("prepare SQLite durable node read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .expect("read SQLite durable nodes")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite durable nodes")
-            .into_iter()
-            .enumerate()
-            .map(
-                |(ordinal, (_generation, node_id, parent_node_id, node_json))| DurableNode {
-                    ordinal,
-                    node_id,
-                    parent_node_id,
-                    bytes: normalized_sql_node_json(&node_json),
-                },
-            )
-            .collect()
-    };
-    let runtime_turn_commits = {
-        let mut statement = connection
-            .prepare(
-                "SELECT turn_id, turn_commit_hash, result_json
-                 FROM runtime_turn_commits
-                 WHERE session_id = ?1
-                 ORDER BY turn_id ASC",
-            )
-            .expect("prepare SQLite turn-commit receipt read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .expect("read SQLite turn-commit receipts")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite turn-commit receipts")
-            .into_iter()
-            .map(
-                |(operation, turn_commit_hash, result_json)| RuntimeTurnCommitObservation {
-                    operation,
-                    turn_commit_hash,
-                    result: serde_json::from_str(&result_json)
-                        .expect("decode SQLite turn-commit result"),
-                },
-            )
-            .collect()
-    };
-    let attachment_manifest = {
-        let mut statement = connection
-            .prepare(
-                "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
-                        committed_at_ms, owner_kind, owner_id, owner_incarnation
-                 FROM attachment_manifest
-                 WHERE session_id = ?1
-                 ORDER BY attachment_id ASC",
-            )
-            .expect("prepare SQLite attachment-manifest read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
-                ))
-            })
-            .expect("read SQLite attachment manifest")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite attachment manifest")
-            .into_iter()
-            .map(
-                |(
-                    attachment_id,
-                    canonical_uri,
-                    intent_at_epoch_ms,
-                    written_at_epoch_ms,
-                    committed_at_epoch_ms,
-                    owner_kind,
-                    owner_id,
-                    owner_incarnation,
-                )| AttachmentManifestObservation {
-                    attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
-                    canonical_uri,
-                    intent_at_epoch_ms: intent_at_epoch_ms as u64,
-                    written: written_at_epoch_ms.is_some(),
-                    committed: committed_at_epoch_ms.is_some(),
-                    owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
-                    owner_id,
-                    owner_incarnation: owner_incarnation.map(|value| value as u64),
-                },
-            )
-            .collect()
-    };
-    let node_anchors = {
-        let mut statement = connection
-            .prepare(
-                "SELECT node_id, checkpoint_ref, source_session_id
-                 FROM node_anchors
-                 WHERE source_session_id = ?1
-                 ORDER BY node_id ASC",
-            )
-            .expect("prepare SQLite node-anchor read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok(NodeAnchorObservation {
-                    node_id: row.get(0)?,
-                    checkpoint_ref: BlobRef(row.get(1)?),
-                    source_session_id: SessionId::from(row.get::<_, String>(2)?),
-                })
-            })
-            .expect("read SQLite node anchors")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite node anchors")
-    };
-    let usage_deltas = {
-        let mut statement = connection
-            .prepare(
-                "SELECT source, model, input_tokens, output_tokens,
-                        cache_read_input_tokens, cache_write_input_tokens,
-                        reasoning_output_tokens
-                 FROM usage_deltas
-                 WHERE session_id = ?1
-                 ORDER BY seq ASC",
-            )
-            .expect("prepare SQLite usage-delta read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok(UsageDeltaObservation {
-                    source: row.get(0)?,
-                    model: row.get(1)?,
-                    usage: TokenUsage {
-                        input_tokens: row.get(2)?,
-                        output_tokens: row.get(3)?,
-                        cache_read_input_tokens: row.get(4)?,
-                        cache_write_input_tokens: row.get(5)?,
-                        reasoning_output_tokens: row.get(6)?,
-                    },
-                })
-            })
-            .expect("read SQLite usage deltas")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite usage deltas")
-    };
-    let session_meta = store
-        .load_session_meta()
-        .await
-        .expect("read SQLite session metadata")
-        .map(session_meta_observation);
-    let session_execution_leases = {
-        let mut statement = connection
-            .prepare(
-                "SELECT lease_owner_id, lease_owner_incarnation_id,
-                        lease_executor_id, lease_token,
-                        lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
-                        lease_term_ms
-                 FROM session_execution_leases
-                 WHERE session_id = ?1",
-            )
-            .expect("prepare SQLite session-execution-lease read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                let owner_id = row.get::<_, Option<String>>(0)?;
-                let incarnation_id = row.get::<_, Option<String>>(1)?;
-                Ok(SessionExecutionLeaseObservation {
-                    owner: lash_core::store_backend_support::lease_owner_from_columns(
-                        owner_id,
-                        incarnation_id,
-                    )
-                    .expect("decode SQLite session lease owner"),
-                    executor_id: row.get::<_, Option<String>>(2)?,
-                    lease_token: row.get::<_, Option<String>>(3)?,
-                    fencing_token: row.get::<_, i64>(4)? as u64,
-                    claimed: row.get::<_, i64>(5)? != 0,
-                    lease_term_ms: (row.get::<_, i64>(5)? != 0)
-                        .then_some(row.get::<_, i64>(7)? as u64),
-                })
-            })
-            .expect("read SQLite session-execution lease")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite session-execution lease")
-    };
-    let pending_turn_inputs = {
-        let mut statement = connection
-            .prepare(
-                "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
-                        CASE WHEN claim_token IS NULL
-                             THEN NULL
-                             ELSE claim_session_lease_generation
-                        END
-                 FROM pending_turn_inputs
-                 WHERE session_id = ?1
-                 ORDER BY enqueue_seq ASC",
-            )
-            .expect("prepare SQLite pending-input read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
-                ))
-            })
-            .expect("read SQLite pending turn inputs")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite pending turn inputs")
-            .into_iter()
-            .map(
-                |(
-                    input_id,
-                    enqueue_seq,
-                    state,
-                    claim_id,
-                    fencing_token,
-                    claim_session_lease_generation,
-                )| {
-                    assert_claim_id_spelling(
-                        claim_id.as_deref(),
-                        "tic",
-                        enqueue_seq as u64,
-                        fencing_token as u64,
-                    );
-                    PendingTurnInputObservation {
-                        input_id,
-                        state: TurnInputState::from_wire_str(&state)
-                            .expect("decode SQLite pending-input state"),
-                        claim_session_lease_generation: claim_session_lease_generation
-                            .map(|generation| generation as u64),
-                    }
-                },
-            )
-            .collect()
-    };
-    let queued_work_batches = {
-        let mut statement = connection
-            .prepare(
-                "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                        authority_json, merge_key, available_at_ms, claim_id, claim_token,
-                        claim_fencing_token, claim_session_lease_generation
-                 FROM queued_work_batches
-                 WHERE session_id = ?1
-                 ORDER BY enqueue_seq ASC",
-            )
-            .expect("prepare SQLite queued-work batch read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
-                    row.get(11)?,
-                ))
-            })
-            .expect("read SQLite queued-work batches")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite queued-work batches")
-    };
-    let queued_work_items = {
-        let mut statement = connection
-            .prepare(
-                "SELECT item.batch_id, item.item_index, item.payload_json
-                 FROM queued_work_items AS item
-                 JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
-                 WHERE batch.session_id = ?1
-                 ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
-            )
-            .expect("prepare SQLite queued-work item read");
-        statement
-            .query_map([session_id.as_str()], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .expect("read SQLite queued-work items")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode SQLite queued-work items")
-    };
-    let queued_work =
-        queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
-    RawDurableState {
-        head_revision,
-        leaf_node_id,
-        checkpoint,
-        durable_nodes,
-        runtime_turn_commits,
-        attachment_manifest,
-        node_anchors,
-        usage_deltas,
-        session_meta,
-        session_execution_leases,
-        pending_turn_inputs,
-        queued_work,
-    }
-}
-
 #[derive(Clone)]
 enum BackendReopen {
     /// Retained-factory, same-object reopen only; this cannot establish
@@ -1335,6 +1051,7 @@ struct BackendRunner {
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
     expected_execution_state: Option<Vec<u8>>,
+    surface: SurfaceScratch,
 }
 
 impl BackendRunner {
@@ -1953,6 +1670,11 @@ impl BackendRunner {
                 self.assert_session_deleted(&error, "stale-handle commit");
                 Err(error)
             }
+            StoreOperation::DriveSurface { method } => self.drive_surface(*method).await,
+            StoreOperation::SeedCorruptRecord { target } => self.seed_corrupt_record(*target).await,
+            StoreOperation::RestoreCorruptRecord { target } => {
+                self.restore_corrupt_record(*target).await
+            }
             StoreOperation::ObserveSessionAbsent => {
                 let request = self.create_request();
                 assert!(
@@ -1970,10 +1692,19 @@ impl BackendRunner {
         }
     }
 
+    /// Snapshot every durable row this operation could touch, without
+    /// decoding any of them. Taken immediately before and after each step so a
+    /// refused operation can be held to the no-residue law.
+    async fn residue_digest(&self) -> ResidueDigest {
+        self.raw_reader.residue_digest().await
+    }
+
     async fn observe(
         &self,
+        before: &ResidueDigest,
+        comparison: ComparisonMode,
         result: Result<Option<ComparableRuntimeCommitResult>, StoreError>,
-    ) -> StepObservation {
+    ) -> (StepObservation, Vec<&'static str>) {
         let (store_error, runtime_commit_result) = match result {
             Ok(result) => (None, result),
             Err(error) => (Some(normalized_store_error(self.name, &error)), None),
@@ -1989,12 +1720,30 @@ impl BackendRunner {
                 FreshnessHeadObservation::Error(normalized_store_error(self.name, &error))
             }
         };
-        StepObservation {
-            store_error,
-            runtime_commit_result,
-            freshness_head,
-            durable_state: self.raw_reader.observe().await,
-        }
+        // A deliberately undecodable row cannot be read through the decoded
+        // digest; the raw changed-table set is the comparison instead.
+        let durable_state = match comparison {
+            ComparisonMode::Decoded => Some(self.raw_reader.observe().await),
+            ComparisonMode::RawOnly => None,
+        };
+        let surface_answer = self.surface.answer.clone();
+        let changed_tables = before.changed_tables(&self.residue_digest().await);
+        let refusal_mutated = store_error.is_some().then_some(!changed_tables.is_empty());
+        (
+            StepObservation {
+                store_error,
+                surface_answer,
+                refusal_mutated,
+                runtime_commit_result,
+                freshness_head,
+                durable_state,
+                raw_changed_tables: match comparison {
+                    ComparisonMode::Decoded => None,
+                    ComparisonMode::RawOnly => Some(changed_tables.clone()),
+                },
+            },
+            changed_tables,
+        )
     }
 }
 
@@ -2236,6 +1985,7 @@ async fn runners_for_case_with_clock(
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
             expected_execution_state: None,
+            surface: SurfaceScratch::default(),
         },
         BackendRunner {
             name: "sqlite",
@@ -2262,6 +2012,7 @@ async fn runners_for_case_with_clock(
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
             expected_execution_state: None,
+            surface: SurfaceScratch::default(),
         },
         BackendRunner {
             name: "postgres",
@@ -2288,6 +2039,7 @@ async fn runners_for_case_with_clock(
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
             expected_execution_state: None,
+            surface: SurfaceScratch::default(),
         },
     ]
 }
@@ -2322,7 +2074,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 18);
+    assert_eq!(cases.len(), 24);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2347,7 +2099,13 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "attachment_intent_adopted_by_commit",
             "queued_work_claim_abandon_preserves_fencing_token",
             "delete_then_attempt_admission",
+            "store_surface_sweep",
+            "refused_surface_on_deleted_session_leaves_no_residue",
             "stale_handle_after_delete",
+            "corrupt_graph_node_refuses_every_reader",
+            "corrupt_pending_turn_input_refuses_list_and_claim",
+            "corrupt_queued_work_refuses_list_and_claim",
+            "corrupt_prior_checkpoint_refuses_read_modify_write",
         ]
     );
 }
@@ -2410,6 +2168,7 @@ async fn cross_backend_store_differential_agrees() {
     )
     .await;
     let mut divergences = String::new();
+    let mut residue_violations = String::new();
     eprintln!(
         "RUNNING cross-backend store differential; \
          compared_backends=[in-memory,sqlite,postgres]; cases={}",
@@ -2425,12 +2184,39 @@ async fn cross_backend_store_differential_agrees() {
             &run_nonce,
         )
         .await;
+        if case.name.comparison() == ComparisonMode::RawOnly {
+            runners.retain(|runner| runner.name != "in-memory");
+            assert_eq!(
+                runners.len(),
+                2,
+                "corrupt-input cases compare exactly the two backends that can hold                  undecodable bytes"
+            );
+        }
         fork_cases::prepare_retention_case(case.name, &runners).await;
         for (step_index, operation) in case.operations.iter().enumerate() {
             let mut observations = Vec::with_capacity(runners.len());
             for runner in &mut runners {
+                runner.surface.answer = None;
+                let before = runner.residue_digest().await;
                 let result = runner.apply(operation).await;
-                let observation = runner.observe(result).await;
+                let (observation, changed_tables) = runner
+                    .observe(&before, case.name.comparison(), result)
+                    .await;
+                // FIG-2841 law: a refused operation leaves durable state
+                // byte-identical to before the call. Recorded rather than
+                // panicked so the same step still reports every backend.
+                if observation.store_error.is_some() && !changed_tables.is_empty() {
+                    let _ = writeln!(
+                        residue_violations,
+                        "\ncase={} step={} operation={} backend={} error={} mutated_tables={:?}",
+                        case.name.as_str(),
+                        step_index + 1,
+                        operation.label(),
+                        runner.name,
+                        observation.store_error.as_deref().unwrap_or("<none>"),
+                        changed_tables,
+                    );
+                }
                 observations.push((runner.name, observation));
             }
             let agrees = observations.windows(2).all(|pair| pair[0].1 == pair[1].1);
@@ -2455,6 +2241,10 @@ async fn cross_backend_store_differential_agrees() {
     assert!(
         divergences.is_empty(),
         "cross-backend durable state diverged:{divergences}"
+    );
+    assert!(
+        residue_violations.is_empty(),
+        "a refused store operation left durable residue:{residue_violations}"
     );
     Box::pin(fork_cases::cross_owner_attachment_adoption(
         sqlite_root.path(),

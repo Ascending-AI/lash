@@ -13,6 +13,20 @@ impl RawDurableReader {
         }
     }
 
+    /// Decode-free per-backend residue digest. See `residue.rs` for why this
+    /// is separate from [`RawDurableReader::observe`].
+    pub(super) async fn residue_digest(&self) -> ResidueDigest {
+        match self {
+            Self::InMemory { .. } => in_memory_residue_digest(&self.observe().await),
+            Self::Sqlite {
+                path, session_id, ..
+            } => sqlite_residue_digest(path, session_id),
+            Self::Postgres {
+                pool, session_id, ..
+            } => postgres_residue_digest(pool, session_id).await,
+        }
+    }
+
     pub(super) async fn observe(&self) -> RawDurableState {
         match self {
             Self::InMemory { store, factory } => {
@@ -445,5 +459,369 @@ impl RawDurableReader {
                 }
             }
         }
+    }
+}
+
+/// Decode the full SQLite durable surface into the normalized, cross-backend
+/// comparable `RawDurableState`. Lives here rather than in the harness root so
+/// the root stays inside the repository's test-file line budget.
+pub(super) async fn read_sqlite_durable_state(
+    path: &Path,
+    session_id: &SessionId,
+    store: &Arc<dyn ConformancePersistence>,
+) -> RawDurableState {
+    let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
+    connection
+        .busy_timeout(Duration::from_secs(15))
+        .expect("configure SQLite durable reader busy timeout");
+    connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .expect("configure SQLite durable reader WAL mode");
+    connection
+        .execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+        .expect("configure SQLite durable reader pragmas");
+
+    let head: Option<(i64, Option<String>, Option<String>)> = connection
+        .query_row(
+            "SELECT head_revision, leaf_node_id, checkpoint_ref
+             FROM session_head
+             WHERE session_id = ?1",
+            [session_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .expect("read SQLite durable head");
+    let (head_revision, leaf_node_id, checkpoint_ref) = head.map_or(
+        (None, None, None),
+        |(revision, leaf_node_id, checkpoint_ref)| {
+            (
+                Some(revision as u64),
+                leaf_node_id,
+                checkpoint_ref.map(BlobRef),
+            )
+        },
+    );
+    let checkpoint = read_sqlite_checkpoint_observation(path, checkpoint_ref);
+    let durable_nodes = {
+        let mut statement = connection
+            .prepare(
+                "SELECT generation, node_id, parent_node_id, node_json
+                 FROM graph_nodes
+                 WHERE session_id = ?1 AND tombstoned = 0
+                 ORDER BY generation ASC",
+            )
+            .expect("prepare SQLite durable node read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .expect("read SQLite durable nodes")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite durable nodes")
+            .into_iter()
+            .enumerate()
+            .map(
+                |(ordinal, (_generation, node_id, parent_node_id, node_json))| DurableNode {
+                    ordinal,
+                    node_id,
+                    parent_node_id,
+                    bytes: normalized_sql_node_json(&node_json),
+                },
+            )
+            .collect()
+    };
+    let runtime_turn_commits = {
+        let mut statement = connection
+            .prepare(
+                "SELECT turn_id, turn_commit_hash, result_json
+                 FROM runtime_turn_commits
+                 WHERE session_id = ?1
+                 ORDER BY turn_id ASC",
+            )
+            .expect("prepare SQLite turn-commit receipt read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .expect("read SQLite turn-commit receipts")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite turn-commit receipts")
+            .into_iter()
+            .map(
+                |(operation, turn_commit_hash, result_json)| RuntimeTurnCommitObservation {
+                    operation,
+                    turn_commit_hash,
+                    result: serde_json::from_str(&result_json)
+                        .expect("decode SQLite turn-commit result"),
+                },
+            )
+            .collect()
+    };
+    let attachment_manifest = {
+        let mut statement = connection
+            .prepare(
+                "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
+                        committed_at_ms, owner_kind, owner_id, owner_incarnation
+                 FROM attachment_manifest
+                 WHERE session_id = ?1
+                 ORDER BY attachment_id ASC",
+            )
+            .expect("prepare SQLite attachment-manifest read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
+            })
+            .expect("read SQLite attachment manifest")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite attachment manifest")
+            .into_iter()
+            .map(
+                |(
+                    attachment_id,
+                    canonical_uri,
+                    intent_at_epoch_ms,
+                    written_at_epoch_ms,
+                    committed_at_epoch_ms,
+                    owner_kind,
+                    owner_id,
+                    owner_incarnation,
+                )| AttachmentManifestObservation {
+                    attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
+                    canonical_uri,
+                    intent_at_epoch_ms: intent_at_epoch_ms as u64,
+                    written: written_at_epoch_ms.is_some(),
+                    committed: committed_at_epoch_ms.is_some(),
+                    owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
+                    owner_id,
+                    owner_incarnation: owner_incarnation.map(|value| value as u64),
+                },
+            )
+            .collect()
+    };
+    let node_anchors = {
+        let mut statement = connection
+            .prepare(
+                "SELECT node_id, checkpoint_ref, source_session_id
+                 FROM node_anchors
+                 WHERE source_session_id = ?1
+                 ORDER BY node_id ASC",
+            )
+            .expect("prepare SQLite node-anchor read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok(NodeAnchorObservation {
+                    node_id: row.get(0)?,
+                    checkpoint_ref: BlobRef(row.get(1)?),
+                    source_session_id: SessionId::from(row.get::<_, String>(2)?),
+                })
+            })
+            .expect("read SQLite node anchors")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite node anchors")
+    };
+    let usage_deltas = {
+        let mut statement = connection
+            .prepare(
+                "SELECT source, model, input_tokens, output_tokens,
+                        cache_read_input_tokens, cache_write_input_tokens,
+                        reasoning_output_tokens
+                 FROM usage_deltas
+                 WHERE session_id = ?1
+                 ORDER BY seq ASC",
+            )
+            .expect("prepare SQLite usage-delta read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok(UsageDeltaObservation {
+                    source: row.get(0)?,
+                    model: row.get(1)?,
+                    usage: TokenUsage {
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                        cache_read_input_tokens: row.get(4)?,
+                        cache_write_input_tokens: row.get(5)?,
+                        reasoning_output_tokens: row.get(6)?,
+                    },
+                })
+            })
+            .expect("read SQLite usage deltas")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite usage deltas")
+    };
+    let session_meta = store
+        .load_session_meta()
+        .await
+        .expect("read SQLite session metadata")
+        .map(session_meta_observation);
+    let session_execution_leases = {
+        let mut statement = connection
+            .prepare(
+                "SELECT lease_owner_id, lease_owner_incarnation_id,
+                        lease_executor_id, lease_token,
+                        lease_fencing_token, lease_claimed_at_ms, lease_expires_at_ms,
+                        lease_term_ms
+                 FROM session_execution_leases
+                 WHERE session_id = ?1",
+            )
+            .expect("prepare SQLite session-execution-lease read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                let owner_id = row.get::<_, Option<String>>(0)?;
+                let incarnation_id = row.get::<_, Option<String>>(1)?;
+                Ok(SessionExecutionLeaseObservation {
+                    owner: lash_core::store_backend_support::lease_owner_from_columns(
+                        owner_id,
+                        incarnation_id,
+                    )
+                    .expect("decode SQLite session lease owner"),
+                    executor_id: row.get::<_, Option<String>>(2)?,
+                    lease_token: row.get::<_, Option<String>>(3)?,
+                    fencing_token: row.get::<_, i64>(4)? as u64,
+                    claimed: row.get::<_, i64>(5)? != 0,
+                    lease_term_ms: (row.get::<_, i64>(5)? != 0)
+                        .then_some(row.get::<_, i64>(7)? as u64),
+                })
+            })
+            .expect("read SQLite session-execution lease")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite session-execution lease")
+    };
+    let pending_turn_inputs = {
+        let mut statement = connection
+            .prepare(
+                "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
+                        CASE WHEN claim_token IS NULL
+                             THEN NULL
+                             ELSE claim_session_lease_generation
+                        END
+                 FROM pending_turn_inputs
+                 WHERE session_id = ?1
+                 ORDER BY enqueue_seq ASC",
+            )
+            .expect("prepare SQLite pending-input read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            })
+            .expect("read SQLite pending turn inputs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite pending turn inputs")
+            .into_iter()
+            .map(
+                |(
+                    input_id,
+                    enqueue_seq,
+                    state,
+                    claim_id,
+                    fencing_token,
+                    claim_session_lease_generation,
+                )| {
+                    assert_claim_id_spelling(
+                        claim_id.as_deref(),
+                        "tic",
+                        enqueue_seq as u64,
+                        fencing_token as u64,
+                    );
+                    PendingTurnInputObservation {
+                        input_id,
+                        state: TurnInputState::from_wire_str(&state)
+                            .expect("decode SQLite pending-input state"),
+                        claim_session_lease_generation: claim_session_lease_generation
+                            .map(|generation| generation as u64),
+                    }
+                },
+            )
+            .collect()
+    };
+    let queued_work_batches = {
+        let mut statement = connection
+            .prepare(
+                "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
+                        authority_json, merge_key, available_at_ms, claim_id, claim_token,
+                        claim_fencing_token, claim_session_lease_generation
+                 FROM queued_work_batches
+                 WHERE session_id = ?1
+                 ORDER BY enqueue_seq ASC",
+            )
+            .expect("prepare SQLite queued-work batch read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                ))
+            })
+            .expect("read SQLite queued-work batches")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite queued-work batches")
+    };
+    let queued_work_items = {
+        let mut statement = connection
+            .prepare(
+                "SELECT item.batch_id, item.item_index, item.payload_json
+                 FROM queued_work_items AS item
+                 JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
+                 WHERE batch.session_id = ?1
+                 ORDER BY batch.enqueue_seq ASC, item.item_index ASC",
+            )
+            .expect("prepare SQLite queued-work item read");
+        statement
+            .query_map([session_id.as_str()], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("read SQLite queued-work items")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode SQLite queued-work items")
+    };
+    let queued_work =
+        queued_work_observations_from_sql_rows(queued_work_batches, queued_work_items);
+    RawDurableState {
+        head_revision,
+        leaf_node_id,
+        checkpoint,
+        durable_nodes,
+        runtime_turn_commits,
+        attachment_manifest,
+        node_anchors,
+        usage_deltas,
+        session_meta,
+        session_execution_leases,
+        pending_turn_inputs,
+        queued_work,
     }
 }

@@ -372,6 +372,20 @@ pub fn ensure_supported_record_schema_version(
     expected: u32,
 ) -> Result<(), StoreError> {
     let Some(schema_version) = value.get("schema_version") else {
+        // A persisted record that did not decode to an object at all is
+        // corruption, not a version refusal: there is no record here whose
+        // version could be missing. Backends whose blobs carry no framing of
+        // their own (PostgreSQL stores the checkpoint manifest as bare
+        // MessagePack) otherwise report arbitrary corrupt bytes that happen to
+        // form a valid scalar -- a lone `0x00` decodes as the integer `0` --
+        // as `MissingRecordSchemaVersion`, while a framed backend reports
+        // `StoredDataCorrupt` for the same bytes (FIG-2841).
+        if !value.is_object() {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind,
+                message: format!("persisted {record_kind} record did not decode to an object"),
+            });
+        }
         return Err(StoreError::MissingRecordSchemaVersion {
             record_kind,
             expected,
