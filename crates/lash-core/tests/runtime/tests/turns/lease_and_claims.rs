@@ -2163,3 +2163,348 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         "the successor must advance from the predecessor's landed head"
     );
 }
+
+/// The text the second tab admits while the first worker is being replaced.
+const LATE_TAB_INPUT: &str = "second tab input admitted after the block was journaled";
+
+/// A journaling controller that validates a replayed envelope against its
+/// recorded canonical form the way a durable substrate does, and that stages
+/// the FIG-3078 race: admit, journal the turn's message block, admit a second
+/// tab's `next_turn` input, then lose the worker.
+struct AcceptanceWindowJournalController {
+    native: lash_core::facade_support::NativeRuntimeEffectController,
+    journal: std::sync::Mutex<
+        HashMap<
+            String,
+            (
+                lash_core::facade_support::CanonicalRuntimeEffectEnvelope,
+                lash_core::RuntimeEffectOutcome,
+            ),
+        >,
+    >,
+    late_admission: std::sync::Mutex<Option<Arc<RecordingStore>>>,
+    admitted_late: std::sync::Mutex<Option<lash_core::PendingTurnInput>>,
+    block_journaled: AtomicBool,
+    kill_armed: AtomicBool,
+    journaling: AtomicBool,
+}
+
+impl AcceptanceWindowJournalController {
+    fn new(store: Arc<RecordingStore>) -> Self {
+        Self {
+            native: lash_core::facade_support::NativeRuntimeEffectController::default(),
+            journal: std::sync::Mutex::new(HashMap::new()),
+            late_admission: std::sync::Mutex::new(Some(store)),
+            admitted_late: std::sync::Mutex::new(None),
+            block_journaled: AtomicBool::new(false),
+            kill_armed: AtomicBool::new(true),
+            journaling: AtomicBool::new(true),
+        }
+    }
+
+    /// The replaced turn is settled; later turns run on a live worker with no
+    /// journal of their own.
+    fn retire_journal(&self) {
+        self.journaling.store(false, Ordering::SeqCst);
+    }
+
+    fn late_input_id(&self) -> lash_core::InputId {
+        self.admitted_late
+            .lock_recover()
+            .as_ref()
+            .expect("the second tab's input was admitted")
+            .input_id
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for AcceptanceWindowJournalController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        Some(format!("acceptance-window-journal:{:p}", self))
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.native
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.native.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.native.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.native.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.native.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.native
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.native
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for AcceptanceWindowJournalController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        if !self.journaling.load(Ordering::SeqCst) {
+            return self.native.execute_effect(envelope, local_executor).await;
+        }
+        let replay_key = envelope.invocation.replay_key().to_string();
+        let reconstructed = envelope.canonical_form()?;
+        let recorded = {
+            let journal = self.journal.lock_recover();
+            journal.get(&replay_key).cloned()
+        };
+        if let Some((recorded, outcome)) = recorded {
+            lash_core::facade_support::validate_replayed_effect_envelope(
+                &recorded,
+                &reconstructed,
+                lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                None,
+            )?;
+            return Ok(outcome);
+        }
+        if self.block_journaled.load(Ordering::SeqCst)
+            && self.kill_armed.swap(false, Ordering::SeqCst)
+        {
+            return Err(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                "worker replaced after the turn's message block was journaled",
+            ));
+        }
+        let journals_the_block = matches!(
+            envelope.command,
+            lash_core::RuntimeEffectCommand::LlmCall { .. }
+        );
+        let outcome = self.native.execute_effect(envelope, local_executor).await?;
+        self.journal
+            .lock_recover()
+            .insert(replay_key, (reconstructed, outcome.clone()));
+        if journals_the_block && !self.block_journaled.swap(true, Ordering::SeqCst) {
+            let store = {
+                let mut slot = self.late_admission.lock_recover();
+                slot.take()
+            };
+            if let Some(store) = store {
+                let admitted = enqueue_idle_turn_input(
+                    store.as_ref(),
+                    &SessionId::from("root"),
+                    LATE_TAB_INPUT,
+                )
+                .await;
+                *self.admitted_late.lock_recover() = Some(admitted);
+            }
+        }
+        Ok(outcome)
+    }
+}
+
+fn single_answer_provider(text: &str) -> TestProvider {
+    mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: text.to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }])
+}
+
+/// FIG-3078: a `next_turn` input admitted after a turn's journaled acceptance
+/// never joins that turn's message block, so the replacement worker replays the
+/// identical block instead of aborting, and the late input is delivered exactly
+/// once by the next turn.
+#[tokio::test]
+pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn() {
+    let turn_id = &TurnId::from("claim-window-worker-replacement");
+    let store = Arc::new(RecordingStore::default());
+    let controller = Arc::new(AcceptanceWindowJournalController::new(Arc::clone(&store)));
+    let shared: Arc<dyn lash_core::RuntimeEffectController> = controller.clone();
+    let input = TurnInput::text("first tab input");
+
+    let mut first_worker = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        single_answer_provider("journaled answer"),
+        journal_replay_host(Arc::clone(&shared)),
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    ))
+    .await;
+    let first_error = first_worker
+        .stream_turn(
+            input.clone(),
+            TurnOptions::new(
+                CancellationToken::new(),
+                lash_core::ScopedEffectController::shared(
+                    Arc::clone(&shared),
+                    lash_core::ExecutionScope::turn("root", turn_id),
+                )
+                .expect("scope the replaced worker"),
+            ),
+        )
+        .await
+        .expect_err("the first worker is replaced after it journals the message block");
+    assert!(
+        first_error.code.is_worker_replacement_abort(),
+        "the staged failure must be the worker replacement itself: {first_error:?}"
+    );
+    let late_input_id = controller.late_input_id();
+    drop(first_worker);
+
+    let mut replacement = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        journal_replay_host(Arc::clone(&shared)),
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    ))
+    .await;
+    let replayed = Box::pin(
+        replacement.stream_turn(
+            input,
+            TurnOptions::new(
+                CancellationToken::new(),
+                lash_core::ScopedEffectController::shared(
+                    Arc::clone(&shared),
+                    lash_core::ExecutionScope::turn("root", turn_id),
+                )
+                .expect("scope the replacement worker"),
+            ),
+        ),
+    )
+    .await
+    .expect("the replacement must replay the journaled message block, not a re-claimed one");
+    let acceptance = replayed
+        .turn_input_acceptance
+        .expect("the replayed direct turn exposes its journaled acceptance");
+    assert_ne!(acceptance.input_id, late_input_id);
+
+    let after_replacement = lash_core::store::TurnInputStore::list_turn_input_applications(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("read applications after the replacement committed");
+    assert_eq!(
+        after_replacement
+            .iter()
+            .map(|application| application.input_id.clone())
+            .collect::<Vec<_>>(),
+        vec![acceptance.input_id.clone()],
+        "the replacement turn must apply only the row its journaled acceptance admitted"
+    );
+
+    controller.retire_journal();
+    let mut next_turn_worker = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        single_answer_provider("answer for the second tab"),
+        journal_replay_host(Arc::clone(&shared)),
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    ))
+    .await;
+    let drained = Box::pin(
+        next_turn_worker.stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            lash_core::ScopedEffectController::shared(
+                Arc::clone(&shared),
+                lash_core::ExecutionScope::turn("root", "claim-window-late-input-drain"),
+            )
+            .expect("scope the next turn"),
+        )),
+    )
+    .await
+    .expect("the deferred second-tab input must drain on the next turn")
+    .ran();
+    assert!(
+        drained.is_some(),
+        "the late input must be claimable by the next turn, not stranded"
+    );
+
+    let settled = lash_core::store::TurnInputStore::list_turn_input_applications(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("read applications after the next turn");
+    let delivered = settled
+        .iter()
+        .map(|application| application.input_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        delivered,
+        vec![acceptance.input_id.clone(), late_input_id.clone()],
+        "each admitted input is delivered exactly once, in admission order"
+    );
+    let late_application = settled
+        .iter()
+        .find(|application| application.input_id == late_input_id)
+        .expect("the late input is applied by some turn");
+    assert_ne!(
+        &late_application.turn_id, turn_id,
+        "the late input must ride the next turn, never the block the replaced worker journaled"
+    );
+}
