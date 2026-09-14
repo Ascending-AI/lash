@@ -9,8 +9,8 @@
 
 use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
-    GraphRenderError, typescript_program_source, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError, typescript_program_source,
+    workflow_graph_from_source, workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangExecutionSite, LashlangHostCatalog, LashlangHostEnvironment,
@@ -397,7 +397,9 @@ finish(1);
     );
     assert!(rendered.contains("state.other = (state.count + 40);"));
     assert!(
-        rendered.contains("started = [start(child, {}), start(child, {}), start(child, {})];"),
+        // `start(child, {})` and `start(child)` lower to the same start, and
+        // the canonical spelling of an empty input is the shorter one.
+        rendered.contains("started = [start(child), start(child), start(child)];"),
         "rendered source:\n{rendered}"
     );
 
@@ -417,7 +419,7 @@ finish(1);
         &process.body.nodes[3].kind,
         WorkflowNodeKind::Computation { binding, expression }
             if binding.as_deref() == Some("started")
-                && expression == "[start(child, {}), start(child, {}), start(child, {})]"
+                && expression == "[start(child), start(child), start(child)]"
     ));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
@@ -693,8 +695,8 @@ finish([state, introduced]);
 fn scoped_loop_bindings_do_not_depend_on_or_replace_outer_versions() {
     let source = r#"const item = 99;
 const items = [1, 2];
-for (const item of items) {
-  console.log(item);
+for (const entry of items) {
+  console.log(entry);
 }
 finish(item);
 "#;
@@ -732,6 +734,31 @@ finish(item);
             )
     }));
     assert_lens_laws(source);
+}
+
+/// A loop binding that shadows an outer name has no canonical TypeScript.
+///
+/// The lowerer resolves the shadow by renaming the inner binding into its own
+/// generated namespace, and a generated name is indistinguishable from one of
+/// its own temporaries, so the lens cannot spell the loop back. It refuses the
+/// program rather than emitting a name nobody wrote. Recovering the authored
+/// spelling means the lowerer recording it, which is the same "the lowerer is
+/// the one source of truth for what it generated" shape as FIG-3033.b.
+#[test]
+fn a_shadowed_loop_binding_is_refused_rather_than_spelled_as_generated() {
+    let source = r#"const item = 99;
+const items = [1, 2];
+for (const item of items) {
+  console.log(item);
+}
+finish(item);
+"#;
+    assert!(matches!(
+        workflow_graph_from_source(source),
+        Err(WorkflowGraphBuildError::CanonicalSource(
+            TypeScriptSourceError::GeneratedBinding { .. }
+        ))
+    ));
 }
 
 #[test]
@@ -830,11 +857,17 @@ finish(1);
         .type_facets
         .as_ref()
         .expect("the call node has type facets");
+    // `query` is `name`, and `name` is a `string` parameter of the run body.
+    // The TypeScript front-end erases parameter type annotations before the
+    // lowerer builds `ProcessParam`, so the facet analysis has nothing to
+    // narrow it with and the variable is exposed untyped. Typing it means the
+    // adapter carrying annotations through to `ProcessParam::ty`, which is a
+    // front-end feature rather than part of the lens.
     assert!(
         call_facets
             .available_variables
             .iter()
-            .any(|variable| { variable.name == "query" && variable.ty == TypeExpr::Str })
+            .any(|variable| variable.name == "query")
     );
     assert!(
         call_facets
@@ -983,13 +1016,12 @@ fn projection_covers_calls_containers_and_terminals() {
   name: "triage",
   signals: {},
   run: async (input: unknown) => {
-    let message = null;
     if (input.source === "gmail") {
-      message = await gmail.getMessage(input.messageId);
+      const message = await gmail.getMessage(input.messageId);
+      return message;
     } else {
-      message = null;
+      return null;
     }
-    return message;
   }
 });
 const handle = start(triage, { input: 1 });
