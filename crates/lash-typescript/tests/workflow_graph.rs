@@ -1083,7 +1083,7 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
         .expect("a labeled node in the module body");
     assert_eq!(node.name.as_str(), "Lookup");
     assert_eq!(
-        node.description.as_ref().map(|text| text.as_str()),
+        node.description.as_deref(),
         Some("Read the app's current state")
     );
 
