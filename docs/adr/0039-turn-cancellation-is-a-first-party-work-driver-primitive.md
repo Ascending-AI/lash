@@ -151,8 +151,12 @@ both sides of the seam. Because the disposition comparison runs before the
 escalation promise is touched, only a matching-policy request can ever write
 one, and every reader of that promise — the driver's receipt, the owner's
 journaled peek, its live watch, and the closure that seals it at final commit
-— projects the escalation back onto the base winner's disposition. Timing
-escalation therefore changes when a cancellation is honoured and nothing else,
+— projects the escalation back onto the base winner's disposition. That
+projection is deliberately narrow: `undelivered` alone comes from the base
+winner. `request_id`, `origin`, `reason`, `mode` and `honoured_after_step` come
+from the escalation row, because those describe the escalating request and when
+it takes effect — the point of escalating. Timing escalation therefore changes
+when a cancellation is honoured and nothing else,
 whoever wrote the escalation row. Durably, a conflicting repeat is not an
 escalation either: the request row and the intent revision that fences the
 owner's closure CAS both stay where the accepted request left them, so a

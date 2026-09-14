@@ -22,62 +22,39 @@ mod config_commands;
 mod state_version;
 mod turn_cancel;
 
-/// Prove that an exact commit replay cannot consume a different pending
-/// cancellation-closure authorization on the same turn address.
-pub async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_exact_replay_preserves_different_pending_authorization(factory).await;
+/// Adapt one `turn_cancel` law to the factory type the catalogue in
+/// `macros.rs` addresses laws through. The bodies live in the `turn_cancel`
+/// submodule; these are the names the registration macro sees.
+macro_rules! turn_cancel_law {
+    ($($name:ident: $what:literal,)*) => {$(
+        #[doc = concat!("Prove that ", $what, ".")]
+        pub async fn $name(factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>) {
+            turn_cancel::$name(factory).await;
+        }
+    )*};
 }
 
-/// Prove that cancellation closure settlement is fenced and immutable.
-pub async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_closure_settlement_is_fenced_and_non_overwritable(factory).await;
-}
-
-/// Prove that cancellation closure scope retirement serializes with authorization.
-pub async fn turn_cancel_scope_retirement_serializes_with_authorization(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_scope_retirement_serializes_with_authorization(factory).await;
-}
-
-/// Prove that escalation advances intent without replacing the durable base.
-pub async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_request_escalation_advances_intent_without_replacing_base(factory)
-        .await;
-}
-
-/// Prove that repair retains the base cancellation across escalation and reopen.
-pub async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_repair_preserves_base_across_escalation_and_reopen(factory).await;
-}
-
-/// Prove that repair orders cancellation intent and ordinary redefer atomically.
-pub async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_repair_orders_intent_and_ordinary_redefer(factory).await;
-}
-
-/// Prove that final commit applies its cancellation-intent CAS atomically.
-pub async fn turn_cancel_final_commit_intent_cas_is_atomic(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_final_commit_intent_cas_is_atomic(factory).await;
-}
-
-/// Prove that a conflicting-disposition repeat leaves no durable trace.
-pub async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
-    turn_cancel::turn_cancel_conflicting_repeat_leaves_no_durable_trace(factory).await;
+turn_cancel_law! {
+    turn_cancel_exact_replay_preserves_different_pending_authorization:
+        "an exact commit replay cannot consume a different pending \
+         cancellation-closure authorization on the same turn address",
+    turn_cancel_closure_settlement_is_fenced_and_non_overwritable:
+        "cancellation closure settlement is fenced and immutable",
+    turn_cancel_scope_retirement_serializes_with_authorization:
+        "cancellation closure scope retirement serializes with authorization",
+    turn_cancel_request_escalation_advances_intent_without_replacing_base:
+        "escalation advances intent without replacing the durable base",
+    turn_cancel_repair_preserves_base_across_escalation_and_reopen:
+        "repair retains the base cancellation across escalation and reopen",
+    turn_cancel_repair_orders_intent_and_ordinary_redefer:
+        "repair orders cancellation intent and ordinary redefer atomically",
+    turn_cancel_final_commit_intent_cas_is_atomic:
+        "final commit applies its cancellation-intent CAS atomically",
+    turn_cancel_conflicting_repeat_leaves_no_durable_trace:
+        "a conflicting-disposition repeat leaves no durable trace",
+    turn_cancel_concurrent_opposing_requests_converge:
+        "opposing first requests racing on one address converge on a single \
+         accepted policy, durably and across reopen",
 }
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
