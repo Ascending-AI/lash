@@ -70,6 +70,8 @@ pub(super) enum SurfaceMethod {
     CancelPendingTurnInputs,
     CancelPendingTurnInputSuffix,
     OrphanedActiveTurnIds,
+    CommittedTurnExists,
+    UncommittedTurnExists,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -109,6 +111,8 @@ impl SurfaceMethod {
             Self::CancelPendingTurnInputs => "surface:cancel_pending_turn_inputs",
             Self::CancelPendingTurnInputSuffix => "surface:cancel_pending_turn_input_suffix",
             Self::OrphanedActiveTurnIds => "surface:orphaned_active_turn_ids",
+            Self::CommittedTurnExists => "surface:committed_turn_exists_committed",
+            Self::UncommittedTurnExists => "surface:committed_turn_exists_uncommitted",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -136,6 +140,12 @@ fn surface(method: SurfaceMethod) -> StoreOperation {
 }
 
 const UNKNOWN_BATCH_ID: &str = "fig-2841-unknown-batch";
+/// A turn id no case ever commits. Paired with [`SURFACE_COMMITTED_TURN_ID`]
+/// so the membership read is driven over both answers, not just the one a
+/// backend could return by refusing to look.
+const UNCOMMITTED_TURN_ID: &str = "fig-2841-uncommitted-turn";
+/// The turn id the surface sweep's seed commit stamps.
+const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 /// An attachment id no case ever writes. The manifest drivers use
 /// it so the inventory covers those methods without mutating an attachment the
 /// surrounding case depends on: an unknown entity is itself a refusal driver,
@@ -148,17 +158,25 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::StoreSurfaceSweep,
         operations: vec![
-            commit(
-                "seed_surface_sweep_graph",
-                0,
-                append(
+            // The seed commit stamps a turn so the inventory can drive
+            // `committed_turn_exists` over a turn that is actually committed.
+            StoreOperation::Commit {
+                label: "seed_surface_sweep_graph",
+                expected_head_revision: 0,
+                graph: append(
                     vec![
                         NodeSpec::new("root", None, "root"),
                         NodeSpec::new("active-frame", Some("root"), "active"),
                     ],
                     Some("active-frame"),
                 ),
-            ),
+                turn_commit: Some(TurnCommitSpec {
+                    turn_id: SURFACE_COMMITTED_TURN_ID,
+                }),
+                checkpoint: CheckpointSpec::Empty,
+                usage: false,
+                adopt_attachment: false,
+            },
             StoreOperation::EnqueueNextTurnInput,
             StoreOperation::EnqueueClaimableQueuedWork,
             StoreOperation::AcquireSessionLease {
@@ -186,6 +204,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::AbandonTurnInputClaim),
             surface(SurfaceMethod::AbandonTurnInputClaims),
             surface(SurfaceMethod::OrphanedActiveTurnIds),
+            surface(SurfaceMethod::CommittedTurnExists),
+            surface(SurfaceMethod::UncommittedTurnExists),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
@@ -522,6 +542,18 @@ impl BackendRunner {
                     )
                     .await?;
                 format!("turn_ids={}", turn_ids.len())
+            }
+            SurfaceMethod::CommittedTurnExists => {
+                let exists = store
+                    .committed_turn_exists(&lash_core::TurnId::from(SURFACE_COMMITTED_TURN_ID))
+                    .await?;
+                format!("exists={exists}")
+            }
+            SurfaceMethod::UncommittedTurnExists => {
+                let exists = store
+                    .committed_turn_exists(&lash_core::TurnId::from(UNCOMMITTED_TURN_ID))
+                    .await?;
+                format!("exists={exists}")
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);
