@@ -1078,6 +1078,25 @@ impl<'run> ToolContext<'run> {
         self
     }
 
+    /// Test-only: supply the prepared tool call id and enclosing process a
+    /// leaf body would receive from the attempt coordinator.
+    ///
+    /// A body that declares tool intents derives its declaration identity from
+    /// the prepared call id, and a body that appends to the process it runs
+    /// inside needs that process's id. Neither is something a mock host has,
+    /// so a unit test of such a body sets them here rather than reaching past
+    /// the sealed context.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn __with_attempt_binding_for_testing(
+        mut self,
+        tool_call_id: Option<String>,
+        runtime_process_id: Option<ProcessId>,
+    ) -> Self {
+        self.tool_call_id = tool_call_id;
+        self.runtime_process_id = runtime_process_id;
+        self
+    }
+
     pub(crate) fn with_tool_execution_binding(mut self, binding: serde_json::Value) -> Self {
         self.tool_execution_binding = binding;
         self

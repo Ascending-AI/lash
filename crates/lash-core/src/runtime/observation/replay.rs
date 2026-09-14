@@ -234,6 +234,10 @@ impl SessionObservationEvent {
     ///
     /// Owned rather than borrowed: the cursor stores the identity as a slice of
     /// a larger string, and a `&SessionId` cannot be reborrowed out of a `&str`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the store writes cursors in the parsable form"
+    )]
     pub fn session_id(&self) -> SessionId {
         SessionId::from(
             self.cursor
@@ -244,6 +248,10 @@ impl SessionObservationEvent {
     }
 
     /// Returns the replay-store incarnation named by this event's durable cursor.
+    #[expect(
+        clippy::expect_used,
+        reason = "the store writes cursors in the parsable form"
+    )]
     pub fn replay_incarnation_id(&self) -> &str {
         self.cursor
             .parse()
@@ -252,6 +260,10 @@ impl SessionObservationEvent {
     }
 
     /// Returns the session revision named by this event's durable cursor.
+    #[expect(
+        clippy::expect_used,
+        reason = "the store writes cursors in the parsable form"
+    )]
     pub fn revision(&self) -> SessionRevision {
         self.cursor
             .parse()
@@ -402,6 +414,10 @@ impl PreparedLiveReplayPublication {
     /// Return the cursor at the end of this reserved publication.
     ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
+    #[expect(
+        clippy::expect_used,
+        reason = "a prepared publication holds at least one event"
+    )]
     pub fn latest_cursor(&self) -> &SessionCursor {
         &self
             .events
@@ -499,6 +515,10 @@ async fn live_replay_recv(
 impl Stream for LiveReplaySubscription {
     type Item = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the store writes cursors in the parsable form"
+    )]
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(event) = self.replay.pop_front() {
             return Poll::Ready(Some(Ok(event)));
@@ -780,6 +800,10 @@ struct StoredObservationEvent {
 }
 
 impl InMemoryLiveReplayStore {
+    #[expect(
+        clippy::expect_used,
+        reason = "the store writes cursors in the parsable form"
+    )]
     fn settle_ready(
         config: &InMemoryLiveReplayStoreConfig,
         buffer: &mut LiveReplaySessionBuffer,
@@ -962,6 +986,10 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a prepared publication holds at least one event"
+    )]
     fn publish_prepared(
         &self,
         prepared: PreparedLiveReplayPublication,

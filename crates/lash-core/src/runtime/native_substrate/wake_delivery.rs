@@ -83,6 +83,10 @@ impl Drop for WakeDeliveryDriverLifetime {
 
 impl WakeDeliveryDriver {
     /// Start the autonomous startup scan and bounded polling loop.
+    #[expect(
+        clippy::expect_used,
+        reason = "the default work cadence policy is valid"
+    )]
     pub fn new(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,

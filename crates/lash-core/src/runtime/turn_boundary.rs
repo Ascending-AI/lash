@@ -340,7 +340,14 @@ impl TurnBoundary {
                 frame_key,
                 self.state().current_frame_node_id.as_deref(),
             ),
-            _ => false,
+            _ => match self.graph_appends.pending_frame_switch() {
+                Some(recorded) => agent_frame_switch_materializes(
+                    &self.state().session_id,
+                    &recorded.frame_key,
+                    self.state().current_frame_node_id.as_deref(),
+                ),
+                None => false,
+            },
         };
         let (store, plugins, execution_state_update) = match session {
             Some(session) => {
@@ -500,7 +507,14 @@ impl TurnBoundary {
         })?;
         // Appends recorded after finalization (finalize-turn hooks) land here,
         // after everything the turn materialized.
-        graph_appends.fold_into_final_state(state);
+        graph_appends
+            .fold_into_final_state(state)
+            .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(RuntimeError::new(
+                    RuntimeErrorCode::PluginFinalizeTurn,
+                    error.to_string(),
+                )),
+            })?;
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -549,6 +563,10 @@ impl TurnBoundary {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::expect_used,
+        reason = "derived graph node identities are non-empty"
+    )]
     async fn apply_commit(
         &mut self,
         store: &(dyn RuntimePersistence + '_),

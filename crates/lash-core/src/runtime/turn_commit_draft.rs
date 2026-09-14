@@ -28,6 +28,16 @@ pub(in crate::runtime) struct RecordedTurnGraphAppend {
     outcome: crate::AppendSessionNodesOutcome,
 }
 
+/// A FIG-3107 plug-in frame switch recorded under the running turn: one slot,
+/// consumed by the turn's final commit, never at an intermediate boundary.
+#[derive(Clone, Debug)]
+pub(in crate::runtime) struct RecordedFrameSwitch {
+    pub(in crate::runtime) identity: String,
+    pub(in crate::runtime) frame_key: crate::FrameKey,
+    request: crate::SwitchAgentFrameRequest,
+    outcome: crate::OpenAgentFrameResult,
+}
+
 #[derive(Debug)]
 struct TurnGraphAppendDraftInner {
     /// Node ids on the resident active path when the turn began, plus every
@@ -36,6 +46,9 @@ struct TurnGraphAppendDraftInner {
     active_node_ids: HashSet<crate::NodeId>,
     leaf_node_id: Option<crate::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
+    /// Plugin-visible frame switch (FIG-3107): recorded under the running
+    /// turn's id, materialized by the turn's final commit.
+    frame_switch: Option<RecordedFrameSwitch>,
     /// Prefix of `recorded` already folded into the turn's final state.
     applied: usize,
 }
@@ -77,6 +90,7 @@ impl TurnGraphAppendDraft {
                 active_node_ids,
                 leaf_node_id: state.session_graph.leaf_node_id.clone(),
                 recorded: Vec::new(),
+                frame_switch: None,
                 applied: 0,
             })),
             clock,
@@ -154,11 +168,107 @@ impl TurnGraphAppendDraft {
         apply_recorded_appends(state, &recorded, self.clock.as_ref());
     }
 
+    /// Records a FIG-3107 frame switch under the running turn's scope and
+    /// answers it the way the turn's materialization would: a replayed
+    /// operation id answers the first outcome, a reused operation id for a
+    /// different frame is a typed conflict, and a switch naming the
+    /// already-current frame answers `opened = false` with no fold work.
+    pub(in crate::runtime) fn record_frame_switch(
+        &self,
+        session_id: &SessionId,
+        current_frame_node_id: Option<&str>,
+        request: &crate::SwitchAgentFrameRequest,
+    ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
+        if request.operation_id.trim().is_empty() {
+            return Err(crate::PluginError::Session(
+                "an agent-frame switch requires a non-empty stable operation id".to_string(),
+            ));
+        }
+        let frame_node_id =
+            crate::session_graph::frame_node_id(session_id, request.frame_key.as_str());
+        let mut inner = self.inner.lock_recover();
+        if let Some(recorded) = &inner.frame_switch {
+            if recorded.identity == request.operation_id {
+                if recorded.frame_key == request.frame_key {
+                    return Ok(recorded.outcome.clone());
+                }
+                return Err(crate::PluginError::Session(format!(
+                    "agent-frame switch `{operation_id}` already switched to `{target:?}`, refusing `{key:?}`",
+                    operation_id = request.operation_id,
+                    target = recorded.frame_key,
+                    key = request.frame_key
+                )));
+            }
+            return Err(crate::PluginError::Session(format!(
+                "turn `{session_id}` already carries agent-frame switch `{}`; refusing `{}` — one turn materializes at most one switch",
+                recorded.identity, request.operation_id
+            )));
+        }
+        let outcome = if current_frame_node_id == Some(frame_node_id.as_str()) {
+            crate::OpenAgentFrameResult {
+                frame_node_id: frame_node_id.clone().into_inner(),
+                opened: false,
+                initial_node_ids: Vec::new(),
+            }
+        } else {
+            crate::OpenAgentFrameResult {
+                frame_node_id: frame_node_id.clone().into_inner(),
+                opened: true,
+                initial_node_ids: (0..request.initial_nodes.len() as u64)
+                    .map(|ordinal| {
+                        crate::session_graph::draft_node_id(request.frame_key.as_str(), ordinal)
+                    })
+                    .collect(),
+            }
+        };
+        inner.frame_switch = Some(RecordedFrameSwitch {
+            identity: request.operation_id.clone(),
+            frame_key: request.frame_key.clone(),
+            request: request.clone(),
+            outcome: outcome.clone(),
+        });
+        Ok(outcome)
+    }
+
     /// Folds the appends recorded since the previous fold into `state`, after
     /// whatever nodes `state` already holds.
-    pub(in crate::runtime) fn fold_into_final_state(&self, state: &mut RuntimeSessionState) {
-        let pending = self.take_pending();
+    pub(in crate::runtime) fn fold_into_final_state(
+        &self,
+        state: &mut RuntimeSessionState,
+    ) -> Result<(), crate::PluginError> {
+        let (pending, frame_switch) = {
+            let mut inner = self.inner.lock_recover();
+            let pending = inner.recorded[inner.applied..].to_vec();
+            inner.applied = inner.recorded.len();
+            let frame_switch = inner.frame_switch.take();
+            (pending, frame_switch)
+        };
         apply_recorded_appends(state, &pending, self.clock.as_ref());
+        if let Some(recorded) = frame_switch {
+            let request = crate::OpenAgentFrameRequest::new(
+                recorded.request.frame_key.clone(),
+                recorded.request.reason.clone(),
+            )
+            .with_initial_nodes(recorded.request.initial_nodes.clone());
+            crate::runtime::state::open_agent_frame_in_state_with_clock(
+                state,
+                request,
+                self.clock.as_ref(),
+            )
+            .map_err(|error| crate::PluginError::Session(error.to_string()))
+            .map(|result| {
+                debug_assert_eq!(result.frame_node_id, recorded.outcome.frame_node_id);
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// The frame switch recorded but not yet folded, if any. Read before the
+    /// final fold: the final commit clears protocol execution when this
+    /// materializes, exactly as an in-frame-switching outcome would.
+    pub(in crate::runtime) fn pending_frame_switch(&self) -> Option<RecordedFrameSwitch> {
+        self.inner.lock_recover().frame_switch.clone()
     }
 
     /// Drains the appends recorded since the previous fold.
@@ -211,6 +321,10 @@ impl TurnCommitDraft {
         Self::from_state_with_graph_appends(state, clock, draft_namespace, graph_appends)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the runtime's current frame resolves in its own graph"
+    )]
     pub(super) fn from_state_with_graph_appends(
         mut state: RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,
@@ -352,6 +466,10 @@ impl TurnCommitDraft {
         self.graph.mark_node_ids_persisted(node_ids);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "derived graph node identities are non-empty"
+    )]
     pub(super) fn remap_node_ids(
         &mut self,
         session_id: &SessionId,
@@ -554,7 +672,7 @@ mod tests {
                 )
                 .expect("finalize-hook append"),
         );
-        appends.fold_into_final_state(&mut state);
+        let _ = appends.fold_into_final_state(&mut state);
 
         let path = state
             .session_graph

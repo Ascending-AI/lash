@@ -327,17 +327,27 @@ pub(crate) async fn record_and_project_failure(
     Ok(None)
 }
 
-/// One bounded recovery attempt. Success returns the fresh prompt window;
-/// failure records the attempt (and, at the cap, the exhausted record) and
-/// returns `None`, leaving the turn on the ordinary rolling projection.
+/// One bounded recovery attempt. Success returns the fresh prompt window; failure
+/// records the attempt (and, at the cap, the exhausted record) and returns `None`, leaving
+/// the turn on the ordinary rolling projection.
+///
+/// FIG-3107: the summarizer now runs on the real compaction seam — an ordinary
+/// `new_runtime_internal_compaction` managed child turn over the committed
+/// history — and the summary lands in a durable recovery frame through
+/// [`SessionGraphService::switch_agent_frame`], the same durable semantics as
+/// the in-turn frame-switch control. Recovery no longer projects a window
+/// into the exhausted frame, and no `DirectCompletionClient` is spent: the
+/// residual window projection below covers only this running turn's prompt
+/// view, while the durable session continues in the switched frame.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_overflow_recovery(
     session_id: &SessionId,
     history_messages: &[Message],
     history_snapshot: &SessionSnapshot,
-    direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
+    session_lifecycle: Arc<dyn lash_core::plugin::SessionLifecycleService>,
     session_graph: &dyn lash_core::plugin::SessionGraphService,
-    execution_scope: &lash_core::ExecutionScope,
+    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    current_frame_node_id: Option<&str>,
     trace_context: lash_core::TraceContext,
     state: OverflowRecoveryState,
     max_context_tokens: usize,
@@ -370,7 +380,7 @@ pub(crate) async fn run_overflow_recovery(
             history_snapshot,
             "",
             session_graph,
-            execution_scope,
+            scoped_effect_controller.execution_scope(),
             trace_context,
             attempt_no,
             "insufficient_reduction",
@@ -413,7 +423,7 @@ pub(crate) async fn run_overflow_recovery(
             &request_snapshot,
             &prompt_text,
             session_graph,
-            execution_scope,
+            scoped_effect_controller.execution_scope(),
             trace_context,
             attempt_no,
             "summarizer_request_exceeds_window",
@@ -421,101 +431,139 @@ pub(crate) async fn run_overflow_recovery(
         .await;
     }
 
-    // The summarizer runs as one direct, journaled LLM completion over the
-    // elided history: a replay of the same operation is replay, not a new
-    // summarization spend, and no child session has to hydrate anything.
-    let mut user_text = String::new();
-    for message in &summarizer_prefix {
-        for part in message.parts.iter() {
-            user_text.push_str(&part.content);
-            user_text.push('\n');
-        }
-    }
-    let model_id = history_snapshot.policy.model.id.clone();
-    let direct_request = lash_core::facade_support::DirectRequest {
-        instructions: None,
-        model: model_id,
-        model_variant: lash_core::ReasoningSelection::ProviderDefault,
-        model_capability: lash_core::ModelCapability::default(),
-        messages: vec![lash_core::facade_support::DirectMessage {
-            role: lash_core::facade_support::DirectRole::User,
-            parts: vec![lash_core::facade_support::DirectPart::Text(format!(
-                "{user_text}\n\nProvide a detailed summary of the conversation above so the task can continue without the full history.\n\nAdditional focus:\n{}\n",
-                recovery_instructions(elided_parts)
-            ))],
-        }],
-        output: lash_core::facade_support::DirectOutputSpec::Text,
-        generation: Default::default(),
-        stream_events: None,
-        session_id: Some(session_id.clone()),
-        caused_by: None,
-        replay: None,
-    };
-    let summarized = direct_completions
-        .direct_completion(direct_request, "rolling_history.overflow_recovery")
+    // The summarizer runs as the runtime-internal compaction managed child
+    // turn: the same seam the ordinary compaction policy uses, hydrated from
+    // the parent's durable state (FIG-3107).
+    let summary = {
+        let summarized = summarize_compaction_prefix(
+            session_id,
+            history_snapshot,
+            summarizer_prefix.clone(),
+            Some(&recovery_instructions(elided_parts)),
+            session_lifecycle,
+            scoped_effect_controller.clone(),
+        )
         .await;
-
-    let summary = match summarized {
-        Ok(completion) if !completion.text.trim().is_empty() => completion.text,
-        Ok(_) => {
-            return record_and_project_failure(
-                session_id,
-                history_snapshot,
-                &request_snapshot,
-                &prompt_text,
-                session_graph,
-                execution_scope,
-                trace_context,
-                attempt_no,
-                "insufficient_reduction",
-            )
-            .await;
-        }
-        Err(error) => {
-            return record_and_project_failure(
-                session_id,
-                history_snapshot,
-                &request_snapshot,
-                &prompt_text,
-                session_graph,
-                execution_scope,
-                trace_context,
-                attempt_no,
-                Box::leak(format!("summarizer_failed: {error}").into_boxed_str()),
-            )
-            .await;
+        match summarized {
+            Ok(Some(summary)) => summary,
+            Ok(None) => {
+                return record_and_project_failure(
+                    session_id,
+                    history_snapshot,
+                    &request_snapshot,
+                    &prompt_text,
+                    session_graph,
+                    scoped_effect_controller.execution_scope(),
+                    trace_context,
+                    attempt_no,
+                    "insufficient_reduction",
+                )
+                .await;
+            }
+            Err(error) => {
+                return record_and_project_failure(
+                    session_id,
+                    history_snapshot,
+                    &request_snapshot,
+                    &prompt_text,
+                    session_graph,
+                    scoped_effect_controller.execution_scope(),
+                    trace_context,
+                    attempt_no,
+                    Box::leak(format!("summarizer_failed: {error}").into_boxed_str()),
+                )
+                .await;
+            }
         }
     };
-
-    let window = recovered_prompt_window(&summary, history_messages, current_request);
 
     emit_recovery_trace(
         session_graph,
-        trace_context,
+        trace_context.clone(),
         TRACE_OVERFLOW_RECOVERY_OUTCOME,
         None,
         Some("completed"),
     )
     .await?;
-    let nodes = vec![
-        compaction_summary_seed(&summary),
-        lash_core::SessionAppendNode::message(recovery_record_message(
-            OverflowRecoveryRecord::Completed,
-        )),
-    ];
+    // The terminal record is durable in the old frame; the summary itself is
+    // the switched frame's seed, journaled with the continuing turn's commit.
     append_recovery_record(
         session_id,
         history_snapshot,
         &request_snapshot,
         &prompt_text,
         session_graph,
-        execution_scope,
+        scoped_effect_controller.execution_scope(),
         "completed".to_string(),
-        nodes,
+        vec![lash_core::SessionAppendNode::message(
+            recovery_record_message(OverflowRecoveryRecord::Completed),
+        )],
     )
     .await?;
 
+    // Switch to the recovery frame: a compaction-derived durable frame whose
+    // seed is the recovered summary, materialized by this turn's own commit.
+    switch_recovery_frame(
+        session_id,
+        history_snapshot,
+        &request_snapshot,
+        &prompt_text,
+        session_graph,
+        scoped_effect_controller,
+        current_frame_node_id,
+        &summary,
+    )
+    .await?;
+
+    let window = recovered_prompt_window(&summary, history_messages, current_request);
     Ok(Some(window))
+}
+
+/// Opens the recovery frame through the plugin-visible frame-switch seam
+/// (FIG-3107). The operation id materializes from the same compaction child
+/// identity as the append above, so re-deriving the recovery answers the same
+/// switch commit idempotently.
+#[allow(clippy::too_many_arguments)]
+async fn switch_recovery_frame(
+    session_id: &SessionId,
+    history_snapshot: &SessionSnapshot,
+    request_snapshot: &SessionSnapshot,
+    prompt_text: &str,
+    session_graph: &dyn lash_core::plugin::SessionGraphService,
+    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    current_frame_node_id: Option<&str>,
+    summary: &str,
+) -> Result<(), ContextError> {
+    let (child_session, _) = compaction_child_ids(
+        session_id,
+        history_snapshot,
+        request_snapshot,
+        prompt_text,
+        scoped_effect_controller.execution_scope(),
+    )?;
+    let discriminator = child_session
+        .as_str()
+        .split_once("-compaction:")
+        .map_or_else(|| child_session.to_string(), |(_, tail)| tail.to_string());
+    let frame_key = lash_core::FrameKey::from_compaction_material(
+        session_id,
+        &format!("rolling-history-overflow-recovery:{discriminator}"),
+        current_frame_node_id.unwrap_or_default(),
+    );
+    session_graph
+        .switch_agent_frame(
+            session_id,
+            lash_core::SwitchAgentFrameRequest::new(
+                format!("rolling-history-overflow-recovery/switch/{discriminator}"),
+                frame_key,
+                lash_core::AgentFrameReason::compaction(),
+            )
+            .with_task("context-overflow recovery")
+            .with_initial_nodes(vec![compaction_summary_seed(summary)]),
+        )
+        .await
+        .map_err(ContextError::from)?;
+    Ok(())
 }
 
 /// Marker directive the `after_turn` hook queues for a persisted overflow.

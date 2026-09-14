@@ -158,6 +158,7 @@ impl<T> SelectedQueuedWorkDrainOutcome<T> {
     /// Returns the executed turn or panics with `message` after a successful
     /// drain that was fully satisfied without running a selected turn.
     #[track_caller]
+    #[expect(clippy::expect_used, reason = "the crate's own panicking accessor")]
     pub fn expect(self, message: &str) -> T {
         self.turn.expect(message)
     }
@@ -180,6 +181,10 @@ pub enum SelectedQueuedWorkDrainError {
 }
 
 impl LashRuntime {
+    #[expect(
+        clippy::expect_used,
+        reason = "an automatic drain that ran no turn records why"
+    )]
     pub async fn stream_next_queued_work(
         &mut self,
         opts: TurnOptions<'_>,
@@ -214,6 +219,10 @@ impl LashRuntime {
             .map(|result| result.outcome)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "an automatic drain records its turn or its claim refusal"
+    )]
     async fn stream_queued_work(
         &mut self,
         opts: TurnOptions<'_>,

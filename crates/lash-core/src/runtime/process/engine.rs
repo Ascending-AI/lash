@@ -321,6 +321,10 @@ pub struct ProcessEngineRunContext<'run> {
 
 impl<'run> ProcessEngineRunContext<'run> {
     #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::expect_used,
+        reason = "the process worker installs the write authority"
+    )]
     pub(crate) fn new(
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,

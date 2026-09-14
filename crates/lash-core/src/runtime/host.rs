@@ -136,6 +136,10 @@ impl RuntimeHostConfig {
     /// rather than silently inheriting policy. Use
     /// [`RuntimeHostConfig::in_memory`] to opt into the in-process / in-memory
     /// implementations while still supplying the budget.
+    #[expect(
+        clippy::expect_used,
+        reason = "the concurrency default is a non-zero literal"
+    )]
     pub fn new(
         effect_host: Arc<dyn EffectHost>,
         attachment_store: Arc<dyn crate::AttachmentStore>,

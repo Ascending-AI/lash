@@ -219,7 +219,11 @@ pub enum ToolOutcome {
     /// [`ToolContext::completion_key`](crate::ToolContext::completion_key) it took
     /// before returning. The outcome arrives later through the resolve seam and is
     /// shaped by the carried [`PendingCompletion`].
-    Pending(PendingCompletion),
+    ///
+    /// Boxed so that the outcome every tool attempt returns — and that several
+    /// seams carry as a `Result` error arm — stays a pointer wide, rather than
+    /// growing to the full parked-completion shape at every call site.
+    Pending(Box<PendingCompletion>),
 }
 
 impl ToolOutcome {
@@ -232,7 +236,7 @@ impl ToolOutcome {
     /// Constructs the deferred outcome that protocol and process-engine implementors return when an
     /// authorized tool call will finish out of band.
     pub fn pending(pending: PendingCompletion) -> Self {
-        Self::Pending(pending)
+        Self::Pending(Box::new(pending))
     }
 
     /// Constructs a successful JSON outcome for protocol and process-engine implementors returning
@@ -376,10 +380,14 @@ impl ToolOutcome {
 
     /// Consumes a tool result for protocol and process-engine implementors, returning the
     /// pending-completion configuration instead of output when the call was deferred.
+    #[allow(
+        clippy::result_large_err,
+        reason = "the Err arm is the parked-completion configuration itself; boxing it here would only push the unboxing onto every caller"
+    )]
     pub fn into_done_output(self) -> Result<crate::ToolCallOutput, PendingCompletion> {
         match self {
             Self::Done(output) => Ok(*output),
-            Self::Pending(pending) => Err(pending),
+            Self::Pending(pending) => Err(*pending),
         }
     }
 }

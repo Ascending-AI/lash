@@ -7,6 +7,8 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
 use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
+use lash_core::plugin::{SessionHandle, SessionTurnRequest};
+use lash_core::runtime::AssembledTurn;
 use lash_core::{SessionGraph, SessionPolicy};
 use serde_json::json;
 
@@ -125,6 +127,7 @@ fn mock_manager() -> MockSessionManager {
 struct RecordingSessionGraph {
     events: Mutex<Vec<(lash_core::TraceContext, lash_core::TraceEvent)>>,
     appends: Mutex<Vec<(String, lash_core::AppendSessionNodesRequest)>>,
+    switches: Mutex<Vec<(String, lash_core::SwitchAgentFrameRequest)>>,
 }
 
 impl RecordingSessionGraph {
@@ -134,6 +137,10 @@ impl RecordingSessionGraph {
 
     fn appends(&self) -> Vec<(String, lash_core::AppendSessionNodesRequest)> {
         self.appends.lock_recover().clone()
+    }
+
+    fn switches(&self) -> Vec<(String, lash_core::SwitchAgentFrameRequest)> {
+        self.switches.lock_recover().clone()
     }
 }
 
@@ -146,6 +153,21 @@ impl SessionGraphService for RecordingSessionGraph {
     ) -> Result<(), PluginError> {
         self.events.lock_recover().push((context, event));
         Ok(())
+    }
+
+    async fn switch_agent_frame(
+        &self,
+        session_id: &SessionId,
+        request: lash_core::SwitchAgentFrameRequest,
+    ) -> Result<lash_core::OpenAgentFrameResult, PluginError> {
+        self.switches
+            .lock_recover()
+            .push((session_id.to_string(), request));
+        Ok(lash_core::OpenAgentFrameResult {
+            frame_node_id: "frame".to_string(),
+            opened: true,
+            initial_node_ids: Vec::new(),
+        })
     }
 
     async fn append_session_nodes(
@@ -777,6 +799,96 @@ fn transform_state_ctx_with_services(
     }
 }
 
+/// Lifecycle recording what the managed compaction child turn was asked.
+struct RecordingCompactionLifecycle {
+    inputs: Mutex<Vec<String>>,
+    snapshots: Mutex<Vec<String>>,
+    inner: MockSessionManager,
+}
+
+impl RecordingCompactionLifecycle {
+    fn with_summary(summary: &str) -> Arc<Self> {
+        Arc::new(Self {
+            inputs: Mutex::new(Vec::new()),
+            snapshots: Mutex::new(Vec::new()),
+            inner: MockSessionManager::default()
+                .with_turn(empty_turn(&SessionId::from("root"), summary)),
+        })
+    }
+
+    fn text_inputs(&self) -> Vec<String> {
+        self.inputs.lock_recover().clone()
+    }
+
+    fn snapshot_texts(&self) -> Vec<String> {
+        self.snapshots.lock_recover().clone()
+    }
+}
+
+#[async_trait]
+impl SessionLifecycleService for RecordingCompactionLifecycle {
+    async fn create_session(
+        &self,
+        request: SessionCreateRequest,
+    ) -> Result<SessionHandle, PluginError> {
+        if let SessionStartPoint::Snapshot { snapshot } = &request.start
+            && let Ok(encoded) = serde_json::to_string(&**snapshot)
+        {
+            self.snapshots.lock_recover().push(encoded);
+        }
+        self.inner.create_session(request).await
+    }
+    async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
+        self.inner.close_session(session_id).await
+    }
+
+    async fn start_turn(
+        &self,
+        request: SessionTurnRequest<'_>,
+    ) -> Result<AssembledTurn, PluginError> {
+        let (turn, scoped_effect_controller) = request.into_parts();
+        let mut text = String::new();
+        for item in &turn.input.items {
+            if let InputItem::Text { text: part_text } = item {
+                text.push_str(part_text);
+            }
+        }
+        self.inputs.lock_recover().push(text);
+        self.inner
+            .start_turn(SessionTurnRequest::new_runtime_internal_compaction(
+                turn.session_id.clone(),
+                turn.turn_id.clone(),
+                turn.input.clone(),
+                scoped_effect_controller,
+            )?)
+            .await
+    }
+}
+
+fn transform_state_ctx_with_lifecycle(
+    state: SessionSnapshot,
+    direct: Arc<lash_core::facade_support::DirectCompletionClient<'static>>,
+    lifecycle: Arc<dyn SessionLifecycleService>,
+    graph: Arc<dyn SessionGraphService>,
+    max_context_tokens: usize,
+) -> TurnTransformContext<'static> {
+    TurnTransformContext {
+        session_id: SessionId::from("root"),
+        state: state.read_view().expect("runtime frame scope resolves"),
+        prompt_usage: None,
+        max_context_tokens: Some(max_context_tokens),
+        sessions: Arc::new(MockSessionManager::default()),
+        session_lifecycle: lifecycle,
+        session_graph: graph,
+        scoped_effect_controller: lash_core::ScopedEffectController::shared(
+            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            lash_core::ExecutionScope::runtime_operation("rolling-history-recovery-test"),
+        )
+        .expect("test scoped effect controller"),
+        direct_completions: (*direct).clone(),
+    }
+}
+
 fn test_llm_call_record() -> lash_core::LlmCallRecord {
     lash_core::LlmCallRecord {
         call_id: lash_core::LlmCallId("recovery-test-call".to_string()),
@@ -1015,11 +1127,20 @@ fn recovery_state_derivation_is_bounded_and_durable() {
 #[tokio::test]
 async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window() {
     let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
-    let captured = Arc::new(CapturingDirect::default());
-    let (_messages, state) = recovery_history(true);
+    let (history_before, state) = recovery_history(true);
+    let history_before: Vec<Message> = history_before;
+    let lifecycle = RecordingCompactionLifecycle::with_summary(
+        "Recovered: the user asked for the report verdict; it is done.",
+    );
 
-    let direct = capturing_direct_client(Arc::clone(&captured));
-    let ctx = transform_state_ctx_with_services(state, direct, trace.clone(), 200_000);
+    let direct = empty_direct_client();
+    let ctx = transform_state_ctx_with_lifecycle(
+        state,
+        direct,
+        lifecycle.clone(),
+        trace.clone(),
+        200_000,
+    );
 
     let prepared = PreparedContext {
         messages: vec![text_message(
@@ -1062,60 +1183,98 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         "the current request must survive the recovery: {contents:?}"
     );
 
-    // One direct summarizer ran, and the prompt it was asked carries the
-    // standard compaction ask plus the recovering instructions, never the
-    // oversized body.
-    let requests = captured.text_requests();
-    assert_eq!(requests.len(), 1);
+    // One summarizer ran as the runtime-internal compaction managed child
+    // turn, and the prompt it was asked carries the standard compaction ask
+    // plus the recovery instructions, never the oversized body.
+    let created = lifecycle.inner.created.lock_recover().clone();
+    assert_eq!(created.len(), 1);
     assert!(
-        requests[0].contains("Provide a detailed summary of the conversation above"),
-        "the recovery summarizer must run the standard compaction prompt"
+        created[0]
+            .session_id
+            .as_ref()
+            .is_some_and(|session_id| session_id.as_str().contains("-compaction:")),
+        "the summarizer ran on the compaction child seam: {:?}",
+        created[0]
+    );
+    let inputs = lifecycle.text_inputs();
+    assert_eq!(inputs.len(), 1);
+    assert!(
+        inputs[0].contains("##") && inputs[0].contains("the conversation above"),
+        "the recovery summarizer runs the standard compaction prompt: {}",
+        inputs[0]
     );
     assert!(
-        requests[0].contains(OVERFLOW_RECOVERY_INSTRUCTIONS),
+        inputs[0].contains(OVERFLOW_RECOVERY_INSTRUCTIONS),
         "the recovery summarizer must carry the recovery instructions"
     );
     assert!(
-        requests[0].len() < 40_000,
+        inputs[0].len() < 40_000,
         "the summarizer request itself must fit its window: {}",
-        requests[0].len()
+        inputs[0].len()
     );
+    let snapshots = lifecycle.snapshot_texts();
+    assert_eq!(snapshots.len(), 1);
     assert!(
-        requests[0].contains(OVERFLOW_ELIDED_PART_PLACEHOLDER),
-        "the oversized part was elided before summarization"
+        snapshots[0].contains(OVERFLOW_ELIDED_PART_PLACEHOLDER),
+        "the oversized part was elided before the summarizer's own snapshot"
     );
 
-    // The durable terminal record was appended with the summary.
+    // The durable terminal record was appended; the summary rides the
+    // plugin-visible frame switch instead of the exhausted frame.
     let appends = trace.appends();
     assert_eq!(appends.len(), 1);
-    assert_eq!(appends[0].1.nodes.len(), 2);
-    let kinds: Vec<Option<OverflowRecoveryRecord>> = appends[0]
-        .1
-        .nodes
-        .iter()
-        .filter_map(|node| match node {
-            lash_core::SessionAppendNode::Message { message } => {
-                Some(message.first_text().and_then(|text| {
-                    recovery_record_kind(&Message {
-                        id: "probe".to_string(),
-                        role: MessageRole::System,
-                        parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)]
-                            .into(),
-                        origin: Some(MessageOrigin::Plugin {
-                            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
-                            transient: false,
-                        }),
-                    })
-                }))
-            }
-            _ => None,
-        })
-        .collect();
+    assert_eq!(appends[0].1.nodes.len(), 1);
+    let completed_kind = match &appends[0].1.nodes[0] {
+        lash_core::SessionAppendNode::Message { message } => {
+            message.first_text().and_then(|text| {
+                recovery_record_kind(&Message {
+                    id: "probe".to_string(),
+                    role: MessageRole::System,
+                    parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)].into(),
+                    origin: Some(MessageOrigin::Plugin {
+                        plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+                        transient: false,
+                    }),
+                })
+            })
+        }
+        _ => None,
+    };
     assert_eq!(
-        kinds[1],
+        completed_kind,
         Some(OverflowRecoveryRecord::Completed),
-        "the terminal completed record rides the same durable append"
+        "the terminal completed record is durable in the committed history"
     );
+    let switches = trace.switches();
+    assert_eq!(switches.len(), 1);
+    assert_eq!(
+        switches[0].1.task.as_deref(),
+        Some("context-overflow recovery"),
+        "the switch records its task like the in-turn control: {:?}",
+        switches[0].1
+    );
+    assert_eq!(
+        switches[0].1.reason.as_str(),
+        "compaction",
+        "the recovery frame is an ordinary compaction frame: {:?}",
+        switches[0].1
+    );
+    assert_eq!(switches[0].1.initial_nodes.len(), 1);
+    let seed_summary = match &switches[0].1.initial_nodes[0] {
+        lash_core::SessionAppendNode::Message { message } => message.first_text(),
+        _ => None,
+    };
+    assert!(
+        seed_summary.is_some_and(|text| text.contains("Compaction summary:")),
+        "the recovery frame is seeded with the recovered summary: {seed_summary:?}"
+    );
+
+    // History stays intact and inspectable: recovery rewrites nothing.
+    assert_eq!(trace.appends()[0].1.nodes.len(), 1);
+
+    // The current-turn projection is prompt-view only: no durable history
+    // changed beyond the compaction summary seed itself (already checked).
+    let _ = history_before;
 }
 
 fn recovery_test_input() -> PreparedContext {

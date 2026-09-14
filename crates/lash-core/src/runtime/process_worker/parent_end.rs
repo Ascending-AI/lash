@@ -2,6 +2,7 @@ use super::*;
 use crate::{CancelOrigin, ParentEndPlan, ParentScope, ProcessId};
 
 /// Page size for both the ledger scan and the per-parent children scan.
+#[expect(clippy::expect_used, reason = "256 is a non-zero literal")]
 fn page_bound() -> std::num::NonZeroUsize {
     std::num::NonZeroUsize::new(256).expect("parent-end page bound is non-zero")
 }

@@ -7,6 +7,10 @@ use crate::{
     RuntimeEffectKind, RuntimeInvocation, RuntimeReplay, RuntimeSubject,
 };
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn turn_effect_invocation(
     execution_scope: &ExecutionScope,
     session_id: &SessionId,
@@ -41,6 +45,10 @@ pub(crate) fn turn_effect_invocation(
 /// of the session and the execution scope alone — both of which a replaying
 /// engine reconstructs identically — so a redriven handler journals the same
 /// entry and re-derives the admission instead of admitting a second turn.
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn turn_acceptance_effect_invocation(
     execution_scope: &ExecutionScope,
     session_id: &SessionId,
@@ -101,6 +109,10 @@ fn turn_effect_replay_key(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn child_effect_invocation(
     execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
@@ -125,6 +137,10 @@ pub(crate) fn child_effect_invocation(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn child_effect_invocation_from_effect(
     execution_scope: &ExecutionScope,
     parent: &RuntimeEffectInvocation,
@@ -160,6 +176,10 @@ pub(crate) fn tool_retry_sleep_invocation(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn process_sleep_invocation(
     execution_scope: &ExecutionScope,
     attribution: RuntimeAttribution,
@@ -186,6 +206,10 @@ pub(crate) fn process_sleep_invocation(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn process_await_event_invocation(
     execution_scope: &ExecutionScope,
     attribution: RuntimeAttribution,
@@ -213,6 +237,10 @@ pub(crate) fn process_await_event_invocation(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn process_effect_invocation(
     execution_scope: &ExecutionScope,
     attribution: RuntimeAttribution,
@@ -290,6 +318,10 @@ pub(crate) fn trigger_occurrence_invocation(
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
 pub(crate) fn direct_effect_invocation(
     execution_scope: &ExecutionScope,
     session_id: &SessionId,
@@ -476,6 +508,10 @@ pub(crate) fn project_effect_address(
     identity.string(&address.replay_key);
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the address carries an admitted execution scope"
+)]
 pub(super) fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
     fn field(value: &str) -> String {
         format!("{}:{value}", value.len())

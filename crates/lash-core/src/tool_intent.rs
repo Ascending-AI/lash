@@ -534,7 +534,7 @@ impl ToolAttemptOutcome {
     pub(crate) fn from_tool_result(result: crate::ToolOutcome) -> Self {
         match result {
             crate::ToolOutcome::Done(output) => Self::done_without_intents(ToolOutcomeDone(output)),
-            crate::ToolOutcome::Pending(pending) => Self::Pending(pending),
+            crate::ToolOutcome::Pending(pending) => Self::Pending(*pending),
         }
     }
 }

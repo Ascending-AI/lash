@@ -1111,6 +1111,10 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// the floor — the exact drift this refusal exists to prevent. `set` decides,
     /// and its `Err` hands back the rejected resolver so the same-resolver case
     /// stays a no-op.
+    #[expect(
+        clippy::expect_used,
+        reason = "a rejected set means the cell is already initialized"
+    )]
     pub fn register_group_executors(
         &self,
         executors: Arc<dyn GroupExecutors>,
@@ -1741,6 +1745,7 @@ fn journaled_llm_response_mut(value: &mut serde_json::Value) -> Option<&mut serd
     }
 }
 
+#[expect(clippy::expect_used, reason = "a crate-owned output part serializes")]
 fn upgrade_legacy_journaled_llm_response(response: &mut serde_json::Value) {
     let Some(response) = response.as_object_mut() else {
         return;

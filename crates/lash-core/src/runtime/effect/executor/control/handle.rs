@@ -46,6 +46,10 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the shared handle was built from a valid scope"
+    )]
     pub(crate) fn scoped(&self) -> ScopedEffectController<'_> {
         match self {
             Self::Borrowed(scoped) => scoped.clone(),

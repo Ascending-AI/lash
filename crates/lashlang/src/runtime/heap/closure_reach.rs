@@ -6,19 +6,19 @@
 // execution's result, and the answer is a property of the whole graph rather
 // than of any one object, so it is computed here for the heap at once.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
-use super::{Heap, HeapId, HeapObject, Value, value_refs};
+use super::{Heap, HeapId, HeapObject, Value};
 
 impl Heap {
     /// Which objects a closure is reachable from, closures themselves included.
     ///
     /// The answer is computed for the whole heap at once, by propagating
-    /// backwards along [`HeapObject::child_refs`] from every closure, rather
-    /// than by searching forward from each root: roots routinely share
-    /// subgraphs, and a per-root search re-walks the shared part once per root.
-    /// A heap holding no closure at all — the common case — costs one pass and
-    /// allocates nothing.
+    /// backwards along child references (the `parents` edges the heap already
+    /// maintains) from every closure, rather than by searching forward from
+    /// each root: roots routinely share subgraphs, and a per-root search
+    /// re-walks the shared part once per root. A heap holding no closure at
+    /// all — the common case — costs one pass and allocates nothing.
     pub(crate) fn closure_reach(&self) -> ClosureReach {
         let mut reached = FxHashSet::default();
         let mut pending = Vec::new();
@@ -28,17 +28,8 @@ impl Heap {
                 pending.push(id);
             }
         }
-        if pending.is_empty() {
-            return ClosureReach { reached };
-        }
-        let mut holders: FxHashMap<HeapId, Vec<HeapId>> = FxHashMap::default();
-        for (id, object) in self.objects_in_id_order() {
-            for child in object.child_refs() {
-                holders.entry(child).or_default().push(id);
-            }
-        }
         while let Some(id) = pending.pop() {
-            for holder in holders.get(&id).into_iter().flatten() {
+            for holder in self.parents.get(&id).into_iter().flatten() {
                 if reached.insert(*holder) {
                     pending.push(*holder);
                 }
@@ -61,6 +52,21 @@ impl ClosureReach {
         if self.reached.is_empty() {
             return false;
         }
-        value_refs(value).iter().any(|id| self.reached.contains(id))
+        self.reaches(value)
+    }
+
+    /// Allocation-free twin of [`collect_value_refs`]: the members of a value
+    /// follow the same nesting the reference collector walks, so the state
+    /// boundary can ask this per root without materializing a reference list
+    /// it would immediately discard.
+    fn reaches(&self, value: &Value) -> bool {
+        match value {
+            Value::Ref(id) => self.reached.contains(id),
+            Value::Tuple(values) | Value::List(values) => {
+                values.iter().any(|value| self.reaches(value))
+            }
+            Value::Record(record) => record.values().any(|value| self.reaches(value)),
+            _ => false,
+        }
     }
 }

@@ -137,6 +137,12 @@ async fn overflow_and_recovery(
         bail!("the plugin silently swallowed the overflow trigger");
     }
 
+    // FIG-3107: recovery completes through a durable agent-frame switch. The
+    // frame the overflow turn ran in is the baseline the recovery frame
+    // leaves behind.
+    let pre_recovery = session.read_view().to_snapshot();
+    let recovery_frame_before_id = pre_recovery.current_frame_node_id.clone();
+
     // The same session, not a new one: the claim is that the session continues.
     let continued = session
         .turn(lash::TurnInput::text("now give me the verdict"))
@@ -147,6 +153,18 @@ async fn overflow_and_recovery(
     let continued_history = session.read_view().messages().to_vec();
     let continued_history_len = continued_history.len();
     let overflow_history_after_turn = continued_history;
+
+    // The recovery frame exists and the session is resident in it after
+    // recovery: the latest frame record carries the compaction reason and the
+    // session's current frame moved off the overflow turn's frame.
+    let post_recovery = session.read_view().to_snapshot();
+    let recovery_frame = post_recovery.agent_frames.last().map(|frame| {
+        (
+            frame.reason.as_str().to_string(),
+            frame.frame_node_id.clone(),
+        )
+    });
+    let recovery_frame_id = post_recovery.current_frame_node_id.clone();
 
     Ok(json!({
         "checkpoint": checkpoint,
@@ -186,6 +204,15 @@ async fn overflow_and_recovery(
         "continued_is_context_overflow": continued.result.is_context_overflow(),
         "continued_assistant_message": continued.result.assistant_message(),
         "continued_final_value": continued.result.final_value(),
+        // FIG-3107 frame evidence: the recovery frame exists (latest frame
+        // record with the compaction reason) and the continued session is
+        // resident in it — the current frame moved off the overflow turn's
+        // frame.
+        "recovery_frame_reason": recovery_frame
+            .as_ref()
+            .map(|(reason, _)| reason.clone()),
+        "recovery_frame_id": recovery_frame_id,
+        "recovery_frame_moved": recovery_frame_before_id != recovery_frame_id,
     }))
 }
 

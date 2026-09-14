@@ -103,6 +103,22 @@ impl RuntimeCheckpointComponents {
         }
     }
 
+    /// Moves the execution-state root and leaves (descriptor, body, and
+    /// commit bookkeeping) from `source` (`FIG-3107`).
+    pub(crate) fn adopt_execution_components_from(&mut self, source: &Self) {
+        self.entries.retain(|key, _| {
+            !(key == crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                || key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX))
+        });
+        for (key, component) in &source.entries {
+            if key == crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT
+                || key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX)
+            {
+                self.entries.insert(key.clone(), component.clone());
+            }
+        }
+    }
+
     pub(crate) fn unproven() -> Self {
         Self {
             completeness: CheckpointComponentCompleteness::Unproven,
@@ -177,6 +193,10 @@ impl RuntimeCheckpointComponents {
         result
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the decode above reported this component present"
+    )]
     fn from_hydrated(
         checkpoint: &crate::store::HydratedSessionCheckpoint,
     ) -> Result<Self, crate::StoreError> {
@@ -763,6 +783,20 @@ impl RuntimeSessionState {
         }
     }
 
+    /// Re-hydrates the store-owned execution-state components from a freshly
+    /// loaded durable state (`FIG-3107`).
+    ///
+    /// A snapshot-start child of a parent whose last commit released its
+    /// resident bodies otherwise refuses hydration at its first protocol
+    /// restore with `ExecutionStateBodiesReleased`. The durable head still
+    /// carries the bodies, so the child resolves them there instead. The
+    /// parent's other components, its graph, and its residency bookkeeping are
+    /// untouched: only the execution root and its leaves move.
+    pub(crate) fn adopt_execution_components_from(&mut self, source: &Self) {
+        self.checkpoint_components
+            .adopt_execution_components_from(&source.checkpoint_components);
+    }
+
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
@@ -1125,6 +1159,10 @@ impl RuntimeSessionState {
 }
 
 impl RuntimeSessionState {
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string"
+    )]
     pub(crate) fn refresh_current_frame_projection(&mut self) {
         self.current_frame_node_id = self
             .session_graph
@@ -1168,6 +1206,10 @@ impl RuntimeSessionState {
 
     /// Ensures agent frame initialized with clock exists for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
+    #[expect(
+        clippy::expect_used,
+        reason = "a frame node identity and the initial frame material are non-empty"
+    )]
     pub fn ensure_agent_frame_initialized_with_clock(&mut self, clock: &dyn crate::Clock) {
         if let Some(frame_node_id) = self
             .session_graph
@@ -1204,6 +1246,10 @@ impl RuntimeSessionState {
 
     /// Resets initial agent frame with clock for protocol and process-engine implementors while
     /// materializing or restoring protocol session state.
+    #[expect(
+        clippy::expect_used,
+        reason = "the initial frame material is a non-empty literal"
+    )]
     pub fn reset_initial_agent_frame_with_clock(
         &mut self,
         assignment: crate::AgentFrameAssignment,
@@ -1501,6 +1547,10 @@ pub(crate) fn derive_graph_commit_node_ids(
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "derived graph node identities are non-empty"
+)]
 pub(crate) fn apply_graph_commit_node_id_mapping(
     state: &mut RuntimeSessionState,
     mapping: &[(crate::NodeId, crate::NodeId)],

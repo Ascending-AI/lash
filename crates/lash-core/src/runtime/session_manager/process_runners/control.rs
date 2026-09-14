@@ -218,6 +218,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the proxy owns its controller and the worker installs its process wiring"
+    )]
     async fn run(
         &self,
         command: crate::ProcessCommand,
@@ -715,6 +719,10 @@ impl ProcessCapability {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "execution scopes are plain string identities"
+    )]
     pub(in crate::runtime::session_manager) async fn cancel_process(
         &self,
         current: &CurrentSessionCapability,

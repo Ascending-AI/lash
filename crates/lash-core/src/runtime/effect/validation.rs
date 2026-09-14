@@ -367,6 +367,10 @@ fn field_path(parent: &str, field: &str) -> String {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a `serde_json::Value` re-encodes into an in-memory buffer"
+)]
 fn trace_value(value: Option<&Value>) -> TraceEffectEnvelopeDiffValue {
     let Some(value) = value else {
         return TraceEffectEnvelopeDiffValue::Missing;

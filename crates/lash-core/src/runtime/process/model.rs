@@ -1466,6 +1466,11 @@ impl ProcessRecord {
 
     /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
+    ///
+    /// Panics when the registration is invalid, so callers that accept
+    /// host-supplied registrations validate them with
+    /// `prepare_process_registration` first.
+    #[expect(clippy::expect_used, reason = "callers validate first")]
     pub fn from_registration_with_clock(
         registration: ProcessRegistration,
         incarnation: ProcessIncarnation,

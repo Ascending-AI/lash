@@ -292,6 +292,10 @@ impl AwaitEventRegistry {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a resolve transition always carries a public outcome"
+    )]
     pub(super) fn resolve(
         &self,
         key: &AwaitEventKey,
@@ -445,6 +449,10 @@ impl AwaitEventRegistry {
         .await
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the entry is inserted above under this same lock"
+    )]
     async fn await_resolution_inner(
         &self,
         key: &AwaitEventKey,

@@ -181,6 +181,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.487,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.398,
               "required": false
@@ -218,8 +222,8 @@
       "embed_standard": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 17052000,
-          "steady_state_turn_alloc_bytes_max": 1377000
+          "alloc_bytes_max": 20315000,
+          "steady_state_turn_alloc_bytes_max": 1621000
         },
         "advisory_duration": {
           "ms_max": 114.874,
@@ -297,6 +301,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.473,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -393,6 +401,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.495,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -591,6 +603,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.467,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.758,
               "required": false
@@ -679,6 +695,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.484,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.05,
               "required": false
@@ -753,6 +773,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.429,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -847,6 +871,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.5,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.32,
               "required": false
@@ -857,8 +885,8 @@
       "rlm_large_tool_catalog": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1678131000,
-          "steady_state_turn_alloc_bytes_max": 125156000
+          "alloc_bytes_max": 2598305000,
+          "steady_state_turn_alloc_bytes_max": 198193000
         },
         "advisory_duration": {
           "ms_max": 3569.37,
@@ -923,6 +951,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.504,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.332,
               "required": false
@@ -933,8 +965,8 @@
       "rlm_tool_catalog_cold": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 5126342000,
-          "steady_state_turn_alloc_bytes_max": 127146000
+          "alloc_bytes_max": 7559010000,
+          "steady_state_turn_alloc_bytes_max": 200107000
         },
         "advisory_duration": {
           "ms_max": 2600.0,
@@ -999,6 +1031,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.498,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.332,
               "required": false
@@ -1009,8 +1045,8 @@
       "rlm_tool_catalog_warm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 2026802000,
-          "steady_state_turn_alloc_bytes_max": 127115000
+          "alloc_bytes_max": 3074448000,
+          "steady_state_turn_alloc_bytes_max": 200085000
         },
         "advisory_duration": {
           "ms_max": 2100.0,
@@ -1069,6 +1105,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.516,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -1157,6 +1197,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.491,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -1299,6 +1343,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.526,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.336,
               "required": false
@@ -1433,6 +1481,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.485,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -1571,6 +1623,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.489,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.178,
               "required": false
@@ -1645,6 +1701,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.468,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -1783,6 +1843,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.471,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.354,
               "required": false
@@ -1869,6 +1933,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.489,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -1991,6 +2059,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.541,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.484,
               "required": false
@@ -2045,6 +2117,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.46,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -2107,6 +2183,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 1.471,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 136.928,
               "required": false
@@ -2161,6 +2241,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.462,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -2219,6 +2303,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.46,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.15,
               "required": false
@@ -2275,6 +2363,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.482,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.166,
               "required": false
@@ -2329,6 +2421,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.463,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -2527,6 +2623,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.475,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 4.55,
               "required": false
@@ -2537,8 +2637,8 @@
       "tool_discovery_search": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 631530000,
-          "steady_state_turn_alloc_bytes_max": 46459000
+          "alloc_bytes_max": 1231308000,
+          "steady_state_turn_alloc_bytes_max": 87737000
         },
         "advisory_duration": {
           "ms_max": 3621.198,
@@ -2581,6 +2681,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.501,
               "required": false
             },
             "turn_cancel.start_gate": {
@@ -2663,6 +2767,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.468,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 8.358,
               "required": false
@@ -2723,6 +2831,10 @@
               "budget_ms": 0.69,
               "required": false
             },
+            "turn.parent_end": {
+              "budget_ms": 0.458,
+              "required": false
+            },
             "turn_cancel.start_gate": {
               "budget_ms": 2.36,
               "required": false
@@ -2773,6 +2885,10 @@
             },
             "prompt_build": {
               "budget_ms": 11.4,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.458,
               "required": false
             },
             "turn_cancel.request_to_token_to_seal": {
@@ -2921,6 +3037,10 @@
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
+              "required": false
+            },
+            "turn.parent_end": {
+              "budget_ms": 0.479,
               "required": false
             },
             "turn_cancel.start_gate": {

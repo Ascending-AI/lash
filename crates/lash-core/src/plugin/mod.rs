@@ -83,7 +83,7 @@ pub use registry::{
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
     SessionGraphService, SessionLifecycleService, SessionStateService, SessionTurnInput,
-    SessionTurnRequest,
+    SessionTurnRequest, SwitchAgentFrameRequest,
 };
 pub use runtime_impl::{
     PluginHost, RecordedSessionConfig, SessionAuthorityContext, SessionCreationConfig,

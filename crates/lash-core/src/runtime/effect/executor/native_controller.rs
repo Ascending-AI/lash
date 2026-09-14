@@ -541,6 +541,10 @@ impl NativeEffectGroups {
     /// the rejected resolver — identical to the held one means the caller
     /// re-registered what is already there, and anything else is the typed
     /// different-resolver refusal.
+    #[expect(
+        clippy::expect_used,
+        reason = "a rejected set means the cell is already initialized"
+    )]
     fn register_executors(
         &self,
         executors: Arc<dyn GroupExecutors>,

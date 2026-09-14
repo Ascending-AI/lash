@@ -228,6 +228,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         Ok((turn_input_claim, queued_work_claim))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "this branch runs only for a non-empty selection"
+    )]
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
