@@ -102,6 +102,7 @@ fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
         core: current.host.core.clone(),
         session_store_factory: current.host.session_store_factory.clone(),
         trigger_store: current.host.trigger_store.clone(),
+        process_definitions: current.host.process_definitions.clone(),
     }
 }
 

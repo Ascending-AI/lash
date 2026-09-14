@@ -177,6 +177,7 @@ enum RealizedIntent {
     // record, including its captured source contract and route, and is an
     // order of magnitude larger than the other two variants.
     TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
+    ProcessDefinitionRegistration(Box<lash_core::ProcessDefinitionRegistration>),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -678,6 +679,10 @@ impl ToolIntentIngress {
                 lash_core::ToolIntentKind::RegisterTrigger,
                 serde_json::to_value(receipt).unwrap_or(serde_json::Value::Null),
             )),
+            RealizedIntent::ProcessDefinitionRegistration(registration) => Some((
+                lash_core::ToolIntentKind::RegisterProcessDefinition,
+                serde_json::to_value(registration).unwrap_or(serde_json::Value::Null),
+            )),
             RealizedIntent::Process(_) => None,
         };
         let result = match trigger_result {
@@ -718,7 +723,9 @@ impl ToolIntentIngress {
             }
             None => match result {
                 RealizedIntent::Process(result) => result,
-                RealizedIntent::Trigger(_) | RealizedIntent::TriggerRegistration(_) => {
+                RealizedIntent::Trigger(_)
+                | RealizedIntent::TriggerRegistration(_)
+                | RealizedIntent::ProcessDefinitionRegistration(_) => {
                     unreachable!("trigger outcomes are settled above")
                 }
             },
@@ -1028,16 +1035,11 @@ impl ToolIntentIngress {
                 return Ok((RealizedIntent::Trigger(report), replayed));
             }
             lash_core::ToolIntent::RegisterProcessDefinition(intent) => {
-                // The definition registry table is a separate child of
-                // FIG-2990; the declaration is admitted and identified here,
-                // and realization refuses until that table exists.
-                return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    format!(
-                        "process definition registry is unavailable in this runtime: \
-                         cannot register a `{}` definition",
-                        intent.engine_kind
-                    ),
-                )));
+                let registration = self.register_process_definition(identity, *intent).await?;
+                return Ok((
+                    RealizedIntent::ProcessDefinitionRegistration(Box::new(registration)),
+                    false,
+                ));
             }
             lash_core::ToolIntent::RegisterTrigger(intent) => {
                 let receipt = self
@@ -1126,6 +1128,97 @@ impl ToolIntentIngress {
                 format!("trigger registration returned a non-mutation outcome: {other:?}"),
             ))),
         }
+    }
+
+    /// Install one recorded process-definition registration through the
+    /// same resolve-once path the runtime intent executor uses (FIG-2995).
+    async fn register_process_definition(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: lash_core::RegisterProcessDefinitionIntent,
+    ) -> crate::Result<lash_core::ProcessDefinitionRegistration> {
+        let registry = self.core.env.process_definitions.clone().ok_or_else(|| {
+            crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                "process definition registry is unavailable in this runtime: \
+                     cannot register a `{engine}` definition"
+                    .replace("{engine}", &intent.engine_kind),
+            ))
+        })?;
+        let name = intent
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                    "process definition registration requires a registered name".to_string(),
+                ))
+            })?;
+        lash_core::process_registry::validate_process_definition_name(name)
+            .map_err(crate::EmbedError::Plugin)?;
+        let existing = lash_core::process_registry::resolve_named_definition(
+            registry.as_ref(),
+            &intent.session_id,
+            name,
+        )
+        .await
+        .map_err(crate::EmbedError::Plugin)?;
+        let pinned = match existing.as_ref() {
+            Some(existing) => {
+                if existing.definition.engine_kind.as_str() != intent.engine_kind {
+                    return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                        format!(
+                            "process definition name `{name}` is registered under engine \
+                             kind `{}`, not `{}`",
+                            existing.definition.engine_kind, intent.engine_kind
+                        ),
+                    )));
+                }
+                existing.definition.clone()
+            }
+            None => lash_core::ProcessDefinitionRef::unclaimed(
+                intent.engine_kind.clone(),
+                intent.definition.clone(),
+            ),
+        };
+        let resolution = self
+            .core
+            .env
+            .core
+            .process_engines
+            .resolve(&pinned)
+            .await
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?;
+        let pinned = pinned.with_resolved_signature(resolution.signature);
+        let expectation = match existing.as_ref() {
+            Some(existing) => {
+                let observed_revision = intent.expected_revision.ok_or_else(|| {
+                    crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                        "process definition name `{name}` is registered at revision {}; \
+                             re-registration requires the caller's revision compare-and-swap",
+                        existing.revision
+                    )))
+                })?;
+                Some(lash_core::ProcessDefinitionExpectation::observed(
+                    observed_revision,
+                    existing.fingerprint.clone(),
+                ))
+            }
+            None => None,
+        };
+        let registration_result = registry
+            .register_definition(
+                &identity.replay_key,
+                lash_core::TriggerOwnerScope::session(intent.session_id.clone()),
+                name,
+                pinned,
+                expectation.as_ref(),
+            )
+            .await
+            .map_err(crate::EmbedError::Plugin)?;
+        Ok(registration_result)
     }
 
     /// Emit one recorded trigger declaration through the same router the

@@ -8,6 +8,8 @@
 mod effect_group_conformance;
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
+#[path = "process_definitions_registry.rs"]
+mod process_definitions_registry;
 #[path = "process_event_time_cutover.rs"]
 mod process_event_time_cutover;
 #[path = "process_prune_reclaim.rs"]

@@ -654,6 +654,34 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
     ON lash_trigger_subscriptions(source_type, source_key, enabled);
 
+-- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
+-- name, revision, pinned definition fingerprint, lifecycle tombstone and
+-- change sequence, unique on owner scope and name. The pinned
+-- ProcessDefinitionRef travels in record_json; the fingerprint column is what
+-- the revision-and-fingerprint compare-and-swap compares. The lifecycle is
+-- the FIG-1951 one-column enum with a paired-nullable delete timestamp.
+-- Session-scoped names follow the ADR 0049 deletion frontier; host- and
+-- platform-scoped tombstones are never collected (ADR 0067).
+CREATE TABLE IF NOT EXISTS lash_process_definitions (
+    definition_id TEXT PRIMARY KEY,
+    owner_scope TEXT NOT NULL,
+    name TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    lifecycle TEXT NOT NULL,
+    deleted_at_ms BIGINT,
+    change_seq BIGINT NOT NULL,
+    created_at_ms BIGINT NOT NULL,
+    updated_at_ms BIGINT NOT NULL,
+    record_json TEXT NOT NULL,
+    CONSTRAINT ck_process_definitions_lifecycle CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
+    UNIQUE(owner_scope, name)
+);
+CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_registrant
+    ON lash_process_definitions(owner_scope, name);
+CREATE INDEX IF NOT EXISTS idx_lash_process_definitions_change
+    ON lash_process_definitions(change_seq);
+
 CREATE TABLE IF NOT EXISTS lash_trigger_occurrences (
     occurrence_id TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -717,7 +745,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 96)
+VALUES ('lash-postgres-store', 97)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

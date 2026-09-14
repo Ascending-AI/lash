@@ -958,6 +958,7 @@ pub struct LashCoreBuilder {
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
+    process_definitions: Option<Arc<dyn lash_core::process_registry::ProcessDefinitionRegistry>>,
     // Core fields applied while constructing a config from individual builder
     // setters. They conflict with a whole-config override when duplicated.
     prompt: Option<PromptLayer>,
@@ -1007,6 +1008,7 @@ impl LashCoreBuilder {
             process_wake_delivery_policy: None,
             native_substrate: NativeSubstrateConfig::default(),
             trigger_store: None,
+            process_definitions: None,
             prompt: None,
             trace_sink: None,
             trace_level: None,
@@ -1379,6 +1381,10 @@ impl LashCoreBuilder {
             ))
         });
         env_builder = env_builder.with_trigger_store(trigger_store);
+        env_builder = match self.process_definitions.clone() {
+            Some(registry) => env_builder.with_process_definition_registry(registry),
+            None => env_builder,
+        };
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
                 facade_support::InMemoryLiveReplayStoreConfig::default(),
@@ -1613,6 +1619,15 @@ impl LashCoreBuilder {
     /// Configures the trigger store and returns the updated builder.
     pub fn trigger_store(mut self, store: Arc<dyn lash_core::TriggerStore>) -> Self {
         self.trigger_store = Some(store);
+        self
+    }
+
+    /// Configures the process-definition registry and returns the updated builder.
+    pub fn process_definition_registry(
+        mut self,
+        registry: Arc<dyn lash_core::ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.process_definitions = Some(registry);
         self
     }
 

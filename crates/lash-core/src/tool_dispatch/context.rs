@@ -70,6 +70,11 @@ pub struct ToolDispatchContext<'run> {
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
     pub trigger_router: Option<crate::TriggerRouter>,
+    /// Durable home for the named process-definition registry (FIG-2995).
+    /// Unset only in fixtures that exercise no registration intent.
+    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
+    /// The engines a definition registration resolves against.
+    pub process_engines: crate::ProcessEngineRegistry,
     pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
@@ -141,6 +146,8 @@ impl<'run> ToolDispatchContext<'run> {
             session_graph: Arc::clone(&self.session_graph),
             processes: Arc::clone(&self.processes),
             trigger_router: self.trigger_router.clone(),
+            process_definitions: self.process_definitions.clone(),
+            process_engines: self.process_engines.clone(),
             effect_controller: self.effect_controller.to_static()?,
             direct_completions: self.direct_completions.to_static()?,
             parent_invocation: self.parent_invocation.clone(),

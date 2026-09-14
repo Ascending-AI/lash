@@ -298,6 +298,8 @@ pub struct EmbeddedRuntimeHost {
     pub core: RuntimeHostConfig,
     pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
+    /// Durable home for the named process-definition registry (FIG-2995).
+    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
 }
 
 impl EmbeddedRuntimeHost {
@@ -307,6 +309,9 @@ impl EmbeddedRuntimeHost {
             core,
             session_store_factory: None,
             trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::with_clock(clock))),
+            process_definitions: Some(
+                Arc::new(crate::InMemoryProcessDefinitionRegistry::default()),
+            ),
         }
     }
 
@@ -320,6 +325,14 @@ impl EmbeddedRuntimeHost {
 
     pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
         self.trigger_store = Some(store);
+        self
+    }
+
+    pub fn with_process_definition_registry(
+        mut self,
+        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.process_definitions = Some(registry);
         self
     }
 }
@@ -422,6 +435,7 @@ pub struct RuntimeHost {
     pub core: RuntimeHostConfig,
     pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
+    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     pub work: RuntimeWork,
 }
 
@@ -434,6 +448,7 @@ impl RuntimeHost {
             core: embedded.core,
             session_store_factory: embedded.session_store_factory,
             trigger_store: embedded.trigger_store,
+            process_definitions: embedded.process_definitions,
             work,
         }
     }
@@ -501,6 +516,7 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
             core: value.embedded.core,
             session_store_factory: value.embedded.session_store_factory,
             trigger_store: value.embedded.trigger_store,
+            process_definitions: value.embedded.process_definitions,
             work: RuntimeWork::processes(value.wiring, value.queued_work),
         }
     }

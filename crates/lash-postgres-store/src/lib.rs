@@ -364,7 +364,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // encoding -- so component 95 is rejected and recreated rather than migrated:
 // the resolved duration cannot be turned back into the deadline the guest
 // asked for.
-const SCHEMA_VERSION: i32 = 96;
+const SCHEMA_VERSION: i32 = 97;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -1040,6 +1040,8 @@ mod effect_replay;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
 mod preflight;
+#[path = "postgres/process_definitions.rs"]
+mod process_definitions;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
 mod process_lifecycle_sql;
@@ -1083,6 +1085,7 @@ pub use lash_core::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
 pub use preflight::PostgresStorePreflight;
+pub use process_definitions::PostgresProcessDefinitionRegistry;
 use schema_shape::{
     AWAIT_EVENT_SIGNING_SECRET_BYTES, ComponentVersion, SchemaShape, read_component_version,
     read_search_path, resolve_installation, verify_schema_migration_source_shape,

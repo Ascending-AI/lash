@@ -215,6 +215,8 @@ fn probe_context_with_projector(
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",

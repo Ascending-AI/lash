@@ -720,10 +720,7 @@ impl TriggerSubscriptionDraft {
             ));
         }
         self.source_capture.validate()?;
-        validate_trigger_subscription_target_label(
-            self.target_label.as_deref(),
-            self.target_identity.label.as_deref(),
-        )
+        Ok(())
     }
 }
 
@@ -880,21 +877,6 @@ impl TriggerSubscriptionRecord {
     /// returning `None` for host and platform ownership.
     pub fn registrant_session_id(&self) -> Option<&SessionId> {
         self.owner_scope.session_id()
-    }
-}
-
-fn validate_trigger_subscription_target_label(
-    target_label: Option<&str>,
-    identity_label: Option<&str>,
-) -> Result<(), PluginError> {
-    match (target_label, identity_label) {
-        (Some(target_label), Some(identity_label)) if target_label != identity_label => {
-            Err(PluginError::Session(
-                "trigger target_label must match target_identity.label when both are present"
-                    .to_string(),
-            ))
-        }
-        _ => Ok(()),
     }
 }
 

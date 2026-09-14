@@ -248,6 +248,8 @@ terminal frontier, so its name fence remains durable.
 
 | Row class and scope | Owner | Reclaim trigger |
 |---|---|---|
+| Session process-definition registry slot | Registering session | The ADR 0049 deleted-session frontier, like a session subscription. The registry has no delivery fan-out, so the frontier reconcile deletes enabled and tombstoned session slots once the owning session is deleted. |
+| Host or platform process-definition registry tombstone | Host or platform namespace | Never. Like a host subscription tombstone, the slot is the permanent take-over fence for its name. |
 | Session subscription | Registering session | The ADR 0049 deleted-session frontier. Delivery-retention reconciliation deletes the row in its trigger-store transaction only after witnessing zero remaining deliveries for the subscription. This applies to enabled and tombstoned rows; a tombstone remains the `Revive` CAS fence while its session could still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
 | Session mutation receipt | Registering session's replay eligibility | The same ADR 0049 frontier and trigger-store reconciliation transaction. Receipts survive while any delivery owned by that session remains. Once the frontier is crossed and the delivery set is witnessed empty, post-deletion replay is impossible and the journal is reclaimed. |

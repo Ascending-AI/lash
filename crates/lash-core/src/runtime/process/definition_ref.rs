@@ -226,7 +226,7 @@ impl ProcessDefinitionRef {
     /// This reference with the engine's authoritative signature in place of
     /// whatever it claimed. Only the registry calls this, after a successful
     /// resolve, so a durable row pins the authority rather than the claim.
-    pub(crate) fn with_resolved_signature(mut self, signature: ProcessSignature) -> Self {
+    pub fn with_resolved_signature(mut self, signature: ProcessSignature) -> Self {
         self.signature = signature;
         self
     }

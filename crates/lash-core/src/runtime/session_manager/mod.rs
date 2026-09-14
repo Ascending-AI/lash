@@ -378,6 +378,19 @@ impl RuntimeSessionServices {
         DirectCompletionClient::runtime(Arc::clone(self), effect_controller, turn_id)
     }
 
+    /// The host's durable home for the named process-definition registry
+    /// (FIG-2995). The environment defaults it to the in-memory registry, so
+    /// this is `Some` for every real runtime open.
+    pub(in crate::runtime) fn process_definition_registry(
+        self: &Arc<Self>,
+    ) -> Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>> {
+        self.current.host.process_definitions.clone()
+    }
+
+    pub(in crate::runtime) fn process_engines(&self) -> &crate::ProcessEngineRegistry {
+        &self.current.host.core.process_engines
+    }
+
     pub(in crate::runtime) fn trigger_router(self: &Arc<Self>) -> Option<crate::TriggerRouter> {
         self.current.host.trigger_store.as_ref().and_then(|store| {
             self.current

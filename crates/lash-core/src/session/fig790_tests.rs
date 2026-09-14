@@ -420,6 +420,8 @@ fn fig790_process_await_context(
         session_graph: host,
         processes,
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",

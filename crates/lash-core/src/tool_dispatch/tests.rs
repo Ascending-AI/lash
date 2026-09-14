@@ -851,6 +851,8 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -952,6 +954,8 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1011,6 +1015,8 @@ fn projection_policy_dispatch_context(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1180,6 +1186,8 @@ fn pinned_contract_dispatch_context(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1253,6 +1261,8 @@ fn authority_hidden_dispatch_context(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1299,6 +1309,8 @@ fn exact_dispatch_context_with_plugins(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1426,6 +1438,8 @@ fn pending_dispatch_context(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
@@ -1481,6 +1495,8 @@ fn parallel_dispatch_context(
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
             crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),

@@ -19,6 +19,7 @@ pub(crate) struct BoundSession {
     process: Option<ProcessWorkWiring>,
     queued: Arc<dyn QueuedWorkSubstrate>,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
+    process_definitions: Option<Arc<dyn lash_core::ProcessDefinitionRegistry>>,
     child_store_provider: Option<Arc<dyn SessionStoreFactory>>,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
@@ -46,6 +47,7 @@ impl BoundSession {
             process,
             queued,
             trigger_store: env.trigger_store.clone(),
+            process_definitions: env.process_definitions.clone(),
             child_store_provider: env.session_store_factory.clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
@@ -93,6 +95,9 @@ impl BoundSession {
     pub(crate) fn apply_owner(&self, mut env: RuntimeEnvironment) -> RuntimeEnvironment {
         env.core.control.effect_host = self.effect_host();
         env.trigger_store = self.trigger_store.clone();
+        if let Some(registry) = self.process_definitions.as_ref() {
+            env.process_definitions = Some(Arc::clone(registry));
+        }
         env.session_store_factory = self.child_store_provider.clone();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);

@@ -59,6 +59,10 @@ pub struct RuntimeEnvironment {
     // Host-owned trigger subscription and trigger occurrence routing.
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
 
+    // Host-owned durable home for the named process-definition registry
+    // (FIG-2995). Defaults to the in-memory registry at build time.
+    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
+
     // Store factory used by managed child sessions created from runtimes
     // built with this environment.
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
@@ -130,6 +134,7 @@ impl RuntimeEnvironmentBuilder {
                 plugin_host: None,
                 process_registry: None,
                 trigger_store: None,
+                process_definitions: None,
                 session_store_factory: None,
                 work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
                 core,
@@ -156,6 +161,14 @@ impl RuntimeEnvironmentBuilder {
 
     pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
         self.env.trigger_store = Some(store);
+        self
+    }
+
+    pub fn with_process_definition_registry(
+        mut self,
+        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
+    ) -> Self {
+        self.env.process_definitions = Some(registry);
         self
     }
 
@@ -290,6 +303,10 @@ impl RuntimeEnvironmentBuilder {
             self.env.trigger_store = Some(Arc::new(crate::InMemoryTriggerStore::with_clock(
                 Arc::clone(&self.env.core.clock),
             )));
+        }
+        if self.env.process_definitions.is_none() {
+            self.env.process_definitions =
+                Some(Arc::new(crate::InMemoryProcessDefinitionRegistry::default()));
         }
         self.env
     }

@@ -630,6 +630,8 @@ mod tests {
             session_graph: host,
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::NativeRuntimeEffectController::default(),
             )),
@@ -1039,6 +1041,8 @@ mod tests {
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",

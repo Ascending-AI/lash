@@ -322,6 +322,8 @@ fn tool_context_with_provider<'run>(
             Arc::clone(&fixtures.trigger_store) as Arc<dyn lash_core::TriggerStore>,
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
+        process_definitions: None,
+        process_engines: Default::default(),
         effect_controller,
         direct_completions,
         parent_invocation: Some(attempt_parent.clone()),

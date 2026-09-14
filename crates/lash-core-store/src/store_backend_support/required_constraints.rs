@@ -122,6 +122,12 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         "observer_inheritance_kind IN ('all', 'none', 'only')",
     ),
     sqlite_constraint(
+        SqliteConstraintDatabase::DurableCore,
+        "process_definitions",
+        "ck_process_definitions_lifecycle",
+        "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+    ),
+    sqlite_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
         "processes",
         "ck_processes_status",
@@ -185,6 +191,11 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
 
 /// Named `CHECK`s required from the published PostgreSQL schema.
 pub const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_process_definitions",
+        "ck_process_definitions_lifecycle",
+        "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+    ),
     expected_constraint(
         "lash_attachment_manifest",
         "ck_lash_attachment_manifest_owner_identity",
