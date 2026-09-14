@@ -822,7 +822,8 @@ mod tests {
                 inner
                     .clone()
                     .prop_map(|payload| TypeExpr::TriggerHandle(Box::new(payload))),
-                proptest::collection::vec(("[a-z][a-z0-9_]{0,6}", inner), 0..3).prop_map(
+                proptest::collection::vec(("[a-z][a-z0-9_]{0,6}", inner), 0..3).prop_filter_map(
+                    "a parameter name the language cannot spell",
                     |params| {
                         let mut seen = BTreeSet::new();
                         let params = params
@@ -836,10 +837,15 @@ mod tests {
                         let output = params
                             .first()
                             .map_or(TypeExpr::Null, |param| param.ty.clone());
-                        TypeExpr::Process(ProcessType::known(
-                            ProcessSignature::try_new(params, output)
-                                .expect("generated signature is well formed"),
-                        ))
+                        // The generated name space is wider than the language's:
+                        // `or` matches the pattern and is a keyword, so the
+                        // signature cannot be built. Asking `try_new` rather than
+                        // re-deriving the rule here keeps this generator honest if
+                        // the rule ever moves, and the discard is rare enough to
+                        // leave proptest's budget alone.
+                        ProcessSignature::try_new(params, output)
+                            .ok()
+                            .map(|signature| TypeExpr::Process(ProcessType::known(signature)))
                     }
                 ),
             ]
