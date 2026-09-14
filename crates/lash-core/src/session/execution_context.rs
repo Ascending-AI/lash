@@ -729,7 +729,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
                 let owner = crate::ArtifactOwner::process_start(&registration.id);
-                let env_ref = self.captured_process_execution_env_ref(&owner).await?;
+                let env_ref = self.staged_process_start_env_ref(&owner).await?;
                 Ok(registration.with_execution_env_ref(Some(env_ref)))
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
@@ -740,15 +740,16 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// Exposes captured process execution env ref to protocol and process-engine implementors while
     /// executing code against the session runtime.
+    ///
+    /// A retired owner fails here. Callers outside the process-start staging path publish under a
+    /// durable owner and then persist the reference (trigger registration keeps it in
+    /// `TriggerSubscriptionDraft::env_ref`), so a retirement must surface at publish time rather
+    /// than hand back a reference to bytes the fence already reclaimed.
     pub async fn captured_process_execution_env_ref(
         &self,
         owner: &crate::ArtifactOwner,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-        if let Some(env_ref) = self
-            .process_execution
-            .as_ref()
-            .and_then(|exec| exec.env_ref.clone())
-        {
+        if let Some(env_ref) = self.inherited_process_execution_env_ref() {
             return Ok(env_ref);
         }
         crate::publish_process_execution_env(
@@ -757,6 +758,52 @@ impl<'run> RuntimeExecutionContext<'run> {
             &self.execution_env_spec,
         )
         .await
+    }
+
+    /// Stages the process execution environment for a process start under the start-scoped owner.
+    ///
+    /// The publish happens before the process-start effect is journaled, so a replay of the same
+    /// turn repeats it after the first attempt already retired that staging owner — the start
+    /// effect transfers the artifact to the process owner and then fences the staging owner, and
+    /// several cleanup paths retire it with no transfer at all. A retired staging owner is
+    /// therefore an expected replay outcome, and resolving it to the content-addressed reference
+    /// the publish would have produced keeps the process-start effect reachable and the journal on
+    /// the same command sequence.
+    ///
+    /// This does not hand a running process a reclaimed environment: both executors resolve the
+    /// reference through `get_process_execution_env` and fail closed when it dangles
+    /// (`crates/lash-restate/src/controller/process_command.rs` and
+    /// `crates/lash-core/src/runtime/effect/executor/process_local.rs`).
+    async fn staged_process_start_env_ref(
+        &self,
+        owner: &crate::ArtifactOwner,
+    ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
+        if let Some(env_ref) = self.inherited_process_execution_env_ref() {
+            return Ok(env_ref);
+        }
+        match crate::publish_process_execution_env(
+            self.process_env_store.as_ref(),
+            owner,
+            &self.execution_env_spec,
+        )
+        .await
+        {
+            Ok(env_ref) => Ok(env_ref),
+            Err(publish_error) if crate::artifact_owner_is_permanently_retired(&publish_error) => {
+                self.execution_env_spec.stable_ref().map_err(|error| {
+                    crate::PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })
+            }
+            Err(publish_error) => Err(publish_error),
+        }
+    }
+
+    fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+        self.process_execution
+            .as_ref()
+            .and_then(|exec| exec.env_ref.clone())
     }
 
     pub(crate) fn child_process_query(&self) -> Option<Arc<dyn crate::ProcessQuery>> {
@@ -1405,6 +1452,14 @@ mod tests {
     }
 
     fn test_execution_context() -> RuntimeExecutionContext<'static> {
+        test_execution_context_with_env_store(Arc::new(
+            crate::InMemoryProcessExecutionEnvStore::new(),
+        ))
+    }
+
+    fn test_execution_context_with_env_store(
+        env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    ) -> RuntimeExecutionContext<'static> {
         let plugins = crate::plugin::PluginHost::empty()
             .build_session("session")
             .expect("plugin session");
@@ -1445,12 +1500,102 @@ mod tests {
         RuntimeExecutionContext::new(
             SessionId::from("session"),
             dispatch,
-            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            env_store,
             Arc::new(crate::SessionAttachmentStore::in_memory()),
             Arc::new(crate::ChronologicalProjection::default()),
             None,
             crate::TurnContext::default(),
         )
+    }
+
+    /// A process start is staged before the process-start effect is journaled, so a replayed turn
+    /// repeats the staging publish after the first attempt already transferred the environment to
+    /// the process owner and permanently retired the staging owner. The replay must still reach the
+    /// journaled start command, so the retired staging owner resolves to the same content-addressed
+    /// reference instead of failing the start.
+    #[tokio::test]
+    async fn process_start_staging_survives_a_retired_staging_owner_on_replay() {
+        use crate::ProcessExecutionEnvStore;
+
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let context = test_execution_context_with_env_store(env_store.clone());
+        let registration = crate::ProcessRegistration::new(
+            "replayed-process",
+            crate::ProcessInput::Engine {
+                kind: "test-engine".to_string(),
+                payload: serde_json::json!({"program": "probe"}),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
+
+        let first = context
+            .attach_captured_process_execution_env(registration.clone())
+            .await
+            .expect("first attempt stages the execution environment");
+        let staged_ref = first.env_ref.clone().expect("staged env ref");
+
+        // The process-start effect transfers the staged artifact and fences the staging owner.
+        env_store
+            .transfer_process_execution_env(
+                &staging_owner,
+                &crate::ArtifactOwner::process(crate::ProcessRef::new(
+                    registration.id.clone(),
+                    crate::ProcessIncarnation::from_registration_sequence(1),
+                )),
+                &staged_ref,
+            )
+            .await
+            .expect("transfer to the process owner");
+        env_store
+            .retire_process_execution_env_owner(&staging_owner)
+            .await
+            .expect("retire the staging owner");
+
+        let replayed = context
+            .attach_captured_process_execution_env(registration)
+            .await
+            .expect("replay still reaches the journaled process start");
+        assert_eq!(replayed.env_ref, Some(staged_ref));
+    }
+
+    /// The replay tolerance is scoped to process-start staging. A durable owner (trigger
+    /// registration publishes under the execution's own artifact owner and then persists the
+    /// reference) must still fail at publish time once that owner is fenced, rather than record a
+    /// reference to bytes the retirement reclaimed.
+    #[tokio::test]
+    async fn a_retired_durable_owner_still_fails_the_public_env_ref_publish() {
+        use crate::ProcessExecutionEnvStore;
+
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let context = test_execution_context_with_env_store(env_store.clone());
+        let owner = crate::ArtifactOwner::Execution(crate::ExecutionScope::runtime_operation(
+            "durable-owner",
+        ));
+
+        context
+            .captured_process_execution_env_ref(&owner)
+            .await
+            .expect("first publish under a live owner");
+
+        env_store
+            .retire_process_execution_env_owner(&owner)
+            .await
+            .expect("retire the durable owner");
+
+        let error = context
+            .captured_process_execution_env_ref(&owner)
+            .await
+            .expect_err("a fenced durable owner must not resolve to a reclaimed reference");
+        assert!(
+            crate::artifact_owner_is_permanently_retired(&error),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
