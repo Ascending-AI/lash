@@ -69,8 +69,8 @@ impl InMemorySessionStore {
                         .find(|node| node.node_id == target.leaf_node_id)
                         .expect("graph-integrity fixture leaf is durable")
                         .clone();
-                    let node_a_id = format!("{}-a", target.missing_node_id);
-                    let node_b_id = format!("{}-b", target.missing_node_id);
+                    let node_a_id = crate::NodeId::new(format!("{}-a", target.missing_node_id));
+                    let node_b_id = crate::NodeId::new(format!("{}-b", target.missing_node_id));
                     let mut node_a = template.clone();
                     node_a.node_id = node_a_id.clone();
                     node_a.parent_node_id = Some(node_b_id.clone());
@@ -121,7 +121,7 @@ impl InMemorySessionStore {
     }
 
     /// Return the durable leaf-node id without loading a session read model.
-    pub fn raw_leaf_node_id_for_testing(&self) -> Option<String> {
+    pub fn raw_leaf_node_id_for_testing(&self) -> Option<crate::NodeId> {
         self.session_head_meta
             .lock_recover()
             .as_ref()
@@ -321,7 +321,7 @@ impl super::InMemorySessionStoreFactory {
     }
 
     /// Return explicit node-anchor rows without mixing in implicit live tips.
-    pub fn raw_node_anchors_for_testing(&self) -> Vec<(String, crate::BlobRef, SessionId)> {
+    pub fn raw_node_anchors_for_testing(&self) -> Vec<(crate::NodeId, crate::BlobRef, SessionId)> {
         let mut rows = self
             .node_anchors
             .lock_recover()

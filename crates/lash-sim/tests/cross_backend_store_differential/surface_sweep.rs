@@ -369,7 +369,7 @@ impl BackendRunner {
                     )
                     .await?;
                 let batch = outcome.into_batch();
-                self.surface.batch_id = Some(batch.batch_id.clone());
+                self.surface.batch_id = Some(batch.batch_id.to_string());
                 format!("source_key={:?}", batch.source_key)
             }
             SurfaceMethod::ClaimLeadingReadySessionCommand => {
@@ -389,7 +389,7 @@ impl BackendRunner {
                         &lease_fence,
                         &lease_owner,
                         QueuedWorkClaimBoundary::Idle,
-                        &[UNKNOWN_BATCH_ID.to_string()],
+                        &[UNKNOWN_BATCH_ID.into()],
                         lash_core::testing::queued_work_claim_policy(1),
                     )
                     .await?;

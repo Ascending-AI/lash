@@ -23,15 +23,15 @@ pub struct InMemorySessionStoreFactory {
     pub(super) retired_stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
     pub(super) global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    pub(super) global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
-    pub(super) global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
+    pub(super) global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
+    pub(super) global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
     pub(super) fork_plans: Arc<Mutex<HashMap<SessionId, crate::store::ForkPlan>>>,
     pub(super) node_anchors: InMemoryNodeAnchors,
     pub(super) checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     /// Factory-global session -> live checkpoint component edges; see
     /// [`InMemorySessionStore::checkpoint_blob_roots`].
     pub(super) checkpoint_blob_roots: super::SharedCheckpointBlobRoots,
-    pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+    pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
     pub(super) deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
     pub(super) session_catalog: super::SharedSessionCatalog,
     /// Factory-global attachment GC condemnation state: the digest is global to
@@ -110,7 +110,7 @@ fn retained_fork_config(
 ) -> Result<crate::PersistedSessionConfig, crate::StoreError> {
     let frame_node_id = graph.nearest_frame_node_id(Some(node_id)).ok_or_else(|| {
         crate::StoreError::MissingFrameOpenAncestor {
-            leaf_node_id: node_id.to_string(),
+            leaf_node_id: crate::NodeId::from(node_id),
         }
     })?;
     graph
@@ -468,7 +468,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         {
             let graph = self.global_session_graph.lock_recover();
             return Ok(crate::ForkPoint {
-                node_id: node_id.to_string(),
+                node_id: crate::NodeId::from(node_id),
                 checkpoint_ref,
                 source_session_id,
                 config: retained_fork_config(&graph, node_id)?,
@@ -492,21 +492,21 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         drop(stores);
         let Some((checkpoint_ref, checkpoint, source_session_id)) = retained else {
             return Err(crate::StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string(),
+                node_id: crate::NodeId::from(node_id),
             });
         };
         let graph = self.global_session_graph.lock_recover().clone();
         let tombstoned = self.tombstoned_node_ids.lock_recover();
         if graph.find_node(node_id).is_none() || tombstoned.contains(node_id) {
             return Err(crate::StoreError::ForkPointNotRetained {
-                node_id: node_id.to_string(),
+                node_id: crate::NodeId::from(node_id),
             });
         }
         let config = retained_fork_config(&graph, node_id)?;
         drop(tombstoned);
         drop(graph);
         self.node_anchors.lock_recover().insert(
-            node_id.to_string(),
+            crate::NodeId::from(node_id),
             (
                 checkpoint_ref.clone(),
                 checkpoint,
@@ -514,7 +514,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             ),
         );
         Ok(crate::ForkPoint {
-            node_id: node_id.to_string(),
+            node_id: crate::NodeId::from(node_id),
             checkpoint_ref,
             source_session_id,
             config,
@@ -1083,7 +1083,7 @@ pub(crate) mod lineage_conformance_support {
             self.factory
                 .tombstoned_node_ids
                 .lock_recover()
-                .insert(node_id.to_string());
+                .insert(crate::NodeId::from(node_id));
         }
 
         async fn lineage_ancestors(
@@ -1152,7 +1152,7 @@ pub(crate) mod lineage_conformance_support {
                         frame_node_id: graph
                             .nearest_frame_node_id(Some(&node.node_id))
                             .expect("in-memory graph node has a frame ancestor")
-                            .to_string(),
+                            .clone(),
                         is_frame: matches!(
                             node.payload,
                             crate::SessionNodePayload::FrameOpen { .. }

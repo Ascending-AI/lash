@@ -156,26 +156,31 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
         "sha256:4f0da66cfa71819ff33a6ca872b6825e3d403c9f4f1c99918ee3de03efea09bc"
     ),
-    # FIG-2144: ChargeSafetyPolicy is live host configuration deliberately
-    # omitted from SessionPolicyWire, and RetryDecision.charge_safety is
-    # serde-skipped. Both guarded Rust shapes changed while the persisted
-    # session-node body stays byte-identical, so version 3 remains current.
-    # (Superseded state: sha256:b3b1b326e2b8a29da91388b4dfc7f6531a45338f50
-    # ffed061d04861166017632.)
-    #
-    # FIG-2479: PersistedSessionConfig gained the optional
-    # protocol_turn_options head field. The struct lives in session_graph.rs,
-    # so the node-body whole-file sweep sees it, but it is the session-head
-    # payload, not a node-body carrier: no FrameOpen/Event/Plugin byte
-    # changes, and the surface that actually changed took its honest bump
-    # (SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6, now guarded on this struct
-    # directly). SESSION_NODE_BODY_SCHEMA_VERSION stays 10.
-    # FIG-2880: removing tool_access's serde default changes head-owned
-    # PersistedSessionConfig only; head version 8 fences those bytes. Node
-    # bodies and checkpoint/blob references are unchanged, so node version 12
-    # remains current. Both independent reviews verified this boundary.
+    # Node-body rename baselines, collapsed to one live entry: this is a plain
+    # dict, so a second literal for the same key would silently win. History of
+    # the readings this entry supersedes --
+    #   FIG-2144: ChargeSafetyPolicy is live host configuration omitted from
+    #     SessionPolicyWire and RetryDecision.charge_safety is serde-skipped;
+    #     the guarded Rust shapes moved, the persisted bytes did not.
+    #   FIG-2479: PersistedSessionConfig gained the optional
+    #     protocol_turn_options head field -- session-head payload, not a
+    #     node-body carrier; the honest bump landed on
+    #     SESSION_HEAD_META_SCHEMA_VERSION 5 -> 6.
+    #   FIG-2880: removing tool_access's serde default changed head-owned
+    #     PersistedSessionConfig only; head version 8 fences those bytes.
+    #   All three superseded by FIG-1040.
+    # FIG-1040 (live): the identity-newtype wave retyped raw `String` id fields
+    # to the transparent NodeId/InputId/BatchId/SessionId/ProcessId/TurnId
+    # newtypes. Every identity is #[repr(transparent)] + #[serde(transparent)]
+    # with its JsonSchema delegated to String, and the identity
+    # transparent-serde and JSON-schema tests in
+    # crates/lash-sansio/src/identity.rs are byte-for-byte unchanged by this
+    # diff, so the guarded session-node body text moved while the serialized
+    # bytes cannot have. No field name, variant name, serde attribute or
+    # constant value changed, so SESSION_NODE_BODY_SCHEMA_VERSION stays 14.
+    # Any further guarded-shape drift re-fails the gate.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:18682ce7b019aea9ce6d4b8ff46c3cec91cf0f908b0443992570c9a7dca26d2f"
+        "sha256:1a59dad63420820eca62f134f5c011b2aa38f4d773e7bc5199cde23ff19a98db"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (

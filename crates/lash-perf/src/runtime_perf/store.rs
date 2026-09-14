@@ -24,7 +24,7 @@ use lash_core::{
 /// counter the perf report cannot obtain from the public persistence traits.
 pub(crate) struct RuntimePerfStore {
     inner: Arc<dyn RuntimePersistence>,
-    committed_node_ids: Mutex<HashSet<String>>,
+    committed_node_ids: Mutex<HashSet<lash_core::NodeId>>,
     metrics: Arc<RuntimePerfStoreMetrics>,
     measure_commit_bytes: bool,
 }

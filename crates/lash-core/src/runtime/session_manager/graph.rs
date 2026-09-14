@@ -87,7 +87,10 @@ impl CurrentSessionCapability {
             .len()
             .saturating_sub(requested_node_count)..]
             .to_vec();
-        let locally_derived_leaf_node_id = graph.leaf_node_id.clone().unwrap_or_default();
+        let locally_derived_leaf_node_id = graph
+            .leaf_node_id
+            .clone()
+            .unwrap_or_else(|| crate::NodeId::new(String::new()));
         let usage_deltas = staged_usage
             .as_ref()
             .map_or(&[][..], |staged| staged.deltas());

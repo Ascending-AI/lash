@@ -1,4 +1,4 @@
-use crate::SessionId;
+use crate::{NodeId, SessionId};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
@@ -16,7 +16,7 @@ mod legacy_response;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RealizedNodeTimestamp {
-    pub node_id: String,
+    pub node_id: NodeId,
     pub timestamp: String,
 }
 
@@ -67,7 +67,7 @@ pub(crate) mod facade_ops {
     pub trait SessionGraphFacadeOps {
         fn active_path_nodes(&self) -> Vec<&SessionNodeRecord>;
 
-        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str>;
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId>;
 
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
     }
@@ -81,13 +81,13 @@ pub(crate) mod facade_ops {
                 .collect()
         }
 
-        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&str> {
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId> {
             let idx = self
                 .nearest_ancestor_index(leaf_node_id, |node| {
                     matches!(node.payload, SessionNodePayload::FrameOpen { .. })
                 })
                 .ok()??;
-            Some(self.nodes[idx].node_id.as_str())
+            Some(&self.nodes[idx].node_id)
         }
 
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord> {
@@ -97,12 +97,12 @@ pub(crate) mod facade_ops {
     }
 }
 
-pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> String {
+pub(crate) fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
-    format!(
+    NodeId::new(format!(
         "draft-node/v3/{}",
         crate::stable_hash::blake3_hex("lash-draft-node/v3", preimage.as_bytes())
-    )
+    ))
 }
 
 /// Derive a durable frame identity before the surrounding operation commits.
@@ -129,7 +129,7 @@ pub struct SessionGraphData {
     #[serde(default)]
     pub nodes: Vec<SessionNodeRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub leaf_node_id: Option<String>,
+    pub leaf_node_id: Option<NodeId>,
 }
 
 #[derive(Debug)]
@@ -185,9 +185,9 @@ impl Deref for SessionGraph {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SessionNodeRecord {
-    pub node_id: String,
+    pub node_id: NodeId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_node_id: Option<String>,
+    pub parent_node_id: Option<NodeId>,
     pub timestamp: String,
     #[serde(flatten)]
     pub payload: SessionNodePayload,
@@ -444,8 +444,8 @@ pub struct PersistedTurnState {
 
 #[derive(Clone, Debug)]
 pub struct SessionMessageTreeNode {
-    pub node_id: String,
-    pub parent_message_node_id: Option<String>,
+    pub node_id: NodeId,
+    pub parent_message_node_id: Option<NodeId>,
     pub message: Message,
     pub timestamp: String,
     pub children: Vec<SessionMessageTreeNode>,
@@ -454,7 +454,7 @@ pub struct SessionMessageTreeNode {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveReadReplacement {
-    pub(crate) leaf_node_id: Option<String>,
+    pub(crate) leaf_node_id: Option<NodeId>,
     pub(crate) new_tail_nodes: Vec<SessionNodeRecord>,
 }
 
@@ -490,22 +490,22 @@ pub enum SessionGraphScopeError {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SessionGraphAppendBuilder {
-    existing_ids: HashSet<String>,
-    leaf_node_id: Option<String>,
+    existing_ids: HashSet<NodeId>,
+    leaf_node_id: Option<NodeId>,
     draft_namespace: String,
     next_draft_ordinal: u64,
 }
 
 impl SessionGraphAppendBuilder {
-    pub(crate) fn leaf_node_id(&self) -> Option<&String> {
+    pub(crate) fn leaf_node_id(&self) -> Option<&NodeId> {
         self.leaf_node_id.as_ref()
     }
 
-    pub(crate) fn set_leaf_node_id(&mut self, leaf_node_id: Option<String>) {
+    pub(crate) fn set_leaf_node_id(&mut self, leaf_node_id: Option<NodeId>) {
         self.leaf_node_id = leaf_node_id;
     }
 
-    pub(crate) fn remap_node_ids(&mut self, mapping: &[(String, String)]) {
+    pub(crate) fn remap_node_ids(&mut self, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
@@ -602,7 +602,7 @@ impl SessionGraphAppendBuilder {
         nodes
     }
 
-    fn next_draft_node_id(&mut self) -> String {
+    fn next_draft_node_id(&mut self) -> NodeId {
         loop {
             let candidate = draft_node_id(&self.draft_namespace, self.next_draft_ordinal);
             self.next_draft_ordinal += 1;
@@ -615,7 +615,7 @@ impl SessionGraphAppendBuilder {
 
 #[derive(Debug, Clone)]
 struct SessionGraphCache {
-    by_id: HashMap<String, usize>,
+    by_id: HashMap<NodeId, usize>,
     active_path_indices: Vec<usize>,
     active_events: Arc<Vec<SessionHistoryRecord>>,
     active_messages: Arc<Vec<Message>>,
@@ -820,8 +820,8 @@ impl SessionNodeRecord {
             )));
         }
         Ok(Self {
-            node_id,
-            parent_node_id,
+            node_id: NodeId::from(node_id),
+            parent_node_id: parent_node_id.map(NodeId::from),
             timestamp: body.timestamp,
             payload: body.payload,
         })
@@ -903,7 +903,7 @@ impl SessionGraph {
     /// `validate_resident_integrity` at the resident seam.
     pub fn from_nodes(
         nodes: Vec<SessionNodeRecord>,
-        leaf_node_id: Option<String>,
+        leaf_node_id: Option<NodeId>,
     ) -> Result<Self, crate::StoreError> {
         let graph = Self::from_validated_nodes(nodes, leaf_node_id);
         graph.validate_structural_integrity()?;
@@ -917,7 +917,7 @@ impl SessionGraph {
     /// preserves identity, parent topology, and leaf membership.
     pub(crate) fn from_validated_nodes(
         nodes: Vec<SessionNodeRecord>,
-        leaf_node_id: Option<String>,
+        leaf_node_id: Option<NodeId>,
     ) -> Self {
         Self {
             inner: Arc::new(SessionGraphData {
@@ -931,7 +931,7 @@ impl SessionGraph {
     #[cfg(any(test, feature = "testing"))]
     pub fn from_unchecked_nodes_for_testing(
         nodes: Vec<SessionNodeRecord>,
-        leaf_node_id: Option<String>,
+        leaf_node_id: Option<NodeId>,
     ) -> Self {
         Self::from_validated_nodes(nodes, leaf_node_id)
     }
@@ -978,7 +978,7 @@ impl SessionGraph {
         Arc::make_mut(&mut self.inner)
     }
 
-    pub(crate) fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(String, String)]) {
+    pub(crate) fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
@@ -1113,7 +1113,7 @@ impl SessionGraph {
 
     /// Appends one message after the active leaf for protocol implementors and returns its
     /// content-derived node ID.
-    pub fn append_message(&mut self, message: Message) -> String {
+    pub fn append_message(&mut self, message: Message) -> NodeId {
         self.append_node_draft(SessionNodeDraft::message(message))
     }
 
@@ -1123,7 +1123,7 @@ impl SessionGraph {
         &mut self,
         plugin_type: impl Into<String>,
         body: serde_json::Value,
-    ) -> String {
+    ) -> NodeId {
         self.append_node_draft(SessionNodeDraft::plugin(plugin_type, body))
     }
 
@@ -1169,18 +1169,18 @@ impl SessionGraph {
     ///
     /// The head caches this answer for bounded reads, but ancestry remains the
     /// truth and is used to validate every stored pointer.
-    pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> String {
+    pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> NodeId {
         self.append_node_draft(SessionNodeDraft::protocol_event(event))
     }
 
-    pub(crate) fn append_node_draft(&mut self, draft: SessionNodeDraft) -> String {
+    pub(crate) fn append_node_draft(&mut self, draft: SessionNodeDraft) -> NodeId {
         self.append_node_drafts([draft])
             .into_iter()
             .next()
             .expect("single draft append must create one node")
     }
 
-    pub(crate) fn append_node_drafts<I>(&mut self, drafts: I) -> Vec<String>
+    pub(crate) fn append_node_drafts<I>(&mut self, drafts: I) -> Vec<NodeId>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1200,7 +1200,7 @@ impl SessionGraph {
             return false;
         }
         self.append_prebuilt_nodes(vec![SessionNodeRecord {
-            node_id: frame_node_id.into_inner(),
+            node_id: NodeId::new(frame_node_id.into_inner()),
             parent_node_id: self.leaf_node_id.clone(),
             timestamp,
             payload: SessionNodePayload::FrameOpen {
@@ -1244,7 +1244,7 @@ impl SessionGraph {
         draft_namespace: &str,
         drafts: I,
         timestamp: String,
-    ) -> Vec<String>
+    ) -> Vec<NodeId>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1256,7 +1256,7 @@ impl SessionGraph {
         draft_namespace: Option<&str>,
         drafts: I,
         timestamp: String,
-    ) -> Vec<String>
+    ) -> Vec<NodeId>
     where
         I: IntoIterator<Item = SessionNodeDraft>,
     {
@@ -1484,7 +1484,7 @@ impl SessionGraph {
         build_tree(message_nodes)
     }
 
-    fn nearest_message_ancestor(&self, node_id: Option<&str>) -> Option<String> {
+    fn nearest_message_ancestor(&self, node_id: Option<&str>) -> Option<NodeId> {
         let idx = self
             .nearest_ancestor_index(node_id, |node| node.message().is_some())
             .ok()??;
@@ -1506,7 +1506,7 @@ impl SessionGraph {
 
 fn nearest_ancestor_index(
     graph: &SessionGraph,
-    by_id: &HashMap<String, usize>,
+    by_id: &HashMap<NodeId, usize>,
     node_id: Option<&str>,
     mut predicate: impl FnMut(&SessionNodeRecord) -> bool,
 ) -> Result<Option<usize>, crate::StoreError> {
@@ -1534,7 +1534,7 @@ fn nearest_ancestor_index(
 }
 
 fn build_tree(mut nodes: Vec<SessionMessageTreeNode>) -> Vec<SessionMessageTreeNode> {
-    let mut children_by_parent = HashMap::<Option<String>, Vec<SessionMessageTreeNode>>::new();
+    let mut children_by_parent = HashMap::<Option<NodeId>, Vec<SessionMessageTreeNode>>::new();
     for node in nodes.drain(..) {
         children_by_parent
             .entry(node.parent_message_node_id.clone())
@@ -1554,8 +1554,8 @@ fn sort_tree(nodes: &mut [SessionMessageTreeNode]) {
 }
 
 fn build_tree_children(
-    parent_id: Option<String>,
-    children_by_parent: &mut HashMap<Option<String>, Vec<SessionMessageTreeNode>>,
+    parent_id: Option<NodeId>,
+    children_by_parent: &mut HashMap<Option<NodeId>, Vec<SessionMessageTreeNode>>,
 ) -> Vec<SessionMessageTreeNode> {
     let mut children = children_by_parent.remove(&parent_id).unwrap_or_default();
     for child in &mut children {

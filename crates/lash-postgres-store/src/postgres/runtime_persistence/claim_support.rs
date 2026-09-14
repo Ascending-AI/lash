@@ -170,7 +170,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
                )",
         )
         .bind(session_id.as_str())
-        .bind(&row.batch_id)
+        .bind(&*row.batch_id)
         .bind(&lease.claim_id)
         .bind(&lease.lease_token)
         .bind(sql_session_lease_generation(
@@ -524,7 +524,7 @@ pub(super) fn turn_cancel_record_from_rows(
             });
         }
         affected_inputs.push(lash_core::TurnCancelAffectedInput {
-            input_id,
+            input_id: input_id.into(),
             payload: store_decode_json(&input_json, "turn input")?,
             disposition: turn_cancel_disposition_from_wire(&applied_disposition)?,
         });
@@ -622,7 +622,7 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
-    .bind(&affected.input_id)
+    .bind(&*affected.input_id)
     .bind(turn_cancel_disposition_wire(affected.disposition))
     .execute(&mut **tx)
     .await
@@ -834,7 +834,7 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         .await
         .map_err(store_sqlx_error)?;
         let affected = lash_core::TurnCancelAffectedInput {
-            input_id,
+            input_id: input_id.into(),
             payload,
             disposition,
         };
@@ -956,7 +956,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
                )",
         )
         .bind(session_id.as_str())
-        .bind(&row.input_id)
+        .bind(row.input_id.as_str())
         .bind(state_after_claim.as_str())
         .bind(&lease.claim_id)
         .bind(&owner.owner_id)

@@ -107,7 +107,7 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     );
     crate::restate::settle_workbench_turn(
         &state,
-        &SessionId::from(session.session_id()),
+        &session.session_id(),
         &TurnId::from("bare-prose-turn"),
     )
     .await
@@ -207,7 +207,7 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     );
     crate::restate::settle_workbench_turn(
         &state,
-        &SessionId::from(session.session_id()),
+        &session.session_id(),
         &TurnId::from("reasoned-prose-turn"),
     )
     .await
@@ -298,7 +298,7 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     .expect("record mid-turn prose turn output");
     crate::restate::settle_workbench_turn(
         &state,
-        &SessionId::from(session.session_id()),
+        &session.session_id(),
         &TurnId::from("mid-turn-prose-turn"),
     )
     .await

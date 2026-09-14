@@ -876,7 +876,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             let raw_pending = store.raw_pending_turn_inputs_for_testing();
             let dropped = raw_pending
                 .iter()
-                .find(|(input_id, ..)| input_id == &undelivered.input_id)
+                .find(|(input_id, ..)| input_id == undelivered.input_id)
                 .expect("dropped input retains terminal lifecycle evidence");
             assert_eq!(dropped.2, lash_core::TurnInputState::Cancelled);
             assert!(
@@ -1361,7 +1361,7 @@ pub(super) async fn await_queued_work_batch_resolves_immediately_for_unknown_bat
     let session = core.session("await-unknown").open().await?;
     tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        session.await_queued_work_batch("qwb:never-existed"),
+        session.await_queued_work_batch(&lash_core::BatchId::from("qwb:never-existed")),
     )
     .await
     .expect("unknown batch must resolve immediately")?;
@@ -1543,10 +1543,7 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
     let output = session
         .turn(TurnInput::text("use tool"))
         .advanced()
-        .collect_with_scope(
-            live.as_ref(),
-            turn_scope(&SessionId::from(session.session_id())),
-        )
+        .collect_with_scope(live.as_ref(), turn_scope(&session.session_id()))
         .await?;
 
     assert!(matches!(

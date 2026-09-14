@@ -137,7 +137,7 @@ impl Store {
                 format!("readable path does not end at leaf `{leaf_node_id}`"),
             ));
         }
-        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id)
+        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id.map(lash_core::NodeId::from))
             .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 

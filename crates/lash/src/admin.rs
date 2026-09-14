@@ -682,7 +682,7 @@ impl SessionAdmin {
                 lash_core::SessionQueueEventKind::Enqueued,
                 pending_turn_inputs
                     .iter()
-                    .map(|input| input.input_id.clone())
+                    .map(|input| input.input_id.to_string())
                     .collect(),
             );
         }

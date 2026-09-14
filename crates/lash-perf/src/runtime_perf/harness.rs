@@ -203,7 +203,7 @@ impl BenchmarkRuntime {
     ) -> anyhow::Result<lash::LashSession> {
         let parent_session_id = self.session().session_id();
         self.core
-            .open_child_session(session_id, SessionId::from(parent_session_id))
+            .open_child_session(session_id, parent_session_id)
             .await
             .map_err(anyhow::Error::from)
     }

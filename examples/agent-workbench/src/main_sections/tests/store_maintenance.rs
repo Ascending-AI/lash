@@ -245,7 +245,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         .await
         .expect("open the vacuum test session");
     let cancelled = session
-        .cancel_pending_turn_input(&settled.input_id)
+        .cancel_pending_turn_input(&lash::InputId::from(settled.input_id.as_str()))
         .await
         .expect("cancel the second input");
     assert!(

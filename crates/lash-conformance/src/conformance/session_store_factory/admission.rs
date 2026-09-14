@@ -86,7 +86,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
         session_id: request.session_id.clone(),
         relation: crate::SessionRelation::Fork {
             source_session_id: SessionId::from("admission-parent"),
-            source_node_id: "admission-node".to_string(),
+            source_node_id: "admission-node".into(),
             observer_inheritance: crate::ObserverInheritance::None,
         },
     };
@@ -172,7 +172,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
         "admission-model",
         crate::SessionRelation::Fork {
             source_session_id: fork_source_session_id.clone(),
-            source_node_id: "admission-fork-node".to_string(),
+            source_node_id: "admission-fork-node".into(),
             observer_inheritance: crate::ObserverInheritance::None,
         },
     );
@@ -207,7 +207,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionSt
                 session_id: fork_request.session_id.clone(),
                 relation: crate::SessionRelation::Fork {
                     source_session_id: fork_source_session_id.clone(),
-                    source_node_id: "admission-fork-other-node".to_string(),
+                    source_node_id: "admission-fork-other-node".into(),
                     observer_inheritance: crate::ObserverInheritance::None,
                 },
             })

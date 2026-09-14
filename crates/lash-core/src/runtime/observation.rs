@@ -631,7 +631,7 @@ impl RuntimeHandle {
             self.record_queue_changed(
                 SessionQueueEventKind::Enqueued,
                 if is_next_turn {
-                    vec![input.input_id.clone()]
+                    vec![input.input_id.to_string()]
                 } else {
                     Vec::new()
                 },
@@ -698,7 +698,10 @@ impl RuntimeHandle {
                     })
                     .collect::<Vec<_>>();
                 if !cancelled_ids.is_empty() {
-                    self.record_queue_changed(SessionQueueEventKind::Cancelled, cancelled_ids);
+                    self.record_queue_changed(
+                        SessionQueueEventKind::Cancelled,
+                        cancelled_ids.iter().map(ToString::to_string).collect(),
+                    );
                 }
             })
     }
@@ -737,7 +740,10 @@ impl RuntimeHandle {
                     })
                     .collect::<Vec<_>>();
                 if !cancelled_ids.is_empty() {
-                    self.record_queue_changed(SessionQueueEventKind::Cancelled, cancelled_ids);
+                    self.record_queue_changed(
+                        SessionQueueEventKind::Cancelled,
+                        cancelled_ids.iter().map(ToString::to_string).collect(),
+                    );
                 }
             })
     }
@@ -772,7 +778,7 @@ impl RuntimeHandle {
             claim
                 .batches
                 .iter()
-                .map(|batch| batch.batch_id.clone())
+                .map(|batch| batch.batch_id.to_string())
                 .collect(),
         );
         Ok(())
@@ -798,7 +804,7 @@ impl RuntimeHandle {
             claim
                 .inputs
                 .iter()
-                .map(|input| input.input_id.clone())
+                .map(|input| input.input_id.to_string())
                 .collect(),
         );
         Ok(())

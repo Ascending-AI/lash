@@ -301,7 +301,7 @@ impl InMemorySessionStore {
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub fn force_active_leaf_for_testing(&self, leaf_node_id: String) {
+    pub fn force_active_leaf_for_testing(&self, leaf_node_id: crate::NodeId) {
         let _transaction = self.write_transaction.lock_recover();
         let mut meta = self.session_head_meta.lock_recover();
         let meta = meta.as_mut().expect("branch switch requires session head");
@@ -316,7 +316,7 @@ impl InMemorySessionStore {
             .expect("forced active leaf must resolve");
     }
 
-    pub fn tombstone_node_for_testing(&self, node_id: String) {
+    pub fn tombstone_node_for_testing(&self, node_id: crate::NodeId) {
         let _transaction = self.write_transaction.lock_recover();
         self.tombstoned_node_ids.lock_recover().insert(node_id);
     }
@@ -496,7 +496,7 @@ mod tests {
             ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
         };
         let node = crate::SessionNodeRecord {
-            node_id: "node".to_string(),
+            node_id: "node".into(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
@@ -517,7 +517,7 @@ mod tests {
         commit.graph = GraphAppend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: format!("node-{index}"),
+                    node_id: format!("node-{index}").into(),
                     ..node.clone()
                 })
                 .collect(),
@@ -551,7 +551,7 @@ mod tests {
             .lock_recover()
             .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
-                    batch_id: "exhausted-batch".to_string(),
+                    batch_id: "exhausted-batch".into(),
                     session_id: SessionId::from("session"),
                     enqueue_seq: 1,
                     source_key: None,
@@ -615,7 +615,7 @@ mod tests {
             .lock_recover()
             .push(super::super::InMemoryQueuedBatch {
                 batch: QueuedWorkBatch {
-                    batch_id: "batch".to_string(),
+                    batch_id: "batch".into(),
                     session_id: SessionId::from("session"),
                     enqueue_seq: 1,
                     source_key: None,
@@ -653,7 +653,7 @@ mod tests {
             claim_id: "queue-claim".to_string(),
             lease_token: "queue-token".to_string(),
             data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["batch".to_string()],
+                batch_ids: vec!["batch".into()],
             },
         }];
         commit.completed_turn_input_claims = vec![TurnInputCompletion {
@@ -663,7 +663,7 @@ mod tests {
                 lease_token: "stale-input-token".to_string(),
             }),
             data: crate::TurnInputCompletionData {
-                input_ids: vec!["missing-input".to_string()],
+                input_ids: vec!["missing-input".into()],
                 applications: Vec::new(),
             },
         }];

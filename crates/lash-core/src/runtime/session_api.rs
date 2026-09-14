@@ -715,7 +715,7 @@ impl LashRuntime {
         else {
             let receipt = crate::SessionCommandReceipt {
                 session_id,
-                batch_id: format!("inline-command:{}", uuid::Uuid::new_v4()),
+                batch_id: crate::BatchId::new(format!("inline-command:{}", uuid::Uuid::new_v4())),
                 source_key,
             };
             self.apply_session_command_after_admission(vec![command], None, None)
@@ -1014,7 +1014,10 @@ impl LashRuntime {
                 let batch_id = batch.batch_id.clone();
                 crate::SessionCommandReceipt {
                     session_id: self.state.session_id.clone(),
-                    source_key: batch.source_key.clone().unwrap_or_else(|| batch_id.clone()),
+                    source_key: batch
+                        .source_key
+                        .clone()
+                        .unwrap_or_else(|| batch_id.to_string()),
                     batch_id,
                 }
             })

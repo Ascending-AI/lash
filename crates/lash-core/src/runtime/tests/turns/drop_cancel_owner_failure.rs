@@ -162,7 +162,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let raw = inner_store.raw_pending_turn_inputs_for_testing();
     let dropped = raw
         .iter()
-        .find(|(input_id, ..)| input_id == &undelivered.input_id)
+        .find(|(input_id, ..)| input_id == undelivered.input_id)
         .expect("the cancelled row remains as durable evidence");
     assert_eq!(dropped.2, crate::TurnInputState::Cancelled);
     assert!(dropped.3.is_none(), "recovery clears the dead turn claim");

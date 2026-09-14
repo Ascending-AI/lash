@@ -7,6 +7,7 @@ use lash::direct::{
     GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
 };
 use lash::durability::RuntimeHostConfig;
+use lash::BatchId;
 use lash::TurnId;
 use lash::SessionId;
 use lash::messages::MessageRole;
@@ -333,7 +334,7 @@ impl QueuedWorkStore for FacadeStore {
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _owner: &LeaseOwnerIdentity,
         _boundary: QueuedWorkClaimBoundary,
-        _batch_ids: &[String],
+        _batch_ids: &[BatchId],
         _policy: QueuedWorkClaimPolicy,
     ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         Ok(SelectedQueuedWorkClaimOutcome::new(None, Vec::new()))
@@ -575,7 +576,7 @@ fn turn_input_ingress_types_are_nameable(
 }
 
 async fn queued_work_wait_is_nameable(session: &lash::LashSession) -> lash::Result<()> {
-    session.await_queued_work_batch("qwb:batch").await
+    session.await_queued_work_batch(&BatchId::from("qwb:batch")).await
 }
 
 async fn pending_turn_input_cancel_facade_is_nameable(

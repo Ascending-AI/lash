@@ -158,7 +158,7 @@ fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessio
     state
 }
 
-fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<String> {
+fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<lash_core::BatchId> {
     claim
         .batches
         .iter()
@@ -171,7 +171,7 @@ async fn assert_no_parallel_reclaim(
     session_id: &SessionId,
     lease: &crate::SessionExecutionLease,
     claim_owner: &crate::LeaseOwnerIdentity,
-    batch_ids: &[String],
+    batch_ids: &[lash_core::BatchId],
 ) {
     assert!(
         store

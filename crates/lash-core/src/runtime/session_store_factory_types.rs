@@ -1,4 +1,4 @@
-use crate::SessionId;
+use crate::{NodeId, SessionId};
 use crate::{SessionPolicy, SessionRelation};
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ impl SessionStoreCreateRequest {
 /// session head.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkPoint {
-    pub node_id: String,
+    pub node_id: NodeId,
     pub checkpoint_ref: crate::BlobRef,
     /// Provenance of the node, which may name a session that has since been
     /// deleted and is not required to remain readable for a fork.
@@ -38,7 +38,7 @@ pub struct ForkPoint {
 #[derive(Clone, Debug)]
 pub struct ForkSessionRequest {
     pub session_id: SessionId,
-    pub node_id: String,
+    pub node_id: NodeId,
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
@@ -48,7 +48,7 @@ pub struct ForkSessionRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForkSessionReceipt {
     pub session_id: SessionId,
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Session that originally wrote `node_id`. This is process-observer
     /// provenance, not a required source-session argument to the fork.
     pub source_session_id: SessionId,

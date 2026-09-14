@@ -1853,7 +1853,7 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         owner: &lash_core::LeaseOwnerIdentity,
         boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[lash_core::BatchId],
         policy: lash_core::QueuedWorkClaimPolicy,
     ) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, lash_core::StoreError> {
         self.inner

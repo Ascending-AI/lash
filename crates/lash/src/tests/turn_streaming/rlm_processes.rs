@@ -52,7 +52,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                     )
                     .with_id("leaf-bearing-stale-append-message"),
                 )],
-                requires_ancestor_node_id: Some("inactive-ancestor".to_string()),
+                requires_ancestor_node_id: Some("inactive-ancestor".to_string().into()),
             }),
         )
         .await?;
@@ -608,7 +608,7 @@ finish value"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
+    let scoped_effect_controller = turn_scope(&turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("start tool"))
@@ -682,7 +682,7 @@ finish value"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
+    let scoped_effect_controller = turn_scope(&turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("start tool"))
@@ -1316,7 +1316,7 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         .open()
         .await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&SessionId::from(turn_session.session_id()));
+    let scoped_effect_controller = turn_scope(&turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
             .turn(TurnInput::text("start tool"))

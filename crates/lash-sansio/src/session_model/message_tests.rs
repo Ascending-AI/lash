@@ -719,7 +719,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
         parts: vec![part(PartKind::Text, "follow up")].into(),
         origin: Some(MessageOrigin::TurnInput {
             turn_id: TurnId::from("t1"),
-            input_id: Some("in-7".to_string()),
+            input_id: Some(crate::InputId::from("in-7")),
         }),
     };
     assert_eq!(
@@ -746,7 +746,7 @@ fn turn_input_origin_wire_shape_is_tagged_and_omits_an_absent_input_id() {
         decoded[1].origin,
         Some(MessageOrigin::TurnInput {
             turn_id: TurnId::from("t1"),
-            input_id: Some("in-7".to_string()),
+            input_id: Some(crate::InputId::from("in-7")),
         })
     );
 }

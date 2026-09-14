@@ -1,4 +1,4 @@
-use crate::SessionId;
+use crate::{NodeId, SessionId};
 use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -18,11 +18,11 @@ pub(super) struct TurnGraphEditor {
     active_messages: MessageSequence,
     current_frame_node_id: Option<crate::FrameNodeId>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
-    pre_turn_append_leaf: Option<String>,
-    append_builder_minted_node_ids: HashSet<String>,
+    pre_turn_append_leaf: Option<NodeId>,
+    append_builder_minted_node_ids: HashSet<NodeId>,
     appended_nodes: Vec<SessionNodeRecord>,
-    appended_node_indices: HashMap<String, usize>,
-    committed_node_ids: HashSet<String>,
+    appended_node_indices: HashMap<NodeId, usize>,
+    committed_node_ids: HashSet<NodeId>,
     clock: Arc<dyn crate::Clock>,
     projection_diagnostics: Vec<ReadProjectionDiagnostic>,
 }
@@ -41,7 +41,7 @@ impl TurnGraphEditor {
         current_frame_node_id: Option<crate::FrameNodeId>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
-        persisted_node_ids: HashSet<String>,
+        persisted_node_ids: HashSet<NodeId>,
     ) -> Self {
         let append_builder = base_graph.append_builder_in_namespace(draft_namespace);
         let pre_turn_append_leaf = append_builder.leaf_node_id().cloned();
@@ -183,7 +183,7 @@ impl TurnGraphEditor {
         &mut self,
         draft_namespace: &str,
         drafts: Vec<crate::session_graph::SessionNodeDraft>,
-    ) -> Vec<String> {
+    ) -> Vec<NodeId> {
         let mut builder = self.base_graph.append_builder_in_namespace(draft_namespace);
         builder.set_leaf_node_id(self.leaf_node_id());
         let nodes = builder.append_drafts_at(drafts, self.clock.timestamp_rfc3339());
@@ -272,16 +272,16 @@ impl TurnGraphEditor {
 
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
-        I: IntoIterator<Item = String>,
+        I: IntoIterator<Item = crate::NodeId>,
     {
         self.committed_node_ids.extend(node_ids);
     }
 
-    pub(super) fn persisted_node_ids(&self) -> HashSet<String> {
+    pub(super) fn persisted_node_ids(&self) -> HashSet<NodeId> {
         self.committed_node_ids.clone()
     }
 
-    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(String, String)]) {
+    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
         if mapping.is_empty() {
             return;
         }
@@ -351,7 +351,7 @@ impl TurnGraphEditor {
         }
     }
 
-    fn leaf_node_id(&self) -> Option<String> {
+    fn leaf_node_id(&self) -> Option<NodeId> {
         self.append_builder.leaf_node_id().cloned()
     }
 
@@ -609,8 +609,8 @@ mod tests {
 
     fn active_path_walk_is_bounded_scenario() {
         let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-            node_id: node_id.to_string(),
-            parent_node_id: Some(parent_node_id.to_string()),
+            node_id: node_id.to_string().into(),
+            parent_node_id: Some(parent_node_id.to_string().into()),
             timestamp: "2026-07-31T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "turn-graph-cycle-test".to_string(),
@@ -626,7 +626,7 @@ mod tests {
         ]);
         editor
             .append_builder
-            .set_leaf_node_id(Some("turn-cycle-b".to_string()));
+            .set_leaf_node_id(Some("turn-cycle-b".into()));
 
         assert_eq!(editor.active_path_nodes().len(), 2);
     }

@@ -313,7 +313,7 @@ mod tests {
             ..Default::default()
         };
         let node = crate::SessionNodeRecord {
-            node_id: "node".to_string(),
+            node_id: "node".into(),
             parent_node_id: None,
             timestamp: "2026-07-27T00:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Event {
@@ -327,7 +327,7 @@ mod tests {
         commit.graph = super::super::GraphAppend {
             nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
                 .map(|index| crate::SessionNodeRecord {
-                    node_id: format!("node-{index}"),
+                    node_id: format!("node-{index}").into(),
                     ..node.clone()
                 })
                 .collect(),

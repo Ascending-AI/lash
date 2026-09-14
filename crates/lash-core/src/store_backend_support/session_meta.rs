@@ -252,7 +252,7 @@ impl SessionMetaCodec {
             } => {
                 stored.relation_kind = "fork".to_string();
                 stored.source_session_id = Some(source_session_id.clone());
-                stored.source_node_id = Some(source_node_id.clone());
+                stored.source_node_id = Some(source_node_id.to_string());
                 match observer_inheritance {
                     ObserverInheritance::All => {
                         stored.observer_inheritance_kind = Some("all".to_string());
@@ -337,7 +337,9 @@ impl SessionMetaCodec {
                 SessionRelation::Fork {
                     source_session_id: self
                         .required(stored.source_session_id, "source_session_id")?,
-                    source_node_id: self.required(stored.source_node_id, "source_node_id")?,
+                    source_node_id: crate::NodeId::new(
+                        self.required(stored.source_node_id, "source_node_id")?,
+                    ),
                     observer_inheritance,
                 }
             }

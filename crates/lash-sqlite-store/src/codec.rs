@@ -119,7 +119,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             )
         })?,
         checkpoint_ref.map(Into::into),
-        leaf_node_id,
+        leaf_node_id.map(lash_core::NodeId::from),
     )))
 }
 

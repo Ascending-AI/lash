@@ -80,22 +80,22 @@ struct GeneratedCase {
 
 #[derive(Clone, Debug)]
 struct ModelNode {
-    parent_node_id: Option<String>,
+    parent_node_id: Option<lash_core::NodeId>,
     owner_session_id: SessionId,
 }
 
 #[derive(Clone, Debug)]
 struct ModelSession {
     physical_id: String,
-    path: Vec<String>,
+    path: Vec<lash_core::NodeId>,
     head_revision: u64,
 }
 
 #[derive(Clone, Debug, Default)]
 struct ReferenceModel {
     sessions: BTreeMap<u8, ModelSession>,
-    nodes: BTreeMap<String, ModelNode>,
-    pins: BTreeSet<String>,
+    nodes: BTreeMap<lash_core::NodeId, ModelNode>,
+    pins: BTreeSet<lash_core::NodeId>,
     next_session_generation: u64,
     next_operation: u64,
 }
@@ -506,7 +506,10 @@ impl SessionGraphScenario {
             0 => None,
             1 => old_path.first().cloned(),
             2 => old_path.last().cloned(),
-            _ => Some(format!("missing-required-{}", self.model.next_operation)),
+            _ => Some(lash_core::NodeId::new(format!(
+                "missing-required-{}",
+                self.model.next_operation
+            ))),
         };
         let operation_id = self.next_operation_id("append");
         let live = self.live.get(&slot).expect("ensured live session");
@@ -700,7 +703,7 @@ impl SessionGraphScenario {
             .clone();
         let target_index = source_path
             .iter()
-            .position(|candidate| candidate == &node_id)
+            .position(|candidate| candidate == node_id)
             .ok_or_else(|| "fork target left the modeled source path".to_string())?;
         self.handles_by_physical_id
             .insert(physical_id.clone(), Arc::clone(&store));
@@ -780,7 +783,7 @@ impl SessionGraphScenario {
         let index = old_model
             .path
             .iter()
-            .position(|candidate| candidate == &node_id)
+            .position(|candidate| candidate == node_id)
             .expect("rewind node belongs to old path");
         self.handles_by_physical_id
             .insert(physical_id.clone(), Arc::clone(&store));
@@ -993,13 +996,16 @@ impl SessionGraphScenario {
         Ok(())
     }
 
-    fn selected_node(&self, slot: u8, selector: u8) -> Option<String> {
+    fn selected_node(&self, slot: u8, selector: u8) -> Option<lash_core::NodeId> {
         let path = &self.model.sessions.get(&(slot % SESSION_COUNT))?.path;
         match selector % 4 {
             0 => path.last().cloned(),
             1 => path.iter().rev().nth(1).cloned(),
             2 => path.first().cloned(),
-            _ => Some(format!("missing-node-{slot}-{}", self.model.next_operation)),
+            _ => Some(lash_core::NodeId::new(format!(
+                "missing-node-{slot}-{}",
+                self.model.next_operation
+            ))),
         }
     }
 
@@ -1221,13 +1227,13 @@ impl SessionGraphScenario {
         Ok(())
     }
 
-    fn retaining_pin_for(&self, node_id: &str) -> Option<String> {
+    fn retaining_pin_for(&self, node_id: &str) -> Option<lash_core::NodeId> {
         for pin in &self.model.pins {
             let mut cursor = Some(pin.as_str());
             let mut visited = BTreeSet::new();
             while let Some(candidate) = cursor {
                 if candidate == node_id {
-                    return Some(pin.clone());
+                    return Some(pin.to_string().into());
                 }
                 if !visited.insert(candidate) {
                     break;
@@ -1257,7 +1263,7 @@ impl SessionGraphScenario {
             .fork_at(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(probe_id.clone()),
-                node_id: pinned_node_id.to_string(),
+                node_id: pinned_node_id.to_string().into(),
                 relation: request.relation.clone(),
                 policy: request.policy.clone(),
             })
@@ -1304,7 +1310,7 @@ impl SessionGraphScenario {
         Ok(())
     }
 
-    fn reachable_nodes(&self) -> BTreeSet<String> {
+    fn reachable_nodes(&self) -> BTreeSet<lash_core::NodeId> {
         let mut roots = self.model.pins.clone();
         roots.extend(
             self.model
@@ -1404,16 +1410,19 @@ fn malformed_graph_append(
     shape: u8,
 ) -> Result<crate::GraphAppend, String> {
     let old_leaf = state.session_graph.leaf_node_id.clone();
-    let plugin_node = |ordinal: u64, parent_node_id: Option<String>| crate::SessionNodeRecord {
-        node_id: crate::store::derive_history_node_id(&state.session_id, operation, ordinal)
-            .expect("property operation id is valid"),
-        parent_node_id,
-        timestamp: "1970-01-01T00:00:00Z".to_string(),
-        payload: crate::SessionNodePayload::Plugin {
-            plugin_type: "session-graph-malformed".to_string(),
-            body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"shape": shape})),
-        },
-    };
+    let plugin_node =
+        |ordinal: u64, parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
+            node_id: crate::store::derive_history_node_id(&state.session_id, operation, ordinal)
+                .expect("property operation id is valid"),
+            parent_node_id,
+            timestamp: "1970-01-01T00:00:00Z".to_string(),
+            payload: crate::SessionNodePayload::Plugin {
+                plugin_type: "session-graph-malformed".to_string(),
+                body: crate::session_graph::SharedJsonValue::new(
+                    serde_json::json!({"shape": shape}),
+                ),
+            },
+        };
     Ok(match shape {
         0 => {
             let frame_key = crate::FrameKey::from_caller_material(&format!(
@@ -1422,8 +1431,8 @@ fn malformed_graph_append(
             ))
             .expect("non-empty frame material");
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
-            let frame = |parent_node_id: Option<String>| crate::SessionNodeRecord {
-                node_id: node_id.clone(),
+            let frame = |parent_node_id: Option<lash_core::NodeId>| crate::SessionNodeRecord {
+                node_id: node_id.clone().into(),
                 parent_node_id,
                 timestamp: "1970-01-01T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::FrameOpen {
@@ -1434,12 +1443,12 @@ fn malformed_graph_append(
                 },
             };
             crate::GraphAppend {
-                nodes: vec![frame(old_leaf), frame(Some(node_id.clone()))],
-                leaf_node_id: Some(node_id),
+                nodes: vec![frame(old_leaf), frame(Some(node_id.clone().into()))],
+                leaf_node_id: Some(node_id.into()),
             }
         }
         1 => {
-            let node = plugin_node(0, Some("missing-parent".to_string()));
+            let node = plugin_node(0, Some("missing-parent".into()));
             crate::GraphAppend {
                 leaf_node_id: Some(node.node_id.clone()),
                 nodes: vec![node],
@@ -1447,7 +1456,7 @@ fn malformed_graph_append(
         }
         2 => crate::GraphAppend {
             nodes: vec![plugin_node(0, old_leaf)],
-            leaf_node_id: Some("missing-leaf".to_string()),
+            leaf_node_id: Some("missing-leaf".into()),
         },
         _ => {
             let frame_key = crate::FrameKey::from_caller_material(&format!(
@@ -1458,8 +1467,8 @@ fn malformed_graph_append(
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
             crate::GraphAppend {
                 nodes: vec![crate::SessionNodeRecord {
-                    node_id: node_id.clone(),
-                    parent_node_id: Some(node_id.clone()),
+                    node_id: node_id.clone().into(),
+                    parent_node_id: Some(node_id.clone().into()),
                     timestamp: "1970-01-01T00:00:00Z".to_string(),
                     payload: crate::SessionNodePayload::FrameOpen {
                         frame_key,
@@ -1468,7 +1477,7 @@ fn malformed_graph_append(
                         protocol_turn_options: crate::ProtocolTurnOptions::default(),
                     },
                 }],
-                leaf_node_id: Some(node_id),
+                leaf_node_id: Some(node_id.into()),
             }
         }
     })
@@ -1502,8 +1511,8 @@ fn assert_bounded_resident_rejection(shape: u8) -> Result<(), String> {
 
 fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     let node = |id: &str, parent: Option<&str>| crate::SessionNodeRecord {
-        node_id: id.to_string(),
-        parent_node_id: parent.map(str::to_string),
+        node_id: id.to_string().into(),
+        parent_node_id: parent.map(lash_core::NodeId::from),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Plugin {
             plugin_type: "session-graph-bounded".to_string(),
@@ -1513,27 +1522,27 @@ fn malformed_resident_graph(shape: u8) -> crate::SessionGraph {
     match shape {
         0 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("duplicate", None), node("duplicate", None)],
-            Some("duplicate".to_string()),
+            Some("duplicate".into()),
         ),
         1 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("dangling", Some("missing"))],
-            Some("dangling".to_string()),
+            Some("dangling".into()),
         ),
         2 => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![node("present", None)],
-            Some("missing-leaf".to_string()),
+            Some("missing-leaf".into()),
         ),
         _ => crate::SessionGraph::from_unchecked_nodes_for_testing(
             vec![
                 node("cycle-a", Some("cycle-b")),
                 node("cycle-b", Some("cycle-a")),
             ],
-            Some("cycle-b".to_string()),
+            Some("cycle-b".into()),
         ),
     }
 }
 
-fn graph_path_ids(graph: &crate::SessionGraph) -> Result<Vec<String>, String> {
+fn graph_path_ids(graph: &crate::SessionGraph) -> Result<Vec<lash_core::NodeId>, String> {
     graph
         .validate_resident_integrity()
         .map_err(|error| error.to_string())?;

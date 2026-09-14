@@ -340,6 +340,7 @@ fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> V
             state
                 .session_graph
                 .nearest_frame_node_id(Some(&node.node_id))
+                .map(lash_core::NodeId::as_str)
                 == Some(frame_id)
         })
         .filter_map(|node| match &node.payload {

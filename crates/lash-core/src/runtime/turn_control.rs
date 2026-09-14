@@ -198,7 +198,7 @@ pub use lash_sansio::{TurnCancelDisposition, TurnCancelMode, TurnCancellationEvi
 /// One undelivered active-turn input affected by cancellation repair.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnCancelAffectedInput {
-    pub input_id: String,
+    pub input_id: crate::InputId,
     pub payload: crate::TurnInput,
     pub disposition: TurnCancelDisposition,
 }

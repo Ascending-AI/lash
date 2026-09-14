@@ -38,9 +38,9 @@ impl GraphIntegrityRead {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphIntegrityTarget {
     pub session_id: SessionId,
-    pub root_node_id: String,
-    pub leaf_node_id: String,
-    pub missing_node_id: String,
+    pub root_node_id: crate::NodeId,
+    pub leaf_node_id: crate::NodeId,
+    pub missing_node_id: crate::NodeId,
     pub corruption: GraphIntegrityCorruption,
     pub read: GraphIntegrityRead,
 }

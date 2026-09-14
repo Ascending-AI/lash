@@ -93,12 +93,12 @@ fn realistic_commit(
                 format!("{session_id}:node:{index}")
             };
             SessionNodeRecord {
-                node_id: node_id.clone(),
+                node_id: node_id.clone().into(),
                 parent_node_id: (index > 0).then(|| {
                     if index == 1 {
-                        frame_node_id.to_string()
+                        frame_node_id.to_string().into()
                     } else {
-                        format!("{session_id}:node:{}", index - 1)
+                        format!("{session_id}:node:{}", index - 1).into()
                     }
                 }),
                 timestamp: "2026-08-20T12:00:00Z".to_string(),

@@ -80,7 +80,7 @@ async fn seed(
     factory: &Arc<dyn SessionStoreFactory>,
     session_id: &SessionId,
     plugins: usize,
-) -> (Arc<dyn RuntimePersistence>, Vec<String>) {
+) -> (Arc<dyn RuntimePersistence>, Vec<lash_core::NodeId>) {
     let store = factory
         .create_store(&request(session_id))
         .await
@@ -124,7 +124,7 @@ async fn fork(
         .fork_at(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
-            node_id: node_id.to_string(),
+            node_id: node_id.to_string().into(),
             relation: SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
@@ -137,7 +137,7 @@ async fn fork(
         .expect("lineage conformance fork exists")
 }
 
-async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<String> {
+async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<lash_core::NodeId> {
     let mut state = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load lineage append state")

@@ -120,7 +120,7 @@ impl BackendRunner {
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: self.session_id.clone(),
-                        node_id: format!("{}:missing-fork-node", self.session_id),
+                        node_id: format!("{}:missing-fork-node", self.session_id).into(),
                         relation: SessionRelation::Root,
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -143,13 +143,13 @@ impl BackendRunner {
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:foreign-lineage", self.session_id)),
-                        node_id: node_id.clone(),
+                        node_id: node_id.clone().into(),
                         relation: SessionRelation::Fork {
                             source_session_id: SessionId::from(format!(
                                 "{}:foreign-source",
                                 self.session_id
                             )),
-                            source_node_id: format!("{}:foreign-node", self.session_id),
+                            source_node_id: format!("{}:foreign-node", self.session_id).into(),
                             observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -179,10 +179,10 @@ impl BackendRunner {
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: branch_session_id.clone(),
-                        node_id: node_id.clone(),
+                        node_id: node_id.clone().into(),
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: node_id.clone(),
+                            source_node_id: node_id.clone().into(),
                             observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -211,10 +211,11 @@ impl BackendRunner {
                     .fork_at(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:rewind", self.session_id)),
-                        node_id,
+                        node_id: node_id.into(),
                         relation: SessionRelation::Fork {
                             source_session_id: branch_session_id,
-                            source_node_id: format!("{}:rewind-source-node", self.session_id),
+                            source_node_id: format!("{}:rewind-source-node", self.session_id)
+                                .into(),
                             observer_inheritance: lash_core::ObserverInheritance::None,
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

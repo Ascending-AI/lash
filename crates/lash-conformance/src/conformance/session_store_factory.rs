@@ -1514,7 +1514,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "fork-empty",
             crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("declared-missing-session"),
-                source_node_id: "declared-missing-node".to_string(),
+                source_node_id: "declared-missing-node".into(),
                 observer_inheritance: crate::ObserverInheritance::All,
             },
         ),
@@ -1522,7 +1522,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "fork-only-empty",
             crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("declared-source"),
-                source_node_id: "declared-node".to_string(),
+                source_node_id: "declared-node".into(),
                 observer_inheritance: crate::ObserverInheritance::Only(Vec::new()),
             },
         ),
@@ -1530,7 +1530,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "fork-only-processes",
             crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("declared-source"),
-                source_node_id: "declared-node".to_string(),
+                source_node_id: "declared-node".into(),
                 observer_inheritance: crate::ObserverInheritance::Only(vec![
                     ProcessId::from("inherit-a".to_string()),
                     ProcessId::from("inherit-b".to_string()),
@@ -1687,8 +1687,8 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         "a bound store must not expose an unrelated session's node"
     );
     let child = crate::SessionNodeRecord {
-        node_id: "cross-session-child".to_string(),
-        parent_node_id: Some(foreign_parent.to_string()),
+        node_id: "cross-session-child".into(),
+        parent_node_id: Some(foreign_parent.to_string().into()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(
@@ -1708,7 +1708,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         &state,
         crate::GraphAppend {
             nodes: vec![child],
-            leaf_node_id: Some("cross-session-child".to_string()),
+            leaf_node_id: Some("cross-session-child".into()),
         },
         &[],
     );
@@ -1718,9 +1718,9 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .await
         .expect_err("a graph parent must belong to the committing session");
     assert!(match &error {
-        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == &child_node_id,
+        crate::StoreError::InvalidGraphParent { node_id, .. } => node_id == child_node_id,
         crate::StoreError::MissingFrameOpenAncestor { leaf_node_id } => {
-            leaf_node_id == &child_node_id
+            leaf_node_id == child_node_id
         }
         _ => false,
     });
@@ -1909,7 +1909,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
             node_id: root_node_id.clone(),
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("no-such-session"),
-                source_node_id: "no-such-node".to_string(),
+                source_node_id: "no-such-node".into(),
                 observer_inheritance: crate::ObserverInheritance::default(),
             },
             policy: source_request.policy.clone(),
@@ -2063,7 +2063,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("initial frame node");
     let frame_node_id = frame.node_id.clone();
     let child_node = |node_id: &str| crate::SessionNodeRecord {
-        node_id: node_id.to_string(),
+        node_id: node_id.to_string().into(),
         parent_node_id: Some(frame_node_id.clone()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {

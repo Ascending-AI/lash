@@ -1484,7 +1484,7 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
 #[derive(serde::Serialize)]
 struct CompletedQueueIntent<'a> {
     session_id: &'a SessionId,
-    batch_ids: &'a [String],
+    batch_ids: &'a [crate::BatchId],
 }
 
 impl<'a> From<&'a crate::QueuedWorkCompletion> for CompletedQueueIntent<'a> {
@@ -1499,7 +1499,7 @@ impl<'a> From<&'a crate::QueuedWorkCompletion> for CompletedQueueIntent<'a> {
 #[derive(serde::Serialize)]
 struct CompletedTurnInputIntent<'a> {
     session_id: &'a SessionId,
-    input_ids: &'a [String],
+    input_ids: &'a [crate::InputId],
     applications: &'a [crate::TurnInputApplication],
 }
 
@@ -1633,7 +1633,7 @@ pub fn derive_history_node_id(
     session_id: &SessionId,
     operation: &OperationId,
     ordinal: u64,
-) -> Result<String, StoreError> {
+) -> Result<crate::NodeId, StoreError> {
     let operation = serde_json::to_value(operation).map_err(|err| {
         StoreError::Backend(format!(
             "failed to serialize node operation identity: {err}"
@@ -1642,7 +1642,7 @@ pub fn derive_history_node_id(
     let operation = crate::stable_hash::stable_json_string(&operation).map_err(|err| {
         StoreError::Backend(format!("failed to encode node operation identity: {err}"))
     })?;
-    Ok(format!(
+    Ok(crate::NodeId::new(format!(
         "n_{}",
         domain_hash(
             "lash-history-node/v3",
@@ -1652,5 +1652,5 @@ pub fn derive_history_node_id(
                 &ordinal.to_be_bytes(),
             ],
         )
-    ))
+    )))
 }

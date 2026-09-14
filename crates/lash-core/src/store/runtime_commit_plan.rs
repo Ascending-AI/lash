@@ -46,7 +46,7 @@ pub struct FreshRuntimeCommitFacts {
     pub requested_ancestor_is_active: bool,
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
-    pub occupied_node_ids: HashSet<String>,
+    pub occupied_node_ids: HashSet<crate::NodeId>,
     /// Whether a selected leaf not included in this append resolves to a live
     /// durable node.
     pub selected_leaf_is_live: bool,
@@ -63,7 +63,7 @@ pub enum PublishedLeafFacts {
     /// A live leaf with its immutable ancestry seed.
     Live(ParentNodeFacts),
     /// The published identity no longer names a live node.
-    Retired { node_id: String },
+    Retired { node_id: crate::NodeId },
 }
 
 /// Immutable derived facts for an append's durable parent node.
@@ -72,11 +72,11 @@ pub enum PublishedLeafFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParentNodeFacts {
     /// Parent identity cross-checked against the append edge.
-    pub node_id: String,
+    pub node_id: crate::NodeId,
     /// Zero-based distance from the graph root.
     pub generation: u64,
     /// Nearest frame boundary at or above the parent.
-    pub frame_node_id: String,
+    pub frame_node_id: crate::NodeId,
 }
 
 /// Immutable facts the core planner prescribes for one appended node.
@@ -85,11 +85,11 @@ pub struct ParentNodeFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedNodeFacts {
     /// Appended node identity.
-    pub node_id: String,
+    pub node_id: crate::NodeId,
     /// Zero-based distance from the graph root.
     pub generation: u64,
     /// Nearest frame boundary at or above this node.
-    pub frame_node_id: String,
+    pub frame_node_id: crate::NodeId,
 }
 
 /// A replay decision for an already committed operation.
@@ -286,7 +286,7 @@ impl RuntimeCommitPlanner {
             && !facts.requested_ancestor_is_active
         {
             return Err(StoreError::AppendAncestorNotActive {
-                required_node_id: required_node_id.clone(),
+                required_node_id: crate::NodeId::from(required_node_id),
             });
         }
         validate_head_revision(
@@ -313,7 +313,7 @@ impl RuntimeCommitPlanner {
                     .commit
                     .graph
                     .appended_nodes()
-                    .any(|node| &node.node_id == leaf_node_id)
+                    .any(|node| node.node_id == *leaf_node_id)
                     && !facts.selected_leaf_is_live =>
             {
                 return Err(StoreError::InvalidGraphLeaf {
@@ -370,7 +370,7 @@ impl RuntimeCommitPlanner {
                     .current_frame_node_id
                     .clone()
                     .map(crate::FrameNodeId::into_inner),
-                derived: derived_frame_node_id,
+                derived: derived_frame_node_id.map(crate::NodeId::into_inner),
             });
         }
         for completion in &self.commit.completed_queue_claims {
@@ -439,8 +439,8 @@ pub struct RuntimeCommitPlan<'a> {
     operation_key: String,
     actual_head_revision: u64,
     next_head_revision: u64,
-    old_leaf_node_id: Option<String>,
-    derived_frame_node_id: Option<String>,
+    old_leaf_node_id: Option<crate::NodeId>,
+    derived_frame_node_id: Option<crate::NodeId>,
     planned_node_facts: Vec<PlannedNodeFacts>,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
     committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
@@ -540,7 +540,7 @@ impl<'a> RuntimeCommitPlan<'a> {
 fn derive_appended_node_facts(
     graph: &super::GraphAppend,
     mut parent: Option<ParentNodeFacts>,
-) -> Result<(Vec<PlannedNodeFacts>, Option<String>), StoreError> {
+) -> Result<(Vec<PlannedNodeFacts>, Option<crate::NodeId>), StoreError> {
     let mut planned = Vec::with_capacity(graph.nodes.len());
     for node in &graph.nodes {
         let generation = match parent.as_ref() {

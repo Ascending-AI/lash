@@ -528,7 +528,10 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                 let changed = conn
                     .execute(
                         "UPDATE graph_nodes SET parent_node_id = ?1 WHERE node_id = ?2",
-                        rusqlite::params![target.missing_node_id, target.leaf_node_id],
+                        rusqlite::params![
+                            target.missing_node_id.as_str(),
+                            target.leaf_node_id.as_str()
+                        ],
                     )
                     .expect("inject orphaned SQLite graph leaf");
                 assert_eq!(changed, 1);
@@ -557,7 +560,7 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                          )
                          SELECT session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned
                          FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
-                        rusqlite::params![target.leaf_node_id],
+                        rusqlite::params![target.leaf_node_id.as_str()],
                     )
                     .expect("inject duplicate SQLite graph node id");
                 assert_eq!(changed, 1);
@@ -566,7 +569,10 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                 let changed = conn
                     .execute(
                         "UPDATE session_head SET leaf_node_id = ?1 WHERE session_id = ?2",
-                        rusqlite::params![target.missing_node_id, target.session_id.as_str()],
+                        rusqlite::params![
+                            target.missing_node_id.as_str(),
+                            target.session_id.as_str()
+                        ],
                     )
                     .expect("inject dangling SQLite graph leaf id");
                 assert_eq!(changed, 1);
@@ -576,7 +582,10 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                     let changed = conn
                         .execute(
                             "UPDATE graph_nodes SET parent_node_id = ?1 WHERE node_id = ?2",
-                            rusqlite::params![target.leaf_node_id, target.root_node_id],
+                            rusqlite::params![
+                                target.leaf_node_id.as_str(),
+                                target.root_node_id.as_str()
+                            ],
                         )
                         .expect("inject active SQLite graph parent cycle");
                     assert_eq!(changed, 1);
@@ -593,7 +602,7 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                             rusqlite::params![
                                 node_id,
                                 parent_node_id,
-                                target.leaf_node_id,
+                                target.leaf_node_id.as_str(),
                                 generation_offset
                             ],
                         )
@@ -1348,13 +1357,13 @@ lash_conformance::append_head_switch_tests!({
     (
         dir,
         store as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id: String| async move {
+        move |leaf_node_id: lash_core::NodeId| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE session_head
                  SET leaf_node_id = ?1, head_revision = head_revision + 1
                  WHERE session_id = 'root'",
-                rusqlite::params![leaf_node_id],
+                rusqlite::params![leaf_node_id.as_str()],
             )
             .expect("switch sqlite active branch");
         },
@@ -1369,11 +1378,11 @@ lash_conformance::append_tombstone_tests!({
     (
         dir,
         store as Arc<dyn RuntimePersistence>,
-        move |node_id: String| async move {
+        move |node_id: lash_core::NodeId| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
-                rusqlite::params![node_id],
+                rusqlite::params![node_id.as_str()],
             )
             .expect("tombstone sqlite old leaf");
         },

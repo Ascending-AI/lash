@@ -36,7 +36,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: crate::SessionRelation::Fork {
                 source_session_id: SessionId::from("fork-observer-transient-source"),
-                source_node_id: "fork-observer-transient-node".to_string(),
+                source_node_id: "fork-observer-transient-node".into(),
                 observer_inheritance: crate::ObserverInheritance::All,
             },
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

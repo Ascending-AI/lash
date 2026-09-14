@@ -113,7 +113,7 @@ pub(super) trait SettlementRows {
     const ROW_KIND: &'static str;
     const MESSAGE: &'static str;
     fn claim_id(&self) -> Option<&str>;
-    fn rows(&self) -> &[String];
+    fn rows(&self) -> impl Iterator<Item = &str>;
     fn remove_row(&mut self, row_id: &str);
     fn supersession(error: &crate::StoreError) -> Option<Supersession<'_>>;
 }
@@ -125,7 +125,7 @@ fn drop_row<C: SettlementRows>(claims: &mut Vec<C>, claim_id: &str, row_id: &str
     {
         claim.remove_row(row_id);
     }
-    claims.retain(|claim| !claim.rows().is_empty());
+    claims.retain(|claim| claim.rows().next().is_some());
 }
 
 impl<C: SettlementRows> ClaimSettlement<C> {
@@ -147,9 +147,8 @@ impl<C: SettlementRows> ClaimSettlement<C> {
         let Some(&stale_generation) = self.generations.get(claim_id) else {
             return false;
         };
-        let holds_row = |claim: &C| {
-            claim.claim_id() == Some(claim_id) && claim.rows().iter().any(|id| id == row_id)
-        };
+        let holds_row =
+            |claim: &C| claim.claim_id() == Some(claim_id) && claim.rows().any(|id| id == row_id);
         if !current_session_lease_generation.is_some_and(|current| stale_generation < current)
             || !self.completions.iter().any(holds_row)
             || !self.originating().iter().any(holds_row)
@@ -187,8 +186,8 @@ impl SettlementRows for crate::QueuedWorkCompletion {
     fn claim_id(&self) -> Option<&str> {
         Some(&self.claim_id)
     }
-    fn rows(&self) -> &[String] {
-        &self.batch_ids
+    fn rows(&self) -> impl Iterator<Item = &str> {
+        self.batch_ids.iter().map(crate::BatchId::as_str)
     }
     fn remove_row(&mut self, row_id: &str) {
         self.batch_ids.retain(|id| id != row_id);
@@ -220,8 +219,8 @@ impl SettlementRows for crate::TurnInputCompletion {
     fn claim_id(&self) -> Option<&str> {
         self.claim_id()
     }
-    fn rows(&self) -> &[String] {
-        &self.input_ids
+    fn rows(&self) -> impl Iterator<Item = &str> {
+        self.input_ids.iter().map(crate::InputId::as_str)
     }
     fn remove_row(&mut self, row_id: &str) {
         self.input_ids.retain(|id| id != row_id);
@@ -276,7 +275,7 @@ mod tests {
             claim_id: "stale-claim".to_string(),
             lease_token: "stale-token".to_string(),
             data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["fig905-row".to_string()],
+                batch_ids: vec!["fig905-row".into()],
             },
         }
     }
@@ -299,7 +298,7 @@ mod tests {
                 lease_token: "stale-token".to_string(),
             }),
             data: crate::TurnInputCompletionData {
-                input_ids: vec!["fig905-row".to_string()],
+                input_ids: vec!["fig905-row".into()],
                 applications: Vec::new(),
             },
         }
@@ -338,7 +337,7 @@ mod tests {
             claim_id: "stale-claim".to_string(),
             lease_token: "stale-token".to_string(),
             data: crate::QueuedWorkCompletionData {
-                batch_ids: vec!["fig905-other-row".to_string()],
+                batch_ids: vec!["fig905-other-row".into()],
             },
         }
     }
@@ -351,7 +350,7 @@ mod tests {
                 lease_token: "stale-token".to_string(),
             }),
             data: crate::TurnInputCompletionData {
-                input_ids: vec!["fig905-other-row".to_string()],
+                input_ids: vec!["fig905-other-row".into()],
                 applications: Vec::new(),
             },
         }

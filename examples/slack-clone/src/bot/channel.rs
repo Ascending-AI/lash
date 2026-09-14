@@ -664,7 +664,7 @@ impl ChannelBot {
             .await
             .context("admit routed message as queued turn input")?;
         self.ledger
-            .record_input_id(record.event_id.clone(), receipt.input_id.clone())
+            .record_input_id(record.event_id.clone(), receipt.input_id.to_string())
             .await
             .context("record Lash admission identity")?;
 
@@ -683,7 +683,7 @@ impl ChannelBot {
             return Ok(Disposition::Folded {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
-                input_id: receipt.input_id,
+                input_id: receipt.input_id.to_string(),
             });
         }
         self.run_mention_turn(&session, record, &receipt.input_id)

@@ -550,7 +550,7 @@ pub struct ParkedSession {
 impl ParkedSession {
     /// The parked session's id. Use it to key a per-session cache of parked
     /// handles on the host.
-    pub fn session_id(&self) -> &str {
+    pub fn session_id(&self) -> &SessionId {
         self.inner.session_id()
     }
 }
@@ -645,8 +645,8 @@ impl LashSession {
     }
 
     /// Returns the session identifier.
-    pub fn session_id(&self) -> String {
-        self.runtime.observe().session_id().to_string()
+    pub fn session_id(&self) -> SessionId {
+        SessionId::from(self.runtime.observe().session_id())
     }
 
     /// Build the execution scope for a turn in this opened session.
@@ -983,9 +983,9 @@ impl LashSession {
     /// Cancels pending turn input.
     pub async fn cancel_pending_turn_input(
         &self,
-        input_id: &str,
+        input_id: &lash_core::InputId,
     ) -> Result<PendingTurnInputCancelOutcome> {
-        let session_id = SessionId::from(self.session_id());
+        let session_id = self.session_id();
         self.runtime
             .cancel_pending_turn_input(&session_id, input_id)
             .await
@@ -1003,7 +1003,7 @@ impl LashSession {
         &self,
         targets: impl IntoIterator<Item = PendingTurnInputCancelTarget>,
     ) -> Result<Vec<PendingTurnInputCancelReceipt>> {
-        let session_id = SessionId::from(self.session_id());
+        let session_id = self.session_id();
         let targets = targets.into_iter().collect::<Vec<_>>();
         self.runtime
             .cancel_pending_turn_inputs(&session_id, &targets)
@@ -1023,7 +1023,7 @@ impl LashSession {
         &self,
         anchor: PendingTurnInputCancelTarget,
     ) -> Result<PendingTurnInputSuffixCancelOutcome> {
-        let session_id = SessionId::from(self.session_id());
+        let session_id = self.session_id();
         self.runtime
             .cancel_pending_turn_input_suffix(&session_id, &anchor)
             .await
@@ -1033,9 +1033,9 @@ impl LashSession {
     /// Cancels queued work batch.
     pub async fn cancel_queued_work_batch(
         &self,
-        batch_id: &str,
+        batch_id: &lash_core::BatchId,
     ) -> Result<Option<QueuedWorkBatch>> {
-        let session_id = SessionId::from(self.session_id());
+        let session_id = self.session_id();
         self.runtime
             .cancel_queued_work_batch(&session_id, batch_id)
             .await
@@ -1075,7 +1075,7 @@ impl LashSession {
     /// tombstoning revocation [`LashCore::delete_session`](crate::LashCore::delete_session)
     /// performs.
     pub async fn revoke_durable_waits(&self) -> Result<()> {
-        let session_id = SessionId::from(self.session_id());
+        let session_id = self.session_id();
         self.binding
             .effect_host()
             .cancel_await_events_for_session(&session_id)
@@ -1094,7 +1094,7 @@ impl LashSession {
     /// There is no built-in deadline — nothing resolves if nothing drains the
     /// queue, so bound it with `tokio::time::timeout` when the worker may be
     /// unavailable. A batch id the store has never seen resolves immediately.
-    pub async fn await_queued_work_batch(&self, batch_id: &str) -> Result<()> {
+    pub async fn await_queued_work_batch(&self, batch_id: &lash_core::BatchId) -> Result<()> {
         let observation = self.runtime.observe();
         let store = self.binding.store();
         let session_id = SessionId::from(observation.session_id());
@@ -1270,8 +1270,8 @@ impl ObservableSession {
     }
 
     /// Returns the session identifier.
-    pub fn session_id(&self) -> String {
-        self.snapshot().session_id().to_string()
+    pub fn session_id(&self) -> SessionId {
+        SessionId::from(self.snapshot().session_id())
     }
 
     /// Returns a snapshot of the session policy.

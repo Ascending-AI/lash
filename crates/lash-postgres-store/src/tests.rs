@@ -695,7 +695,7 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
         .execute(storage.pool())
         .await
         .expect("reset selected-drain statement statistics");
-    let selected_batch_id = format!("{batch_prefix}5000");
+    let selected_batch_id = lash_core::BatchId::new(format!("{batch_prefix}5000"));
     let claim = store
         .claim_ready_queued_work_by_batch_ids(
             &session_id,
@@ -895,7 +895,7 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
             lease_token: "token-a".to_string(),
         }),
         data: lash_core::TurnInputCompletionData {
-            input_ids: vec![input_id.clone()],
+            input_ids: vec![input_id.clone().into()],
             applications: Vec::new(),
         },
     };

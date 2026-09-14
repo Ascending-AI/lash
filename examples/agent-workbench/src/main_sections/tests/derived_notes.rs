@@ -148,7 +148,7 @@ async fn derived_notes_survive_an_advanced_head_and_are_dropped_by_a_rewind_inne
     assert_eq!(
         notes.settled().last(),
         Some(&WorkbenchSettledNote::AbandonedBranch {
-            base_node_id: second_leaf.clone(),
+            base_node_id: second_leaf.to_string(),
         }),
         "the in-flight note described a branch this session no longer \
          executes, so the fence must refuse it"
@@ -188,6 +188,7 @@ async fn derived_notes_leaf(session: &lash::LashSession) -> String {
         .leaf_node_id
         .clone()
         .expect("the session has a committed leaf")
+        .to_string()
 }
 
 fn derived_note_base(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {

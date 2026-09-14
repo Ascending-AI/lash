@@ -86,14 +86,14 @@ enum InMemoryQueuedWorkClaimKind {
 }
 
 type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoint, SessionId);
-type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
+type InMemoryNodeAnchors = Arc<Mutex<HashMap<crate::NodeId, InMemoryNodeAnchorRecord>>>;
 /// Session id -> component blob refs its live checkpoint references.
 pub(crate) type SharedCheckpointBlobRoots = Arc<Mutex<HashMap<SessionId, HashSet<crate::BlobRef>>>>;
 pub(crate) type SharedSessionCatalog = Arc<Mutex<HashMap<SessionId, crate::SessionSummary>>>;
 
 #[cfg(any(test, feature = "testing"))]
 pub type RawPendingTurnInputForTesting = (
-    String,
+    crate::InputId,
     u64,
     crate::TurnInputState,
     Option<String>,
@@ -165,10 +165,10 @@ pub struct InMemorySessionStore {
     /// Shared leafless node catalog; never treated as a resident graph without a real leaf grafted
     /// first.
     global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
-    global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
+    global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
+    global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
     node_anchors: InMemoryNodeAnchors,
-    tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+    tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
     /// Permanent per-factory deletion ledger. Maintenance never prunes this:
     /// an id, once used and deleted in this store, must never be reused.
     deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
@@ -308,12 +308,12 @@ impl InMemorySessionStore {
         turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
         write_transaction: Arc<Mutex<()>>,
         global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-        global_node_owners: Arc<Mutex<HashMap<String, SessionId>>>,
-        global_session_heads: Arc<Mutex<HashMap<SessionId, Option<String>>>>,
+        global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
+        global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
         node_anchors: InMemoryNodeAnchors,
         checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
         checkpoint_blob_roots: SharedCheckpointBlobRoots,
-        tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
+        tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
         deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
         session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
@@ -1166,10 +1166,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         .nearest_frame_node_id(Some(leaf_node_id))
                         .map(ToOwned::to_owned)
                         .ok_or_else(|| crate::StoreError::MissingFrameOpenAncestor {
-                            leaf_node_id: leaf_node_id.to_string(),
+                            leaf_node_id: crate::NodeId::from(leaf_node_id),
                         })?;
                     crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
-                        node_id: leaf_node_id.to_string(),
+                        node_id: crate::NodeId::from(leaf_node_id),
                         generation,
                         frame_node_id,
                     })
@@ -1242,7 +1242,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     &queued,
                     &completed.batch_ids,
                     &completed.session_id,
-                    |entry| (&entry.batch.session_id, &entry.batch.batch_id),
+                    |entry| {
+                        (
+                            entry.batch.session_id.as_str(),
+                            entry.batch.batch_id.as_str(),
+                        )
+                    },
                     |entry| {
                         entry.batch.session_id == completed.session_id
                             && entry
@@ -1254,7 +1259,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     return Err(crate::store::StoreError::QueuedWorkClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: completed.claim_id.clone(),
-                        row_id: row_id.cloned().map(String::into_boxed_str),
+                        row_id: row_id.map(|id| id.as_str().to_string().into_boxed_str()),
                         superseding_claim_id: current
                             .and_then(|entry| entry.claim.id())
                             .map(String::into_boxed_str),
@@ -1271,14 +1276,19 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     &pending,
                     &completed.input_ids,
                     &completed.session_id,
-                    |entry| (&entry.input.session_id, &entry.input.input_id),
+                    |entry| {
+                        (
+                            entry.input.session_id.as_str(),
+                            entry.input.input_id.as_str(),
+                        )
+                    },
                     |entry| turn_input::settlement_matches(entry, completed),
                 ) {
                     return Err(match completed.claim.as_ref() {
                         Some(claim) => crate::store::StoreError::TurnInputClaimSuperseded {
                             session_id: completed.session_id.clone(),
                             claim_id: claim.claim_id.clone(),
-                            row_id: row_id.cloned().map(String::into_boxed_str),
+                            row_id: row_id.map(|id| id.as_str().to_string().into_boxed_str()),
                             superseding_claim_id: current
                                 .and_then(|entry| entry.claim.id())
                                 .map(String::into_boxed_str),
@@ -1288,9 +1298,16 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         },
                         None => crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded {
                             session_id: completed.session_id.clone(),
-                            input_id: row_id
-                                .cloned()
-                                .unwrap_or_else(|| completed.input_ids.join(",")),
+                            input_id: row_id.cloned().unwrap_or_else(|| {
+                                crate::InputId::new(
+                                    completed
+                                        .input_ids
+                                        .iter()
+                                        .map(crate::InputId::as_str)
+                                        .collect::<Vec<_>>()
+                                        .join(","),
+                                )
+                            }),
                             observed_state: current.map(|entry| {
                                 entry.input.state.as_str().to_string().into_boxed_str()
                             }),

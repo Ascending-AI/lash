@@ -110,7 +110,10 @@ async fn seed_cancelled_inputs(
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
-    .bind(vec![first.input_id.clone(), second.input_id.clone()])
+    .bind(vec![
+        first.input_id.to_string(),
+        second.input_id.to_string(),
+    ])
     .bind(vec!["drop", "defer"])
     .execute(storage.pool())
     .await
@@ -226,7 +229,7 @@ async fn postgres_turn_cancel_read_rejects_malformed_or_missing_affected_evidenc
     .await
     .expect("restore affected disposition cardinality");
     sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE input_id = $1")
-        .bind(&second.input_id)
+        .bind(second.input_id.as_str())
         .execute(storage.pool())
         .await
         .expect("remove one affected payload");

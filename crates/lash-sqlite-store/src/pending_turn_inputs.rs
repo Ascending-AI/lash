@@ -71,7 +71,7 @@ pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core::PendingTurnInput, StoreError> {
     Ok(lash_core::PendingTurnInput {
-        input_id: row.input_id,
+        input_id: row.input_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,

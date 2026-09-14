@@ -478,7 +478,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[crate::BatchId],
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         self.inner()
@@ -1071,7 +1071,7 @@ where
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: crate::QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[crate::BatchId],
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         RuntimePersistenceDecorator::claim_ready_queued_work_by_batch_ids(

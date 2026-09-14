@@ -1,5 +1,4 @@
 use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use super::BenchmarkRuntime;
@@ -52,12 +51,7 @@ impl BenchmarkRuntime {
         self.tool_catalog_observer
             .as_ref()
             .expect("tool-catalog observer")
-            .arm(
-                variant,
-                SessionId::from(session_id),
-                phase_probe,
-                observation_stage,
-            );
+            .arm(variant, session_id, phase_probe, observation_stage);
     }
 
     pub(crate) fn finish_tool_catalog_observation(&self) -> BenchmarkToolCatalogObservation {

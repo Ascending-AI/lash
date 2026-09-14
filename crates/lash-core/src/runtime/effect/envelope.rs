@@ -1617,7 +1617,7 @@ mod rejection_tests {
     #[test]
     fn rejects_empty_tool_batch_id() {
         let mut value = batch();
-        value.batch_id = " ".to_string();
+        value.batch_id = " ".into();
         assert_rejected(
             invocation(RuntimeEffectKind::ToolBatch),
             RuntimeEffectCommand::ToolBatch { batch: value },

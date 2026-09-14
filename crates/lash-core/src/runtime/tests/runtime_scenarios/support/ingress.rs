@@ -119,7 +119,7 @@ impl RuntimeScenarioContext {
                             existing_input_id,
                         } if session_id.as_str() == self.session_id
                             && err_source_key.as_str() == *source_key
-                            && existing_input_id == &expected.input_id
+                            && existing_input_id == expected.input_id
                     ),
                     "{} changed source-key replay returned wrong error: {err}",
                     self.name

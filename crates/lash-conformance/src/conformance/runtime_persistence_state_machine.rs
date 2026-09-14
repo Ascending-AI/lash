@@ -166,8 +166,8 @@ struct ReferenceModel {
     stale_input_claims: Vec<TurnInputClaim>,
     applications: Vec<crate::TurnInputApplication>,
     components: ComponentModel,
-    crashed_work: BTreeSet<String>,
-    crashed_inputs: BTreeSet<String>,
+    crashed_work: BTreeSet<lash_core::BatchId>,
+    crashed_inputs: BTreeSet<lash_core::InputId>,
     pending_usage: Arc<
         std::sync::Mutex<Vec<lash_core::testing::conformance_support::PendingTokenLedgerEntry>>,
     >,
@@ -1513,7 +1513,7 @@ fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
 fn interrupted_work_composition(
     model: &ReferenceModel,
     selected_batch_id: &str,
-) -> Option<Vec<String>> {
+) -> Option<Vec<lash_core::BatchId>> {
     let pending = pending_work(model)
         .into_iter()
         .map(|batch| batch.batch_id)
@@ -1550,7 +1550,7 @@ fn pending_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
     inputs
 }
 
-fn active_work_ids(model: &ReferenceModel) -> BTreeSet<String> {
+fn active_work_ids(model: &ReferenceModel) -> BTreeSet<lash_core::BatchId> {
     model
         .active_work_claims
         .iter()
@@ -1558,7 +1558,7 @@ fn active_work_ids(model: &ReferenceModel) -> BTreeSet<String> {
         .collect()
 }
 
-fn active_input_ids(model: &ReferenceModel) -> BTreeSet<String> {
+fn active_input_ids(model: &ReferenceModel) -> BTreeSet<lash_core::InputId> {
     model
         .active_input_claims
         .iter()
@@ -1602,7 +1602,7 @@ fn validate_work_claim(
         return Err("queued-work claim duplicated or invented a batch".to_string());
     }
     if let Some(selected_id) = selected_id
-        && claimed != BTreeSet::from([selected_id.to_string()])
+        && claimed != BTreeSet::from([lash_core::BatchId::from(selected_id)])
     {
         return Err("selected-batch drain did not claim exactly the selected id".to_string());
     }

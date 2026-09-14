@@ -112,7 +112,7 @@ pub(super) fn append_request_commit(
     operation_id: &str,
     nodes: &[crate::SessionAppendNode],
     requested_ancestor_node_id: Option<&str>,
-) -> (RuntimeCommit, Vec<String>) {
+) -> (RuntimeCommit, Vec<lash_core::NodeId>) {
     let operation = lash_core::testing::conformance_support::boundary_operation(
         &state.session_id,
         operation_id,
@@ -708,7 +708,7 @@ pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
     store: Arc<dyn RuntimePersistence>,
     supersede: F,
 ) where
-    F: FnOnce(String) -> Fut,
+    F: FnOnce(lash_core::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;
@@ -756,7 +756,7 @@ pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
     store: Arc<dyn RuntimePersistence>,
     supersede: F,
 ) where
-    F: FnOnce(String) -> Fut,
+    F: FnOnce(lash_core::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;
@@ -786,7 +786,7 @@ pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
         matches!(
             &error,
             StoreError::AppendAncestorNotActive { required_node_id }
-                if required_node_id == &required
+                if *required_node_id == required
         ),
         "inactive ancestor must precede stale head, got {error:?}"
     );
@@ -800,7 +800,7 @@ pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(
     store: Arc<dyn RuntimePersistence>,
     tombstone: F,
 ) where
-    F: FnOnce(String) -> Fut,
+    F: FnOnce(lash_core::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
     let mut state = seed_append_receipt_state(&store).await;
@@ -821,7 +821,7 @@ pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(
             &error,
             StoreError::InvalidGraphLeaf {
                 leaf_node_id: Some(leaf)
-            } if leaf == &old_leaf
+            } if *leaf == old_leaf
         ),
         "tombstoned old leaf must be a typed invalid leaf, got {error:?}"
     );

@@ -9,24 +9,24 @@ use super::{InMemoryPendingTurnInput, InMemorySessionStore};
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
-pub(super) fn settlement_mismatch<'a, R>(
+pub(super) fn settlement_mismatch<'a, R, I: AsRef<str>>(
     rows: &'a [R],
-    row_ids: &'a [String],
+    row_ids: &'a [I],
     session_id: &SessionId,
     identity: impl Fn(&R) -> (&str, &str),
     matches: impl Fn(&R) -> bool,
-) -> Option<(Option<&'a String>, Option<&'a R>)> {
+) -> Option<(Option<&'a I>, Option<&'a R>)> {
     if rows.iter().filter(|row| matches(row)).count() == row_ids.len() {
         return None;
     }
     let row_id = row_ids.iter().find(|id| {
         !rows
             .iter()
-            .any(|row| identity(row).1 == id.as_str() && matches(row))
+            .any(|row| identity(row).1 == id.as_ref() && matches(row))
     });
     let current = row_id.and_then(|id| {
         rows.iter()
-            .find(|row| identity(row) == (session_id, id.as_str()))
+            .find(|row| identity(row) == (session_id.as_str(), id.as_ref()))
     });
     Some((row_id, current))
 }
@@ -429,7 +429,8 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         )?;
         let input_id = draft
             .input_id
-            .unwrap_or_else(|| format!("recording-ti-{next_seq}"));
+            .map(crate::InputId::new)
+            .unwrap_or_else(|| crate::InputId::new(format!("recording-ti-{next_seq}")));
         let state = draft.ingress.initial_state();
         let stored = crate::PendingTurnInput {
             input_id,

@@ -18,8 +18,8 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 #[test]
 fn construction_enforces_structural_graph_integrity() {
     let node = |id: &str, parent: Option<&str>| SessionNodeRecord {
-        node_id: id.to_string(),
-        parent_node_id: parent.map(str::to_string),
+        node_id: id.to_string().into(),
+        parent_node_id: parent.map(crate::NodeId::from),
         timestamp: "2026-08-08T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "construction-integrity-test".to_string(),
@@ -28,12 +28,12 @@ fn construction_enforces_structural_graph_integrity() {
     };
 
     assert!(matches!(
-        SessionGraph::from_nodes(vec![node("", None)], Some(String::new())),
+        SessionGraph::from_nodes(vec![node("", None)], Some(String::new().into())),
         Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
     ));
     let invalid_encoded = serde_json::to_string(&SessionGraph::from_unchecked_nodes_for_testing(
         vec![node("", None)],
-        Some(String::new()),
+        Some(String::new().into()),
     ))
     .unwrap();
     assert!(
@@ -45,14 +45,14 @@ fn construction_enforces_structural_graph_integrity() {
     assert!(matches!(
         SessionGraph::from_nodes(
             vec![node("duplicate", None), node("duplicate", None)],
-            Some("duplicate".to_string()),
+            Some("duplicate".into()),
         ),
         Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == "duplicate"
     ));
     assert!(matches!(
         SessionGraph::from_nodes(
             vec![node("orphan", Some("missing-parent"))],
-            Some("orphan".to_string()),
+            Some("orphan".into()),
         ),
         Err(crate::StoreError::InvalidGraphParent {
             node_id,
@@ -61,7 +61,7 @@ fn construction_enforces_structural_graph_integrity() {
         }) if node_id == "orphan" && parent == "missing-parent"
     ));
     assert!(matches!(
-        SessionGraph::from_nodes(vec![node("present", None)], Some("missing-leaf".to_string())),
+        SessionGraph::from_nodes(vec![node("present", None)], Some("missing-leaf".into())),
         Err(crate::StoreError::InvalidGraphLeaf {
             leaf_node_id: Some(leaf)
         }) if leaf == "missing-leaf"
@@ -103,8 +103,8 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
     let before_graph = serde_json::to_value(&graph).expect("serialize graph preimage");
     let before_read = graph.read_model(None).expect("read resident graph");
     let node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-        node_id: node_id.to_string(),
-        parent_node_id: Some(parent_node_id.to_string()),
+        node_id: node_id.to_string().into(),
+        parent_node_id: Some(parent_node_id.to_string().into()),
         timestamp: "2026-09-12T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "atomic-append-test".to_string(),
@@ -114,7 +114,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
 
     let empty_node_id = GraphAppend {
         nodes: vec![node("", &resident_leaf)],
-        leaf_node_id: Some(String::new()),
+        leaf_node_id: Some(String::new().into()),
     };
     assert!(matches!(
         graph.apply_append(&empty_node_id),
@@ -135,7 +135,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
             node("duplicate-batch", &resident_leaf),
             node("duplicate-batch", "duplicate-batch"),
         ],
-        leaf_node_id: Some("duplicate-batch".to_string()),
+        leaf_node_id: Some("duplicate-batch".into()),
     };
     assert!(matches!(
         graph.apply_append(&duplicate_batch),
@@ -144,7 +144,7 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
 
     let invalid = GraphAppend {
         nodes: vec![node("invalid-child", "missing-parent")],
-        leaf_node_id: Some("invalid-child".to_string()),
+        leaf_node_id: Some("invalid-child".into()),
     };
     assert!(matches!(
         graph.apply_append(&invalid),
@@ -193,8 +193,8 @@ fn cache_build_rejects_parent_cycles_scenario() {
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
             SessionNodeRecord {
-                node_id: "cycle-a".to_string(),
-                parent_node_id: Some("cycle-b".to_string()),
+                node_id: "cycle-a".into(),
+                parent_node_id: Some("cycle-b".into()),
                 timestamp: "2026-07-31T00:00:00Z".to_string(),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
@@ -202,8 +202,8 @@ fn cache_build_rejects_parent_cycles_scenario() {
                 },
             },
             SessionNodeRecord {
-                node_id: "cycle-b".to_string(),
-                parent_node_id: Some("cycle-a".to_string()),
+                node_id: "cycle-b".into(),
+                parent_node_id: Some("cycle-a".into()),
                 timestamp: "2026-07-31T00:00:00Z".to_string(),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "cycle-test".to_string(),
@@ -211,7 +211,7 @@ fn cache_build_rejects_parent_cycles_scenario() {
                 },
             },
         ],
-        Some("cycle-b".to_string()),
+        Some("cycle-b".into()),
     );
 
     let error = SessionGraphCache::build(&graph).expect_err("cycle must be rejected");
@@ -228,7 +228,7 @@ fn cache_build_rejects_parent_cycles_scenario() {
 #[test]
 fn cache_build_rejects_duplicate_node_ids() {
     let node = SessionNodeRecord {
-        node_id: "duplicate".to_string(),
+        node_id: "duplicate".into(),
         parent_node_id: None,
         timestamp: "2026-07-31T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
@@ -238,7 +238,7 @@ fn cache_build_rejects_duplicate_node_ids() {
     };
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![node.clone(), node],
-        Some("duplicate".to_string()),
+        Some("duplicate".into()),
     );
 
     assert!(matches!(
@@ -251,15 +251,15 @@ fn cache_build_rejects_duplicate_node_ids() {
 fn cache_build_rejects_dangling_parents() {
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![SessionNodeRecord {
-            node_id: "dangling-child".to_string(),
-            parent_node_id: Some("missing-parent".to_string()),
+            node_id: "dangling-child".into(),
+            parent_node_id: Some("missing-parent".into()),
             timestamp: "2026-07-31T00:00:00Z".to_string(),
             payload: SessionNodePayload::Plugin {
                 plugin_type: "dangling-test".to_string(),
                 body: SharedJsonValue::new(serde_json::json!({"value": 1})),
             },
         }],
-        Some("dangling-child".to_string()),
+        Some("dangling-child".into()),
     );
 
     assert!(matches!(
@@ -275,7 +275,7 @@ fn cache_build_rejects_dangling_parents() {
 #[test]
 fn resident_integrity_rejects_missing_leaves() {
     let node = SessionNodeRecord {
-        node_id: "existing-node".to_string(),
+        node_id: "existing-node".into(),
         parent_node_id: None,
         timestamp: "2026-07-31T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
@@ -285,7 +285,7 @@ fn resident_integrity_rejects_missing_leaves() {
     };
     let unknown_leaf = SessionGraph::from_unchecked_nodes_for_testing(
         vec![node.clone()],
-        Some("missing-leaf".to_string()),
+        Some("missing-leaf".into()),
     );
     let absent_leaf = SessionGraph::from_unchecked_nodes_for_testing(vec![node], None);
 
@@ -304,8 +304,8 @@ fn resident_integrity_rejects_missing_leaves() {
 #[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
-        node_id: node_id.to_string(),
-        parent_node_id: parent_node_id.map(str::to_string),
+        node_id: node_id.to_string().into(),
+        parent_node_id: parent_node_id.map(crate::NodeId::from),
         timestamp: "2026-07-31T00:00:00Z".to_string(),
         payload: SessionNodePayload::Plugin {
             plugin_type: "inactive-cycle-test".to_string(),
@@ -319,7 +319,7 @@ fn cache_build_rejects_cycles_in_inactive_components() {
             plugin_node("inactive-a", Some("inactive-b")),
             plugin_node("inactive-b", Some("inactive-a")),
         ],
-        Some("active-leaf".to_string()),
+        Some("active-leaf".into()),
     );
 
     assert!(matches!(
@@ -351,8 +351,8 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
     let graph = SessionGraph::from_unchecked_nodes_for_testing(
         vec![
             SessionNodeRecord {
-                node_id: "nearest-a".to_string(),
-                parent_node_id: Some("nearest-b".to_string()),
+                node_id: "nearest-a".into(),
+                parent_node_id: Some("nearest-b".into()),
                 timestamp: "2026-07-31T00:00:00Z".to_string(),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
@@ -360,8 +360,8 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
                 },
             },
             SessionNodeRecord {
-                node_id: "nearest-b".to_string(),
-                parent_node_id: Some("nearest-a".to_string()),
+                node_id: "nearest-b".into(),
+                parent_node_id: Some("nearest-a".into()),
                 timestamp: "2026-07-31T00:00:00Z".to_string(),
                 payload: SessionNodePayload::Plugin {
                     plugin_type: "nearest-test".to_string(),
@@ -369,7 +369,7 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
                 },
             },
         ],
-        Some("nearest-b".to_string()),
+        Some("nearest-b".into()),
     );
     let by_id = graph_node_indices(&graph).expect("unique test ids");
 
@@ -441,8 +441,8 @@ fn read_model_preserves_distinct_nodes_with_identical_messages() {
 #[test]
 fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
     let node = SessionNodeRecord {
-        node_id: "node-2".to_string(),
-        parent_node_id: Some("node-1".to_string()),
+        node_id: "node-2".into(),
+        parent_node_id: Some("node-1".into()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: SessionNodePayload::Event {
             event: SessionHistoryRecord::Protocol(protocol_event()),
@@ -453,8 +453,8 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
     assert!(!encoded.contains("node_id"));
     assert!(!encoded.contains("parent_node_id"));
     let decoded = SessionNodeRecord::decode_storage_body(
-        node.node_id.clone(),
-        node.parent_node_id.clone(),
+        node.node_id.to_string(),
+        node.parent_node_id.clone().map(crate::NodeId::into_inner),
         &encoded,
     )
     .expect("decode storage body");
@@ -468,7 +468,7 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
 #[test]
 fn storage_body_states_its_node_body_generation() {
     let node = SessionNodeRecord {
-        node_id: "node-1".to_string(),
+        node_id: "node-1".into(),
         parent_node_id: None,
         timestamp: "2026-08-18T00:00:00Z".to_string(),
         payload: SessionNodePayload::Event {
@@ -639,7 +639,9 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
     let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
         .expect("non-empty frame material");
     let node = SessionNodeRecord {
-        node_id: frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
+        node_id: frame_node_id(&SessionId::from("session"), frame_key.as_str())
+            .into_inner()
+            .into(),
         parent_node_id: None,
         timestamp: "2026-09-01T00:00:00Z".to_string(),
         payload: SessionNodePayload::FrameOpen {
@@ -660,7 +662,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
     stored["frame_key"] = serde_json::json!("initial-frame");
 
     let error = SessionNodeRecord::decode_storage_body(
-        node.node_id,
+        node.node_id.to_string(),
         None,
         &serde_json::to_string(&stored).expect("encode malformed frame-open body"),
     )
@@ -706,15 +708,21 @@ fn nearest_frame_is_derived_from_ancestry() {
     let second_message = graph.append_message(text_message("m2", MessageRole::User, "second"));
 
     assert_eq!(
-        graph.nearest_frame_node_id(Some(&first_message)),
+        graph
+            .nearest_frame_node_id(Some(&first_message))
+            .map(crate::NodeId::as_str),
         Some(first.as_str())
     );
     assert_eq!(
-        graph.nearest_frame_node_id(Some(&second_message)),
+        graph
+            .nearest_frame_node_id(Some(&second_message))
+            .map(crate::NodeId::as_str),
         Some(second.as_str())
     );
     assert_eq!(
-        graph.nearest_frame_node_id(graph.leaf_node_id.as_deref()),
+        graph
+            .nearest_frame_node_id(graph.leaf_node_id.as_deref())
+            .map(crate::NodeId::as_str),
         Some(second.as_str())
     );
 }

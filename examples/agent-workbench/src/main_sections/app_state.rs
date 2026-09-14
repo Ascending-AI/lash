@@ -1114,7 +1114,7 @@ pub(crate) async fn apply_model_selection_to_session(
         // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
     state.trace_for_session(
-        &SessionId::from(session.session_id()),
+        &session.session_id(),
         "model_selection.applied",
         json!({
             "reason": reason,

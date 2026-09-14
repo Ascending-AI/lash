@@ -292,7 +292,7 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let node = SessionNodeRecord {
-        node_id: "unframed-root".to_string(),
+        node_id: "unframed-root".into(),
         parent_node_id: None,
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: SessionNodePayload::Event {
@@ -305,7 +305,7 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
         &state,
         crate::GraphAppend {
             nodes: vec![node],
-            leaf_node_id: Some("unframed-root".to_string()),
+            leaf_node_id: Some("unframed-root".into()),
         },
         &[],
     );
@@ -1008,8 +1008,8 @@ pub(super) fn sample_session_node(
         |_| id.to_string(),
     );
     SessionNodeRecord {
-        node_id,
-        parent_node_id: parent.map(ToOwned::to_owned),
+        node_id: node_id.into(),
+        parent_node_id: parent.map(lash_core::NodeId::from),
         timestamp: "1970-01-01T00:00:00Z".to_string(),
         payload: if parent.is_none() {
             SessionNodePayload::FrameOpen {

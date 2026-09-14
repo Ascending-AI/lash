@@ -202,7 +202,7 @@ async fn negative_claim_fence(handles: FenceIntegrityHandles) {
         .await
         .expect("enqueue negative-fence row");
     let target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: batch.batch_id,
+        batch_id: batch.batch_id.to_string(),
     };
     handles.injector.inject_raw_value(&target, -1).await;
     let before = handles.injector.observe_raw_value(&target).await;
@@ -275,10 +275,10 @@ async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) 
         .await
         .expect("enqueue second divergent row");
     let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: first.batch_id,
+        batch_id: first.batch_id.to_string(),
     };
     let second_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: second.batch_id,
+        batch_id: second.batch_id.to_string(),
     };
     handles.injector.inject_raw_value(&first_target, 5).await;
     handles.injector.inject_raw_value(&second_target, 41).await;
@@ -332,10 +332,10 @@ async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: b
         .await
         .expect("enqueue second exhausted fixture row");
     let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: first.batch_id,
+        batch_id: first.batch_id.to_string(),
     };
     let second_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: second.batch_id,
+        batch_id: second.batch_id.to_string(),
     };
     handles.injector.inject_raw_value(&first_target, 5).await;
     handles.injector.inject_raw_value(&second_target, 9).await;

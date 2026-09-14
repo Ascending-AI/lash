@@ -1449,7 +1449,7 @@ async fn record_turn_output_for_model(
     };
     let assistant_text = assistant_text_for_display(&output, &streamed_prose);
     state.trace_for_session(
-        &SessionId::from(session.session_id()),
+        &session.session_id(),
         trace_name,
         json!({
             "assistant_text": assistant_text.clone(),
@@ -1477,7 +1477,7 @@ async fn record_turn_output_for_model(
         .filter(|message| message.id.starts_with("m_ingress_"))
     {
         state.publish_for_session_identified(
-            &SessionId::from(session.session_id()),
+            &session.session_id(),
             format!("message:{}", message.id),
             crate::StreamItem::Message {
                 message: crate::chat_message_from_committed(message),
@@ -1488,7 +1488,7 @@ async fn record_turn_output_for_model(
         let call_id = record.call_id.0.clone();
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
-            &SessionId::from(session.session_id()),
+            &session.session_id(),
             format!("turn:{}:model-call:{call_id}", identity.turn_id),
             crate::StreamItem::ModelCallRecorded {
                 record: remote_record,
@@ -1499,7 +1499,7 @@ async fn record_turn_output_for_model(
         lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { evidence }) => {
             let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(
-                &SessionId::from(session.session_id()),
+                &session.session_id(),
                 format!("turn:{}:cancelled", identity.turn_id),
                 "event",
                 message,
@@ -1508,7 +1508,7 @@ async fn record_turn_output_for_model(
         lash::TurnOutcome::Stopped(stop) => {
             let _ = stop;
             state.push_message_with_id_for_session(
-                &SessionId::from(session.session_id()),
+                &session.session_id(),
                 format!("turn:{}:failed", identity.turn_id),
                 "event",
                 crate::PUBLIC_TURN_FAILURE_MESSAGE,
@@ -1549,14 +1549,14 @@ async fn record_turn_output_for_model(
                 identity.turn_id.clone()
             };
             state.push_assistant_message_for_turn(
-                &SessionId::from(session.session_id()),
+                &session.session_id(),
                 workbench_turn_assistant_message_id(identity.turn_id),
                 &live_turn_id,
                 assistant_text,
             );
         }
     }
-    state.publish_turn_done(&SessionId::from(session.session_id()), identity.turn_id);
+    state.publish_turn_done(&session.session_id(), identity.turn_id);
     Ok(())
 }
 

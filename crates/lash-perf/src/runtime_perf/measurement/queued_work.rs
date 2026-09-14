@@ -179,7 +179,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
             .batches
             .iter()
             .map(|batch| batch.batch_id.as_str())
-            .ne(join_batch_ids.iter().map(String::as_str))
+            .ne(join_batch_ids.iter().map(lash_core::BatchId::as_str))
         {
             anyhow::bail!("queued-work stress exact reclaim returned different batches");
         }

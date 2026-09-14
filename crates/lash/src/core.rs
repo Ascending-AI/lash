@@ -546,7 +546,7 @@ impl LashCore {
             .into_iter()
             .find(|point| point.node_id == node_id)
             .ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                node_id: node_id.clone(),
+                node_id: node_id.clone().into(),
             })?;
         let inherited = match (&observer_inheritance, self.process_registry()) {
             (lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),
@@ -598,7 +598,7 @@ impl LashCore {
             .collect();
         let request = lash_core::ForkSessionRequest {
             session_id,
-            node_id,
+            node_id: node_id.into(),
             relation: lash_core::SessionRelation::Fork {
                 source_session_id: point.source_session_id,
                 source_node_id: point.node_id,

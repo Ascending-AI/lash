@@ -33,8 +33,8 @@ struct TurnGraphAppendDraftInner {
     /// Node ids on the resident active path when the turn began, plus every
     /// node minted by a recorded append: the set an ancestor requirement is
     /// resolved against.
-    active_node_ids: HashSet<String>,
-    leaf_node_id: Option<String>,
+    active_node_ids: HashSet<crate::NodeId>,
+    leaf_node_id: Option<crate::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
     /// Prefix of `recorded` already folded into the turn's final state.
     applied: usize,
@@ -118,11 +118,11 @@ impl TurnGraphAppendDraft {
                 operation_key: draft_namespace,
             });
         }
-        if let Some(required_node_id) = request.requires_ancestor_node_id.as_deref()
+        if let Some(required_node_id) = request.requires_ancestor_node_id.as_ref()
             && !inner.active_node_ids.contains(required_node_id)
         {
             return Ok(crate::AppendSessionNodesOutcome::StaleBranch {
-                required_node_id: required_node_id.to_string(),
+                required_node_id: required_node_id.clone(),
             });
         }
         let node_ids = (0..request.nodes.len() as u64)
@@ -134,7 +134,10 @@ impl TurnGraphAppendDraft {
         inner.active_node_ids.extend(node_ids.iter().cloned());
         let outcome = crate::AppendSessionNodesOutcome::Appended {
             node_ids,
-            leaf_node_id: inner.leaf_node_id.clone().unwrap_or_default(),
+            leaf_node_id: inner
+                .leaf_node_id
+                .clone()
+                .unwrap_or_else(|| crate::NodeId::new(String::new())),
         };
         inner.recorded.push(RecordedTurnGraphAppend {
             draft_namespace,
@@ -344,12 +347,16 @@ impl TurnCommitDraft {
 
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
-        I: IntoIterator<Item = String>,
+        I: IntoIterator<Item = crate::NodeId>,
     {
         self.graph.mark_node_ids_persisted(node_ids);
     }
 
-    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(String, String)]) {
+    pub(super) fn remap_node_ids(
+        &mut self,
+        session_id: &SessionId,
+        mapping: &[(crate::NodeId, crate::NodeId)],
+    ) {
         self.graph.remap_node_ids(session_id, mapping);
         if let Some(current) = self.state.current_frame_node_id.as_mut()
             && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
@@ -392,7 +399,7 @@ mod tests {
         }
     }
 
-    fn appended_ids(outcome: &AppendSessionNodesOutcome) -> Vec<String> {
+    fn appended_ids(outcome: &AppendSessionNodesOutcome) -> Vec<crate::NodeId> {
         match outcome {
             AppendSessionNodesOutcome::Appended { node_ids, .. } => node_ids.clone(),
             other => panic!("expected an appended outcome, got {other:?}"),
@@ -475,7 +482,7 @@ mod tests {
             AppendSessionNodesOutcome::Appended { .. }
         ));
         let mut off_path = plugin_append("op-d", &["d0"]);
-        off_path.requires_ancestor_node_id = Some("not-on-the-active-path".to_string());
+        off_path.requires_ancestor_node_id = Some("not-on-the-active-path".into());
         assert!(matches!(
             draft.record(&SessionId::from("draft-answers"), &off_path).expect("stale branch answer"),
             AppendSessionNodesOutcome::StaleBranch { required_node_id }
@@ -676,7 +683,8 @@ mod tests {
         assert_eq!(
             state
                 .session_graph
-                .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref()),
+                .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
+                .map(crate::NodeId::as_str),
             Some(opened.frame_node_id.as_str())
         );
         let read = state

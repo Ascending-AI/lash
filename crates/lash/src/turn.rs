@@ -35,12 +35,12 @@ pub enum SelectedQueuedWorkBatchSatisfaction {
     /// This invocation claimed and executed the durable row.
     ClaimedNow {
         /// Requested durable batch ID.
-        batch_id: String,
+        batch_id: lash_core::BatchId,
     },
     /// No durable row remained, so the idempotent request was already done.
     AlreadySatisfied {
         /// Requested durable batch ID.
-        batch_id: String,
+        batch_id: lash_core::BatchId,
     },
 }
 
@@ -676,7 +676,7 @@ impl QueuedTurnBuilder {
     /// one composition or Lash refuses the drain before executing a turn.
     pub fn batch_ids(
         self,
-        batch_ids: impl IntoIterator<Item = impl Into<String>>,
+        batch_ids: impl IntoIterator<Item = impl Into<lash_core::BatchId>>,
     ) -> SelectedQueuedTurnBuilder {
         SelectedQueuedTurnBuilder {
             builder: self,
@@ -867,7 +867,7 @@ impl QueuedTurnBuilder {
 /// present rows must form one claim or Lash refuses before selected execution.
 pub struct SelectedQueuedTurnBuilder {
     builder: QueuedTurnBuilder,
-    batch_ids: Vec<String>,
+    batch_ids: Vec<lash_core::BatchId>,
 }
 
 impl SelectedQueuedTurnBuilder {
@@ -956,7 +956,7 @@ impl SelectedQueuedTurnBuilder {
         self.builder
             .drain_id
             .clone()
-            .or_else(|| self.batch_ids.first().cloned())
+            .or_else(|| self.batch_ids.first().map(ToString::to_string))
             .unwrap_or_else(fresh_queue_drain_id)
     }
 
@@ -1155,7 +1155,7 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-    batch_ids: &[String],
+    batch_ids: &[lash_core::BatchId],
 ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
     let outcome = Box::pin(stream_selected_queued_prepared_assembled(
         runtime,
@@ -1178,7 +1178,7 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
     scoped_effect_controller: ScopedEffectController<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
-    batch_ids: &[String],
+    batch_ids: &[lash_core::BatchId],
 ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;

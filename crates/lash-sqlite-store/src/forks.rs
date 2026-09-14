@@ -21,7 +21,7 @@ fn retained_fork_config_conn(
     let frame_node_id =
         persistence::nearest_frame_node_id_conn(conn, node_id)?.ok_or_else(|| {
             lash_core::StoreError::MissingFrameOpenAncestor {
-                leaf_node_id: node_id.to_string(),
+                leaf_node_id: node_id.to_string().into(),
             }
         })?;
     let (parent_node_id, node_json) = conn
@@ -77,7 +77,7 @@ pub(super) async fn pin_in_catalog(
             {
                 let config = retained_fork_config_conn(tx, &node_id)?;
                 return Ok(lash_core::ForkPoint {
-                    node_id,
+                    node_id: node_id.into(),
                     checkpoint_ref: checkpoint_ref.into(),
                     source_session_id: SessionId::from(source_session_id),
                     config,
@@ -101,7 +101,7 @@ pub(super) async fn pin_in_catalog(
                 .map_err(sqlite_error)?;
             let (source_session_id, checkpoint_ref) =
                 retained.ok_or_else(|| lash_core::StoreError::ForkPointNotRetained {
-                    node_id: node_id.clone(),
+                    node_id: node_id.clone().into(),
                 })?;
             let live = tx
                 .query_row(
@@ -115,7 +115,7 @@ pub(super) async fn pin_in_catalog(
                 .is_some();
             if !live {
                 return Err(lash_core::StoreError::ForkPointNotRetained {
-                    node_id: node_id.clone(),
+                    node_id: node_id.clone().into(),
                 });
             }
             tx.execute(
@@ -126,7 +126,7 @@ pub(super) async fn pin_in_catalog(
             .map_err(sqlite_error)?;
             let config = retained_fork_config_conn(tx, &node_id)?;
             Ok(lash_core::ForkPoint {
-                node_id,
+                node_id: node_id.into(),
                 checkpoint_ref: checkpoint_ref.into(),
                 source_session_id,
                 config,
@@ -218,7 +218,7 @@ pub(super) async fn fork_points_in_catalog(
                 .map(|(node_id, checkpoint_ref, source_session_id, pinned)| {
                     Ok(lash_core::ForkPoint {
                         config: retained_fork_config_conn(&tx, &node_id)?,
-                        node_id,
+                        node_id: node_id.into(),
                         checkpoint_ref: lash_core::BlobRef(checkpoint_ref),
                         source_session_id: SessionId::from(source_session_id),
                         pinned,
@@ -292,7 +292,7 @@ pub(super) async fn fork_at_in_catalog(
                          WHERE leaf_node_id = ?1 AND checkpoint_ref IS NOT NULL
                      )
                      ORDER BY priority, source_session_id LIMIT 1",
-                    params![request.node_id],
+                    params![request.node_id.as_str()],
                     |row| Ok((SessionId::from(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
                 )
                 .optional()
@@ -308,7 +308,7 @@ pub(super) async fn fork_at_in_catalog(
                 .query_row(
                     "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
-                    params![request.node_id],
+                    params![request.node_id.as_str()],
                     |_| Ok(()),
                 )
                 .optional()
@@ -323,7 +323,7 @@ pub(super) async fn fork_at_in_catalog(
                 .query_row(
                     "SELECT session_id, generation FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0",
-                    params![request.node_id],
+                    params![request.node_id.as_str()],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -356,7 +356,7 @@ pub(super) async fn fork_at_in_catalog(
                         "SELECT node_id, parent_node_id, session_id, generation
                          FROM graph_nodes
                          WHERE node_id = ?1 AND tombstoned = 0",
-                        params![current_node_id],
+                        params![current_node_id.as_str()],
                         |row| {
                             Ok((
                                 row.get::<_, String>(0)?,
@@ -392,8 +392,8 @@ pub(super) async fn fork_at_in_catalog(
                 }
                 let parent_node_id = facts.1.clone();
                 edge_path.push(lash_core::store::ForkNodeFacts {
-                    node_id: facts.0,
-                    parent_node_id: facts.1,
+                    node_id: facts.0.into(),
+                    parent_node_id: facts.1.map(lash_core::NodeId::from),
                     owning_session_id: SessionId::from(facts.2),
                     generation,
                 });
@@ -405,7 +405,7 @@ pub(super) async fn fork_at_in_catalog(
                         "SessionGraph",
                         "retained fork path ended before generation zero",
                     )
-                })?;
+                })?.into();
                 expected_generation -= 1;
             }
             edge_path.reverse();

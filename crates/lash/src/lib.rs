@@ -68,11 +68,11 @@ pub use lash_core::facade_support::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, ChargeSafetyPolicy, ChargeSafetyRefusalEvidence,
-    CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy, FrameKey, InputItem,
-    LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
-    OmittedToolCalls, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
+    ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
+    FrameKey, InputId, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec,
+    ModelSpecBuilder, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, ProcessId, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionId, SessionListFilter,

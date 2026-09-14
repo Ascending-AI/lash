@@ -68,7 +68,7 @@ fn claim_id_dialects_preserve_existing_spelling() {
 
 fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
     ClaimCandidate {
-        batch_id: format!("qwb-{enqueue_seq}"),
+        batch_id: format!("qwb-{enqueue_seq}").into(),
         enqueue_seq,
         claim_fencing_token: 0,
         prior_claim_id: None,
@@ -128,7 +128,8 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                     },
                     _ => crate::MessageOrigin::TurnInput {
                         turn_id: TurnId::from(format!("turn-{index}")),
-                        input_id: (index % 2 == 0).then(|| format!("input-{index}")),
+                        input_id: (index % 2 == 0)
+                            .then(|| crate::InputId::new(format!("input-{index}"))),
                     },
                 },
                 text: "x".repeat(text_len),
@@ -155,7 +156,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 input_texts,
                 turn_causes,
             )| ClaimCandidate {
-                batch_id: format!("qwb-{enqueue_seq}"),
+                batch_id: format!("qwb-{enqueue_seq}").into(),
                 enqueue_seq,
                 claim_fencing_token: 0,
                 prior_claim_id: None,
@@ -175,40 +176,47 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
 #[test]
 fn exact_selection_requires_the_literal_interrupted_composition() {
     let candidates = vec![
-        ("w1".to_string(), Some("claim-a".to_string())),
-        ("fresh".to_string(), None),
-        ("w2".to_string(), Some("claim-a".to_string())),
+        (crate::BatchId::from("w1"), Some("claim-a".to_string())),
+        (crate::BatchId::from("fresh"), None),
+        (crate::BatchId::from("w2"), Some("claim-a".to_string())),
     ];
     assert_eq!(
-        select_interrupted_exact_claim_indices(&candidates, &["w1".to_string()]),
-        Err(vec!["w1".to_string(), "w2".to_string()])
+        select_interrupted_exact_claim_indices(&candidates, &[crate::BatchId::from("w1")]),
+        Err(vec![crate::BatchId::from("w1"), crate::BatchId::from("w2")])
     );
     assert_eq!(
-        select_interrupted_exact_claim_indices(&candidates, &["w1".to_string(), "w2".to_string()],),
+        select_interrupted_exact_claim_indices(
+            &candidates,
+            &[crate::BatchId::from("w1"), crate::BatchId::from("w2")],
+        ),
         Ok(Some(vec![0, 2]))
     );
 
     let two_claims = vec![
-        ("a1".to_string(), Some("claim-a".to_string())),
-        ("a2".to_string(), Some("claim-a".to_string())),
-        ("b1".to_string(), Some("claim-b".to_string())),
-        ("b2".to_string(), Some("claim-b".to_string())),
+        (crate::BatchId::from("a1"), Some("claim-a".to_string())),
+        (crate::BatchId::from("a2"), Some("claim-a".to_string())),
+        (crate::BatchId::from("b1"), Some("claim-b".to_string())),
+        (crate::BatchId::from("b2"), Some("claim-b".to_string())),
     ];
     assert_eq!(
         select_interrupted_exact_claim_indices(
             &two_claims,
-            &["a1".to_string(), "a2".to_string(), "b1".to_string()],
+            &[
+                crate::BatchId::from("a1"),
+                crate::BatchId::from("a2"),
+                crate::BatchId::from("b1"),
+            ],
         ),
-        Err(vec!["b1".to_string(), "b2".to_string()])
+        Err(vec![crate::BatchId::from("b1"), crate::BatchId::from("b2")])
     );
     assert_eq!(
         select_interrupted_exact_claim_indices(
             &two_claims,
             &[
-                "a1".to_string(),
-                "a2".to_string(),
-                "b1".to_string(),
-                "b2".to_string(),
+                crate::BatchId::from("a1"),
+                crate::BatchId::from("a2"),
+                crate::BatchId::from("b1"),
+                crate::BatchId::from("b2"),
             ],
         ),
         Ok(Some(vec![0, 1]))
@@ -611,7 +619,7 @@ fn an_exact_host_selection_is_never_sized_by_the_automatic_drain_policy() {
     );
     // A genuine claim law still bounds it: incompatible rows never merge.
     let mut other_key = candidate(2, Some("other"));
-    other_key.batch_id = "qwb-other".to_string();
+    other_key.batch_id = "qwb-other".into();
     assert_eq!(
         select_exact_turn_work_claim_prefix(
             &[candidates[0].clone(), other_key],
@@ -807,10 +815,10 @@ fn adjacent_config_commands_share_one_claim_but_not_other_commands() {
     first.kind = QueuedWorkKind::Control;
     first.config_patch_command = true;
     let mut second = first.clone();
-    second.batch_id = "qwb-2".to_string();
+    second.batch_id = "qwb-2".into();
     second.enqueue_seq = 2;
     let mut refresh = second.clone();
-    refresh.batch_id = "qwb-3".to_string();
+    refresh.batch_id = "qwb-3".into();
     refresh.enqueue_seq = 3;
     refresh.config_patch_command = false;
 
@@ -835,7 +843,7 @@ fn overdue_head_is_claimed_alone_at_claim_time() {
 #[test]
 fn lease_derivation_is_deterministic_and_advances_fencing() {
     let head = ClaimCandidate {
-        batch_id: "qwb-7".to_string(),
+        batch_id: "qwb-7".into(),
         enqueue_seq: 7,
         claim_fencing_token: 2,
         prior_claim_id: None,
@@ -869,7 +877,7 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
 #[test]
 fn lease_token_framing_distinguishes_opaque_identity_boundaries() {
     let head = ClaimCandidate {
-        batch_id: "qwb-7".to_string(),
+        batch_id: "qwb-7".into(),
         enqueue_seq: 7,
         claim_fencing_token: 2,
         prior_claim_id: None,

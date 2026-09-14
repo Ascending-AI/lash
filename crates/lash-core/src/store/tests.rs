@@ -126,7 +126,7 @@ fn claim_settlement_refuses_foreign_completions_in_both_directions() {
         claim_id: "foreign-queue".to_string(),
         lease_token: "token".to_string(),
         data: crate::QueuedWorkCompletionData {
-            batch_ids: vec!["batch".to_string()],
+            batch_ids: vec!["batch".into()],
         },
     }];
     let queue_error = commit
@@ -146,7 +146,7 @@ fn claim_settlement_refuses_foreign_completions_in_both_directions() {
             lease_token: "token".to_string(),
         }),
         data: crate::TurnInputCompletionData {
-            input_ids: vec!["input".to_string()],
+            input_ids: vec!["input".into()],
             applications: Vec::new(),
         },
     }];
@@ -168,7 +168,7 @@ fn claim_settlement_refuses_duplicate_completion_count() {
         claim_id: "originating-queue".to_string(),
         lease_token: "token".to_string(),
         data: crate::QueuedWorkCompletionData {
-            batch_ids: vec!["batch".to_string()],
+            batch_ids: vec!["batch".into()],
         },
     };
     commit.completed_queue_claims = vec![completion.clone(), completion.clone()];
@@ -193,7 +193,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
         session_id: SessionId::from("first-commit"),
         session_graph: crate::SessionGraph::from_nodes(
             vec![crate::SessionNodeRecord {
-                node_id: placeholder.clone(),
+                node_id: placeholder.clone().into(),
                 parent_node_id: None,
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
@@ -201,7 +201,7 @@ fn first_persisted_state_commit_derives_and_installs_node_ids() {
                     body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
                 },
             }],
-            Some(placeholder),
+            Some(placeholder.into()),
         )
         .expect("first-commit fixture graph is valid"),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -354,9 +354,9 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
             lease_token: "lease-a".to_string(),
         }),
         data: crate::TurnInputCompletionData {
-            input_ids: vec!["input-1".to_string()],
+            input_ids: vec!["input-1".into()],
             applications: vec![crate::TurnInputApplication {
-                input_id: "input-1".to_string(),
+                input_id: "input-1".into(),
                 source_key: None,
                 turn_id: crate::TurnId::from("turn-42"),
                 committed_message_id: "random-attempt-a".to_string(),
@@ -493,7 +493,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         },
         41,
         Some(BlobRef("checkpoint".to_string())),
-        Some("leaf".to_string()),
+        Some("leaf".into()),
     );
     let before = serde_json::to_vec(&legacy).expect("serialize legacy session head metadata");
     let after = serde_json::to_vec(&assembled.payload()).expect("serialize session head payload");
@@ -668,7 +668,7 @@ fn node_derivation_guard_rejects_rogue_ids() {
 
     let mut rogue = commit.clone();
     let GraphAppend { nodes, .. } = &mut rogue.graph;
-    nodes[0].node_id = "rogue".to_string();
+    nodes[0].node_id = "rogue".into();
     assert!(matches!(
         rogue.validate_node_derivation(),
         Err(StoreError::NodeIdDerivationMismatch { .. })
@@ -702,7 +702,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
     let mut graph = GraphAppend {
         nodes: vec![
             crate::SessionNodeRecord {
-                node_id: "draft-a".to_string(),
+                node_id: "draft-a".into(),
                 parent_node_id: None,
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
@@ -711,8 +711,8 @@ fn node_derivation_remaps_in_batch_parent_edges() {
                 },
             },
             crate::SessionNodeRecord {
-                node_id: "draft-b".to_string(),
-                parent_node_id: Some("draft-a".to_string()),
+                node_id: "draft-b".into(),
+                parent_node_id: Some("draft-a".into()),
                 timestamp: "2026-07-26T10:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "second".to_string(),
@@ -720,7 +720,7 @@ fn node_derivation_remaps_in_batch_parent_edges() {
                 },
             },
         ],
-        leaf_node_id: Some("draft-b".to_string()),
+        leaf_node_id: Some("draft-b".into()),
     };
     graph
         .derive_node_ids(&SessionId::from("session"), &operation)
@@ -741,7 +741,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
         crate::session_graph::frame_node_id(&SessionId::from("session"), frame_key.as_str());
     let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: frame_node_id.to_string(),
+            node_id: frame_node_id.to_string().into(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -753,7 +753,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
                 protocol_turn_options: crate::ProtocolTurnOptions::default(),
             },
         }],
-        leaf_node_id: Some(frame_node_id.to_string()),
+        leaf_node_id: Some(frame_node_id.to_string().into()),
     };
 
     graph
@@ -772,15 +772,15 @@ fn frame_node_identity_is_stable_across_operation_realization() {
 fn append_chain_rejects_self_parent_cycles() {
     let graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: "cycle".to_string(),
-            parent_node_id: Some("cycle".to_string()),
+            node_id: "cycle".into(),
+            parent_node_id: Some("cycle".into()),
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::Plugin {
                 plugin_type: "cycle".to_string(),
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({})),
             },
         }],
-        leaf_node_id: Some("cycle".to_string()),
+        leaf_node_id: Some("cycle".into()),
     };
 
     assert!(matches!(
@@ -798,7 +798,7 @@ fn append_leaf_must_be_the_terminal_appended_node() {
     let graph = GraphAppend {
         nodes: vec![
             crate::SessionNodeRecord {
-                node_id: "first".to_string(),
+                node_id: "first".into(),
                 parent_node_id: None,
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
@@ -807,8 +807,8 @@ fn append_leaf_must_be_the_terminal_appended_node() {
                 },
             },
             crate::SessionNodeRecord {
-                node_id: "last".to_string(),
-                parent_node_id: Some("first".to_string()),
+                node_id: "last".into(),
+                parent_node_id: Some("first".into()),
                 timestamp: "2026-07-27T00:00:00Z".to_string(),
                 payload: crate::SessionNodePayload::Plugin {
                     plugin_type: "last".to_string(),
@@ -816,7 +816,7 @@ fn append_leaf_must_be_the_terminal_appended_node() {
                 },
             },
         ],
-        leaf_node_id: Some("first".to_string()),
+        leaf_node_id: Some("first".into()),
     };
     assert!(matches!(
         graph.validate_append_topology(),

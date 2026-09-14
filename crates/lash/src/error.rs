@@ -15,7 +15,7 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     /// attempted selected composition remains unexecuted.
     UnclaimableTogether {
         /// Requested batch IDs that the store could not claim with the rest.
-        unclaimed_batch_ids: Vec<String>,
+        unclaimed_batch_ids: Vec<lash_core::BatchId>,
     },
     /// A requested row belongs to an interrupted claim whose complete,
     /// already-journaled composition must be redriven atomically. If a request
@@ -23,7 +23,7 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     /// physically earliest incomplete claim in durable enqueue order.
     InterruptedBatchRequiresFullComposition {
         /// Complete interrupted composition, in durable enqueue order.
-        required_batch_ids: Vec<String>,
+        required_batch_ids: Vec<lash_core::BatchId>,
     },
     /// Another host currently owns the session's execution lane while at least
     /// one requested row remains present.
@@ -35,7 +35,7 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
     /// compact or split the work, or run the session on a larger-window model.
     QueuedItemExceedsContextWindow {
         /// Durable identity of the oversized row.
-        batch_id: String,
+        batch_id: lash_core::BatchId,
         /// Durable queue position of the oversized row.
         batch_enqueue_seq: u64,
         /// Conservative tokens this row alone needs.
@@ -632,14 +632,14 @@ mod tests {
         let cases = [
             (
                 SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                    unclaimed_batch_ids: vec!["unclaimable".to_string()],
+                    unclaimed_batch_ids: vec!["unclaimable".to_string().into()],
                 },
                 false,
                 false,
             ),
             (
                 SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                    required_batch_ids: vec!["interrupted".to_string()],
+                    required_batch_ids: vec!["interrupted".to_string().into()],
                 },
                 false,
                 false,
@@ -651,7 +651,7 @@ mod tests {
             ),
             (
                 SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
-                    batch_id: "oversized".to_string(),
+                    batch_id: "oversized".to_string().into(),
                     batch_enqueue_seq: 7,
                     required_context_tokens: 9,
                     max_context_tokens: 8,

@@ -40,7 +40,7 @@ impl ClaimRows for crate::TurnInputClaimData {
         self.inputs
             .retain(|input| !overlapping.contains(Self::row_key(input)));
         self.applications
-            .retain(|application| !overlapping.contains(&application.input_id));
+            .retain(|application| !overlapping.contains(application.input_id.as_str()));
     }
 }
 
@@ -163,7 +163,7 @@ fn merge_pending_turn_input_claim_authority(
             for application in pending
                 .applications
                 .iter()
-                .filter(|application| overlapping.contains(&application.input_id))
+                .filter(|application| overlapping.contains(application.input_id.as_str()))
             {
                 if !incoming
                     .applications
@@ -430,7 +430,7 @@ impl RuntimeTurnDriver<'_> {
             let mut delivery_claim = claim.clone();
             delivery_claim
                 .inputs
-                .retain(|input| !already_delivered.contains(&input.input_id));
+                .retain(|input| !already_delivered.contains(input.input_id.as_str()));
             let materialized = delivery_claim
                 .materialize_checkpoint_turn_input(
                     &self.turn_id,
@@ -669,7 +669,7 @@ mod claim_authority_tests {
 
     fn coalesced_batch(batch_id: &str, enqueue_seq: u64) -> crate::QueuedWorkBatch {
         crate::QueuedWorkBatch {
-            batch_id: batch_id.to_string(),
+            batch_id: batch_id.to_string().into(),
             session_id: SessionId::from("fig905"),
             enqueue_seq,
             source_key: Some(format!("fig905:{batch_id}")),
@@ -723,7 +723,7 @@ mod claim_authority_tests {
 
     fn pending_turn_input(input_id: &str) -> crate::PendingTurnInput {
         crate::PendingTurnInput {
-            input_id: input_id.to_string(),
+            input_id: input_id.to_string().into(),
             session_id: SessionId::from("fig905"),
             enqueue_seq: 1,
             source_key: None,
@@ -853,7 +853,7 @@ mod claim_authority_tests {
     fn lower_turn_input_authority_records_delivery_and_adopts_applications() {
         let mut predecessor = turn_input_claim("predecessor", 1, 1, &["input-a"]);
         predecessor.applications.push(crate::TurnInputApplication {
-            input_id: "input-a".to_string(),
+            input_id: "input-a".into(),
             source_key: None,
             turn_id: crate::TurnId::from("fig905-turn"),
             committed_message_id: "message-a".to_string(),
@@ -885,7 +885,7 @@ mod claim_authority_tests {
         )];
         let mut incoming = turn_input_claim("predecessor", 1, 1, &["input-a"]);
         incoming.applications.push(crate::TurnInputApplication {
-            input_id: "input-a".to_string(),
+            input_id: "input-a".into(),
             source_key: None,
             turn_id: crate::TurnId::from("fig905-turn"),
             committed_message_id: "message-a".to_string(),

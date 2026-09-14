@@ -21,7 +21,7 @@ pub(crate) async fn ensure_turn_input_completion_tx(
              FOR UPDATE",
         )
         .bind(completed.session_id.as_str())
-        .bind(input_id)
+        .bind(input_id.as_str())
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -57,7 +57,7 @@ pub(crate) async fn ensure_turn_input_completion_tx(
                 Some(claim) => StoreError::TurnInputClaimSuperseded {
                     session_id: completed.session_id.clone(),
                     claim_id: claim.claim_id.clone(),
-                    row_id: Some(input_id.clone().into_boxed_str()),
+                    row_id: Some(input_id.as_str().to_string().into_boxed_str()),
                     superseding_claim_id: observed
                         .as_ref()
                         .and_then(|(claim_id, _, _, _)| claim_id.clone())

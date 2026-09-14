@@ -1685,7 +1685,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersiste
             ),
             sample_session_node(&SessionId::from("branchy"), "left-leaf", Some("left-node")),
         ],
-        Some("left-leaf".to_string()),
+        Some("left-leaf".into()),
     )
     .expect("branch fixture graph is valid");
     let state = RuntimeSessionState {
@@ -1722,7 +1722,7 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersiste
             .collect::<Vec<_>>(),
         expected_node_ids
             .iter()
-            .map(String::as_str)
+            .map(lash_core::NodeId::as_str)
             .collect::<Vec<_>>(),
         "session reads must return the persisted leaf-to-root history"
     );

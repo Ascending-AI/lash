@@ -932,7 +932,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         fence: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        ids: &[String],
+        ids: &[crate::BatchId],
         policy: crate::QueuedWorkClaimPolicy,
     ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
         let operation = TurnSeamOperation::Store(StoreOperation::ClaimSelectedQueuedWork {

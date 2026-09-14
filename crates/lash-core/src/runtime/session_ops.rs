@@ -83,14 +83,14 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store());
         if history_store.is_none()
-            && let Some(required_node_id) = request.requires_ancestor_node_id.as_deref()
+            && let Some(required_node_id) = request.requires_ancestor_node_id.as_ref()
             && !self
                 .state
                 .session_graph
                 .active_path_contains(required_node_id)
         {
             return Ok(crate::AppendSessionNodesOutcome::StaleBranch {
-                required_node_id: required_node_id.to_string(),
+                required_node_id: required_node_id.clone(),
             });
         }
         let operation = boundary_operation(
@@ -166,7 +166,10 @@ impl LashRuntime {
                 .len()
                 .saturating_sub(requested_node_count)..]
                 .to_vec();
-            let locally_derived_leaf_node_id = graph.leaf_node_id.clone().unwrap_or_default();
+            let locally_derived_leaf_node_id = graph
+                .leaf_node_id
+                .clone()
+                .unwrap_or_else(|| crate::NodeId::new(String::new()));
             let mut commit =
                 crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
                     &self.state,
@@ -307,7 +310,7 @@ impl LashRuntime {
                 .session_graph
                 .leaf_node_id
                 .clone()
-                .unwrap_or_default(),
+                .unwrap_or_else(|| crate::NodeId::new(String::new())),
         })
     }
 

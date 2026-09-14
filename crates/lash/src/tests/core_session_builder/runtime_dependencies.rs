@@ -1427,7 +1427,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Fork {
                     source_session_id: SessionId::from(format!("nested-source-{case}")),
-                    source_node_id: format!("nested-source-node-{case}"),
+                    source_node_id: format!("nested-source-node-{case}").into(),
                     observer_inheritance: lash_core::ObserverInheritance::All,
                 },
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

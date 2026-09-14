@@ -299,7 +299,7 @@ impl QueuedWorkStore for Store {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        batch_ids: &[String],
+        batch_ids: &[lash_core::BatchId],
         policy: QueuedWorkClaimPolicy,
     ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
@@ -327,7 +327,7 @@ impl QueuedWorkStore for Store {
                         sql.push(')');
                         let mut values: Vec<rusqlite::types::Value> =
                             vec![session_id.as_str().to_string().into()];
-                        values.extend(batch_ids.iter().cloned().map(Into::into));
+                        values.extend(batch_ids.iter().map(|id| id.as_str().to_string().into()));
                         let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
                         stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             row.get::<_, String>(0)
@@ -364,7 +364,7 @@ impl QueuedWorkStore for Store {
                             (now as i64).into(),
                             sql_session_lease_generation(generation)?.into(),
                         ];
-                        values.extend(batch_ids.iter().cloned().map(Into::into));
+                        values.extend(batch_ids.iter().map(|id| id.as_str().to_string().into()));
                         let mut stmt = tx.prepare(&sql).map_err(sqlite_error)?;
                         let rows = stmt
                             .query_map(
@@ -420,7 +420,12 @@ impl QueuedWorkStore for Store {
                     }
                     let validation_batch_claims = validation_rows
                         .iter()
-                        .map(|row| (row.batch_id.clone(), row.claim_id.clone()))
+                        .map(|row| {
+                            (
+                                lash_core::BatchId::from(row.batch_id.clone()),
+                                row.claim_id.clone(),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     let interrupted_positions =
                         lash_core::store::queued_work::select_interrupted_exact_claim_indices(
@@ -429,7 +434,10 @@ impl QueuedWorkStore for Store {
                         )
                         .map_err(|required_batch_ids| {
                             StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                                required_batch_ids,
+                                required_batch_ids: required_batch_ids
+                                    .into_iter()
+                                    .map(lash_core::BatchId::into_inner)
+                                    .collect(),
                             }
                         })?;
                     let (mut rows, mut batches) = if let Some(interrupted_positions) =
@@ -488,7 +496,7 @@ impl QueuedWorkStore for Store {
                         };
                         let Some(first_position) = span_rows
                             .iter()
-                            .position(|row| requested_ids.contains(&row.batch_id))
+                            .position(|row| requested_ids.contains(row.batch_id.as_str()))
                         else {
                             return Ok(SelectedQueuedWorkClaimOutcome::new(
                                 None,
@@ -497,7 +505,7 @@ impl QueuedWorkStore for Store {
                         };
                         let rows = span_rows[first_position..]
                             .iter()
-                            .take_while(|row| requested_ids.contains(&row.batch_id))
+                            .take_while(|row| requested_ids.contains(row.batch_id.as_str()))
                             .cloned()
                             .collect::<Vec<_>>();
                         let batches = rows

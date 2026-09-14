@@ -5,12 +5,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::NodeId;
 use crate::session_graph::SessionGraph;
 
-pub(crate) fn validate_node_id(node_id: &str) -> Result<(), crate::StoreError> {
+pub(crate) fn validate_node_id(node_id: &NodeId) -> Result<(), crate::StoreError> {
     if node_id.is_empty() {
         return Err(crate::StoreError::InvalidGraphNodeId {
-            node_id: node_id.to_string(),
+            node_id: node_id.clone(),
         });
     }
     Ok(())
@@ -18,7 +19,7 @@ pub(crate) fn validate_node_id(node_id: &str) -> Result<(), crate::StoreError> {
 
 pub(crate) fn graph_node_indices(
     graph: &SessionGraph,
-) -> Result<HashMap<String, usize>, crate::StoreError> {
+) -> Result<HashMap<NodeId, usize>, crate::StoreError> {
     let mut by_id = HashMap::with_capacity(graph.nodes.len());
     for (idx, node) in graph.nodes.iter().enumerate() {
         validate_node_id(&node.node_id)?;
@@ -33,7 +34,7 @@ pub(crate) fn graph_node_indices(
 
 pub(crate) fn ancestry_indices(
     graph: &SessionGraph,
-    by_id: &HashMap<String, usize>,
+    by_id: &HashMap<NodeId, usize>,
     node_id: Option<&str>,
 ) -> Result<Vec<usize>, crate::StoreError> {
     let mut path = Vec::new();
@@ -41,7 +42,7 @@ pub(crate) fn ancestry_indices(
     let mut current = match node_id {
         Some(node_id) => Some(by_id.get(node_id).copied().ok_or_else(|| {
             crate::StoreError::InvalidGraphLeaf {
-                leaf_node_id: Some(node_id.to_string()),
+                leaf_node_id: Some(NodeId::from(node_id)),
             }
         })?),
         None => None,
@@ -66,10 +67,10 @@ pub(crate) fn ancestry_indices(
 
 pub(crate) fn validate_graph_parent_topology(
     graph: &SessionGraph,
-    by_id: &HashMap<String, usize>,
+    by_id: &HashMap<NodeId, usize>,
 ) -> Result<(), crate::StoreError> {
     for node in &graph.nodes {
-        if let Some(parent_node_id) = node.parent_node_id.as_deref()
+        if let Some(parent_node_id) = node.parent_node_id.as_ref()
             && !by_id.contains_key(parent_node_id)
         {
             return Err(crate::StoreError::InvalidGraphParent {

@@ -1292,7 +1292,7 @@ async fn settle_queued_batch(
             &lease.fence(),
             &owner,
             crate::QueuedWorkClaimBoundary::Idle,
-            &[batch_id.to_string()],
+            &[batch_id.to_string().into()],
             crate::testing::queued_work_claim_policy(64),
         )
         .await

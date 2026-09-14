@@ -614,7 +614,7 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
 
     raw.execute(
         "UPDATE queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = ?1",
-        params![batch.batch_id],
+        params![batch.batch_id.as_str()],
     )
     .expect("inject negative fence");
     assert_corrupt(
@@ -624,7 +624,7 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
 
     raw.execute(
         "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
-        params![i64::MAX, batch.batch_id],
+        params![i64::MAX, batch.batch_id.as_str()],
     )
     .expect("seed exhausted fence");
     let error = store
@@ -784,7 +784,7 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
     raw.execute(
         "UPDATE queued_work_batches SET work_kind = 'turn' WHERE batch_id = ?1",
-        params![batch.batch_id],
+        params![batch.batch_id.as_str()],
     )
     .expect("contradict stored family");
     assert_corrupt(
