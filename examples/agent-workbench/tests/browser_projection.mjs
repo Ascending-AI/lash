@@ -1104,7 +1104,7 @@ test("tool start and completion remain one nested code-block row", () => {
     nestedCount: 1,
     siblingCount: 0,
     badge: "completed",
-    summary: "lashlang completed in 9ms · 1 tool",
+    summary: "typescript completed in 9ms · 1 tool",
   });
   assert.deepEqual(JSON.parse(JSON.stringify(projectionContext.settledResult)), {
     nestedCount: 1,
@@ -1208,7 +1208,7 @@ test("tool start and completion without call id remain one nested row", () => {
     nestedCount: 1,
     siblingCount: 0,
     badge: "completed",
-    summary: "lashlang completed in 10ms · 1 tool",
+    summary: "typescript completed in 10ms · 1 tool",
   });
 });
 
