@@ -283,22 +283,6 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             )
             unit_extra_data = []
             unit_args = []
-            if package["name"] == "lash-internal-core":
-                # The fault-matrix routing probes execute the real
-                # scripts/confidence-gate.sh against a recording `cargo`.
-                unit_extra_data.append("//:confidence_gate_scripts")
-                # The five `..._real_cargo_filters_chunk_*` cases each fork a
-                # real `cargo test ... -- --list` against the workspace to prove
-                # the gate's name filters still select tests. That is a claim
-                # about Cargo's own selection, so it cannot be proved inside a
-                # hermetic action without Cargo; the trunk-only `Test heavy
-                # suites` job (profile.ci-heavy) owns them and is the only place
-                # they run. Excluded by name here so the label is honest about
-                # what it executed.
-                unit_args.append(
-                    "--skip=runtime::tests::runtime_scenarios::fault_matrix"
-                    "::durable_fault_matrix_real_cargo_filters_chunk_"
-                )
             unit_timeout = None
             if package["name"] == "lash-sim":
                 # The Postgres effect-history consistency case reads the gate
@@ -388,6 +372,15 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             # The checked-in workspace fact that replaces a nested
             # `cargo metadata` call in the dependency-direction test.
             extra_data.append("//tools/bazel:target_inventory")
+        if package["name"] == "lash-internal-core" and target["name"] in (
+            "runtime_turns",
+            "runtime_observability",
+        ):
+            # These carry the relocated suites that assert over captured
+            # `tracing` events. Capture installs a scoped default subscriber,
+            # so other cases in the same libtest process must not emit
+            # concurrently; Cargo nextest isolates by process, Bazel does not.
+            test_env["RUST_TEST_THREADS"] = "1"
         if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
             # The warning-capture contract installs a scoped tracing subscriber.
             # Other tests in this libtest process must not emit concurrently.
@@ -439,6 +432,26 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "lash-internal-sqlite-store",
         ) and target["name"] == "durable_read_fixture":
             extra_compile_data.append("//:durable_fixtures")
+        target_args = []
+        if (
+            package["name"] == "lash-internal-core"
+            and target["name"] == "runtime_scenarios"
+        ):
+            # The fault-matrix routing probes execute the real
+            # scripts/confidence-gate.sh against a recording `cargo`.
+            extra_data.append("//:confidence_gate_scripts")
+            # The five `..._real_cargo_filters_chunk_*` cases each fork a real
+            # `cargo test ... -- --list` against the workspace to prove the
+            # gate's name filters still select tests. That is a claim about
+            # Cargo's own selection, so it cannot be proved inside a hermetic
+            # action without Cargo; the trunk-only `Test heavy suites` job
+            # (profile.ci-heavy) owns them and is the only place they run.
+            # Excluded by name here so the label is honest about what it
+            # executed.
+            target_args.append(
+                "--skip=runtime::tests::runtime_scenarios::fault_matrix"
+                "::durable_fault_matrix_real_cargo_filters_chunk_"
+            )
         if package["name"] == "lash-sim" and kind == "test":
             extra_compile_data.extend([
                 "//crates/lash-postgres-store:package_files",
@@ -480,6 +493,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         if kind in ("bin", "example", "bench"):
             args.append(f"    include_dev_deps = {str(kind in ('example', 'bench'))},")
         else:
+            if target_args:
+                args.append(f"    args = {string_list(target_args)},")
             if extra_data:
                 args.append(f"    extra_data = {string_list(extra_data)},")
             if target_shards:

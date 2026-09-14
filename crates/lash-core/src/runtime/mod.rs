@@ -1,14 +1,26 @@
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
+#[cfg(feature = "testing")]
+pub mod assembly;
+#[cfg(not(feature = "testing"))]
 mod assembly;
 mod builder;
+#[cfg(feature = "testing")]
+pub mod causal;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod causal;
 mod clock;
+#[cfg(feature = "testing")]
+pub mod commit_admission;
+#[cfg(not(feature = "testing"))]
 mod commit_admission;
 #[doc(hidden)]
 pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
 pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
+#[cfg(feature = "testing")]
+pub mod effect;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod effect;
 #[doc(hidden)]
 pub use effect::await_event_coordinator;
@@ -20,10 +32,19 @@ mod environment;
 mod error;
 mod event_pump;
 mod host;
+#[cfg(feature = "testing")]
+pub mod in_memory_store;
+#[cfg(not(feature = "testing"))]
 mod in_memory_store;
+#[cfg(feature = "testing")]
+pub mod io;
+#[cfg(not(feature = "testing"))]
 mod io;
 mod lifecycle;
 use claim_settlement::TurnClaimSettlement;
+#[cfg(feature = "testing")]
+pub mod logical_turn;
+#[cfg(not(feature = "testing"))]
 mod logical_turn;
 pub(crate) mod native_substrate;
 mod observation;
@@ -43,7 +64,13 @@ pub use session_administration::{
     SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
 };
 pub use session_catalog::*;
+#[cfg(feature = "testing")]
+pub mod session_execution_lease;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod session_execution_lease;
+#[cfg(feature = "testing")]
+pub mod session_manager;
+#[cfg(not(feature = "testing"))]
 mod session_manager;
 #[cfg(any(test, feature = "testing"))]
 pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
@@ -59,11 +86,17 @@ mod session_store_factory_types;
 pub use session_store_factory_types::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionStoreCreateRequest,
 };
+#[cfg(feature = "testing")]
+pub mod state;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
 mod turn_boundary;
 mod turn_commit_draft;
+#[cfg(feature = "testing")]
+pub mod turn_control;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod turn_control;
 mod turn_driver;
 mod turn_failure_evidence;
@@ -73,8 +106,17 @@ pub use turn_failure_evidence::{
     TurnFailureSettlement,
 };
 pub(crate) mod turn_input_ingress;
+#[cfg(feature = "testing")]
+pub mod turn_loop;
+#[cfg(not(feature = "testing"))]
 pub(crate) mod turn_loop;
+#[cfg(feature = "testing")]
+pub mod turn_queue;
+#[cfg(not(feature = "testing"))]
 mod turn_queue;
+#[cfg(feature = "testing")]
+pub mod usage;
+#[cfg(not(feature = "testing"))]
 mod usage;
 mod worker_capacity;
 
@@ -107,8 +149,6 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
-#[cfg(test)]
-use self::facade_ops::TurnContextFacadeOps;
 use host::*;
 use session_execution_lease::*;
 use session_manager::*;
@@ -179,6 +219,9 @@ pub use effect::{
     refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,
 };
+#[cfg(feature = "testing")]
+pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
+#[cfg(not(feature = "testing"))]
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
@@ -299,6 +342,9 @@ pub use turn_control::{
     TurnCancelOriginHint, TurnCancelOutcome, TurnCancelReceipt, TurnCancelRequest,
     TurnCancelRequestRecord, TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
+#[cfg(feature = "testing")]
+pub use turn_input_ingress::ingress_message_id;
+#[cfg(not(feature = "testing"))]
 pub(crate) use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
@@ -309,6 +355,11 @@ pub use turn_input_ingress::{
     TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs,
 };
 pub use turn_loop::ensure_durable_effect_input;
+#[cfg(feature = "testing")]
+pub use turn_queue::SessionCommandSettlement;
+#[cfg(not(feature = "testing"))]
+pub(crate) use turn_queue::SessionCommandSettlement;
+pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
     QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
@@ -318,7 +369,6 @@ pub use turn_queue::{
     SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
     process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
 };
-pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{
     LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
     UnreportedLedgerAttempt, UnreportedUsageAttempt, UsageDispositionError,
@@ -546,7 +596,7 @@ impl LiveTurnInputs {
 
     /// Returns an error when live per-turn inputs would make a durable effect
     /// host replay depend on process-local values.
-    pub(crate) fn durable_effect_rejection(&self) -> Result<(), RuntimeError> {
+    pub fn durable_effect_rejection(&self) -> Result<(), RuntimeError> {
         if self.inputs.is_empty() {
             return Ok(());
         }
@@ -657,7 +707,7 @@ impl TurnContext {
 
     /// Live plugin inputs for this turn. The durable boundary inspects this to
     /// reject turns carrying non-serializable live state.
-    pub(crate) fn live_plugin_inputs(&self) -> &LiveTurnInputs {
+    pub fn live_plugin_inputs(&self) -> &LiveTurnInputs {
         &self.plugin_inputs
     }
 
@@ -799,11 +849,20 @@ pub trait ProtocolSessionExtension: Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
-#[derive(Clone, Debug)]
-pub(super) enum NormalizedItem {
-    Text(String),
-    Attachment(crate::AttachmentSource),
+mod normalized_item {
+    #[derive(Clone, Debug)]
+    pub enum NormalizedItem {
+        Text(String),
+        Attachment(crate::AttachmentSource),
+    }
 }
+
+// The relocated `runtime::tests` binaries name this type; the `testing` feature
+// is the seam that lets them, and the non-testing public surface is unchanged.
+#[cfg(feature = "testing")]
+pub use normalized_item::NormalizedItem;
+#[cfg(not(feature = "testing"))]
+pub(crate) use normalized_item::NormalizedItem;
 
 /// Canonical assistant output payload.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1535,46 +1594,48 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
 }
 
 pub(in crate::runtime) use turn_loop::ResidentSessionContinuity;
+#[cfg(feature = "testing")]
+pub use turn_loop::ResidentSessionState;
+#[cfg(not(feature = "testing"))]
 pub(crate) use turn_loop::ResidentSessionState;
 
 /// Runtime session orchestration over host-supplied services and policy.
 pub struct LashRuntime {
-    pub(in crate::runtime) session: Option<Session>,
-    pub(in crate::runtime) host: RuntimeHost,
-    pub(in crate::runtime) services: RuntimeServices,
-    pub(in crate::runtime) state: RuntimeSessionState,
-    pub(in crate::runtime) runtime_lease_owner: crate::LeaseOwnerIdentity,
-    pub(in crate::runtime) runtime_lease_executor_id: String,
+    pub session: Option<Session>,
+    pub host: RuntimeHost,
+    pub services: RuntimeServices,
+    pub state: RuntimeSessionState,
+    pub runtime_lease_owner: crate::LeaseOwnerIdentity,
+    pub runtime_lease_executor_id: String,
     /// Set for the current turn when the lane was busy and the turn proceeded
     /// under the commit CAS anyway, so a rejected commit still names the writer
     /// and the generation it knowingly raced.
-    pub(in crate::runtime) managed_sessions: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
+    pub managed_sessions: Arc<Mutex<HashMap<SessionId, RuntimeHandle>>>,
     /// Active managed child turns, keyed by turn id. Guarded by a synchronous
     /// mutex so a `ManagedTurnLease` can release its registration from `Drop`:
     /// a cancelled child turn must never leave a ghost "running turn" behind.
-    pub(in crate::runtime) managed_turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
+    pub managed_turns: Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>,
     /// Session-scoped token cost ledger. Shared by ALL
     /// `RuntimeSessionServices` instances created from this runtime
     /// (both per-turn and async maintenance). Entries accumulate here
     /// and are drained into `state.token_ledger` at turn-commit time.
-    pub(in crate::runtime) shared_token_ledger:
-        Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
-    pub(in crate::runtime) process_sync_needed: Arc<AtomicBool>,
-    pub(in crate::runtime) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+    pub shared_token_ledger: Arc<std::sync::Mutex<Vec<session_manager::PendingTokenLedgerEntry>>>,
+    pub process_sync_needed: Arc<AtomicBool>,
+    pub turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     /// How far this handle's resident session has travelled with the durable
     /// one: validity of live plugin/protocol state, whether this handle loaded
     /// the graph itself, cross-process staleness, and the lease and turn its
     /// last commit ran under. Its reload and invalidation rules are methods on
     /// [`ResidentSessionContinuity`].
-    pub(in crate::runtime) resident_session: ResidentSessionContinuity,
+    pub resident_session: ResidentSessionContinuity,
     /// Materialization resolved protocol facts that must be durable before queued work may
     /// reconstruct this session in another runtime.
-    pub(in crate::runtime) materialized_protocol_config_dirty: bool,
+    pub materialized_protocol_config_dirty: bool,
     /// Attempts whose usage never arrived after an abort or failure, not yet
     /// reconciled (FIG-2765). Runtime-resident: persisted holes live in the
     /// ledger's unreported rows; this is the attribution a later
     /// [`LashRuntime::reconcile_unreported_usage`] needs.
-    pub(in crate::runtime) unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
+    pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
 }
 
 #[cfg(any(test, feature = "testing"))]

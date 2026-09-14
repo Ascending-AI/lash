@@ -918,7 +918,7 @@ impl crate::TurnInput {
     }
 }
 
-pub(crate) fn ingress_message_id(input_id: &str) -> String {
+pub fn ingress_message_id(input_id: &str) -> String {
     format!("m_ingress_{input_id}")
 }
 

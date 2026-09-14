@@ -1,5 +1,5 @@
-#[cfg(test)]
-pub(crate) fn attachment_test_capability() -> crate::provider::ModelCapability {
+#[cfg(any(test, feature = "testing"))]
+pub fn attachment_test_capability() -> crate::provider::ModelCapability {
     use crate::provider::{
         AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
         AttachmentMimeSource, ModelCapability,

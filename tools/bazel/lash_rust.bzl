@@ -247,6 +247,7 @@ def lash_rust_integration_test(
         manifest_dir,
         package_name,
         version,
+        args = [],
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
@@ -261,6 +262,7 @@ def lash_rust_integration_test(
     rust_test(
         name = name,
         aliases = _aliases_for(deps, library, library_crate_name),
+        args = args,
         compile_data = _compile_data() + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,

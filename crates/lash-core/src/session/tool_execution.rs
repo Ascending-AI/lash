@@ -497,7 +497,7 @@ impl RuntimeExecutionContext<'_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn execute_prepared_tool_attempt_effect(
+    pub async fn execute_prepared_tool_attempt_effect(
         &self,
         prepared: crate::PreparedToolCall,
         execution_grant: Option<Box<crate::ToolExecutionGrant>>,

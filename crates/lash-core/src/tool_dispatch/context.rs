@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Clone, Default)]
-pub(crate) struct CheckpointMessageBuffer {
+pub struct CheckpointMessageBuffer {
     queue: Arc<Mutex<Vec<crate::PluginMessage>>>,
 }
 
@@ -43,12 +43,12 @@ pub struct ToolTriggerEffectOutcome {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ToolTriggerOutcomeBuffer {
+pub struct ToolTriggerOutcomeBuffer {
     queue: Arc<Mutex<Vec<ToolTriggerEffectOutcome>>>,
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct RecordedToolIntentOutcomeBuffer {
+pub struct RecordedToolIntentOutcomeBuffer {
     actions: Arc<Mutex<Vec<crate::ToolIntentParentEndAction>>>,
 }
 
@@ -153,23 +153,23 @@ impl ToolTriggerOutcomeBuffer {
 pub struct ToolDispatchContext<'run> {
     pub plugins: Arc<PluginSession>,
     pub tools: Arc<dyn ToolProvider>,
-    pub(crate) tool_registry: Option<Arc<crate::ToolRegistry>>,
+    pub tool_registry: Option<Arc<crate::ToolRegistry>>,
     pub tool_catalog: Arc<ToolCatalog>,
     pub sessions: Arc<dyn SessionStateService>,
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
     pub trigger_router: Option<crate::TriggerRouter>,
-    pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
-    pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
-    pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
+    pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    pub direct_completions: crate::DirectCompletionClient<'run>,
+    pub parent_invocation: Option<crate::RuntimeInvocation>,
+    pub execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub session_id: SessionId,
     pub agent_frame_id: crate::FrameNodeId,
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
-    pub(crate) checkpoint_messages: CheckpointMessageBuffer,
-    pub(crate) trigger_outcomes: ToolTriggerOutcomeBuffer,
-    pub(crate) recorded_intent_outcomes: RecordedToolIntentOutcomeBuffer,
+    pub checkpoint_messages: CheckpointMessageBuffer,
+    pub trigger_outcomes: ToolTriggerOutcomeBuffer,
+    pub recorded_intent_outcomes: RecordedToolIntentOutcomeBuffer,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
@@ -323,7 +323,7 @@ mod parent_end_buffer_tests {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ToolDispatchOutcome {
+pub struct ToolDispatchOutcome {
     pub record: ToolCallRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
@@ -334,7 +334,7 @@ pub(crate) struct ToolDispatchOutcome {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct PendingToolDispatchOutcome {
+pub struct PendingToolDispatchOutcome {
     pub tool_name: String,
     pub args: serde_json::Value,
     pub key: crate::AwaitEventKey,
@@ -346,7 +346,7 @@ pub(crate) struct PendingToolDispatchOutcome {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub(crate) enum ToolCallLaunch {
+pub enum ToolCallLaunch {
     Done(Box<ToolDispatchOutcome>),
     Pending(Box<PendingToolDispatchOutcome>),
     ControllerAborted(crate::RuntimeEffectControllerError),

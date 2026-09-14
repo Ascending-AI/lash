@@ -299,7 +299,7 @@ impl LashRuntime {
     /// operation and is admitted as a new commit.
     ///
     /// Facade-only: reached through [`crate::facade_support`].
-    pub(crate) async fn settle_reopen_seeded_config(
+    pub async fn settle_reopen_seeded_config(
         &mut self,
         persisted: &crate::PersistedSessionConfig,
     ) -> Result<(), SessionError> {

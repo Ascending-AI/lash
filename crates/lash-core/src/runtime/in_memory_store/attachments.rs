@@ -143,8 +143,8 @@ impl InMemorySessionStore {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn attachment_manifest_entries(&self) -> Vec<crate::AttachmentManifestEntry> {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn attachment_manifest_entries(&self) -> Vec<crate::AttachmentManifestEntry> {
         self.attachment_manifest
             .lock_recover()
             .values()

@@ -1762,8 +1762,8 @@ mod fail_closed_tests;
 #[path = "attachments/tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[path = "attachments/test_capability.rs"]
-mod test_capability;
-#[cfg(test)]
-pub(crate) use test_capability::attachment_test_capability;
+pub mod test_capability;
+#[cfg(any(test, feature = "testing"))]
+pub use test_capability::attachment_test_capability;

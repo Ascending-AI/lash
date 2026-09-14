@@ -16,7 +16,7 @@ pub enum BoundaryReason {
 /// Runtime-internal handle for effect-controller references carried through
 /// per-turn execution contexts.
 #[derive(Clone)]
-pub(crate) enum RuntimeEffectControllerHandle<'run> {
+pub enum RuntimeEffectControllerHandle<'run> {
     Borrowed(ScopedEffectController<'run>),
     #[cfg(any(test, feature = "testing"))]
     Shared {
@@ -26,12 +26,12 @@ pub(crate) enum RuntimeEffectControllerHandle<'run> {
 }
 
 impl<'run> RuntimeEffectControllerHandle<'run> {
-    pub(crate) fn borrowed(scoped: ScopedEffectController<'run>) -> Self {
+    pub fn borrowed(scoped: ScopedEffectController<'run>) -> Self {
         Self::Borrowed(scoped)
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn shared(controller: Arc<dyn RuntimeEffectController>) -> Self {
+    pub fn shared(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self::Shared {
             controller,
             scope: ExecutionScope::runtime_operation("test-runtime-effect-controller"),

@@ -6,7 +6,7 @@ use super::turn_loop::{
 use super::*;
 use crate::TurnId;
 
-pub(super) const MAX_AGENT_FRAME_SWITCHES: usize = 16;
+pub const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,

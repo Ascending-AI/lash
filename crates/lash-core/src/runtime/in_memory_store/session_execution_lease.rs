@@ -21,7 +21,7 @@ pub(super) enum Lease {
 }
 
 #[derive(Clone)]
-pub(super) struct InMemorySessionExecutionLease {
+pub struct InMemorySessionExecutionLease {
     pub(super) lease: Lease,
     pub(super) fencing_token: u64,
 }

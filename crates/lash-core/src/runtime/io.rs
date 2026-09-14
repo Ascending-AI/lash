@@ -4,7 +4,7 @@
 
 use super::{InputItem, NormalizedItem};
 
-pub(super) async fn normalize_input_items(
+pub async fn normalize_input_items(
     items: &[InputItem],
     attachment_store: &crate::SessionAttachmentStore,
     attachment_source_policy: &dyn crate::AttachmentSourcePolicy,

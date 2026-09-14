@@ -45,13 +45,13 @@ use claim_hold::{ClaimHold, InMemoryClaimMint, InMemoryClaimRow, mint_in_memory_
 use receipts::{RuntimeTurnCommitMap, RuntimeTurnCommitRecord};
 
 #[derive(Clone)]
-struct InMemoryQueuedBatch {
+pub struct InMemoryQueuedBatch {
     batch: crate::QueuedWorkBatch,
     claim: ClaimHold,
 }
 
 #[derive(Clone)]
-struct InMemoryPendingTurnInput {
+pub struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
     claim: ClaimHold,
 }
@@ -123,7 +123,7 @@ pub(crate) type SharedAttachmentCondemnations =
 /// terminal phase, because condemnation already removed every manifest row and
 /// adoption is gated on positive upload evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum AttachmentCondemnationPhase {
+pub enum AttachmentCondemnationPhase {
     /// Claimed by a sweeper, no physical delete issued yet: a writer revokes it.
     Condemned {
         write_claim: Option<AttachmentWriteClaim>,
@@ -136,17 +136,17 @@ pub(crate) enum AttachmentCondemnationPhase {
 /// recovery uses the session identity to remove exactly the abandoned attempt's
 /// uncommitted row before releasing its claim.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct AttachmentWriteClaim {
+pub struct AttachmentWriteClaim {
     pub(super) write_id: crate::AttachmentWriteToken,
     pub(super) session_id: SessionId,
 }
 
 pub struct InMemorySessionStore {
-    clock: Arc<dyn crate::Clock>,
+    pub clock: Arc<dyn crate::Clock>,
     /// Factory-lifetime authority for the reserved turn-cancellation promises.
     /// Factory-created stores expose the same resolver and binding identity on
     /// reopen. Standalone stores leave authority with their configured host.
-    turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
+    pub turn_cancellation_authority: Option<crate::TurnCancellationAuthority>,
     /// Serializes every operation whose correctness depends on observing the
     /// session lease and mutating fenced runtime state atomically. Component
     /// mutexes still guard their data; this mutex supplies the transaction
@@ -154,115 +154,115 @@ pub struct InMemorySessionStore {
     /// Poison recovery is deliberate under ADR 0054. These critical sections
     /// must remain host-code-free: read clocks and invoke any other dynamic
     /// host surface before acquiring this lock, then carry inert values in.
-    write_transaction: Arc<Mutex<()>>,
-    pub(crate) bound_session_id: Mutex<Option<SessionId>>,
-    pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
-    pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
+    pub write_transaction: Arc<Mutex<()>>,
+    pub bound_session_id: Mutex<Option<SessionId>>,
+    pub session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
+    pub session_meta: Mutex<Option<crate::SessionMeta>>,
     /// Independently readable mutable-continuation generation beside binding metadata.
-    pub(crate) session_state_version: Mutex<Option<u32>>,
-    corrupt_session_payload_for_testing: std::sync::atomic::AtomicBool,
-    pub(crate) session_graph: Mutex<crate::SessionGraph>,
+    pub session_state_version: Mutex<Option<u32>>,
+    pub corrupt_session_payload_for_testing: std::sync::atomic::AtomicBool,
+    pub session_graph: Mutex<crate::SessionGraph>,
     /// Shared leafless node catalog; never treated as a resident graph without a real leaf grafted
     /// first.
-    global_session_graph: Arc<Mutex<crate::SessionGraph>>,
-    global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
-    global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
-    node_anchors: InMemoryNodeAnchors,
-    tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
+    pub global_session_graph: Arc<Mutex<crate::SessionGraph>>,
+    pub global_node_owners: Arc<Mutex<HashMap<crate::NodeId, SessionId>>>,
+    pub global_session_heads: Arc<Mutex<HashMap<SessionId, Option<crate::NodeId>>>>,
+    pub node_anchors: InMemoryNodeAnchors,
+    pub tombstoned_node_ids: Arc<Mutex<HashSet<crate::NodeId>>>,
     /// Permanent per-factory deletion ledger. Maintenance never prunes this:
     /// an id, once used and deleted in this store, must never be reused.
-    deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
-    session_catalog: SharedSessionCatalog,
-    pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
-    checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
+    pub deleted_session_ids: Arc<Mutex<HashSet<SessionId>>>,
+    pub session_catalog: SharedSessionCatalog,
+    pub checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
+    pub checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     /// Factory-global reference edges from a session to the component blobs its
     /// *live* checkpoint holds. Edges, not counts (ADR 0067 §4): a commit
     /// replaces its session's edge set, a delete drops it, and
     /// `gc_unreachable` decides liveness by `NOT EXISTS` over the union. This
     /// is what lets the in-memory backend witness its own root set instead of
     /// reporting an unconditional empty sweep.
-    pub(crate) checkpoint_blob_roots: SharedCheckpointBlobRoots,
-    pub(crate) usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
-    pub(crate) runtime_commit_count: Mutex<usize>,
-    runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
-    session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
-    turn_cancellation_binding: Mutex<Option<(String, Option<crate::ExecutionScope>)>>,
-    turn_cancel_closure_authorizations:
+    pub checkpoint_blob_roots: SharedCheckpointBlobRoots,
+    pub usage_deltas: Mutex<Vec<crate::store::RuntimeUsageDelta>>,
+    pub runtime_commit_count: Mutex<usize>,
+    pub runtime_turn_commits: Mutex<RuntimeTurnCommitMap>,
+    pub session_execution_leases: Mutex<HashMap<SessionId, InMemorySessionExecutionLease>>,
+    pub turn_cancellation_binding: Mutex<Option<(String, Option<crate::ExecutionScope>)>>,
+    pub turn_cancel_closure_authorizations:
         Mutex<HashMap<TurnId, crate::TurnCancelClosureAuthorization>>,
-    retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
-    queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
-    queued_work_next_seq: Mutex<u64>,
+    pub retired_turn_cancel_scopes: Arc<Mutex<HashSet<String>>>,
+    pub queued_work: Mutex<Vec<InMemoryQueuedBatch>>,
+    pub queued_work_next_seq: Mutex<u64>,
     /// Receiver-side sender allocation floor. This is a redelivery fence, not
     /// a consumption watermark: selected-batch settlement may be out of order.
-    wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
-    pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
-    pending_turn_input_next_seq: Mutex<u64>,
-    turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
-    attachment_manifest: SharedAttachmentManifest,
+    pub wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
+    pub pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
+    pub pending_turn_input_next_seq: Mutex<u64>,
+    pub turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
+    pub attachment_manifest: SharedAttachmentManifest,
     /// The attempt identity currently owning each manifest row, held beside the
     /// manifest rather than on the public entry projection: a host may observe
     /// *that* an upload completed, never present the fence identity that proves
     /// it. Shared factory-wide with the manifest it keys.
-    pub(crate) attachment_write_ids: SharedAttachmentWriteIds,
+    pub attachment_write_ids: SharedAttachmentWriteIds,
     /// Per-digest attachment GC condemnation state, shared with every store the
     /// same factory owns because the digest is factory-global: the writer's
     /// intent insert and the sweeper's condemn CAS must meet here.
-    pub(crate) attachment_condemnations: SharedAttachmentCondemnations,
+    pub attachment_condemnations: SharedAttachmentCondemnations,
     #[cfg(any(test, feature = "testing"))]
-    claim_after_lease_validation_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub claim_after_lease_validation_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(any(test, feature = "testing"))]
-    fail_next_exact_queue_claim: std::sync::atomic::AtomicBool,
+    pub fail_next_exact_queue_claim: std::sync::atomic::AtomicBool,
     #[cfg(any(test, feature = "testing"))]
-    drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool,
+    pub drop_next_list_queued_work_batch: std::sync::atomic::AtomicBool,
     #[cfg(any(test, feature = "testing"))]
-    drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool,
+    pub drop_next_list_pending_queued_work_batch: std::sync::atomic::AtomicBool,
     #[cfg(any(test, feature = "testing"))]
-    list_pending_queued_work_count: std::sync::atomic::AtomicUsize,
+    pub list_pending_queued_work_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    load_session_count: std::sync::atomic::AtomicUsize,
+    pub load_session_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    load_session_head_meta_count: std::sync::atomic::AtomicUsize,
+    pub load_session_head_meta_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    fail_next_load_session_head_meta: std::sync::atomic::AtomicBool,
+    pub fail_next_load_session_head_meta: std::sync::atomic::AtomicBool,
     #[cfg(any(test, feature = "testing"))]
-    fail_load_session_on_call: Mutex<Option<usize>>,
+    pub fail_load_session_on_call: Mutex<Option<usize>>,
     #[cfg(any(test, feature = "testing"))]
-    checkpoint_probe_count: std::sync::atomic::AtomicUsize,
+    pub checkpoint_probe_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
+    pub checkpoint_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    commit_write_transaction_count: std::sync::atomic::AtomicUsize,
+    pub commit_write_transaction_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
+    pub fail_next_runtime_commit: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
-    inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
+    pub inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     #[cfg(any(test, feature = "testing"))]
-    fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
+    pub fail_next_runtime_commit_after_first_mutation: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
-    fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
+    pub fail_next_session_execution_lease_renewal: Mutex<Option<crate::StoreError>>,
     #[cfg(any(test, feature = "testing"))]
-    force_next_session_execution_lease_renewal_zero_match: std::sync::atomic::AtomicBool,
+    pub force_next_session_execution_lease_renewal_zero_match: std::sync::atomic::AtomicBool,
     #[cfg(any(test, feature = "testing"))]
-    next_session_execution_lease_renewal_response: Mutex<Option<crate::SessionExecutionLease>>,
+    pub next_session_execution_lease_renewal_response: Mutex<Option<crate::SessionExecutionLease>>,
     #[cfg(any(test, feature = "testing"))]
-    session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
+    pub session_execution_lease_renewal_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    session_execution_lease_release_gate:
+    pub session_execution_lease_release_gate:
         Mutex<Option<Arc<test_support::SessionExecutionLeaseReleaseGate>>>,
     #[cfg(any(test, feature = "testing"))]
-    session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize,
+    pub session_execution_lease_release_attempt_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    raw_counter_defects: Mutex<HashMap<String, i64>>,
+    pub raw_counter_defects: Mutex<HashMap<String, i64>>,
     #[cfg(any(test, feature = "testing"))]
-    abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
+    pub abandoned_queued_work_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
+    pub abandoned_turn_input_claim_count: std::sync::atomic::AtomicUsize,
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) session_admission_count: std::sync::atomic::AtomicUsize,
+    pub session_admission_count: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Clone)]
-struct InMemoryTurnCancelRequest {
+pub struct InMemoryTurnCancelRequest {
     record: crate::TurnCancelRequestRecord,
     intent_revision: u64,
 }

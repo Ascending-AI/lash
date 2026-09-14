@@ -295,8 +295,8 @@ pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     tool_call_launch_into_done_or_runtime_failure(context, launch).await
 }
 
-#[cfg(test)]
-pub(crate) async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
+#[cfg(any(test, feature = "testing"))]
+pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,

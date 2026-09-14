@@ -53,11 +53,9 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub(crate) use executor::{
-    EffectControllerTaskRequest, EffectTaskController, ProcessRunner,
-    RuntimeEffectControllerHandle, TurnCancelWait, TurnEffectStateUpdate,
-    drive_effect_controller_task,
-};
+pub(crate) use executor::{EffectControllerTaskRequest, ProcessRunner, TurnEffectStateUpdate};
+pub use executor::{EffectTaskController, drive_effect_controller_task};
+pub use executor::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub(crate) use outcome::{
     LlmTraceFailure, apply_direct_outcome, emit_llm_trace_completed, emit_llm_trace_failed,
     emit_llm_trace_started, emit_provider_replay_drops, llm_call_error_from_transport,

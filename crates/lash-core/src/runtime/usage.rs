@@ -452,10 +452,7 @@ impl SessionUsageReport {
         Self::from_entries_with_saturation(entries, false)
     }
 
-    pub(super) fn from_entries_with_saturation(
-        entries: &[TokenLedgerEntry],
-        mut saturated: bool,
-    ) -> Self {
+    pub fn from_entries_with_saturation(entries: &[TokenLedgerEntry], mut saturated: bool) -> Self {
         let mut total = UsageAccumulator::default();
         let mut by_source_usage = BTreeMap::<String, UsageAccumulator>::new();
         let mut by_model_usage = BTreeMap::<String, UsageAccumulator>::new();
@@ -637,7 +634,7 @@ pub fn diff_usage_reports(
     diff_token_ledger(&row_entries(before), &row_entries(after))
 }
 
-pub(super) fn merge_ledger_entry_saturating(
+pub fn merge_ledger_entry_saturating(
     ledger: &mut Vec<TokenLedgerEntry>,
     entry: TokenLedgerEntry,
 ) -> bool {
@@ -665,7 +662,7 @@ pub(super) fn merge_ledger_entry_saturating(
     }
 }
 
-pub(super) fn normalize_prompt_usage(usage: &TokenUsage) -> Option<PromptUsage> {
+pub fn normalize_prompt_usage(usage: &TokenUsage) -> Option<PromptUsage> {
     let input_tokens = usage.input_tokens.max(0) as usize;
     let output_tokens = usage.output_tokens.max(0) as usize;
     let cache_read_input_tokens = usage.cache_read_input_tokens.max(0) as usize;

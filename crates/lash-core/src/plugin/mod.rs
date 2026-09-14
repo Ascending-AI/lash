@@ -30,10 +30,14 @@ mod tool_catalog;
 mod trigger_registry;
 
 pub(crate) use actions::{
-    ErasedPluginOperationInvokeFuture, ErasedPluginOperationOutcome, PluginCommandHandler,
-    PluginOperationContext, PluginOperationRegistration, PluginOperationSpec, PluginQueryHandler,
-    PluginQueryInvokeFuture, PluginTaskHandler, RegisteredPluginOperation, plugin_operation_spec,
+    ErasedPluginOperationInvokeFuture, PluginCommandHandler, PluginOperationContext,
+    PluginOperationRegistration, PluginQueryHandler, PluginQueryInvokeFuture, PluginTaskHandler,
+    RegisteredPluginOperation, plugin_operation_spec,
 };
+#[cfg(feature = "testing")]
+pub use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
+#[cfg(not(feature = "testing"))]
+pub(crate) use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
 pub use actions::{
     PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
     PluginOperationFailure, PluginOperationFuture, PluginOperationKind, PluginOperationOutcome,

@@ -20,6 +20,11 @@ use lash_sansio::sync::MutexExt;
 pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
+pub mod runtime_helpers;
+#[cfg(feature = "testing")]
+pub mod runtime_internals;
+#[cfg(feature = "testing")]
+pub mod trace_capture;
 
 mod execution_context_builder;
 mod live_replay;
@@ -433,8 +438,8 @@ impl TestProviderBuilder {
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn generation_retry_guarantee(
+    #[cfg(any(test, feature = "testing"))]
+    pub fn generation_retry_guarantee(
         mut self,
         guarantee: crate::provider::GenerationRetryGuarantee,
     ) -> Self {
@@ -2111,9 +2116,11 @@ impl crate::ProcessService for MockSessionManager {
 // crates can wire a minimal fake protocol plugin into integration tests
 // without depending on concrete protocol crates.
 // ─────────────────────────────────────────────────────────────────────
-#[cfg(test)]
-pub(crate) use test_protocol_fakes::test_standard_protocol_factory_with_runtime_state;
-pub use test_protocol_fakes::{test_code_protocol_factories, test_standard_protocol_factories};
+#[cfg(any(test, feature = "testing"))]
+pub use test_protocol_fakes::{
+    test_code_protocol_factories, test_plugin_host, test_standard_protocol_factories,
+    test_standard_protocol_factory_with_runtime_state,
+};
 
 mod test_protocol_fakes;
 

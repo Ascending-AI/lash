@@ -23,6 +23,8 @@ mod trigger;
 mod turn_control_authority;
 
 pub use await_event_support::await_event_scope_not_retirable;
+pub(crate) use control::EffectControllerTaskRequest;
+pub use control::RuntimeEffectControllerHandle;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
@@ -32,10 +34,7 @@ pub use control::{
     ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
-pub(crate) use control::{
-    EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
-    drive_effect_controller_task,
-};
+pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
@@ -147,7 +146,7 @@ impl ProcessTurnCancellation {
 /// `ScopedEffectController::turn_cancel_wait` where no execution context
 /// exists).
 #[derive(Clone)]
-pub(crate) struct TurnCancelWait {
+pub struct TurnCancelWait {
     cancellation: CancellationToken,
     /// `Some` when the wait attaches the turn-cancel gate for that scope;
     /// `None` when the enclosing execution runs without turn observation, as

@@ -65,7 +65,7 @@ pub(crate) struct SessionCommandSettlementHandle {
 /// accepted receipt when the configured settlement deadline expires, while
 /// `Cancelled` reports a queued command withdrawn before that commit.
 #[derive(Clone, Debug)]
-pub(crate) enum SessionCommandSettlement {
+pub enum SessionCommandSettlement {
     Rejected(crate::RuntimeError),
     Durable(SessionCommandReceipt),
     Pending(SessionCommandReceipt),

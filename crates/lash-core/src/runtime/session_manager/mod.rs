@@ -69,7 +69,7 @@ impl CurrentSnapshot {
     }
 }
 
-pub(super) struct ManagedSessionTurn {
+pub struct ManagedSessionTurn {
     pub(super) session_id: SessionId,
     /// Identity of the registration attempt that created this entry. Only the
     /// lease carrying the same nonce may release it.
@@ -131,7 +131,7 @@ struct ProcessCapability {
 struct DirectCompletionCapability;
 
 #[derive(Clone)]
-pub(super) struct RuntimeSessionServices {
+pub struct RuntimeSessionServices {
     current: CurrentSessionCapability,
     managed: ManagedSessionCapability,
     processes: ProcessCapability,
@@ -346,9 +346,7 @@ impl RuntimeSessionServices {
         })
     }
 
-    pub(in crate::runtime) fn model_tool_process_service(
-        self: &Arc<Self>,
-    ) -> Arc<dyn crate::ProcessService> {
+    pub fn model_tool_process_service(self: &Arc<Self>) -> Arc<dyn crate::ProcessService> {
         Arc::new(RuntimeSessionProcessService {
             services: Arc::clone(self),
             visibility: ProcessVisibility::ModelTool,
@@ -364,7 +362,7 @@ impl RuntimeSessionServices {
         })
     }
 
-    pub(super) fn direct_completion_client<'run>(
+    pub fn direct_completion_client<'run>(
         self: &Arc<Self>,
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
         turn_id: Option<TurnId>,

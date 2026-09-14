@@ -40,6 +40,10 @@ struct ToolCatalogArtifact {
     derived: ToolCatalogDerived,
 }
 
+#[cfg(feature = "testing")]
+#[derive(Clone)]
+pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
+#[cfg(not(feature = "testing"))]
 #[derive(Clone)]
 pub(crate) struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
@@ -58,11 +62,11 @@ impl ToolCatalogHandle {
         Arc::clone(&self.0.tool_registry)
     }
 
-    pub(crate) fn tools(&self) -> Arc<dyn ToolProvider> {
+    pub fn tools(&self) -> Arc<dyn ToolProvider> {
         Arc::clone(&self.0.tool_registry) as Arc<dyn ToolProvider>
     }
 
-    pub(crate) fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
+    pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.0.tool_catalog)
     }
 
@@ -371,7 +375,7 @@ impl Session {
     /// authority and plugin contributions then filter the model-facing names.
     /// The returned handle owns both the catalog and the registry dispatch will
     /// use for calls from that request.
-    pub(crate) fn pin_tool_surface(
+    pub fn pin_tool_surface(
         &self,
         session_id: &SessionId,
         tool_access: &crate::SessionToolAccess,

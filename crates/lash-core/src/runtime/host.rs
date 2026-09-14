@@ -365,7 +365,7 @@ impl ProcessRuntimeHost {
 
 /// A runtime's exhaustive work wiring.
 #[derive(Clone)]
-pub(crate) enum RuntimeWork {
+pub enum RuntimeWork {
     SessionsOnly {
         queued: Arc<dyn QueuedWorkSubstrate>,
     },
@@ -414,7 +414,7 @@ impl RuntimeWork {
 }
 
 #[derive(Clone)]
-pub(crate) struct RuntimeHost {
+pub struct RuntimeHost {
     pub core: RuntimeHostConfig,
     pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
@@ -434,7 +434,7 @@ impl RuntimeHost {
         }
     }
 
-    pub(crate) fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
+    pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
         self.work.process_wiring().map(ProcessWorkWiring::registry)
     }
 

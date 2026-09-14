@@ -63,7 +63,7 @@ use crate::store::{
 mod observability;
 pub(crate) use observability::trace_acquisition;
 pub(crate) use observability::trace_busy;
-pub(super) use observability::trace_commit_cas_rejected;
+pub use observability::trace_commit_cas_rejected;
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -116,7 +116,7 @@ pub(super) struct SessionExecutionLeaseContinuity {
 /// that is legal). The event reports `lane_held = false` and names the writer from
 /// the claimant instead, so a rejection is never anonymous.
 #[derive(Clone, Debug)]
-pub(super) struct SessionExecutionLeaseCommitEvidence {
+pub struct SessionExecutionLeaseCommitEvidence {
     /// The lane holder's identity.
     owner: crate::LeaseOwnerIdentity,
     executor_id: String,
@@ -127,7 +127,7 @@ pub(super) struct SessionExecutionLeaseCommitEvidence {
     lease_lost: bool,
 }
 
-pub(crate) struct SessionExecutionLeaseGuard {
+pub struct SessionExecutionLeaseGuard {
     store: Arc<dyn RuntimePersistence>,
     lease: Arc<StdMutex<SessionExecutionLease>>,
     release_state: Arc<AtomicU8>,
@@ -176,8 +176,8 @@ impl SessionExecutionLeaseGuard {
     /// The executor stays a required parameter here too: it is identity, and a
     /// minted-per-call default would silently make every acquisition a distinct
     /// claimant, which is precisely the distinction these tests exercise.
-    #[cfg(test)]
-    pub(super) async fn try_acquire(
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn try_acquire(
         store: Arc<dyn RuntimePersistence>,
         session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
@@ -283,7 +283,7 @@ impl SessionExecutionLeaseGuard {
         }
     }
 
-    pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
+    pub fn fence(&self) -> SessionExecutionLeaseAuthority {
         self.lease.lock_recover().fence()
     }
 
@@ -291,7 +291,7 @@ impl SessionExecutionLeaseGuard {
     /// panic would escalate an unwind into an abort. The lease behind the mutex
     /// is only ever replaced wholesale, so a poisoned lock still holds a
     /// complete lease.
-    pub(super) fn completion(&self) -> SessionExecutionLeaseAuthority {
+    pub fn completion(&self) -> SessionExecutionLeaseAuthority {
         self.lease.lock_recover().completion()
     }
 
@@ -300,7 +300,7 @@ impl SessionExecutionLeaseGuard {
     /// Returned boxed: the caller holds this across the commit await, and even an
     /// unboxed temporary inside that async body is enough to push the turn futures
     /// past the workspace's large-future budget.
-    pub(super) fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
+    pub fn commit_evidence(&self) -> Box<SessionExecutionLeaseCommitEvidence> {
         let lease = self.lease.lock_recover();
         Box::new(SessionExecutionLeaseCommitEvidence {
             owner: lease.owner.clone(),
@@ -333,7 +333,7 @@ impl SessionExecutionLeaseGuard {
         );
     }
 
-    pub(super) fn is_lost(&self) -> bool {
+    pub fn is_lost(&self) -> bool {
         self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE
     }
 
@@ -348,7 +348,7 @@ impl SessionExecutionLeaseGuard {
         })
     }
 
-    pub(super) async fn release_if_live(&self) -> Result<(), StoreError> {
+    pub async fn release_if_live(&self) -> Result<(), StoreError> {
         // Entering `Releasing` stops renewal, but nothing is recorded as
         // released until the backend acknowledges it below. A cancelled or
         // failed release therefore leaves this guard in `Releasing`, where the
@@ -419,7 +419,7 @@ impl SessionExecutionLeaseGuard {
 
 /// An acquired lane commits and releases. A busy claimant commits lane-lessly without displacing
 /// or releasing the holder, whose lane remains untouched; the head CAS is sole authority.
-pub(super) async fn commit_runtime_state_with_fresh_session_execution_lease(
+pub async fn commit_runtime_state_with_fresh_session_execution_lease(
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
     owner: &crate::LeaseOwnerIdentity,

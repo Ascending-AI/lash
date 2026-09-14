@@ -15,7 +15,7 @@ pub(crate) fn blake3_hex(domain: &str, bytes: &[u8]) -> String {
 /// SHA-256 retained only for contracts whose field or protocol name explicitly
 /// promises that algorithm. Lash-owned content and semantic identities use
 /// [`blake3_hex`] instead.
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", sha2::Sha256::digest(bytes))
 }
 

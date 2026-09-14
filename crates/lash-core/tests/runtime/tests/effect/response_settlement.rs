@@ -1,0 +1,397 @@
+use super::*;
+
+struct SettlementExecutor {
+    calls: std::sync::atomic::AtomicUsize,
+    first_started: AtomicBool,
+    started: tokio::sync::Notify,
+    unsettled: AtomicBool,
+    dispositions: Mutex<Vec<lash_core::plugin::CodeExecutionDisposition>>,
+    nested_error: bool,
+}
+
+impl SettlementExecutor {
+    fn new(nested_error: bool) -> Self {
+        Self {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            first_started: AtomicBool::new(false),
+            started: tokio::sync::Notify::new(),
+            unsettled: AtomicBool::new(false),
+            dispositions: Mutex::new(Vec::new()),
+            nested_error,
+        }
+    }
+
+    async fn wait_for_first_execution(&self) {
+        loop {
+            let notified = self.started.notified();
+            if self.first_started.load(Ordering::SeqCst) {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    fn dispositions(&self) -> Vec<lash_core::plugin::CodeExecutionDisposition> {
+        self.dispositions.lock_recover().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
+    async fn execute_code(
+        &self,
+        ctx: lash_core::RuntimeExecutionContext<'_>,
+        _request: lash_core::ExecRequest,
+    ) -> Result<lash_core::ExecResponse, lash_core::SessionError> {
+        if self.unsettled.swap(true, Ordering::SeqCst) {
+            return Err(lash_core::SessionError::Protocol(
+                "the previous code execution response has not been settled".to_string(),
+            ));
+        }
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.first_started.store(true, Ordering::SeqCst);
+            self.started.notify_waiters();
+            while !ctx.is_cancelled() {
+                tokio::task::yield_now().await;
+            }
+            if self.nested_error {
+                ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::foreign(
+                    "injected_exec_handoff_failure",
+                    "injected code-effect response handoff failure",
+                ));
+                return Err(lash_core::SessionError::Protocol(
+                    "code execution stopped at the response handoff".to_string(),
+                ));
+            }
+            return Ok(lash_core::ExecResponse {
+                observations: Vec::new(),
+                calls: Vec::new(),
+                printed_images: Vec::new(),
+                error: Some(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    "code execution stopped",
+                )),
+                duration_ms: 1,
+                degraded_bindings: Vec::new(),
+                terminal_finish: None,
+            });
+        }
+        Ok(lash_core::ExecResponse {
+            observations: vec![lash_core::Observation {
+                text: "next cell executed".to_string(),
+                projection: Default::default(),
+            }],
+            calls: Vec::new(),
+            printed_images: Vec::new(),
+            error: None,
+            duration_ms: 1,
+            degraded_bindings: Vec::new(),
+            terminal_finish: None,
+        })
+    }
+
+    async fn settle_code_execution(
+        &self,
+        disposition: lash_core::plugin::CodeExecutionDisposition,
+    ) -> Result<(), lash_core::SessionError> {
+        self.dispositions.lock_recover().push(disposition);
+        self.unsettled.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+fn protocol_factory(
+    executor: Arc<SettlementExecutor>,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(EffectControllerTestProtocolFactory {
+        code_executor: Some(executor),
+    })
+}
+
+fn turn_scope<'a>(
+    controller: &'a dyn lash_core::RuntimeEffectController,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> lash_core::ScopedEffectController<'a> {
+    lash_core::ScopedEffectController::borrowed(
+        controller,
+        lash_core::ExecutionScope::turn(session_id, turn_id),
+    )
+    .expect("turn scope")
+}
+
+#[derive(Debug)]
+struct ManualClock {
+    epoch_ms: std::sync::atomic::AtomicU64,
+}
+
+impl ManualClock {
+    fn new(epoch_ms: u64) -> Self {
+        Self {
+            epoch_ms: std::sync::atomic::AtomicU64::new(epoch_ms),
+        }
+    }
+
+    fn advance_ms(&self, delta_ms: u64) {
+        self.epoch_ms.fetch_add(delta_ms, Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::Clock for ManualClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        let timestamp_ms = self.epoch_ms.load(Ordering::SeqCst);
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
+        )
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+}
+
+#[test]
+fn manual_clock_wall_clock_faces_agree() {
+    let clock = ManualClock::new(1_700_000_000_123);
+    let clock: &dyn lash_core::Clock = &clock;
+    let milliseconds = clock.timestamp_ms();
+    let datetime = clock.timestamp_datetime();
+    let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
+        .expect("clock emits RFC 3339");
+    assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
+    assert_eq!(text.timestamp_millis() as u64, milliseconds);
+}
+
+#[tokio::test]
+async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_terminal() {
+    let lease_ttl = std::time::Duration::from_millis(120);
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store = Arc::new(RecordingStore::with_clock(clock.clone()));
+    let executor = Arc::new(SettlementExecutor::new(false));
+    let controller = RecordingEffectController::default().with_local_code_execution();
+    let config = runtime_host_config_with_native_controller(Arc::new(controller.clone()))
+        .with_clock(clock.clone())
+        .with_lease_timings(
+            lash_core::facade_support::LeaseTimings::from_ttl(lease_ttl)
+                .expect("valid lease timings"),
+        );
+    let mut runtime = TestRuntime::new(mock_provider(Vec::new()))
+        .plugins(vec![protocol_factory(Arc::clone(&executor))])
+        .host(EmbeddedRuntimeHost::new(config))
+        .store(store.clone())
+        .without_process_registry()
+        .build()
+        .await;
+    let cancel = CancellationToken::new();
+    let cancel_for_turn = cancel.clone();
+    let hint = lash_core::TurnCancelOriginHint::default();
+    hint.configure_local_token(None);
+    let mut input = TurnInput::text("run until the session lease is lost");
+    input.turn_context.set_local_cancel_origin_hint(hint);
+    let controller_for_turn = controller.clone();
+    let turn = lash_core::task::spawn(async move {
+        runtime
+            .run_turn_assembled(
+                input,
+                cancel_for_turn,
+                turn_scope(
+                    &controller_for_turn,
+                    &SessionId::from("root"),
+                    &TurnId::from("lease-loss-mid-cell"),
+                ),
+            )
+            .await
+    });
+    executor.wait_for_first_execution().await;
+    let renewals_before_loss = store.session_execution_lease_renewal_count();
+
+    clock.advance_ms(lease_ttl.as_millis() as u64 + 1);
+    lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &lash_core::LeaseOwnerIdentity::opaque("lease-loss-successor", "incarnation"),
+        "lease-loss-successor-executor",
+        60_000,
+    )
+    .await
+    .expect("claim expired session execution lease")
+    .acquired()
+    .expect("successor takes over the expired lease");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while store.session_execution_lease_renewal_count() == renewals_before_loss {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("renewal observes the lost predecessor fence");
+    cancel.cancel();
+
+    let error = turn
+        .await
+        .expect("turn task")
+        .expect_err("lease loss must not commit a fabricated Cancelled terminal");
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
+    );
+    assert_eq!(
+        executor.dispositions(),
+        vec![lash_core::plugin::CodeExecutionDisposition::Accepted]
+    );
+}
+
+#[tokio::test]
+async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
+    let executor = Arc::new(SettlementExecutor::new(false));
+    let controller = RecordingEffectController::default().with_local_code_execution();
+    let host = host_with_effect_recorder(controller.clone());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    lash_core::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &lash_core::SessionId::from("root"),
+    )
+    .await;
+    let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
+        Arc::clone(&host.core.control.effect_host),
+        "root",
+        driver_store,
+    );
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        vec![protocol_factory(Arc::clone(&executor))],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let turn_id = "user-stop-mid-cell";
+    let turn = lash_core::task::spawn(async move {
+        runtime
+            .run_turn_assembled(
+                TurnInput::text("run the first cell"),
+                CancellationToken::new(),
+                turn_scope(
+                    &controller,
+                    &SessionId::from("root"),
+                    &TurnId::from(turn_id),
+                ),
+            )
+            .await
+    });
+    executor.wait_for_first_execution().await;
+
+    let receipt = turn_driver
+        .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
+            lash_core::facade_support::TurnAddress::new("root", turn_id),
+            "user-stop-request",
+            Some("test-user".to_string()),
+        ))
+        .await
+        .expect("record user cancellation");
+    assert!(matches!(
+        receipt.outcome,
+        lash_core::facade_support::TurnCancelOutcome::Requested(_)
+    ));
+
+    let assembled = turn.await.expect("turn task").expect("cancelled turn");
+    assert!(matches!(
+        assembled.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
+            if evidence.request_id == "user-stop-request"
+                && evidence.origin.as_deref() == Some("test-user")
+    ));
+    assert_eq!(
+        executor.dispositions(),
+        vec![lash_core::plugin::CodeExecutionDisposition::Cancelled]
+    );
+}
+
+#[tokio::test]
+async fn response_handoff_abort_settles_before_the_next_cell() {
+    let executor = Arc::new(SettlementExecutor::new(false));
+    let controller = RecordingEffectController::default()
+        .with_local_code_execution()
+        .with_failing_exec_handoff_once();
+    let host = host_with_effect_recorder(controller.clone());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    lash_core::testing::store_fixtures::bind_conformance_session(
+        &driver_store,
+        &lash_core::SessionId::from("root"),
+    )
+    .await;
+    let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
+        Arc::clone(&host.core.control.effect_host),
+        "root",
+        driver_store,
+    );
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        vec![protocol_factory(Arc::clone(&executor))],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let turn_id = "response-handoff-abort";
+    let controller_for_first = controller.clone();
+    let first = lash_core::task::spawn(async move {
+        let result = runtime
+            .run_turn_assembled(
+                TurnInput::text("abort the first cell handoff"),
+                CancellationToken::new(),
+                turn_scope(
+                    &controller_for_first,
+                    &SessionId::from("root"),
+                    &TurnId::from(turn_id),
+                ),
+            )
+            .await;
+        (runtime, result)
+    });
+    executor.wait_for_first_execution().await;
+    controller.fail_failure_disposition();
+    turn_driver
+        .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
+            lash_core::facade_support::TurnAddress::new("root", turn_id),
+            "handoff-abort-stop",
+            Some("test-user".to_string()),
+        ))
+        .await
+        .expect("record cancellation before the failed disposition lookup");
+    let (mut runtime, first_result) = first.await.expect("first turn task");
+    let first = first_result.expect("the cancellation path assembles its terminal");
+    assert!(matches!(
+        first.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
+            if evidence.request_id == "handoff-abort-stop"
+    ));
+
+    let second = runtime
+        .run_turn_assembled(
+            TurnInput::text("run the next cell"),
+            CancellationToken::new(),
+            turn_scope(
+                &controller,
+                &SessionId::from("root"),
+                &TurnId::from("response-handoff-next-cell"),
+            ),
+        )
+        .await
+        .expect("the next cell executes after settlement");
+    assert!(matches!(second.outcome, TurnOutcome::Finished(_)));
+    assert_eq!(second.assistant_output.safe_text, "next cell executed");
+    assert_eq!(
+        executor.dispositions(),
+        vec![
+            lash_core::plugin::CodeExecutionDisposition::Cancelled,
+            lash_core::plugin::CodeExecutionDisposition::Accepted,
+        ]
+    );
+}
