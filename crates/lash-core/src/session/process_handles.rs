@@ -41,25 +41,7 @@ impl RuntimeExecutionContext<'_> {
     pub(super) fn parse_process_handle(
         handle: &serde_json::Value,
     ) -> Result<crate::ProcessRef, String> {
-        let invalid = || "Invalid process handle".to_string();
-        let target = lash_sansio::handle::parse_handle_json(handle)
-            .as_ref()
-            .and_then(lash_sansio::handle::HandleId::target)
-            .ok_or_else(invalid)?;
-        let lash_sansio::handle::HandleTarget::Process {
-            process_id,
-            incarnation,
-        } = target
-        else {
-            return Err("Invalid process handle: not a process".to_string());
-        };
-        if incarnation == 0 {
-            return Err("Invalid process handle: missing `incarnation`".to_string());
-        }
-        Ok(crate::ProcessRef::new(
-            process_id,
-            crate::ProcessIncarnation::from_registration_sequence(incarnation),
-        ))
+        crate::ProcessRef::from_handle_json(handle)
     }
 
     /// FIG-653: observer validation enforces subscription relationships, not authorization.

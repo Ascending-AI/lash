@@ -1,5 +1,5 @@
 //! Protocol-stack runtime-control tools (`processes.list`,
-//! `processes.cancel`).
+//! `processes.cancel`, `processes.await`).
 //!
 //! Dedicated plugins register these tools into the normal tool-provider
 //! surface, so protocol crates do not own or duplicate runtime control behavior.
@@ -79,7 +79,16 @@ impl StaticToolExecute for SessionProcessAdminTools {
         ))
     }
 
+    /// `await_process` parks, so the runtime pre-derives the completion key its
+    /// recorded attempt reads. Nothing else in this plugin defers.
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:await_process"
+    }
+
     async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name == "await_process" {
+            return execute_process_await_tool_call(call.context, call.args);
+        }
         if call.name == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
@@ -163,11 +172,45 @@ pub fn process_list_tool_definition() -> ToolDefinition {
 }
 
 fn processes_tool_definitions(include_cancel_process: bool) -> Vec<ToolDefinition> {
-    let mut definitions = vec![process_list_tool_definition()];
+    let mut definitions = vec![
+        process_list_tool_definition(),
+        process_await_tool_definition(),
+    ];
     if include_cancel_process {
         definitions.push(process_cancel_tool_definition());
     }
     definitions
+}
+
+/// `processes.await(handle)` — park until the process behind `handle` reaches
+/// its terminal, and answer with that terminal.
+///
+/// The argument is typed as a handle through `x-lash` rather than as a record:
+/// a cell passes the process handle value itself, whose nominal type is not
+/// assignable to a record, so a `{"type":"object"}` parameter would refuse the
+/// call in the type checker before the handler ever ran.
+pub fn process_await_tool_definition() -> ToolDefinition {
+    ToolDefinition::raw(
+        "tool:await_process",
+        "await_process",
+        "Wait for a durable process to finish and return its terminal outcome. Pass the handle a process start or `processes.list(...)` returned. The wait is durable: it survives a restart of the waiting turn, and cancelling the turn drops the wait without cancelling the process.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "handle": {
+                    "x-lash": { "kind": "handle" },
+                    "description": "Process handle to wait on, as returned by a process start or `processes.list(...)`."
+                }
+            },
+            "required": ["handle"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({
+            "description": "The process's terminal outcome."
+        }),
+    )
+    .with_examples(vec!["await processes.await({ handle: h })?".into()])
+    .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
 pub fn process_cancel_tool_definition() -> ToolDefinition {
@@ -204,6 +247,37 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
         r#"await processes.cancel({ process_id: "subagent:session-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),
     ])
     .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
+}
+
+/// Parks the call on the terminal of the handle's process.
+///
+/// It takes the completion key first and names the process terminal as the
+/// resolver, so the runtime — not this tool — is responsible for arming the
+/// wait, both now and on every redrive of the parked turn. That is what makes
+/// the wait durable: nothing here holds a future, a task, or a watcher that a
+/// crash could lose.
+///
+/// Deliberately intent-free. A parking attempt cannot carry tool intents by
+/// construction, and it needs none: the durable act is the journaled arming the
+/// runtime performs from the declaration below, not a side effect this body
+/// requests.
+pub fn execute_process_await_tool_call(
+    context: &lash_core::AttemptContext<'_>,
+    args: &Value,
+) -> lash_core::ToolAttemptOutcome {
+    let Some(handle) = args.get("handle") else {
+        return done_without_intents(ToolOutcome::err_fmt("await_process requires `handle`"));
+    };
+    let process_ref = match lash_core::ProcessRef::from_handle_json(handle) {
+        Ok(process_ref) => process_ref,
+        Err(err) => return done_without_intents(ToolOutcome::err_fmt(err)),
+    };
+    if let Err(err) = context.completion_key() {
+        return done_without_intents(ToolOutcome::err_fmt(err));
+    }
+    lash_core::ToolAttemptOutcome::pending(
+        lash_core::PendingCompletion::new().resolved_by_process_terminal(process_ref),
+    )
 }
 
 pub async fn execute_process_list_tool_call(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::process_attach::RestateProcessAttachRequest;
 use restate_sdk::serde::Json;
 
 const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;

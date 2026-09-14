@@ -750,6 +750,9 @@ impl ToolIntentIngress {
             lash_core::ProcessEffectOutcome::Await { .. } => {
                 return Err(Self::outside_protocol_outcome("await"));
             }
+            lash_core::ProcessEffectOutcome::AttachTerminal => {
+                return Err(Self::outside_protocol_outcome("attach_terminal"));
+            }
         };
         if recorded_kind != kind {
             return Err(RealizationFailure::Refused(
@@ -793,6 +796,9 @@ impl ToolIntentIngress {
             }
             lash_core::ProcessEffectOutcome::Await { .. } => {
                 return Err(Self::outside_protocol_outcome("await"));
+            }
+            lash_core::ProcessEffectOutcome::AttachTerminal => {
+                return Err(Self::outside_protocol_outcome("attach_terminal"));
             }
         };
         let outcome = lash_core::ToolIntentExecutionOutcome::Executed {

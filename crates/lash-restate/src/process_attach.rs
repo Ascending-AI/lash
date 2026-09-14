@@ -81,13 +81,13 @@ impl LashProcessAttach for LashProcessAttachImpl {
         let resolution = match output {
             Ok(Json(output)) => match serde_json::to_value(&output) {
                 Ok(value) => Resolution::Ok(value),
-                Err(error) => Resolution::Err(lash_core::ExternalCompletionError {
+                Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
                     code: "process_terminal_encode".to_string(),
                     message: error.to_string(),
                     raw: None,
                 }),
             },
-            Err(error) => Resolution::Err(lash_core::ExternalCompletionError {
+            Err(error) => Resolution::Err(lash_core::runtime::ExternalCompletionError {
                 code: "process_terminal_unobservable".to_string(),
                 message: error.to_string(),
                 raw: None,
