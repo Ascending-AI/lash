@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const FRESHEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-73-079ae4b4/sqlite-expected.json",
+];
 const NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-72-d2676b45/sqlite-expected.json",
 ];

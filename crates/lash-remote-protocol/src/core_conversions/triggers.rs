@@ -251,7 +251,7 @@ impl TryFrom<RemoteTriggerSubscriptionFilter> for lash_core::TriggerSubscription
             name,
             source_type,
             source_key,
-            target: target.map(Into::into),
+            target,
             enabled,
         })
     }
@@ -274,7 +274,7 @@ impl From<lash_core::TriggerSubscriptionFilter> for RemoteTriggerSubscriptionFil
             name,
             source_type,
             source_key,
-            target: target.map(Into::into),
+            target,
             enabled,
         }
     }

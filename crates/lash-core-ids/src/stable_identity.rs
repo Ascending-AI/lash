@@ -24,6 +24,7 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.direct-effect-discriminator",
     "lash.direct-effect-replay-key",
     "lash.process-cancellation-request",
+    "lash.process-definition-reference",
     "lash.process-registration-definition",
     "lash.process-transfer-set",
     "lash.process-wake",

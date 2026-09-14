@@ -22,7 +22,9 @@ fn record(process_id: &ProcessId, label: &str, created_at_ms: u64) -> ProcessRec
                 crate::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(ProcessIdentity::new("test-engine").with_label(Some(label)))
+        .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::labelled("test-engine", Some(label)),
+        ))
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),
@@ -57,19 +59,25 @@ fn process_list_filter_matches_definition_and_status() {
     let target_ref = json!({ "component": "target", "pos": 0, "name": "target" });
     let other_ref = json!({ "component": "other", "pos": 1, "name": "other" });
     let filter = ProcessListFilter::decode(&json!({
-        "definition": target_ref,
+        "definition": target_ref.clone(),
         "status": {"in": ["completed"]}
     }))
     .expect("decode filter");
 
     let mut matching = record(&ProcessId::from("matching"), "target", 100);
-    matching.identity.definition = Some(target_ref);
+    matching.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
+        "test-engine",
+        target_ref,
+    ));
     matching.status = ProcessStatus::Completed;
     matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
         crate::ToolCallOutput::success(json!(true)),
     ));
     let mut wrong_definition = record(&ProcessId::from("wrong-definition"), "other", 100);
-    wrong_definition.identity.definition = Some(other_ref);
+    wrong_definition.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
+        "test-engine",
+        other_ref,
+    ));
     wrong_definition.status = matching.status;
 
     assert_eq!(filter.list_mode(), ProcessListMode::All);

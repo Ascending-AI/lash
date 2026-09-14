@@ -780,7 +780,12 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
                     Some((
                         draft.source_key.clone(),
                         draft.subscription_key.clone(),
-                        draft.target_identity.definition.as_ref()?["module_ref"]
+                        draft
+                            .target_identity
+                            .definition
+                            .as_ref()?
+                            .definition
+                            .as_json()["module_ref"]
                             .as_str()?
                             .to_string(),
                     ))
@@ -1769,7 +1774,9 @@ finish(handle);
             .target_identity
             .definition
             .clone()
-            .expect("the target carries a process definition identity");
+            .expect("the target carries a process definition identity")
+            .definition
+            .into_json();
         let identity: lashlang::ProcessDefinitionIdentity =
             serde_json::from_value(identity).expect("a process definition identity");
 

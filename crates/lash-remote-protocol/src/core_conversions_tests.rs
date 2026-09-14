@@ -740,10 +740,13 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let summary = lash_core::ProcessHandleView::new(
         "process:record",
         lash_core::ProcessIncarnation::from_registration_sequence(1),
-        lash_core::ProcessIdentity::new("external").with_label(Some("External".to_string())),
+        lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lash_core::ProcessStatus::Completed,
     )
-    .with_definition(Some(process_definition_identity("main")));
+    .with_definition(Some(lash_core::ProcessDefinitionRef::unclaimed(
+        "lashlang",
+        process_definition_identity("main"),
+    )));
     let remote = RemoteProcessHandleView::from(summary.clone());
     remote
         .validate("RemoteProcessHandleView")
@@ -891,7 +894,9 @@ fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
 #[test]
 fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
-        definition: Some(process_definition_identity("main")),
+        definition: Some(lash_core::ProcessDefinitionValue::new(
+            process_definition_identity("main"),
+        )),
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
         parent_scope: Some(lash_core::ParentScope::Turn {
@@ -1994,9 +1999,13 @@ fn engine_process_input(process_name: &str, args: serde_json::Value) -> lash_cor
 }
 
 fn engine_process_identity(process_name: &str) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::new("lashlang")
-        .with_label(Some(process_name.to_string()))
-        .with_definition(Some(process_definition_identity(process_name)))
+    lash_core::ProcessIdentity::for_definition(
+        lash_core::ProcessDefinitionRef::unclaimed(
+            "lashlang",
+            process_definition_identity(process_name),
+        ),
+        Some(process_name.to_string()),
+    )
 }
 
 fn trigger_target_identity() -> serde_json::Value {

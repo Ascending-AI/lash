@@ -102,8 +102,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         process_id: ProcessId::from("process:observed"),
         incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         last_event_sequence: 0,
-        identity: lash_core::ProcessIdentity::new("external")
-            .with_label(Some("External".to_string())),
+        identity: lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lifecycle: lash_core::ProcessStatus::Running,
         policy: lash_core::ProcessLifecyclePolicy::new(
             lash_core::ParentScope::Host,

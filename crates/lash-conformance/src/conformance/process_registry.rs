@@ -420,11 +420,15 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_identity(
-        ProcessIdentity::new("conformance")
-            .with_label(Some(id))
-            .with_definition(Some(serde_json::json!({"suite": "process_registry"}))),
-    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        ProcessIdentity::for_definition(
+            lash_core::ProcessDefinitionRef::unclaimed(
+                "conformance",
+                serde_json::json!({"suite": "process_registry"}),
+            ),
+            Some(id),
+        ),
+    ))
 }
 
 pub(super) fn wake_event_type(name: &str) -> ProcessEventType {
@@ -1425,10 +1429,15 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(
-                ProcessIdentity::new("waiting-recovery-worklist")
-                    .with_definition(Some(definition.clone())),
-            )
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::for_definition(
+                    lash_core::ProcessDefinitionRef::unclaimed(
+                        "waiting-recovery-worklist",
+                        definition.clone(),
+                    ),
+                    None::<String>,
+                ),
+            ))
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await
@@ -1475,7 +1484,11 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
         .expect("summarize waiting live references");
     assert!(
         references.iter().any(|summary| {
-            summary.definition.as_ref() == Some(&definition)
+            summary
+                .definition
+                .as_ref()
+                .map(|reference| reference.definition.as_json())
+                == Some(&definition)
                 && summary.env_ref.as_ref() == Some(&env_ref)
                 && summary.process_count == 1
         }),

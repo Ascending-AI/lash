@@ -124,7 +124,7 @@ async fn trigger_intent_cutover_endpoint() -> (
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"process": "trigger-intent-cutover"}),
         },
-        lash_core::ProcessIdentity::new("test-engine").with_label(Some("trigger-intent-cutover")),
+        lash_core::ProcessIdentity::labelled("test-engine", Some("trigger-intent-cutover")),
     );
     store
         .execute_command(

@@ -32,7 +32,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
         .with_observers(observers)
         .with_event_types(event_types.into_iter().map(Into::into));
         if let Some(identity) = identity {
-            request = request.with_identity(identity.into());
+            request = request.with_declared_identity(identity.into());
         }
         request.env_spec = env_spec.map(TryInto::try_into).transpose()?;
         Ok(request)

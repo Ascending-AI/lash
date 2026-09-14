@@ -592,7 +592,9 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
                 lash_core::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(lash_core::ProcessIdentity::new("test"))
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            lash_core::ProcessIdentity::new("test"),
+        ))
     };
 
     // The index is revoked, and the registration commits with no host bound:

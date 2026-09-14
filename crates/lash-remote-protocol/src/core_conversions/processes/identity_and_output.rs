@@ -125,15 +125,64 @@ impl TryFrom<RemoteProcessProvenance> for lash_core::ProcessProvenance {
     }
 }
 
-impl From<serde_json::Value> for RemoteProcessDefinitionIdentity {
-    fn from(value: serde_json::Value) -> Self {
-        Self { value }
+impl From<lash_core::ProcessSignature> for RemoteProcessSignature {
+    fn from(value: lash_core::ProcessSignature) -> Self {
+        match value {
+            lash_core::ProcessSignature::Unknown => Self::Unknown,
+            lash_core::ProcessSignature::Known { encoding } => Self::Known { encoding },
+        }
     }
 }
 
-impl From<RemoteProcessDefinitionIdentity> for serde_json::Value {
+impl From<RemoteProcessSignature> for lash_core::ProcessSignature {
+    fn from(value: RemoteProcessSignature) -> Self {
+        match value {
+            RemoteProcessSignature::Unknown => Self::Unknown,
+            RemoteProcessSignature::Known { encoding } => Self::Known { encoding },
+        }
+    }
+}
+
+impl From<lash_core::ProcessDefinitionRef> for RemoteProcessDefinitionIdentity {
+    fn from(value: lash_core::ProcessDefinitionRef) -> Self {
+        let lash_core::ProcessDefinitionRef {
+            engine_kind,
+            definition,
+            signature,
+        } = value;
+        Self {
+            engine_kind: engine_kind.into(),
+            value: definition.into_json(),
+            signature: signature.into(),
+        }
+    }
+}
+
+impl From<RemoteProcessDefinitionIdentity> for lash_core::ProcessDefinitionRef {
     fn from(value: RemoteProcessDefinitionIdentity) -> Self {
-        value.value
+        let RemoteProcessDefinitionIdentity {
+            engine_kind,
+            value,
+            signature,
+        } = value;
+        lash_core::ProcessDefinitionRef::new(engine_kind, value, signature.into())
+    }
+}
+
+impl From<lash_core::DeclaredProcessIdentity> for RemoteDeclaredProcessIdentity {
+    fn from(value: lash_core::DeclaredProcessIdentity) -> Self {
+        let lash_core::DeclaredProcessIdentity { kind, label } = value;
+        Self {
+            kind: kind.into(),
+            label,
+        }
+    }
+}
+
+impl From<RemoteDeclaredProcessIdentity> for lash_core::DeclaredProcessIdentity {
+    fn from(value: RemoteDeclaredProcessIdentity) -> Self {
+        let RemoteDeclaredProcessIdentity { kind, label } = value;
+        lash_core::DeclaredProcessIdentity::labelled(kind, label)
     }
 }
 
@@ -145,7 +194,7 @@ impl From<lash_core::ProcessIdentity> for RemoteProcessIdentity {
             definition,
         } = value;
         Self {
-            kind,
+            kind: kind.into(),
             label,
             definition: definition.map(Into::into),
         }
@@ -159,10 +208,11 @@ impl From<RemoteProcessIdentity> for lash_core::ProcessIdentity {
             label,
             definition,
         } = value;
-        Self {
-            kind,
-            label,
-            definition: definition.map(Into::into),
+        match definition {
+            Some(definition) => {
+                lash_core::ProcessIdentity::for_definition(definition.into(), label)
+            }
+            None => lash_core::ProcessIdentity::labelled(kind, label),
         }
     }
 }

@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::super::events::{ProcessEventType, default_process_event_types};
 use super::{
-    ProcessExecutionEnvRef, ProcessId, ProcessIdentity, ProcessIncarnation, ProcessInput,
-    ProcessProvenance, ProcessRegistration, RecoveryContract, SessionId,
+    ProcessExecutionEnvRef, ProcessId, ProcessIncarnation, ProcessInput, ProcessProvenance,
+    ProcessRegistration, RecoveryContract, SessionId,
 };
 
 /// The host-selected action when a process's parent scope ends.
@@ -132,7 +132,7 @@ pub struct ProcessStartRequest {
     pub env_spec: Option<super::ProcessExecutionEnvSpec>,
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<ProcessIdentity>,
+    pub identity: Option<super::DeclaredProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -197,10 +197,11 @@ impl ProcessStartRequest {
         self
     }
 
-    /// Sets the identity carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
-        self.identity = Some(identity);
+    /// Declares the visible kind and label of this start. A request never
+    /// pins a definition reference: only the engine registry can, and only
+    /// after resolving it against the engine's stored artifact.
+    pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
+        self.identity = Some(declared);
         self
     }
 
@@ -256,7 +257,7 @@ impl ProcessStartRequest {
         .with_execution_env_ref(env_ref)
         .with_wake_session_id(self.wake_session_id);
         if let Some(identity) = self.identity {
-            registration = registration.with_identity(identity);
+            registration = registration.with_declared_identity(identity);
         }
         registration
     }

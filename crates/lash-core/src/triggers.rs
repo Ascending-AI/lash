@@ -752,10 +752,13 @@ impl TriggerSubscriptionFilter {
                 .is_none_or(|source_key| record.source_key == source_key)
             && self.enabled.is_none_or(|enabled| record.enabled == enabled)
             && !record.tombstoned
-            && self
-                .target
-                .as_ref()
-                .is_none_or(|target| record.target_identity.definition.as_ref() == Some(target))
+            && self.target.as_ref().is_none_or(|target| {
+                record
+                    .target_identity
+                    .definition
+                    .as_ref()
+                    .is_some_and(|reference| reference.definition.as_json() == target)
+            })
     }
 }
 

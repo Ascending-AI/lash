@@ -801,7 +801,9 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(ProcessIdentity::new("recent-pushdown-kind")),
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("recent-pushdown-kind"),
+            )),
         )
         .await
         .expect("register recently retired pushdown fixture");

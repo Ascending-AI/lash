@@ -37,15 +37,14 @@ pub async fn registration_reports_created_then_existing(registry: Arc<dyn Proces
     );
 
     // A differing fingerprint is neither Created nor Existing: it is a refusal.
+    // Identity is a derivation and no longer part of the preimage (FIG-2992), so
+    // the conflicting registration differs in its recorded input instead.
+    let mut conflicting = registration(id);
+    conflicting.input = std::sync::Arc::new(ProcessInput::External {
+        metadata: serde_json::json!({"suite": "disposition-conflict"}),
+    });
     let conflict = registry
-        .register_process_reporting_disposition(
-            registration(id).with_identity(
-                ProcessIdentity::new("conformance")
-                    .with_label(Some(id))
-                    .with_definition(Some(serde_json::json!({"suite": "disposition-conflict"}))),
-            ),
-            &[],
-        )
+        .register_process_reporting_disposition(conflicting, &[])
         .await
         .expect_err("a differing fingerprint is a conflict, not a silent overwrite");
     assert!(

@@ -311,7 +311,9 @@ fn external_registration(process_id: &ProcessId) -> lash_core::ProcessRegistrati
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_identity(lash_core::ProcessIdentity::new("test"))
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        lash_core::ProcessIdentity::new("test"),
+    ))
 }
 
 async fn register_and_complete(registry: &dyn lash_core::ProcessRegistry, process_id: &ProcessId) {

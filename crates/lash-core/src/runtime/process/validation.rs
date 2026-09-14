@@ -802,7 +802,13 @@ pub fn prepare_process_registration(
 // Bumped to 5 (FIG-2828): effect causes now encode their admitted execution
 // scope and replay key instead of descriptive session/effect fields.
 // Bumped to 6 (FIG-2960): required lifecycle policy joins the resolved attempt bound.
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 6;
+// Bumped to 7 (FIG-2992): process identity leaves the preimage entirely. Kind,
+// label and definition reference are all derivations — of the recorded input and
+// of the engine registry's admission of it — so hashing them added no fact the
+// input did not already fix, while making a display label a registration
+// conflict. The v6 preimage of an identity-bearing registration is frozen as a
+// witness in `validation_tests.rs`.
+const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 7;
 
 /// Permanent tag registry for the process-registration definition fingerprint.
 ///
@@ -827,7 +833,7 @@ fn process_registration_fingerprint_preimage(
         disposition,
         lifecycle,
         max_attempts,
-        identity,
+        identity: _,
         event_types,
         provenance,
         env_ref,
@@ -915,15 +921,9 @@ fn process_registration_fingerprint_preimage(
         super::model::OnParentEnd::Cancel => 2,
     });
 
-    let super::model::ProcessIdentity {
-        kind,
-        label,
-        definition,
-    } = identity;
-    fingerprint.string(kind);
-    fingerprint.optional(label.as_deref(), |identity, label| identity.string(label));
-    fingerprint.optional(definition.as_ref(), project_registration_payload_leaf);
-
+    // Identity is deliberately absent from the preimage: it is derived from the
+    // recorded input and the engine registry's admission of it, both of which
+    // the preimage already fixes. See the family version note above.
     let super::model::ProcessProvenance {
         originator,
         caused_by,

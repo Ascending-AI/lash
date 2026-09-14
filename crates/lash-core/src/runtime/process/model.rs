@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use super::definition_ref::{ProcessDefinitionRef, ProcessDefinitionValue, ProcessEngineKind};
 use super::events::{
     ProcessAwaitOutput, ProcessEventType, ProcessTerminalSemantics, default_process_event_types,
 };
@@ -983,10 +984,26 @@ impl ProcessRegistration {
         self
     }
 
-    /// Sets the identity carried by a `ProcessRegistration` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_identity(mut self, identity: ProcessIdentity) -> Self {
+    /// Adopts the kind and label a host declared for this start.
+    pub fn with_declared_identity(mut self, declared: DeclaredProcessIdentity) -> Self {
+        self.identity = declared.into_identity();
+        self
+    }
+
+    /// Adopts an identity the engine registry admitted, together with the
+    /// signal event types the engine resolved for it.
+    ///
+    /// This is the only way a registration's derived identity is replaced, and
+    /// [`AdmittedProcessIdentity`](crate::AdmittedProcessIdentity) is the only
+    /// carrier that can hold a definition reference.
+    pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {
+        let (identity, signals) = admitted.into_parts();
         self.identity = identity;
+        for signal in signals {
+            if !self.event_types.contains(&signal) {
+                self.event_types.push(signal);
+            }
+        }
         self
     }
 
@@ -1414,38 +1431,110 @@ impl ProcessRecord {
     }
 }
 
-/// Canonical process identity stored alongside every durable process row.
+/// The kind and label a host declares for a start whose input core owns
+/// outright — a session turn, a tool call, an external placeholder.
 ///
-/// `ProcessInput::Engine` keeps its payload opaque to core. Engines therefore
-/// publish their visible kind, display label, and definition identity at the
-/// registration boundary; list, summary, trigger, and observation paths read
-/// this durable field instead of decoding engine payload conventions.
+/// A declaration carries no definition reference, by construction: only the
+/// engine registry can put one on a durable row, and only after resolving it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessIdentity {
-    pub kind: String,
+pub struct DeclaredProcessIdentity {
+    pub kind: ProcessEngineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_present_json_value"
-    )]
-    pub definition: Option<serde_json::Value>,
 }
 
-fn deserialize_present_json_value<'de, D>(
-    deserializer: D,
-) -> Result<Option<serde_json::Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    serde_json::Value::deserialize(deserializer).map(Some)
+impl DeclaredProcessIdentity {
+    /// Constructs a `DeclaredProcessIdentity` for protocol and host implementors starting a
+    /// process whose input core owns outright.
+    pub fn new(kind: impl Into<ProcessEngineKind>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: None,
+        }
+    }
+
+    /// Constructs a labelled `DeclaredProcessIdentity`.
+    pub fn labelled(kind: impl Into<ProcessEngineKind>, label: Option<impl Into<String>>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: label.map(Into::into),
+        }
+    }
+
+    /// Widens the declaration to the durable identity shape, with no definition.
+    pub fn into_identity(self) -> ProcessIdentity {
+        ProcessIdentity::labelled(self.kind, self.label)
+    }
+}
+
+/// Canonical process identity stored alongside every durable process row.
+///
+/// `ProcessInput::Engine` keeps its payload opaque to core. Identity is a pure
+/// derivation: the non-engine input kinds derive it from the recorded input
+/// itself, and an engine start derives it through the engine registry's
+/// admission, which is the only thing that can name a definition reference.
+/// There are no setters — a durable row's identity is never edited into place.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ProcessIdentity {
+    pub kind: ProcessEngineKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The definition reference this row pins, for the engine starts that have
+    /// one. It is the whole reference, not a bare blob: the engine kind that
+    /// owns the definition, the definition value, and the signature claimed for
+    /// it when the row was created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<ProcessDefinitionRef>,
+}
+
+/// Reads a durable identity, including one written before the definition
+/// reference was typed.
+///
+/// A pre-FIG-2992 row stored the definition as a bare engine-owned value with
+/// no engine kind and no signature beside it. Such a row still names exactly
+/// one definition, and the engine that owns it is the row's own `kind`, so it
+/// reads back as an unclaimed reference to that engine's definition — no row is
+/// unreadable, and no legacy row is credited with a signature it never carried.
+impl<'de> Deserialize<'de> for ProcessIdentity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct StoredIdentity {
+            kind: ProcessEngineKind,
+            #[serde(default)]
+            label: Option<String>,
+            #[serde(default)]
+            definition: Option<serde_json::Value>,
+        }
+
+        let StoredIdentity {
+            kind,
+            label,
+            definition,
+        } = StoredIdentity::deserialize(deserializer)?;
+        let definition = match definition {
+            None | Some(serde_json::Value::Null) => None,
+            Some(stored) => Some(
+                match serde_json::from_value::<ProcessDefinitionRef>(stored.clone()) {
+                    Ok(reference) => reference,
+                    Err(_) => ProcessDefinitionRef::unclaimed(kind.clone(), stored),
+                },
+            ),
+        };
+        Ok(Self {
+            kind,
+            label,
+            definition,
+        })
+    }
 }
 
 impl ProcessIdentity {
-    /// Constructs a `ProcessIdentity` for protocol and process-engine implementors while running a
-    /// durable process.
-    pub fn new(kind: impl Into<String>) -> Self {
+    /// Constructs a `ProcessIdentity` naming only an engine kind, for protocol and process-engine
+    /// implementors while running a durable process.
+    pub fn new(kind: impl Into<ProcessEngineKind>) -> Self {
         Self {
             kind: kind.into(),
             label: None,
@@ -1453,27 +1542,39 @@ impl ProcessIdentity {
         }
     }
 
-    /// Sets the label carried by a `ProcessIdentity` for protocol and process-engine implementors
-    /// while running a durable process.
-    pub fn with_label(mut self, label: Option<impl Into<String>>) -> Self {
-        self.label = label.map(Into::into);
-        self
+    /// Constructs a labelled `ProcessIdentity` for protocol and process-engine implementors while
+    /// running a durable process.
+    pub fn labelled(kind: impl Into<ProcessEngineKind>, label: Option<impl Into<String>>) -> Self {
+        Self {
+            kind: kind.into(),
+            label: label.map(Into::into),
+            definition: None,
+        }
     }
 
-    /// Sets the definition carried by a `ProcessIdentity` for protocol and process-engine
-    /// implementors while running a durable process.
-    pub fn with_definition(mut self, definition: Option<serde_json::Value>) -> Self {
-        self.definition = definition;
-        self
+    /// Constructs the identity of an engine start that pins a definition reference.
+    ///
+    /// The engine kind is taken from the reference, so the two can never drift.
+    pub fn for_definition(
+        reference: ProcessDefinitionRef,
+        label: Option<impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind: reference.engine_kind.clone(),
+            label: label.map(Into::into),
+            definition: Some(reference),
+        }
     }
 
-    /// Derives stable kind and definition identity for process-engine implementors from the
-    /// executable input without executing it.
+    /// Derives stable kind and label for process-engine implementors from the executable input
+    /// without executing it.
+    ///
+    /// An engine input derives only its kind here: its label and definition
+    /// reference come from the engine registry's admission, which is the only
+    /// authority over an opaque engine payload.
     pub fn from_process_input(input: &ProcessInput) -> Self {
         match input {
-            ProcessInput::ToolCall { call } => {
-                Self::new("tool").with_label(Some(call.tool_name.clone()))
-            }
+            ProcessInput::ToolCall { call } => Self::labelled("tool", Some(call.tool_name.clone())),
             ProcessInput::Engine { kind, .. } => Self::new(kind.clone()),
             ProcessInput::SessionTurn { create_request, .. } => {
                 let label = create_request
@@ -1482,7 +1583,7 @@ impl ProcessIdentity {
                     .map(|subagent| subagent.capability.clone())
                     .or_else(|| create_request.usage_source.clone())
                     .or_else(|| create_request.session_id.clone().map(Into::into));
-                Self::new("session_turn").with_label(label)
+                Self::labelled("session_turn", label)
             }
             ProcessInput::External { metadata } => {
                 let label = metadata
@@ -1491,7 +1592,7 @@ impl ProcessIdentity {
                     .or_else(|| metadata.get("title"))
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string);
-                Self::new("external").with_label(label)
+                Self::labelled("external", label)
             }
         }
     }
@@ -1655,11 +1756,11 @@ pub struct ProcessHandleView {
     pub id: ProcessId,
     pub process_id: ProcessId,
     pub incarnation: ProcessIncarnation,
-    pub kind: String,
+    pub kind: ProcessEngineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<serde_json::Value>,
+    pub definition: Option<ProcessDefinitionRef>,
     pub status: ProcessStatus,
 }
 
@@ -1687,7 +1788,7 @@ impl ProcessHandleView {
 
     /// Sets the definition carried by a `ProcessHandleView` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn with_definition(mut self, definition: Option<serde_json::Value>) -> Self {
+    pub fn with_definition(mut self, definition: Option<ProcessDefinitionRef>) -> Self {
         self.definition = definition;
         self
     }

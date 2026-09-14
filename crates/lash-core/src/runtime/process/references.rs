@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+use super::definition_ref::ProcessDefinitionRef;
 use super::model::{ProcessExecutionEnvRef, ProcessRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessLiveReferenceView {
-    pub definition: Option<serde_json::Value>,
+    pub definition: Option<ProcessDefinitionRef>,
     pub env_ref: Option<ProcessExecutionEnvRef>,
     pub process_count: usize,
 }

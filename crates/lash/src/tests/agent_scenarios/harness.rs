@@ -401,7 +401,11 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                         lash_core::OnParentEnd::Abandon,
                     ),
                 )
-                .with_identity(lash_core::ProcessIdentity::new("test.awaited-child")),
+                .with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(
+                        lash_core::ProcessIdentity::new("test.awaited-child"),
+                    ),
+                ),
                 std::slice::from_ref(&case.session_id),
             )
             .await?;

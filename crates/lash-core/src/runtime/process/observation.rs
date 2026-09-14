@@ -1007,7 +1007,9 @@ mod tests {
                     crate::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(ProcessIdentity::new(kind).with_label(Some(label.to_string())));
+            .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::labelled(kind, Some(label.to_string())),
+            ));
             if needs_env {
                 registration = registration.with_execution_env_ref(Some(
                     ProcessExecutionEnvRef::new(format!("process-env:test:{process_id}")),

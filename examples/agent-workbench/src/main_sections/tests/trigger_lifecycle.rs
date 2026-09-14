@@ -461,9 +461,13 @@ fn workbench_receipt_register_command(session_id: &SessionId) -> lash::triggers:
                 kind: "test".to_string(),
                 payload: json!({ "process": "receipt_prune_demo" }),
             },
-            target_identity: lash::process::ProcessIdentity::new("test")
-                .with_label(Some("receipt prune demo".to_string()))
-                .with_definition(Some(json!({ "process_name": "receipt_prune_demo" }))),
+            target_identity: lash::process::ProcessIdentity::for_definition(
+                lash::process::ProcessDefinitionRef::unclaimed(
+                    "test",
+                    json!({ "process_name": "receipt_prune_demo" }),
+                ),
+                Some("receipt prune demo".to_string()),
+            ),
             event_types: Vec::new(),
             input_template: std::collections::BTreeMap::from([(
                 "event".to_string(),

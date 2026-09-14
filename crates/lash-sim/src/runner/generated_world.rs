@@ -1426,7 +1426,7 @@ impl SimTriggerHarness {
                         "trigger_boundary": event.boundary_id,
                     }),
                 },
-                lash_core::ProcessIdentity::new("sim-trigger").with_label(Some("sim trigger")),
+                lash_core::ProcessIdentity::labelled("sim-trigger", Some("sim trigger")),
             )
             .with_wake_target(lash_core::SessionScope::new(session.clone()));
             self.store

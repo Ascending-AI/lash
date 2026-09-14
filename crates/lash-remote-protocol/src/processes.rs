@@ -200,14 +200,31 @@ impl RemoteProcessProvenance {
 }
 #[cfg(all(test, feature = "core-conversions"))]
 mod core_process_status_label_tests;
+/// The typed definition reference a durable process row pins: the engine that
+/// owns the definition, the engine-owned definition value, and the signature
+/// claimed for it. The claim is never authority (ADR 0095) — a peer's claim is
+/// checked against the owning engine before any local row is created.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessDefinitionIdentity {
+    pub engine_kind: String,
     #[serde(default)]
     pub value: serde_json::Value,
+    pub signature: RemoteProcessSignature,
+}
+
+/// A signature claim travelling on a definition reference, or the explicit
+/// absence of one (ADR 0090's unknown process type).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "signature", rename_all = "snake_case")]
+pub enum RemoteProcessSignature {
+    Unknown,
+    Known { encoding: serde_json::Value },
 }
 
 impl RemoteProcessDefinitionIdentity {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "definition.engine_kind", &self.engine_kind)?;
         if self.value.is_null() {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
@@ -215,6 +232,23 @@ impl RemoteProcessDefinitionIdentity {
             });
         }
         Ok(())
+    }
+}
+
+/// The kind and label a peer declares for a start whose input core owns
+/// outright. A start request never carries a definition reference: only the
+/// engine registry can put one on a durable row, and only after resolving it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteDeclaredProcessIdentity {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl RemoteDeclaredProcessIdentity {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "identity.kind", &self.kind)
     }
 }
 
@@ -1429,7 +1463,7 @@ impl RemoteProcessStatusFilter {
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<RemoteProcessDefinitionIdentity>,
+    pub definition: Option<serde_json::Value>,
     #[serde(default)]
     pub status: RemoteProcessStatusFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1461,8 +1495,15 @@ pub struct RemoteProcessListFilter {
 
 impl RemoteProcessListFilter {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        if let Some(definition) = &self.definition {
-            definition.validate("RemoteProcessListFilter")?;
+        if self
+            .definition
+            .as_ref()
+            .is_some_and(serde_json::Value::is_null)
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessListFilter",
+                message: "definition value cannot be null".to_string(),
+            });
         }
         if let Some(originator) = &self.originator {
             originator.validate("RemoteProcessListFilter")?;

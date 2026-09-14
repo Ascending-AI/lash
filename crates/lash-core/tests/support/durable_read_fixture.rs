@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 73;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 74;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -378,9 +378,10 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 69, 70),
         (crate::IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 70, 71),
         (crate::LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 71, 72),
+        (crate::NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 72, 73),
         (
-            crate::NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            72,
+            crate::FRESHEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            73,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -1840,11 +1841,15 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
         ),
     )
     .with_execution_env_ref(Some(env_ref))
-    .with_identity(
-        ProcessIdentity::new("durable-read-engine")
-            .with_label(Some("Durable read fixture".to_string()))
-            .with_definition(Some(serde_json::json!({"fixture": "process"}))),
-    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        ProcessIdentity::for_definition(
+            lash_core::ProcessDefinitionRef::unclaimed(
+                "durable-read-engine",
+                serde_json::json!({"fixture": "process"}),
+            ),
+            Some("Durable read fixture".to_string()),
+        ),
+    ))
 }
 
 fn fixture_wait_state() -> WaitState {
@@ -1894,9 +1899,13 @@ fn fixture_register_command(env_ref: ProcessExecutionEnvRef) -> TriggerCommand {
                 kind: "durable-read-trigger-target".to_string(),
                 payload: serde_json::json!({"fixture": "trigger"}),
             },
-            target_identity: ProcessIdentity::new("durable-read-trigger-target")
-                .with_label(Some("Durable read trigger target".to_string()))
-                .with_definition(Some(serde_json::json!({"fixture": "trigger"}))),
+            target_identity: ProcessIdentity::for_definition(
+                lash_core::ProcessDefinitionRef::unclaimed(
+                    "durable-read-trigger-target",
+                    serde_json::json!({"fixture": "trigger"}),
+                ),
+                Some("Durable read trigger target".to_string()),
+            ),
             event_types: Vec::new(),
             input_template,
             target_label: Some("Durable read trigger target".to_string()),

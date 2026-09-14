@@ -810,7 +810,7 @@ async fn register_trigger_intent_subscription_with_schema(
             kind: "testing-fixture".to_string(),
             payload: json!({"process": "intent-trigger-delivery"}),
         },
-        crate::ProcessIdentity::new("testing-fixture").with_label(Some("intent-trigger-delivery")),
+        crate::ProcessIdentity::labelled("testing-fixture", Some("intent-trigger-delivery")),
     )
     .with_payload_schema(payload_schema);
     let outcome = store

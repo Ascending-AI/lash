@@ -39,7 +39,7 @@ static LIST_PROCESSES_SQL_TEMPLATE: LazyLock<String> = LazyLock::new(|| {
                AND ($3::TEXT IS NULL OR identity_kind = $3)
                AND ($4::TEXT IS NULL OR identity_label = $4)
                AND ($5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{{identity,definition}}') = $5)
+                    (record_json::JSONB #> '{{identity,definition,definition}}') = $5)
                AND ($6::TEXT IS NULL OR
                     (record_json::JSONB #>> '{{provenance,caused_by,occurrence_id}}') = $6)
                AND ($7::TEXT IS NULL OR
@@ -422,7 +422,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .bind(&record.registration_fingerprint)
         .bind(record.originator_id().as_str())
         .bind(wake_session_id.as_deref())
-        .bind(&record.identity.kind)
+        .bind(record.identity.kind.as_str())
         .bind(&record.identity.label)
         .bind(record.created_at_ms as i64)
         .bind(record.updated_at_ms as i64)

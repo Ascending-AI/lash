@@ -71,11 +71,13 @@ impl ProcessOriginatorFilter {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProcessListFilter {
-    /// Engine-encoded process definition value, compared verbatim against
-    /// `ProcessIdentity.definition`. The core owns no encoding here: a caller
-    /// passes the same value the engine that started the run stores, so a
-    /// caller holding a definition can filter by it directly.
-    pub definition: Option<serde_json::Value>,
+    /// Engine-owned process definition value, compared verbatim against the
+    /// definition a record's reference names. The core owns no encoding here: a
+    /// caller passes the same value the engine that started the run stores, so a
+    /// caller holding a definition can filter by it directly. The reference's
+    /// signature is deliberately excluded: it is resolved authority about the
+    /// same definition, not part of what names it.
+    pub definition: Option<super::ProcessDefinitionValue>,
     pub status: ProcessStatusFilter,
     pub originator: Option<ProcessOriginatorFilter>,
     /// Selects the children of one durable scope, compared by the same
@@ -129,7 +131,10 @@ impl ProcessListFilter {
         // Taken verbatim: the definition value is whichever encoding the engine
         // that started the process stores, and `matches_record` compares the two
         // by equality. Normalizing here would reintroduce a second encoding.
-        let definition = args.get("definition").cloned();
+        let definition = args
+            .get("definition")
+            .cloned()
+            .map(super::ProcessDefinitionValue::new);
         let status = ProcessStatusFilter::decode(args.get("status"))?;
         let originator = args
             .get("originator")
@@ -181,10 +186,13 @@ impl ProcessListFilter {
     /// their inclusive update timestamp.
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
         self.status.matches(record.status)
-            && self
-                .definition
-                .as_ref()
-                .is_none_or(|definition| record.identity.definition.as_ref() == Some(definition))
+            && self.definition.as_ref().is_none_or(|definition| {
+                record
+                    .identity
+                    .definition
+                    .as_ref()
+                    .is_some_and(|reference| &reference.definition == definition)
+            })
             && self
                 .originator
                 .as_ref()

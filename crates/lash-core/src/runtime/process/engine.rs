@@ -7,7 +7,11 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use super::definition_ref::{
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessSignature,
+};
 use super::events::ProcessAwaitOutput;
+use super::events::ProcessEventType;
 use super::model::{
     ProcessExecutionContext, ProcessExecutionEnvSpec, ProcessIdentity, ProcessRegistration,
 };
@@ -530,6 +534,91 @@ pub trait ProcessEngine: Send + Sync {
     ) -> Result<(), crate::PluginError> {
         Ok(())
     }
+
+    /// Answer what this engine's stored artifact says about a definition
+    /// reference: its authoritative signature and the signal event types the
+    /// definition declares.
+    ///
+    /// The signature travelling on the reference is a **claim**. This method
+    /// never reads it; the registry compares the claim against what is returned
+    /// here and refuses a disagreement before any durable row exists. An engine
+    /// that stores no artifacts leaves the default, which asserts *unknown*
+    /// rather than rubber-stamping the claim: a reference that claims a
+    /// signature such an engine cannot vouch for is refused, and an unclaimed
+    /// one is admitted as unknown.
+    ///
+    /// This is an **integrator class 3: process-engine implementor** seam.
+    async fn resolve(
+        &self,
+        reference: &ProcessDefinitionRef,
+    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+        let _ = reference;
+        Ok(ProcessDefinitionResolution::new(
+            ProcessSignature::Unknown,
+            Vec::new(),
+        ))
+    }
+}
+
+/// A process identity the engine registry produced, and the signal event types
+/// that came with it.
+///
+/// This is the only way an identity reaches a [`ProcessRegistration`]. A
+/// definition reference can therefore only appear on a durable row if the
+/// engine that owns the definition resolved it and agreed with the signature
+/// the reference claimed: a fabricated claim is refused before the row exists,
+/// and no caller can construct this value carrying one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AdmittedProcessIdentity {
+    identity: ProcessIdentity,
+    signals: Vec<ProcessEventType>,
+}
+
+impl AdmittedProcessIdentity {
+    pub(crate) fn admitted(identity: ProcessIdentity, signals: Vec<ProcessEventType>) -> Self {
+        Self { identity, signals }
+    }
+
+    /// Replay an identity that was admitted once and then durably pinned: a
+    /// trigger subscription's recorded target identity (ADR 0095 — a delivery
+    /// fires the definition pinned at registration and never re-resolves it),
+    /// or a process row a remote peer already created and is now reporting.
+    ///
+    /// This is a **replay**, never an admission. Do not reach for it on a path
+    /// that creates a durable row from caller-supplied input: there the
+    /// registry's [`admit`](ProcessEngineRegistry::admit) is the only route,
+    /// because it is what checks a signature claim.
+    pub fn pinned(identity: ProcessIdentity) -> Self {
+        Self {
+            identity,
+            signals: Vec::new(),
+        }
+    }
+
+    /// Build an admitted identity without an engine, for tests and conformance
+    /// suites that write process rows directly to a store.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_testing(identity: ProcessIdentity) -> Self {
+        Self {
+            identity,
+            signals: Vec::new(),
+        }
+    }
+
+    /// Borrow the admitted identity.
+    pub fn identity(&self) -> &ProcessIdentity {
+        &self.identity
+    }
+
+    /// Borrow the signal event types the engine resolved for this definition.
+    pub fn signals(&self) -> &[ProcessEventType] {
+        &self.signals
+    }
+
+    /// Split the admitted identity from the resolved signal event types.
+    pub fn into_parts(self) -> (ProcessIdentity, Vec<ProcessEventType>) {
+        (self.identity, self.signals)
+    }
 }
 
 /// Pure admission policy for immutable, recorded engine-start inputs.
@@ -702,19 +791,87 @@ impl ProcessEngineRegistry {
         })
     }
 
-    /// Admit a start using only immutable recorded inputs.
-    pub fn admit(
+    /// Admit a start using only immutable recorded inputs, then verify every
+    /// definition reference the admission derived against the owning engine.
+    ///
+    /// This is the single boundary at which a signature claim is checked. The
+    /// admission policy is pure and cannot read an artifact, so it derives the
+    /// reference the recorded payload names; the engine then says what that
+    /// definition's signature actually is, and a disagreement refuses the start
+    /// before any durable row exists.
+    pub async fn admit(
         &self,
         kind: &str,
         payload: &serde_json::Value,
         env_spec: Option<&ProcessExecutionEnvSpec>,
-    ) -> Result<ProcessIdentity, crate::PluginError> {
-        self.admissions
+    ) -> Result<AdmittedProcessIdentity, crate::PluginError> {
+        let identity = self
+            .admissions
             .get(kind)
             .copied()
             .ok_or_else(|| {
                 crate::PluginError::Session(format!("process engine `{kind}` is not configured"))
             })?
-            .admit(payload, env_spec)
+            .admit(payload, env_spec)?;
+        let Some(reference) = identity.definition.clone() else {
+            return Ok(AdmittedProcessIdentity::admitted(identity, Vec::new()));
+        };
+        let resolution = match self.resolve(&reference).await {
+            Ok(resolution) => resolution,
+            // An engine that cannot read its definition right now has said
+            // nothing about the claim. Start admission is a recorded-input
+            // decision (FIG-1838/FIG-1521): a live artifact-store outage belongs
+            // to retryable execution after the row is durable, so an *unclaimed*
+            // reference is admitted unresolved rather than refused for the
+            // lifetime of the intent. A reference that does claim a signature is
+            // still refused — an unverifiable claim never creates a row.
+            Err(ProcessDefinitionRefusal::UnresolvableDefinition { .. })
+                if reference.signature.is_unknown() =>
+            {
+                return Ok(AdmittedProcessIdentity::admitted(identity, Vec::new()));
+            }
+            Err(refusal) => return Err(refusal.into()),
+        };
+        // The durable row pins the engine's authority, not the claim that
+        // arrived: they are equal by the check above when a claim was made, and
+        // an unclaimed reference adopts the artifact's signature here rather
+        // than recording "unknown" forever.
+        let identity = ProcessIdentity {
+            definition: Some(reference.with_resolved_signature(resolution.signature)),
+            ..identity
+        };
+        Ok(AdmittedProcessIdentity::admitted(
+            identity,
+            resolution.signals,
+        ))
+    }
+
+    /// Resolve one definition reference against the engine that owns it,
+    /// refusing a claimed signature the engine's artifact disagrees with.
+    pub async fn resolve(
+        &self,
+        reference: &ProcessDefinitionRef,
+    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+        let engine = self.get(reference.engine_kind.as_str()).ok_or_else(|| {
+            ProcessDefinitionRefusal::UnknownEngine {
+                engine_kind: reference.engine_kind.clone(),
+            }
+        })?;
+        let resolution = engine.resolve(reference).await?;
+        // An unknown claim asserts nothing and adopts the authority. A known
+        // claim must be the authority exactly: this is the single point where a
+        // fabricated signature is refused, and it runs before the row exists.
+        if !reference.signature.is_unknown() && resolution.signature != reference.signature {
+            return Err(ProcessDefinitionRefusal::SignatureMismatch {
+                engine_kind: reference.engine_kind.clone(),
+                claimed: reference.signature.clone(),
+                authoritative: resolution.signature,
+            });
+        }
+        Ok(resolution)
     }
 }
+
+#[cfg(test)]
+#[path = "engine_resolve_tests.rs"]
+mod resolve_tests;

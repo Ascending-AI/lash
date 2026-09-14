@@ -1,4 +1,5 @@
 mod awaiter;
+mod definition_ref;
 mod engine;
 mod events;
 mod lease_serde;
@@ -28,11 +29,15 @@ pub use awaiter::{
     ProcessChangeHub, ProcessEventSink, WatchedRegistry, watch_process_registry,
     watch_process_registry_with_sink,
 };
+pub use definition_ref::{
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
+};
 pub use engine::{
-    PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission, ProcessEngineProcessContext,
-    ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError, ProcessRunOutcome,
-    SegmentHandover,
+    AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
+    ProcessRunOutcome, SegmentHandover,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
@@ -45,10 +50,10 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    AbandonRequest, ArtifactOwner, InMemoryProcessExecutionEnvStore, ObserverInheritance,
-    OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION, ParentScope, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
+    AbandonRequest, ArtifactOwner, DeclaredProcessIdentity, InMemoryProcessExecutionEnvStore,
+    ObserverInheritance, OnParentEnd, PROCESS_LEASE_SCHEMA_VERSION, ParentScope,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext, ProcessExecutionEnvRef,
     ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdentity, ProcessIncarnation,
     ProcessInput, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,

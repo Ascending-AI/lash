@@ -192,7 +192,7 @@ pub struct RemoteProcessStartRequest {
     pub env_spec: Option<RemoteProcessExecutionEnvSpec>,
     pub originator: RemoteProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<RemoteProcessIdentity>,
+    pub identity: Option<RemoteDeclaredProcessIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

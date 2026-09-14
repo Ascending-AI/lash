@@ -784,7 +784,9 @@ impl LashlangProcessInput {
             kind: LASHLANG_ENGINE_KIND.to_string(),
             label: Some(self.process_name.clone()),
             definition: Some(lash_remote_protocol::RemoteProcessDefinitionIdentity {
+                engine_kind: LASHLANG_ENGINE_KIND.to_string(),
                 value: self.definition_identity().to_process_value(),
+                signature: lash_remote_protocol::RemoteProcessSignature::Unknown,
             }),
         }
     }
@@ -948,7 +950,6 @@ pub async fn prepare_lashlang_process_start(
         process_name: start.process_name,
         args,
     };
-    let identity = lashlang_process_identity(&process_input);
     let process_id =
         deterministic_lashlang_process_id(parent_start_seed, &start.start_site, &process_input)
             .map_err(|source| LashlangRuntimeError::DeriveProcessId { source })?;
@@ -963,7 +964,6 @@ pub async fn prepare_lashlang_process_start(
         lifecycle,
     )
     .with_max_attempts(Some(max_attempts.get()))
-    .with_identity(identity)
     .with_extra_event_types(
         lashlang_process_event_types()
             .into_iter()
@@ -1149,9 +1149,13 @@ pub fn resolve_lashlang_module_operation(
 }
 
 fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND)
-        .with_label(Some(input.process_name.clone()))
-        .with_definition(Some(input.definition_identity().to_process_value()))
+    lash_core::ProcessIdentity::for_definition(
+        lash_core::ProcessDefinitionRef::unclaimed(
+            LASHLANG_ENGINE_KIND,
+            input.definition_identity().to_process_value(),
+        ),
+        Some(input.process_name.clone()),
+    )
 }
 
 #[derive(Clone)]
@@ -1220,6 +1224,44 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             payload,
         ))
         .await
+    }
+
+    async fn resolve(
+        &self,
+        reference: &lash_core::ProcessDefinitionRef,
+    ) -> Result<lash_core::ProcessDefinitionResolution, lash_core::ProcessDefinitionRefusal> {
+        let engine_kind = reference.engine_kind.clone();
+        let unresolvable =
+            |message: String| lash_core::ProcessDefinitionRefusal::UnresolvableDefinition {
+                engine_kind: engine_kind.clone(),
+                message,
+            };
+        let identity =
+            lashlang::ProcessDefinitionIdentity::from_process_value(reference.definition.as_json())
+                .map_err(|error| unresolvable(error.to_string()))?;
+        let artifact = self
+            .artifact_store
+            .get_module_artifact(&identity.module_ref)
+            .await
+            .map_err(|error| unresolvable(error.to_string()))?
+            .ok_or_else(|| {
+                unresolvable(format!(
+                    "module artifact `{}` is not published",
+                    identity.module_ref
+                ))
+            })?;
+        let process_type = identity
+            .resolve_process_type(&artifact)
+            .map_err(|error| unresolvable(error.to_string()))?;
+        let signals = artifact
+            .canonical_ir
+            .process(&identity.process_name)
+            .map(lashlang_process_signal_event_types)
+            .unwrap_or_default();
+        Ok(lash_core::ProcessDefinitionResolution::new(
+            lash_core::ProcessSignature::known(lashlang_type_expr_schema(&process_type)),
+            signals,
+        ))
     }
 
     async fn protect_start_artifacts(

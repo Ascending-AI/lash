@@ -43,10 +43,10 @@ const LIST_PROCESSES_SQL_TEMPLATE: &str = "SELECT record_json FROM processes
        AND (?3 IS NULL OR identity_kind = ?3)
        AND (?4 IS NULL OR identity_label = ?4)
        AND (?5 IS NULL OR
-            (json_type(record_json, '$.identity.definition') IS NOT NULL
-             AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+            (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
+             AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
              AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                  OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+                  OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
        AND (?6 IS NULL OR
             json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
        AND (?7 IS NULL OR
@@ -193,10 +193,10 @@ static LIST_PROCESSES_RECENT_RETIRED_SQL_TEMPLATE: LazyLock<String> = LazyLock::
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
+                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
                  AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR
@@ -212,10 +212,10 @@ static LIST_PROCESSES_RECENT_RETIRED_SQL_TEMPLATE: LazyLock<String> = LazyLock::
            AND (?3 IS NULL OR identity_kind = ?3)
            AND (?4 IS NULL OR identity_label = ?4)
            AND (?5 IS NULL OR
-                (json_type(record_json, '$.identity.definition') IS NOT NULL
-                 AND json_type(record_json, '$.identity.definition') = json_type(?5, '$')
+                (json_type(record_json, '$.identity.definition.definition') IS NOT NULL
+                 AND json_type(record_json, '$.identity.definition.definition') = json_type(?5, '$')
                  AND (json_type(?5, '$') IN ('null', 'true', 'false')
-                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?5))))
+                      OR json_quote(json_extract(record_json, '$.identity.definition.definition')) IS json(?5))))
            AND (?6 IS NULL OR
                 json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?6)
            AND (?7 IS NULL OR

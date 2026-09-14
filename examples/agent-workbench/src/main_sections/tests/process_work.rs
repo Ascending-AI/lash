@@ -443,12 +443,19 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     };
     assert_eq!(input.engine_kind(), "engine");
     assert_eq!(input.engine_specific_kind(), Some("report-export"));
-    let identity = ProcessIdentity::from_process_input(&input)
-        .with_label(Some("Nightly invoice export"))
-        .with_definition(Some(json!({ "workflow": "invoice-export", "revision": 7 })));
+    let identity = ProcessIdentity::for_definition(
+        lash::process::ProcessDefinitionRef::unclaimed(
+            "report-export",
+            json!({ "workflow": "invoice-export", "revision": 7 }),
+        ),
+        Some("Nightly invoice export"),
+    );
     assert_eq!(identity.kind, "report-export");
     assert_eq!(identity.label.as_deref(), Some("Nightly invoice export"));
-    assert_eq!(identity.definition.as_ref().unwrap()["revision"], 7);
+    assert_eq!(
+        identity.definition.as_ref().unwrap().definition.as_json()["revision"],
+        7
+    );
     let execution_env_ref = ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
@@ -477,7 +484,9 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         ),
     )
     .with_process_provenance(provenance)
-    .with_identity(identity)
+    .with_admitted_identity(lash::process::AdmittedProcessIdentity::for_testing(
+        identity,
+    ))
     .with_max_attempts(Some(3))
     .with_execution_env_ref(Some(execution_env_ref.clone()))
     .with_extra_event_types([ProcessEventType {
@@ -559,8 +568,8 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
     assert!(record.outcome.is_none());
     let registration_digest = record
         .registration_fingerprint
-        .strip_prefix("process-registration-definition:v6:blake3:")
-        .expect("process registration uses the v6 BLAKE3 definition-fingerprint family");
+        .strip_prefix("process-registration-definition:v7:blake3:")
+        .expect("process registration uses the v7 BLAKE3 definition-fingerprint family");
     assert_eq!(registration_digest.len(), 64);
     assert!(
         registration_digest
@@ -795,7 +804,15 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         .expect("summarize live references");
     assert_eq!(live_refs.len(), 1);
     assert_eq!(live_refs[0].process_count, 1);
-    assert_eq!(live_refs[0].definition.as_ref().unwrap()["revision"], 7);
+    assert_eq!(
+        live_refs[0]
+            .definition
+            .as_ref()
+            .unwrap()
+            .definition
+            .as_json()["revision"],
+        7
+    );
     assert_eq!(
         live_refs[0]
             .env_ref
@@ -857,14 +874,21 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         "operator cancelled"
     );
 
-    let handle = ProcessHandleView::from_record(completed.clone())
-        .with_definition(Some(json!({ "workflow": "invoice-export", "revision": 7 })));
+    let handle = ProcessHandleView::from_record(completed.clone()).with_definition(Some(
+        lash::process::ProcessDefinitionRef::unclaimed(
+            "report-export",
+            json!({ "workflow": "invoice-export", "revision": 7 }),
+        ),
+    ));
     assert_eq!(handle.handle_type, "process");
     assert_eq!(handle.id, process_id);
     assert_eq!(handle.process_id, process_id);
     assert_eq!(handle.kind, "report-export");
     assert_eq!(handle.label.as_deref(), Some("Nightly invoice export"));
-    assert_eq!(handle.definition.as_ref().unwrap()["revision"], 7);
+    assert_eq!(
+        handle.definition.as_ref().unwrap().definition.as_json()["revision"],
+        7
+    );
     assert_eq!(handle.status, ProcessStatus::Completed);
     assert!(
         lash::process::ProcessCancelReceipt::from_record(completed.clone()).is_err(),
