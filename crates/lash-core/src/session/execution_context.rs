@@ -1675,14 +1675,36 @@ mod retired_staging_owner_tests {
             .expect("first run captured an env ref");
 
         // What a completed first start does: hand the environment to the process
-        // owner and permanently retire the staging owner.
+        // owner, then permanently retire the staging owner.
         let staging_owner = crate::ArtifactOwner::process_start(&registration().id);
+        let process_owner = crate::ArtifactOwner::process(crate::ProcessRef::new(
+            registration().id.clone(),
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        ));
+        crate::ProcessExecutionEnvStore::transfer_process_execution_env(
+            env_store.as_ref(),
+            &staging_owner,
+            &process_owner,
+            &first_ref,
+        )
+        .await
+        .expect("transfer the environment to the process owner");
         crate::ProcessExecutionEnvStore::retire_process_execution_env_owner(
             env_store.as_ref(),
             &staging_owner,
         )
         .await
         .expect("retire the staging owner");
+        assert!(
+            crate::ProcessExecutionEnvStore::get_process_execution_env(
+                env_store.as_ref(),
+                &first_ref,
+            )
+            .await
+            .expect("read the environment back")
+            .is_some(),
+            "the process owner still retains the environment after the staging owner is retired"
+        );
 
         let replayed = ctx
             .attach_captured_process_execution_env(registration())
