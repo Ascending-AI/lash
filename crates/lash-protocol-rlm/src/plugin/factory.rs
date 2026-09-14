@@ -35,11 +35,7 @@ pub fn rlm_protocol_config(
 ) -> RlmProtocolPluginConfig {
     let mut config = config;
     if process_lifecycle {
-        config.lashlang_abilities = config
-            .lashlang_abilities
-            .with_sleep()
-            .with_processes()
-            .with_process_signals();
+        config.lashlang_abilities = config.lashlang_abilities.with_sleep();
     }
     config
 }

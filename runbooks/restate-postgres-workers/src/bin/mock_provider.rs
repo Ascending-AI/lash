@@ -489,30 +489,23 @@ Execute the same authored loop once without segmentation and once with a forced
 three-effect segment budget.
 
 <typescript>
-const effect_loop = defineProcess({{
-  name: "effect_loop",
-  run: async (workflow_id, force_segmentation) => {{
-    let n = 0;
-    let total = 0;
-    const values = [];
-    while (n < 8) {{
-      const lookup = await tools.app_lookup({{ key: "segment-loop" }});
-      total = total + n;
-      values.push(lookup.value);
-      n = n + 1;
-    }}
-    return {{ total: total, values: values }};
+const effect_loop = async (workflow_id, force_segmentation) => {{
+  let n = 0;
+  let total = 0;
+  const values = [];
+  while (n < 8) {{
+    const lookup = await tools.app_lookup({{ key: "segment-loop" }});
+    total = total + n;
+    values.push(lookup.value);
+    n = n + 1;
   }}
-}});
+  return {{ total: total, values: values }};
+}};
 
-const unsegmented_handle = start(effect_loop, {{
-  workflow_id: "{workflow_id}",
-  force_segmentation: false
-}});
-const segmented_handle = start(effect_loop, {{
-  workflow_id: "{workflow_id}",
-  force_segmentation: true
-}});
+const unsegmented_handle = await processes.start({{
+  definition: effect_loop, args: {{ workflow_id: "{workflow_id}", force_segmentation: false }} }});
+const segmented_handle = await processes.start({{
+  definition: effect_loop, args: {{ workflow_id: "{workflow_id}", force_segmentation: true }} }});
 const unsegmented = await unsegmented_handle;
 const segmented = await segmented_handle;
 finish({{
@@ -541,49 +534,42 @@ const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});
 Execute this program.
 
 <typescript>
-const child = defineProcess({{
-  name: "child",
-  run: async (value) => {{
-    const lookup = await tools.app_lookup({{ key: value }});
-    return {{ child: value, lookup: lookup.value }};
-  }}
-}});
+const child = async (value) => {{
+  const lookup = await tools.app_lookup({{ key: value }});
+  return {{ child: value, lookup: lookup.value }};
+}};
 
-const parent = defineProcess({{
-  name: "parent",
-  run: async (workflow_id) => {{
-    const parent_lookup = await tools.app_lookup({{ key: "parent" }});
-    const nested_result = await start(child, {{ value: "nested" }});
-    const left_handle = start(child, {{ value: "left" }});
-    const right_handle = start(child, {{ value: "right" }});
-    const left_result = await left_handle;
-    const right_result = await right_handle;
-    await sleep(1);
-    return {{
-      parent_lookup: parent_lookup.value,
-      nested: nested_result.lookup,
-      parallel: {{
-        left: left_result.lookup,
-        right: right_result.lookup
-      }},
-      slept: true,
-      wake: "deferred"
-    }};
-  }}
-}});
+const parent = async (workflow_id) => {{
+  const parent_lookup = await tools.app_lookup({{ key: "parent" }});
+  const nested_result = await (await processes.start({{ definition: child, args: {{ value: "nested" }} }}));
+  const left_handle = await processes.start({{ definition: child, args: {{ value: "left" }} }});
+  const right_handle = await processes.start({{ definition: child, args: {{ value: "right" }} }});
+  const left_result = await left_handle;
+  const right_result = await right_handle;
+  await sleep(1);
+  return {{
+    parent_lookup: parent_lookup.value,
+    nested: nested_result.lookup,
+    parallel: {{
+      left: left_result.lookup,
+      right: right_result.lookup
+    }},
+    slept: true,
+    wake: "deferred"
+  }};
+}};
 
-const waker = defineProcess({{
-  name: "waker",
-  run: async (workflow_id) => {{
-    await sleep(1500);
-    wake({{
+const waker = async (workflow_id) => {{
+  await sleep(1500);
+  await processes.emit({{
+    value: {{
       kind: "parent_wake",
       workflow_id: workflow_id,
       text: "deploy complete"
-    }});
-    return {{ wake: "sent" }};
-  }}
-}});
+    }}
+  }});
+  return {{ wake: "sent" }};
+}};
 
 const foreground = await tools.app_lookup({{ key: "foreground" }});
 const attachment = await tools.make_attachment({{
@@ -591,8 +577,8 @@ const attachment = await tools.make_attachment({{
   name: "kitchen-sink.png"
 }});
 {crash}
-const process_result = await start(parent, {{ workflow_id: "{workflow_id}" }});
-const waker_handle = start(waker, {{ workflow_id: "{workflow_id}" }});
+const process_result = await (await processes.start({{ definition: parent, args: {{ workflow_id: "{workflow_id}" }} }}));
+const waker_handle = await processes.start({{ definition: waker, args: {{ workflow_id: "{workflow_id}" }} }});
 await sleep(0);
 finish({{
   workflow_id: "{workflow_id}",
@@ -613,14 +599,11 @@ fn trigger_setup_script() -> String {
 Register this trigger.
 
 <typescript>
-const on_button = defineProcess({
-  name: "on_button",
-  run: async (event: ui.button.Pressed) => {
-    return { triggered: event.button, message: event.message };
-  }
-});
+const on_button = async (event: ui.button.Pressed) => {
+  return { triggered: event.button, message: event.message };
+};
 
-const handle = await registerTrigger({
+const handle = await triggers.register({
   source: ui.button.pressed({}),
   target: on_button,
   inputs: (event) => ({ event: event }),
@@ -638,20 +621,17 @@ fn signal_suspend_script(workflow_id: &str) -> String {
 Start the signal suspension process but do not await it.
 
 <typescript>
-const waiter = defineProcess({{
-  name: "waiter",
-  run: async (workflow_id) => {{
-    const first = await waitSignal("first");
-    const second = await waitSignal("second");
-    return {{
-      workflow_id: workflow_id,
-      first: first,
-      second: second
-    }};
-  }}
-}});
+const waiter = async (workflow_id) => {{
+  const first = await waitSignal("first");
+  const second = await waitSignal("second");
+  return {{
+    workflow_id: workflow_id,
+    first: first,
+    second: second
+  }};
+}};
 
-const handle = start(waiter, {{ workflow_id: "{workflow_id}" }});
+const handle = await processes.start({{ definition: waiter, args: {{ workflow_id: "{workflow_id}" }} }});
 finish({{
   workflow_id: "{workflow_id}",
   process_id: handle.process_id,
@@ -680,14 +660,11 @@ fn async_completion_script(workflow_id: &str) -> String {
 Exercise the async host tool completion path.
 
 <typescript>
-const async_child = defineProcess({{
-  name: "async_child",
-  run: async (workflow_id) => {{
-    return await tools.async_lookup({{ workflow_id: workflow_id, key: "detached" }});
-  }}
-}});
+const async_child = async (workflow_id) => {{
+  return await tools.async_lookup({{ workflow_id: workflow_id, key: "detached" }});
+}};
 
-const result = await start(async_child, {{ workflow_id: "{workflow_id}" }});
+const result = await (await processes.start({{ definition: async_child, args: {{ workflow_id: "{workflow_id}" }} }}));
 finish({{
   workflow_id: "{workflow_id}",
   async: result,
@@ -715,18 +692,15 @@ fn process_llm_query_script(workflow_id: &str, fail_once: bool) -> String {
 Exercise the exact FIG-446 process-to-llm_query geometry with typed output.
 
 <typescript>
-const enrich = defineProcess({{
-  name: "enrich",
-  run: async (event) => {{
-    const enriched = await llm.query({{
-      task: "Classify this email. workflow_id={workflow_id} process_llm_query=true",
-      inputs: {{ event: event }},
-      output: {{ category: "str", confidence: "float" }}
-    }});{replay_probe}
-    return enriched;
-  }}
-}});
-const result = await start(enrich, {{ event: {{ email: "hello@example.com" }} }});
+const enrich = async (event) => {{
+  const enriched = await llm.query({{
+    task: "Classify this email. workflow_id={workflow_id} process_llm_query=true",
+    inputs: {{ event: event }},
+    output: {{ category: "str", confidence: "float" }}
+  }});{replay_probe}
+  return enriched;
+}};
+const result = await (await processes.start({{ definition: enrich, args: {{ event: {{ email: "hello@example.com" }} }} }}));
 finish({{
   workflow_id: "{workflow_id}",
   category: result.category,
@@ -744,17 +718,14 @@ fn durable_input_request_script(workflow_id: &str) -> String {
 Exercise a durable in-process tool that opens an input request and resumes through a custom await key.
 
 <typescript>
-const durable_child = defineProcess({{
-  name: "durable_child",
-  run: async (workflow_id) => {{
-    return await tools.durable_input_request({{
-      workflow_id: workflow_id,
-      question: "approve durable input?"
-    }});
-  }}
-}});
+const durable_child = async (workflow_id) => {{
+  return await tools.durable_input_request({{
+    workflow_id: workflow_id,
+    question: "approve durable input?"
+  }});
+}};
 
-const result = await start(durable_child, {{ workflow_id: "{workflow_id}" }});
+const result = await (await processes.start({{ definition: durable_child, args: {{ workflow_id: "{workflow_id}" }} }}));
 finish({{
   workflow_id: "{workflow_id}",
   durable: result,
@@ -771,30 +742,24 @@ fn parent_durable_input_after_child_script(workflow_id: &str) -> String {
 Exercise parent replay after a completed child process and a durable input suspension.
 
 <typescript>
-const immediate_child = defineProcess({{
-  name: "immediate_child",
-  run: async (value) => {{
-    return {{ child: value }};
-  }}
-}});
+const immediate_child = async (value) => {{
+  return {{ child: value }};
+}};
 
-const parent = defineProcess({{
-  name: "parent",
-  run: async (workflow_id) => {{
-    const child = await start(immediate_child, {{ value: "ready" }});
-    const input = await tools.durable_input_request({{
-      workflow_id: workflow_id,
-      question: "approve parent durable input?",
-      attach_after_resolution: true
-    }});
-    return {{
-      child: child.child,
-      durable: input
-    }};
-  }}
-}});
+const parent = async (workflow_id) => {{
+  const child = await (await processes.start({{ definition: immediate_child, args: {{ value: "ready" }} }}));
+  const input = await tools.durable_input_request({{
+    workflow_id: workflow_id,
+    question: "approve parent durable input?",
+    attach_after_resolution: true
+  }});
+  return {{
+    child: child.child,
+    durable: input
+  }};
+}};
 
-const result = await start(parent, {{ workflow_id: "{workflow_id}" }});
+const result = await (await processes.start({{ definition: parent, args: {{ workflow_id: "{workflow_id}" }} }}));
 finish({{
   workflow_id: "{workflow_id}",
   parent: result,

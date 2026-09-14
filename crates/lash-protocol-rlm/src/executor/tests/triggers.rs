@@ -108,9 +108,7 @@ async fn execute_with_deferred_trigger(
         },
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
         LashlangSurface::new(
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_triggers(),
+            lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
             lashlang::LashlangHostCatalog::new(),
         ),
@@ -132,12 +130,9 @@ fn deferred_trigger_constructor_and_event_schema_link() {
         let cases = [(
             "typescript",
             r#"
-                    const remember = defineProcess({
-                      name: "remember", signals: {},
-                      run: async (change: calendar.Change) => true
-                    });
+                    const remember = async (change: calendar.Change) => true;
                     const source = calendar.Changed({});
-                    finish(await registerTrigger({
+                    finish(await triggers.register({
                       source, target: remember, inputs: (event) => ({ change: event })
                     }));
                 "#,
@@ -182,12 +177,9 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
         let (mut state, response) = execute_with_deferred_trigger(
             "typescript",
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (change: calendar.Change) => true
-                });
+                const remember = async (change: calendar.Change) => true;
                 const source = calendar.Changed({});
-                finish(await registerTrigger({
+                finish(await triggers.register({
                   source, target: remember, inputs: (event) => ({ change: event })
                 }));
             "#,
@@ -223,11 +215,8 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
             "typescript",
             r#"
                     const sourceInput = () => ({});
-                    const remember = defineProcess({
-                      name: "remember", signals: {},
-                      run: async (change: calendar.Change) => true
-                    });
-                    finish(await registerTrigger({
+                    const remember = async (change: calendar.Change) => true;
+                    finish(await triggers.register({
                       source: calendar.Changed(sourceInput()), target: remember,
                       inputs: (event) => ({ change: event })
                     }));
@@ -253,11 +242,8 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
 fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
     block_on(async {
         let code = r#"
-            const wrong = defineProcess({
-              name: "wrong", signals: {},
-              run: async (value: number) => true
-            });
-            await registerTrigger({
+            const wrong = async (value: number) => true;
+            await triggers.register({
               source: calendar.Changed({}), target: wrong,
               inputs: (event) => ({ value: event })
             });
@@ -314,16 +300,10 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
-                    const remember = defineProcess({
-                      name: "remember", signals: {},
-                      run: async (change: calendar.Change) => true
-                    });
-                    const unused = defineProcess({
-                      name: "unused", signals: {},
-                      run: async () => { await web.fetch({}); return true; }
-                    });
+                    const remember = async (change: calendar.Change) => true;
+                    const unused = async () => { await web.fetch({}); return true; };
                     const source = calendar.Changed({});
-                    await registerTrigger({
+                    await triggers.register({
                       source, target: remember,
                       inputs: (event) => ({ change: event })
                     });
@@ -333,9 +313,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             },
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             LashlangSurface::new(
-                lashlang::LashlangAbilities::default()
-                    .with_processes()
-                    .with_triggers(),
+                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             ),
@@ -399,13 +377,6 @@ pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
             .expect("valid timer tick type"),
         )
         .expect("valid timer trigger source");
-    resources
-}
-
-pub(super) fn disabled_timer_trigger_resources() -> lashlang::LashlangHostCatalog {
-    let mut resources = timer_trigger_resources();
-    lashlang::add_trigger_resource_operations(&mut resources)
-        .expect("trigger resource operations are unique");
     resources
 }
 
@@ -490,9 +461,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         Arc::new(controller),
     );
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_triggers(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         timer_trigger_resources(),
     );
@@ -516,9 +485,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
 pub(super) async fn execute_with_trigger_environment(code: &str) -> ExecResponse {
     execute_with_host_environment(
         code,
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_triggers(),
+        lashlang::LashlangAbilities::default(),
         timer_trigger_resources(),
     )
     .await
@@ -529,12 +496,9 @@ pub(super) fn typescript_register_trigger_executes_end_to_end() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: unknown) => { return true; }
-                });
+                const remember = async (tick: unknown) => { return true; };
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                const handle = await registerTrigger({
+                const handle = await triggers.register({
                   source,
                   target: remember,
                   inputs: (event) => ({ tick: event }),
@@ -574,12 +538,9 @@ fn trigger_registration_failure_prevents_foreground_execution() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: string) => { return true; }
-                });
+                const remember = async (tick: string) => { return true; };
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                await registerTrigger({
+                await triggers.register({
                   source,
                   target: remember,
                   inputs: (event) => ({ tick: event }),
@@ -610,12 +571,9 @@ pub(super) fn trigger_registry_operations_execute_foreground_code() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => true
-                });
+                const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                const handle = await registerTrigger({
+                const handle = await triggers.register({
                   source,
                   target: remember,
                   inputs: (event) => ({ tick: event }),
@@ -682,9 +640,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
                 Arc::new(controller.clone()),
             );
         let surface = LashlangSurface::new(
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_triggers(),
+            lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         );
@@ -694,12 +650,9 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
-                        const remember = defineProcess({
-                          name: "remember", signals: {},
-                          run: async (tick: timer.Tick) => tick.fired_at
-                        });
+                        const remember = async (tick: timer.Tick) => tick.fired_at;
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                        const handle = await registerTrigger({
+                        const handle = await triggers.register({
                           source,
                           target: remember,
                           inputs: (event) => ({ tick: event })
@@ -718,8 +671,13 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
 
+        // Re-pinned by FIG-2999: a keyless key is derived from the source and
+        // the target's definition, and the target is now a lifted process
+        // whose declaration is named by its lift digest rather than by the
+        // `const` the source spells. The derivation is unchanged; its input
+        // moved with the dialect.
         let expected_key =
-            "derived/v3/9956413528fb2c204e9f9941784a6e9d51ef7926b69d3e31e0f20cc493309a4b";
+            "derived/v3/c8727a9bd798917885c10ca9e76bde549e48c950c36e8201c959c02d9f9c8af2";
         let (effect_owner_scope, effect_subscription_key) = {
             let envelopes = controller.envelopes.lock_recover();
             let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[0].command else {
@@ -797,14 +755,11 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
         // threshold once the turn config carries its budgets.
         let first = Box::pin(capture(
                 r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => tick.fired_at
-                });
+                const remember = async (tick: timer.Tick) => tick.fired_at;
                 const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
-                await registerTrigger({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
-                await registerTrigger({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
                 finish(true);
                 "#,
             ))
@@ -813,14 +768,11 @@ pub(super) fn reordered_keyless_registration_calls_keep_derived_keys_across_modu
         // threshold once the turn config carries its budgets.
         let second = Box::pin(capture(
                 r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => tick.fired_at
-                });
+                const remember = async (tick: timer.Tick) => tick.fired_at;
                 const morning = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
                 const evening = timer.Schedule({ expr: "0 18 * * *", tz: "UTC" });
-                await registerTrigger({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
-                await registerTrigger({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: evening, target: remember, inputs: (event) => ({ tick: event }) });
+                await triggers.register({ source: morning, target: remember, inputs: (event) => ({ tick: event }) });
                 finish(true);
                 "#,
             ))
@@ -845,9 +797,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
         let artifact_store = Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
         let surface = LashlangSurface::new(
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_triggers(),
+            lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         );
@@ -859,12 +809,9 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
-                        const remember = defineProcess({
-                          name: "remember", signals: {},
-                          run: async (tick: timer.Tick) => tick.fired_at
-                        });
+                        const remember = async (tick: timer.Tick) => tick.fired_at;
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                        await registerTrigger({
+                        await triggers.register({
                           source,
                           target: remember,
                           inputs: (event) => ({ tick: event }),
@@ -1036,12 +983,11 @@ async fn execute_trigger_process_with_originator(
     let controller = CapturingTriggerEffectController::default();
     let controller_dyn: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(controller.clone());
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_triggers(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         timer_trigger_resources(),
     );
+    let engine_surface = process_engine_surface(surface.clone());
     let session_policy = lash_core::SessionPolicy {
         model: lash_core::ModelSpec::builder("mock-model")
             .context_window_tokens(200_000)
@@ -1063,7 +1009,7 @@ async fn execute_trigger_process_with_originator(
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
-                surface.clone(),
+                engine_surface,
             ),
         ),
     );
@@ -1087,10 +1033,12 @@ async fn execute_trigger_process_with_originator(
         registry: registry.clone(),
         controller: controller_dyn.clone(),
         originator_override: originator_override.clone(),
+        env_store: Arc::clone(&process_env_store),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        Arc::new(EmptyTypeScriptSignalToolProvider),
-        lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+        Arc::new(ProcessControlToolProvider),
+        process_control_tool_catalog(),
         None,
         processes,
         controller_dyn,
@@ -1210,11 +1158,8 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
         let result = execute_trigger_process_with_originator(
             "typescript",
             r#"
-                const registrar = defineProcess({
-                  name: "registrar", signals: {},
-                  run: async () => await triggers.list({})
-                });
-                const handle = start(registrar);
+                const registrar = async () => await triggers.list({});
+                const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,
             Some(lash_core::ProcessOriginator::host()),
@@ -1239,11 +1184,8 @@ pub(super) fn typescript_process_body_uses_trigger_command_handler() {
         let result = execute_trigger_process(
             "typescript",
             r#"
-                const registrar = defineProcess({
-                  name: "registrar", signals: {},
-                  run: async () => await triggers.list({})
-                });
-                const handle = start(registrar);
+                const registrar = async () => await triggers.list({});
+                const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,
         )
@@ -1276,14 +1218,11 @@ pub(super) fn typescript_process_local_helper_reaches_trigger_command_handler() 
         let result = execute_trigger_process(
             "typescript",
             r#"
-                const registrar = defineProcess({
-                  name: "registrar", signals: {},
-                  run: async () => {
-                    const listRegistrations = () => triggers.list({});
-                    return await listRegistrations();
-                  }
-                });
-                const handle = start(registrar);
+                const registrar = async () => {
+                  const listRegistrations = () => triggers.list({});
+                  return await listRegistrations();
+                };
+                const handle = await processes.start({ definition: registrar });
                 finish(handle.process_id);
             "#,
         )
@@ -1314,12 +1253,9 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
         let scalar = CapturingTriggerEffectController::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => true
-                });
+                const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                const registered = await registerTrigger({
+                const registered = await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   name: "scalar", subscription_key: "scalar"
                 });
@@ -1338,7 +1274,7 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
                 const deleted = await triggers.delete({
                   subscription_key: "scalar", expected_revision: enabled.revision
                 });
-                await registerTrigger({
+                await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "prune-me"
                 });
@@ -1386,27 +1322,24 @@ pub(super) fn scalar_and_batched_trigger_verbs_emit_typed_effect_envelopes() {
         let batched = CapturingTriggerEffectController::default();
         let response = Box::pin(execute_with_capturing_trigger_effects(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => true
-                });
+                const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-                const update_seed = await registerTrigger({
+                const update_seed = await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-update"
                 });
-                const registered_enable_seed = await registerTrigger({
+                const registered_enable_seed = await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-enable"
                 });
                 const enable_seed = await triggers.disable({
                   subscription_key: "batch-enable", expected_revision: registered_enable_seed.revision
                 });
-                const disable_seed = await registerTrigger({
+                const disable_seed = await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-disable"
                 });
-                const delete_seed = await registerTrigger({
+                const delete_seed = await triggers.register({
                   source, target: remember, inputs: (event) => ({ tick: event }),
                   subscription_key: "batch-delete"
                 });
@@ -1476,12 +1409,9 @@ pub(super) fn trigger_disable_is_revision_checked_and_keeps_registry_entry() {
     block_on(async {
         let response = execute_with_trigger_environment(
             r#"
-                const remember = defineProcess({
-                  name: "remember", signals: {},
-                  run: async (tick: timer.Tick) => true
-                });
+                const remember = async (tick: timer.Tick) => true;
                 const source = timer.Schedule({ expr: "0 8 * * *" });
-                const handle = await registerTrigger({
+                const handle = await triggers.register({
                   source,
                   target: remember,
                   inputs: (event) => ({ tick: event }),
@@ -1587,113 +1517,44 @@ pub(super) fn console_log_of_a_large_record_still_stops_at_the_byte_cap() {
     });
 }
 
+/// FIG-2999: `sleep` is the one lashlang feature a host can still withhold.
+/// Declaring a process, starting one, signalling one and registering a trigger
+/// are no longer abilities — a process is an ordinary value and the controls
+/// are leaf tools, so their availability is the catalogue's presence or absence
+/// rather than a flag the host sets.
 #[test]
-pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
-    struct DisabledCase {
-        name: &'static str,
-        code: &'static str,
-        abilities: lashlang::LashlangAbilities,
-        resources: fn() -> lashlang::LashlangHostCatalog,
-        feature: &'static str,
-    }
-
-    let cases = [
-        DisabledCase {
-            name: "process declaration",
-            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async () => null });",
-            abilities: lashlang::LashlangAbilities::default(),
-            resources: lashlang::LashlangHostCatalog::new,
-            feature: "processes",
-        },
-        DisabledCase {
-            name: "process start",
-            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async () => null });\nstart(worker);",
-            abilities: lashlang::LashlangAbilities::default(),
-            resources: lashlang::LashlangHostCatalog::new,
-            feature: "processes",
-        },
-        DisabledCase {
-            name: "sleep",
-            code: "await sleep(1000);",
-            abilities: lashlang::LashlangAbilities::default(),
-            resources: lashlang::LashlangHostCatalog::new,
-            feature: "sleep",
-        },
-        DisabledCase {
-            name: "wait_signal",
-            code: "const worker = defineProcess({ name: \"worker\", signals: { ready: null }, run: async () => await waitSignal(\"ready\") });",
-            abilities: lashlang::LashlangAbilities::default().with_processes(),
-            resources: lashlang::LashlangHostCatalog::new,
-            feature: "process signals",
-        },
-        DisabledCase {
-            name: "signal_run",
-            code: "const worker = defineProcess({ name: \"worker\", signals: {}, run: async (target: unknown) => wake(target, \"ready\", null) });",
-            abilities: lashlang::LashlangAbilities::default().with_processes(),
-            resources: lashlang::LashlangHostCatalog::new,
-            feature: "process signals",
-        },
-        DisabledCase {
-            name: "trigger",
-            code: r#"
-                    const worker = defineProcess({
-                      name: "worker", signals: {},
-                      run: async (tick: timer.Tick) => true
-                    });
-                    const source = timer.Schedule({ expr: "0 8 * * *" });
-                    await registerTrigger({
-                      source,
-                      target: worker,
-                      inputs: (event) => ({ tick: event })
-                    });
-                "#,
-            abilities: lashlang::LashlangAbilities::default().with_processes(),
-            resources: disabled_timer_trigger_resources,
-            feature: "triggers",
-        },
-    ];
-
+pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
     block_on(async {
-        for case in cases {
-            lash_typescript::parse(case.code)
-                .unwrap_or_else(|err| panic!("{} should parse: {err}", case.name));
-            let response =
-                execute_with_host_environment(case.code, case.abilities, (case.resources)()).await;
-            let error = response
-                .error
-                .as_ref()
-                .unwrap_or_else(|| panic!("{} should fail at link time", case.name));
+        let code = "await sleep(1000);";
+        lash_typescript::parse(code).expect("the fixture parses");
+        let response = execute_with_host_environment(
+            code,
+            lashlang::LashlangAbilities::default(),
+            lashlang::LashlangHostCatalog::new(),
+        )
+        .await;
+        let error = response
+            .error
+            .as_ref()
+            .expect("a withheld ability fails at link time");
 
-            assert!(
-                error.message.contains(&format!(
-                    "lashlang feature `{}` is disabled by this host",
-                    case.feature
-                )),
-                "{} error was {}",
-                case.name,
-                error.message,
-            );
-            assert!(
-                response.calls.is_empty(),
-                "{} should not call runtime tools",
-                case.name
-            );
-            assert!(
-                response.observations.is_empty(),
-                "{} should not emit observations",
-                case.name
-            );
-            assert!(
-                response.printed_images.is_empty(),
-                "{} should not emit images",
-                case.name
-            );
-            assert!(
-                response.terminal_finish.is_none(),
-                "{} should not finish terminally",
-                case.name
-            );
-        }
+        assert!(
+            error
+                .message
+                .contains("lashlang feature `sleep` is disabled by this host"),
+            "error was {}",
+            error.message,
+        );
+        assert!(response.calls.is_empty(), "no runtime tools are called");
+        assert!(
+            response.observations.is_empty(),
+            "no observations are emitted"
+        );
+        assert!(response.printed_images.is_empty(), "no images are emitted");
+        assert!(
+            response.terminal_finish.is_none(),
+            "the program does not finish terminally"
+        );
     });
 }
 
@@ -1743,15 +1604,11 @@ pub(super) fn executor_reports_disabled_lashlang_abilities_at_link_time() {
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
-const remember = defineProcess({
-  name: "remember",
-  signals: {},
-  run: async (tick: timer.Tick, label: string) => {
-    return true;
-  }
-});
+const remember = async (tick: timer.Tick, label: string) => {
+  return true;
+};
 const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
-const handle = await registerTrigger({
+const handle = await triggers.register({
   source,
   target: remember,
   inputs: (event) => ({ tick: event, label: "daily" }),
@@ -1926,9 +1783,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         },
         store,
         LashlangSurface::new(
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_triggers(),
+            lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
             timer_trigger_resources(),
         ),

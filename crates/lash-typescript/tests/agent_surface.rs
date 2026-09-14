@@ -16,6 +16,52 @@ impl ExecutionHost for Host {
     }
 }
 
+/// The host environment every process fixture links against.
+///
+/// FIG-2999 deleted `defineProcess`, `start` and `wake`: a process is an
+/// uncalled top-level `const` async arrow, and the controls are leaf tools, so
+/// a fixture starts and signals one through `processes.*`. The `process` slot
+/// is typed `Process` through `x-lash`, which is what the linker lifts the
+/// literal into.
+fn process_environment() -> lashlang::LashlangHostEnvironment {
+    process_environment_with(lashlang::LashlangHostCatalog::new())
+}
+
+fn process_environment_with(
+    mut catalog: lashlang::LashlangHostCatalog,
+) -> lashlang::LashlangHostEnvironment {
+    catalog
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:processes/start",
+            &lashlang::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": { "definition": { "x-lash": { "kind": "process_unknown" } } },
+                    "required": ["definition"]
+                }),
+                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+            ),
+        )
+        .expect("process start operation");
+    catalog
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "signal",
+            "tool:processes/signal",
+            &lashlang::OperationContract::new(
+                serde_json::json!({ "type": "object", "additionalProperties": true }),
+                serde_json::json!({}),
+            ),
+        )
+        .expect("process signal operation");
+    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
+}
+
 fn finished(source: &str) -> Value {
     let program = lash_typescript::compile(source).expect("TypeScript should compile");
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
@@ -27,25 +73,20 @@ fn finished(source: &str) -> Value {
 }
 
 #[test]
-fn define_process_is_a_static_declaration_and_return_stays_a_function_return() {
-    let program = lash_typescript::parse(
-        r#"
-        const worker = defineProcess({
-          name: "worker",
-          run: async (input: unknown) => {
-            try { return input; } finally { wake("completed"); }
-          }
-        });
-        const handle = start(worker, { input: 3 });
+fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return() {
+    let source = r#"
+        const worker = async (input: unknown) => {
+          try { return input; } finally { console.log("completed"); }
+        };
+        const handle = await processes.start({ definition: worker, args: { input: 3 } });
         finish(handle);
-        "#,
-    )
-    .expect("agent program should lower");
+        "#;
+    let linked =
+        lash_typescript::link(source, &process_environment()).expect("agent program should link");
 
-    let [Declaration::Process(process)] = program.declarations.as_slice() else {
-        panic!("expected exactly one process declaration")
+    let [Declaration::Process(process)] = linked.program().declarations.as_slice() else {
+        panic!("expected exactly one lifted process declaration")
     };
-    assert_eq!(process.name.as_str(), "worker");
     assert_eq!(process.params[0].name.as_str(), "input");
     assert!(
         process.signals.is_empty(),
@@ -64,34 +105,25 @@ fn define_process_is_a_static_declaration_and_return_stays_a_function_return() {
         panic!("run remains a real function")
     };
     assert!(contains_return(&function.body));
-    assert!(contains_wake(&function.body));
     assert!(matches!(
         wrapper.catch.as_ref().map(|catch| catch.body.as_ref()),
         Some(Expr::Fail(_))
     ));
-    assert!(contains_start(&program.main));
 }
 
 #[test]
 fn durable_process_agent_primitives_link_through_existing_effects() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",
-          run: async (input: unknown) => {
-            const signal = await waitSignal("ready");
-            await sleep(5);
-            wake(signal);
-            return input;
-          }
-        });
-        const handle = start(worker, { input: 3 });
+        const worker = async (input: unknown) => {
+          const signal = await waitSignal("ready");
+          await sleep(5);
+          console.log(signal);
+          return input;
+        };
+        const handle = await processes.start({ definition: worker, args: { input: 3 } });
         finish(handle);
     "#;
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::all(),
-    );
-    let linked = lash_typescript::link(source, &environment)
+    let linked = lash_typescript::link(source, &process_environment())
         .expect("all TypeScript agent primitives should link to shared effects");
     assert_eq!(linked.artifact.exports.processes.len(), 1);
     let artifact: lashlang::ModuleArtifact = serde_json::from_slice(
@@ -104,15 +136,10 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
 #[test]
 fn production_link_cache_preserves_typescript_artifact_identity() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",           run: async (input: unknown) => { const alias = input; return alias; }
-        });
-        finish(start(worker, { input: [1] }));
+        const worker = async (input: unknown) => { const alias = input; return alias; };
+        finish(await processes.start({ definition: worker, args: { input: [1] } }));
     "#;
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::all(),
-    );
+    let environment = process_environment();
     let program = lash_typescript::parse(source).expect("TypeScript should lower");
     let mut cache = lashlang::LinkedProgramCache::new();
     let linked = cache
@@ -128,25 +155,21 @@ fn production_link_cache_preserves_typescript_artifact_identity() {
 }
 
 #[test]
-fn wake_signals_runs_and_process_finish_is_rejected() {
-    let program = lash_typescript::parse(
-        r#"
-        const worker = defineProcess({
-          name: "worker",           run: async () => await waitSignal("ready")
-        });
-        const handle = start(worker);
-        wake(handle, "ready", { ok: true });
+fn signalling_a_run_links_and_process_finish_is_rejected() {
+    let source = r#"
+        const worker = async () => await waitSignal("ready");
+        const handle = await processes.start({ definition: worker });
+        await processes.signal({ handle: handle, signal: "ready", payload: { ok: true } });
         finish(await handle);
-        "#,
-    )
-    .expect("wake(handle, signal, payload) should lower");
-    assert!(contains_signal_run(&program.main));
+        "#;
+    lash_typescript::link(source, &process_environment())
+        .expect("a foreground signal links through the tool surface");
 
     let error = lash_typescript::parse(
         r#"
-        const worker = defineProcess({
-          name: "worker",           run: async () => { try { finish(1); } finally { wake("cleanup"); } }
-        });
+        const worker = async () => { try { finish(1); } finally { console.log("cleanup"); } };
+        const handle = await processes.start({ definition: worker });
+        finish(handle);
         "#,
     )
     .expect_err("finish inside run must not bypass finally");
@@ -161,12 +184,12 @@ fn wake_signals_runs_and_process_finish_is_rejected() {
 fn process_membership_reaches_functions_nested_inside_run() {
     let error = lash_typescript::parse(
         r#"
-        const worker = defineProcess({
-          name: "worker",           run: async () => {
-            function stop() { finish(1); }
-            return stop();
-          }
-        });
+        const worker = async () => {
+          function stop() { finish(1); }
+          return stop();
+        };
+        const handle = await processes.start({ definition: worker });
+        finish(handle);
         "#,
     )
     .expect_err("finish nested inside run must remain cell-only");
@@ -179,19 +202,27 @@ fn process_membership_reaches_functions_nested_inside_run() {
 
 #[derive(Default)]
 struct SignalHost {
-    signal: std::sync::Mutex<Option<lashlang::ProcessSignal>>,
+    signal: std::sync::Mutex<Option<lashlang::Record>>,
 }
 
 impl ExecutionHost for SignalHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(lashlang::from_json(
-                serde_json::json!({ "__handle__": "lash", "id": "p.1.run-1", "process_id": "run-1" }),
-            ))),
-            AbilityOp::SignalRun(signal) => {
-                *self.signal.lock().expect("signal lock") = Some(signal);
-                Ok(AbilityResult::Value(Value::Null))
-            }
+            AbilityOp::ResourceOperation(call) => match call.operation.as_str() {
+                "start" => Ok(AbilityResult::Value(lashlang::from_json(
+                    serde_json::json!({ "__handle__": "lash", "id": "p.1.run-1", "process_id": "run-1" }),
+                ))),
+                "signal" => {
+                    let [Value::Record(fields)] = call.args.as_slice() else {
+                        return Err(ExecutionHostError::new("expected record args"));
+                    };
+                    *self.signal.lock().expect("signal lock") = Some((**fields).clone());
+                    Ok(AbilityResult::Value(Value::Null))
+                }
+                other => Err(ExecutionHostError::new(format!(
+                    "unexpected process operation: {other}"
+                ))),
+            },
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected signal ability")),
         }
@@ -199,20 +230,15 @@ impl ExecutionHost for SignalHost {
 }
 
 #[test]
-fn foreground_wake_delivers_a_named_process_signal() {
+fn a_foreground_signal_delivers_a_named_process_signal() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",           run: async () => await waitSignal("ready")
-        });
-        const handle = start(worker);
-        wake(handle, "ready", { ok: true });
+        const worker = async () => await waitSignal("ready");
+        const handle = await processes.start({ definition: worker });
+        await processes.signal({ handle: handle, signal: "ready", payload: { ok: true } });
         finish(handle);
     "#;
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::all(),
-    );
-    let linked = lash_typescript::link(source, &environment).expect("signal program links");
+    let linked =
+        lash_typescript::link(source, &process_environment()).expect("signal program links");
     let host = SignalHost::default();
     let outcome = futures::executor::block_on(lashlang::execute(
         &lash_typescript::compile_linked(&linked),
@@ -227,10 +253,10 @@ fn foreground_wake_delivers_a_named_process_signal() {
         .expect("signal lock")
         .clone()
         .expect("signal delivered");
-    assert_eq!(signal.name, "ready");
+    assert_eq!(signal.get("signal"), Some(&Value::String("ready".into())));
     assert_eq!(
-        signal.payload,
-        lashlang::from_json(serde_json::json!({ "ok": true }))
+        signal.get("payload").cloned(),
+        Some(lashlang::from_json(serde_json::json!({ "ok": true })))
     );
 }
 
@@ -249,9 +275,18 @@ fn process_handle(id: &str) -> Value {
 impl ExecutionHost for StartHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(start) => {
-                assert_eq!(start.process_name, "worker");
-                assert_eq!(start.args.get("input"), Some(&Value::Number(3.0)));
+            AbilityOp::ResourceOperation(call) => {
+                assert_eq!(call.operation, "start");
+                let [Value::Record(fields)] = call.args.as_slice() else {
+                    return Err(ExecutionHostError::new("expected record args"));
+                };
+                // The start's own arguments ride in `args`, beside the
+                // `definition` slot that carries the process itself.
+                let start_args = fields
+                    .get("args")
+                    .and_then(Value::as_record)
+                    .expect("a start passes its arguments in `args`");
+                assert_eq!(start_args.get("input"), Some(&Value::Number(3.0)));
                 Ok(AbilityResult::Value(process_handle("run-handle")))
             }
             AbilityOp::Await(handle) if handle == process_handle("run-handle") => {
@@ -266,16 +301,11 @@ impl ExecutionHost for StartHost {
 #[test]
 fn start_and_await_process_execute_through_shared_process_effects() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",           run: async (input: unknown) => { return input * 2; }
-        });
-        finish(await start(worker, { input: 3 }));
+        const worker = async (input: unknown) => { return input * 2; };
+        const handle = await processes.start({ definition: worker, args: { input: 3 } });
+        finish(await handle);
     "#;
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::default().with_processes(),
-    );
-    let linked = lash_typescript::link(source, &environment).expect("start should link");
+    let linked = lash_typescript::link(source, &process_environment()).expect("start should link");
     let outcome = futures::executor::block_on(lashlang::execute(
         &lash_typescript::compile_linked(&linked),
         &mut State::new(),
@@ -293,7 +323,9 @@ enum ProcessAwaitFailureHost {
 impl ExecutionHost for ProcessAwaitFailureHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(process_handle("rejected-run"))),
+            AbilityOp::ResourceOperation(_) => {
+                Ok(AbilityResult::Value(process_handle("rejected-run")))
+            }
             AbilityOp::Await(handle) if handle == process_handle("rejected-run") => match self {
                 Self::Typed => Err(ExecutionHostError::from_tool_failure(
                     &lash_sansio::ToolFailure {
@@ -318,10 +350,8 @@ impl ExecutionHost for ProcessAwaitFailureHost {
 fn caught_process_await(host: &ProcessAwaitFailureHost, probe: &str) -> Value {
     let source = format!(
         r#"
-        const worker = defineProcess({{
-          name: "worker",           run: async () => {{ return null; }}
-        }});
-        const handle = start(worker);
+        const worker = async () => {{ return null; }};
+        const handle = await processes.start({{ definition: worker }});
         try {{
           await handle;
           finish("the process await did not fail");
@@ -330,11 +360,8 @@ fn caught_process_await(host: &ProcessAwaitFailureHost, probe: &str) -> Value {
         }}
         "#
     );
-    let environment = lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::default().with_processes(),
-    );
-    let linked = lash_typescript::link(&source, &environment).expect("process await should link");
+    let linked =
+        lash_typescript::link(&source, &process_environment()).expect("process await should link");
     match futures::executor::block_on(lashlang::execute(
         &lash_typescript::compile_linked(&linked),
         &mut State::new(),
@@ -400,9 +427,17 @@ struct ProcessHandleIdInspectionHost {
 impl ExecutionHost for ProcessHandleIdInspectionHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(start) => {
-                assert_eq!(start.process_name, "worker");
-                assert_eq!(start.args.get("input"), Some(&Value::Number(42.0)));
+            AbilityOp::ResourceOperation(call) if call.operation == "start" => {
+                let [Value::Record(fields)] = call.args.as_slice() else {
+                    return Err(ExecutionHostError::new("expected record args"));
+                };
+                // The start's own arguments ride in `args`, beside the
+                // `definition` slot that carries the process itself.
+                let start_args = fields
+                    .get("args")
+                    .and_then(Value::as_record)
+                    .expect("a start passes its arguments in `args`");
+                assert_eq!(start_args.get("input"), Some(&Value::Number(42.0)));
                 Ok(AbilityResult::Value(lashlang::from_json(
                     serde_json::json!({ "__handle__": "lash", "id": "p.1.process-test-42", "process_id": "process-test-42" }),
                 )))
@@ -441,10 +476,8 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
 #[test]
 fn process_handle_exposes_id_member_for_subsequent_operations() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",           run: async (input: unknown) => { return input; }
-        });
-        const handle = start(worker, { input: 42 });
+        const worker = async (input: unknown) => { return input; };
+        const handle = await processes.start({ definition: worker, args: { input: 42 } });
         const processId = handle.process_id;
         const result = await inspection.status({ process_id: processId });
         finish({ processId: processId, result: result });
@@ -462,11 +495,8 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
             ),
         )
         .expect("operation binding");
-    let environment = lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::default().with_processes(),
-    );
-    let linked = lash_typescript::link(source, &environment).expect("TypeScript should link");
+    let linked = lash_typescript::link(source, &process_environment_with(catalog))
+        .expect("TypeScript should link");
     let host = ProcessHandleIdInspectionHost::default();
     let outcome = futures::executor::block_on(lashlang::execute(
         &lash_typescript::compile_linked(&linked),
@@ -1305,13 +1335,27 @@ impl ExecutionHost for ProcessDurabilityHost {
             }
             AbilityOp::Sleep(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::ProcessEvent(event) => Ok(AbilityResult::Value(event.value)),
-            AbilityOp::StartProcess(start) => Ok(AbilityResult::Value(lashlang::from_json(
-                serde_json::json!({
-                    "__handle__": "lash",
-                    "id": format!("p.1.{}", start.process_name),
-                    "process_id": start.process_name,
-                }),
-            ))),
+            // A start names the process it is asked to start: the fixture's
+            // process values carry a `name`, so a handle minted here can be
+            // told apart from a handle minted for another process.
+            AbilityOp::ResourceOperation(call) => {
+                let name = call
+                    .args
+                    .first()
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("definition"))
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("name"))
+                    .map(|name| name.to_string())
+                    .unwrap_or_else(|| "worker".to_string());
+                Ok(AbilityResult::Value(lashlang::from_json(
+                    serde_json::json!({
+                        "__handle__": "lash",
+                        "id": format!("p.1.{name}"),
+                        "process_id": name,
+                    }),
+                )))
+            }
             AbilityOp::Await(handle) => {
                 let id = handle
                     .as_record()
@@ -1330,7 +1374,30 @@ impl ExecutionHost for ProcessDurabilityHost {
     }
 }
 
-fn suspend_and_resume_process(source: &str, globals: serde_json::Value) -> ExecutionOutcome {
+/// The lifted process a fixture drives, named by its parameter count.
+///
+/// FIG-2999: a process literal's name is the linker's lift identity, not an
+/// authored string, so a fixture that lifts more than one process picks the
+/// one it means by shape instead of by name.
+fn lifted_process_name(linked: &lashlang::LinkedModule, params: usize) -> String {
+    linked
+        .program()
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            Declaration::Process(process) if process.params.len() == params => {
+                Some(process.name.to_string())
+            }
+            _ => None,
+        })
+        .expect("the module lifts a process of that shape")
+}
+
+fn suspend_and_resume_process(
+    source: &str,
+    globals: serde_json::Value,
+    params: usize,
+) -> ExecutionOutcome {
     futures::executor::block_on(async {
         let mut catalog = lashlang::LashlangHostCatalog::new();
         catalog
@@ -1342,11 +1409,14 @@ fn suspend_and_resume_process(source: &str, globals: serde_json::Value) -> Execu
                 &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("test host binding");
-        let environment =
-            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all());
-        let linked = lash_typescript::link(source, &environment).expect("process should link");
-        let compiled =
-            lashlang::compile_linked_process(&linked, "worker").expect("process should compile");
+        let linked = lash_typescript::link(source, &process_environment_with(catalog))
+            .expect("process should link");
+        // FIG-2999: the literal's name is the linker's lift name, not an
+        // authored one, so the fixture asks the artifact for the process it
+        // lifted rather than spelling a name the source no longer carries.
+        let process_name = lifted_process_name(&linked, params);
+        let compiled = lashlang::compile_linked_process(&linked, &process_name)
+            .expect("process should compile");
         let mut state = State::from_snapshot(lashlang::Snapshot::new(
             lashlang::from_json(globals)
                 .as_record()
@@ -1386,46 +1456,37 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
     let cases = [
         (
             r#"
-            const worker = defineProcess({
-              name: "worker",               run: async () => await waitSignal("ready")
-            });
+            const worker = async () => await waitSignal("ready");
+            finish(await processes.start({ definition: worker }));
             "#,
             serde_json::json!({}),
+            0,
             Value::String("signalled".into()),
         ),
         (
             r#"
-            const worker = defineProcess({
-              name: "worker",               run: async (input: unknown) => { await sleep(5); return input; }
-            });
+            const worker = async (input: unknown) => { await sleep(5); return input; };
+            finish(await processes.start({ definition: worker }));
             "#,
             serde_json::json!({ "input": 7 }),
+            1,
             Value::Number(7.0),
         ),
         (
             r#"
-            const worker = defineProcess({
-              name: "worker",               run: async (input: unknown) => {
-                try { return input; } finally { await sleep(5); }
-              }
-            });
+            const worker = async (input: unknown) => {
+              try { return input; } finally { await sleep(5); }
+            };
+            finish(await processes.start({ definition: worker }));
             "#,
             serde_json::json!({ "input": 9 }),
+            1,
             Value::Number(9.0),
         ),
-        (
-            r#"
-            const worker = defineProcess({
-              name: "worker",               run: async (input: unknown) => { wake(input); return input; }
-            });
-            "#,
-            serde_json::json!({ "input": 11 }),
-            Value::Number(11.0),
-        ),
     ];
-    for (source, globals, expected) in cases {
+    for (source, globals, params, expected) in cases {
         assert_eq!(
-            suspend_and_resume_process(source, globals),
+            suspend_and_resume_process(source, globals, params),
             ExecutionOutcome::Finished(expected)
         );
     }
@@ -1435,13 +1496,14 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
 fn uncaught_throw_fails_a_durable_process() {
     futures::executor::block_on(async {
         let source = r#"
-            const worker = defineProcess({
-              name: "worker",               run: async () => { throw "broken"; }
-            });
+            const worker = async () => { throw "broken"; };
+            finish(await processes.start({ definition: worker }));
         "#;
-        let program = lash_typescript::parse(source).expect("process should lower");
+        let linked =
+            lash_typescript::link(source, &process_environment()).expect("process should link");
+        let process_name = lifted_process_name(&linked, 0);
         let compiled =
-            lash_typescript::compile_process(&program, "worker").expect("process compiles");
+            lashlang::compile_linked_process(&linked, &process_name).expect("process compiles");
         let mut state = State::new();
         let host = ProcessDurabilityHost;
         let execution_environment = lashlang::ExecutionEnvironment::new(&host).process();
@@ -1465,14 +1527,13 @@ fn uncaught_throw_fails_a_durable_process() {
 #[test]
 fn durable_process_resumes_after_shared_promise_batch() {
     let source = r#"
-        const worker = defineProcess({
-          name: "worker",           run: async () => await Promise.all([
-            web.fetch({ value: 1 }), web.fetch({ value: 2 })
-          ])
-        });
+        const worker = async () => await Promise.all([
+          web.fetch({ value: 1 }), web.fetch({ value: 2 })
+        ]);
+        finish(await processes.start({ definition: worker }));
     "#;
     assert_eq!(
-        suspend_and_resume_process(source, serde_json::json!({})),
+        suspend_and_resume_process(source, serde_json::json!({}), 0),
         ExecutionOutcome::Finished(Value::List(
             vec![Value::Number(1.0), Value::Number(2.0)].into()
         ))
@@ -1481,19 +1542,6 @@ fn durable_process_resumes_after_shared_promise_batch() {
 
 fn contains_return(expr: &Expr) -> bool {
     matches!(expr, Expr::Return(_)) || expr.children().any(contains_return)
-}
-
-fn contains_wake(expr: &Expr) -> bool {
-    matches!(expr, Expr::Wake(_)) || expr.children().any(contains_wake)
-}
-
-fn contains_signal_run(expr: &Expr) -> bool {
-    matches!(expr, Expr::SignalRun { name, .. } if name.as_str() == "ready")
-        || expr.children().any(contains_signal_run)
-}
-
-fn contains_start(expr: &Expr) -> bool {
-    matches!(expr, Expr::StartProcess(_)) || expr.children().any(contains_start)
 }
 
 fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
@@ -1549,6 +1597,21 @@ fn two_leaf_web_environment() -> lashlang::LashlangHostEnvironment {
         )
         .expect("test host binding");
     lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+}
+
+/// [`two_leaf_web_environment`] plus the process control tools.
+fn mixed_aggregate_environment() -> lashlang::LashlangHostEnvironment {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            ["web"],
+            "Web",
+            "fetch",
+            "tool:web/fetch",
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+        )
+        .expect("test host binding");
+    process_environment_with(catalog)
 }
 
 #[test]
@@ -2295,13 +2358,12 @@ fn runtime_array_rejections_use_recorded_settlement_order() {
 fn pending_tool_handles_survive_durable_process_park() {
     for mode in ["all", "allSettled"] {
         let source = format!(
-            r#"const worker = defineProcess({{
-            name: "worker", run: async () => {{
-                const pending = [web.fetch({{value: "kept"}}), 42];
-                await sleep(5);
-                return await Promise.{mode}(pending);
-            }}
-        }});"#
+            r#"const worker = async () => {{
+            const pending = [web.fetch({{value: "kept"}}), 42];
+            await sleep(5);
+            return await Promise.{mode}(pending);
+        }};
+        finish(await processes.start({{ definition: worker }}));"#
         );
         let expected = if mode == "all" {
             serde_json::json!(["kept", 42])
@@ -2312,7 +2374,7 @@ fn pending_tool_handles_survive_durable_process_park() {
             ])
         };
         assert_eq!(
-            suspend_and_resume_process(&source, serde_json::json!({})),
+            suspend_and_resume_process(&source, serde_json::json!({}), 0),
             ExecutionOutcome::Finished(lashlang::from_json(expected)),
             "{mode}"
         );
@@ -2351,16 +2413,26 @@ impl ExecutionHost for MixedAggregateHost {
                     batch.operations.iter().map(Self::settle).collect(),
                 ),
             )),
-            AbilityOp::StartProcess(start) => Ok(AbilityResult::Value(lashlang::from_json(
-                serde_json::json!({
-                    "__handle__": "lash",
-                    "id": format!(
-                        "p.1.{}",
-                        start.args.get("input").cloned().unwrap_or(Value::Null)
-                    ),
-                    "process_id": start.args.get("input").cloned().unwrap_or(Value::Null),
-                }),
-            ))),
+            AbilityOp::ResourceOperation(call) if call.operation == "start" => {
+                // The start's own arguments ride in `args`, beside the
+                // `definition` slot that carries the process itself.
+                let input = call
+                    .args
+                    .first()
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("args"))
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("input"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                Ok(AbilityResult::Value(lashlang::from_json(
+                    serde_json::json!({
+                        "__handle__": "lash",
+                        "id": format!("p.1.{input}"),
+                        "process_id": input,
+                    }),
+                )))
+            }
             AbilityOp::Await(handle) => {
                 let id = handle
                     .as_record()
@@ -2385,14 +2457,11 @@ impl ExecutionHost for MixedAggregateHost {
 
 fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
     let source = format!(
-        r#"const worker = defineProcess({{
-            name: "worker", run: async (input: unknown) => input
-        }});
+        r#"const worker = async (input: unknown) => input;
         {body}"#
     );
-    let mut environment = two_leaf_web_environment();
-    environment.abilities = lashlang::LashlangAbilities::default().with_processes();
-    let linked = lash_typescript::link(&source, &environment).expect("mixed aggregate should link");
+    let linked = lash_typescript::link(&source, &mixed_aggregate_environment())
+        .expect("mixed aggregate should link");
     futures::executor::block_on(lashlang::execute(
         &lash_typescript::compile_linked(&linked),
         &mut State::new(),
@@ -2416,11 +2485,11 @@ fn a_process_handle_is_not_an_aggregate_leaf() {
     for method in ["all", "allSettled"] {
         for body in [
             format!(
-                "const h = start(worker, {{ input: 'fail-p' }}); \
+                "const h = await processes.start({{ definition: worker, args: {{ input: 'fail-p' }} }}); \
                  finish(await Promise.{method}([web.fetch({{ fail: true }}), h]));"
             ),
             format!(
-                "const h = start(worker, {{ input: 'fail-p' }}); \
+                "const h = await processes.start({{ definition: worker, args: {{ input: 'fail-p' }} }}); \
                  finish(await Promise.{method}([h, web.fetch({{ fail: true }})]));"
             ),
         ] {
@@ -2469,7 +2538,7 @@ fn all_settled_reports_every_tool_outcome_in_array_order() {
 
 #[test]
 fn promise_all_keeps_nested_process_handles_shallow() {
-    let body = "const h = start(worker, { input: 'p' }); \
+    let body = "const h = await processes.start({ definition: worker, args: { input: 'p' } }); \
                 finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
     assert_eq!(
         run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),

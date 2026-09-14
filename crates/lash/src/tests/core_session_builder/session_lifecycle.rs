@@ -845,7 +845,7 @@ async fn rlm_core_opens_rlm_session() -> Result<()> {
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result<()> {
+async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("rlm-abilities-prompt-test")
@@ -866,7 +866,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         "instruction_limit": { "bounded": 1_000_000 },
         "wall_clock": { "bounded": 30_000 },
         "memory_limit": { "bounded": 67_108_864 },
-        "lashlang_abilities": { "processes": true, "triggers": true }
+        "lashlang_abilities": { "sleep": true }
     }))
     .expect("rlm config");
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, inmem_artifact_store());
@@ -895,14 +895,17 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .await?;
 
     let prompts = seen.lock_recover();
-    // The `lashlang_abilities` config field still drives the surface; the
-    // surface it drives is TypeScript's, the only one a session can be served
-    // (ADR 0096). Same three facts: the registration primitive is offered, its
-    // shape is stated, and the registry is readable.
-    assert!(prompts[0].contains("registerTrigger(c: {source:"));
-    assert!(prompts[0].contains("Literal target; inputs match params, arrow erased."));
-    assert!(prompts[0].contains("triggers.list"));
-    assert!(!prompts[0].contains("TRIGGER."));
+    // `sleep` is the one surviving ability (FIG-2999): processes, signals and
+    // triggers are catalogue presence now, not configuration, so this session —
+    // whose catalogue carries neither — is told about `sleep` and about nothing
+    // it cannot call. The retired special forms are named nowhere.
+    assert!(prompts[0].contains("`await sleep(ms)` pauses the program."));
+    for retired in ["registerTrigger", "defineProcess", "triggers.list"] {
+        assert!(
+            !prompts[0].contains(retired),
+            "the prompt still advertises `{retired}`"
+        );
+    }
     Ok(())
 }
 
@@ -1123,9 +1126,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     let surface =
         factory.lashlang_compile_surface(&plugin_host, process_lifecycle_available, request)?;
 
-    assert!(surface.host_environment.abilities.processes);
     assert!(surface.host_environment.abilities.sleep);
-    assert!(surface.host_environment.abilities.process_signals);
     assert!(surface.tool_catalog.has_callable_tool("compile_core_tool"));
     assert!(surface.tool_catalog.has_callable_tool("lookup"));
     assert!(!surface.tool_catalog.has_callable_tool("fallback"));

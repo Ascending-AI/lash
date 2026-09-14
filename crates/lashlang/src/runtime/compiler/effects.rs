@@ -416,17 +416,6 @@ impl Compiler {
         }
     }
 
-    pub(super) fn compile_start_process_expr(&mut self, process: &ProcessStartExpr) -> usize {
-        for (_, expr) in &process.args {
-            self.compile_expr(expr);
-        }
-        let keys = self.push_key_list(process.args.iter().map(|(name, _)| name.as_str()));
-        let process = self.push_name(&process.process);
-        let instruction = self.code.len();
-        self.code.push(Instruction::StartProcess { process, keys });
-        instruction
-    }
-
     pub(super) fn compile_process_ref_expr(&mut self, process: &str) {
         let Some(module_context) = self.module_context.as_ref() else {
             self.emit_push_value(Value::Null);

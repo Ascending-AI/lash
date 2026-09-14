@@ -821,7 +821,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
@@ -889,7 +889,7 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let required_environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
@@ -1083,7 +1083,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: str, other: str) -> bool { finish true }",
@@ -1340,7 +1340,7 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(value: str) -> bool { finish true }",
@@ -1409,7 +1409,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(handler: Process<(event: str), bool> | str) -> bool { finish true }",
@@ -1472,7 +1472,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
 #[test]
 fn surface_merges_plugin_extensions() {
     let contribution = LashlangSurfaceContribution::new(
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
         LashlangLanguageFeatures::default().with_label_annotations(),
         LashlangHostCatalog::tool_default(["lookup"]),
     );
@@ -1492,7 +1492,6 @@ fn surface_merges_plugin_extensions() {
         .expect("empty tool catalog has no Lashlang bindings to validate");
 
     assert!(environment.abilities.sleep);
-    assert!(environment.abilities.processes);
     assert!(environment.language_features.label_annotations);
     assert!(
         environment
@@ -1625,7 +1624,7 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_processes(),
+        LashlangAbilities::default(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,

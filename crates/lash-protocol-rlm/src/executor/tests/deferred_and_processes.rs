@@ -1363,10 +1363,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
             language: "typescript".to_string(),
-            code: r#"const later = defineProcess({
-              name: "later", signals: {},
-              run: async () => { return 1; }
-            });
+            code: r#"const later = async () => { return 1; };
             finish(1);"#
                 .to_string(),
         };
@@ -1374,7 +1371,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         let context = || lash_core::testing::code_execution_context();
         let surface = || {
             LashlangSurface::new(
-                lashlang::LashlangAbilities::default().with_processes(),
+                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             )
@@ -1426,17 +1423,14 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
-                        const worker = defineProcess({
-                          name: "worker", signals: {},
-                          run: async (input: unknown) => { return input; }
-                        });
+                        const worker = async (input: unknown) => { return input; };
                         finish(1);
                     "#
                 .to_string(),
             },
             artifact_store.clone(),
             LashlangSurface::new(
-                lashlang::LashlangAbilities::default().with_processes(),
+                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             ),
@@ -1477,9 +1471,53 @@ pub(super) struct TypeScriptSignalProcessService {
     pub(super) registry: Arc<lash_core::TestLocalProcessRegistry>,
     pub(super) controller: Arc<dyn lash_core::RuntimeEffectController>,
     pub(super) originator_override: Option<lash_core::ProcessOriginator>,
+    /// Where a recorded start publishes the execution env its registration
+    /// then references. FIG-2999: `processes.start` is a declaring leaf tool,
+    /// so the env is captured on the recorded-intent route rather than by the
+    /// host-bridge arm the executor no longer has.
+    pub(super) env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    /// The engine registry a recorded start is admitted against. FIG-2999: the
+    /// signal event types a process registers with come from the engine
+    /// resolving the definition the start named, which used to be computed by
+    /// the in-attempt start path the executor no longer has. Without the
+    /// admission a signalled process refuses its own signal at delivery
+    /// ("emitted undeclared event type `signal.ready`").
+    pub(super) engines: Arc<lash_core::ProcessEngineRegistry>,
 }
 
-pub(super) struct EmptyTypeScriptSignalToolProvider;
+/// The surface a process engine runs a child against.
+///
+/// FIG-2999: the cell's module requires the `processes` module the moment it
+/// starts a process, and a child replaying that module resolves the requirement
+/// against the engine's own surface. The cell reads those operations off its
+/// tool catalogue; the engine, which has no catalogue, carries them as host
+/// resources instead.
+pub(super) fn process_engine_surface(surface: LashlangSurface) -> LashlangSurface {
+    surface
+        .with_resources(
+            lash_lashlang_runtime::lashlang_resources_from_tool_catalog(
+                &process_control_tool_catalog(),
+            )
+            .expect("process control tools bind"),
+        )
+        .expect("process control operations are unique")
+}
+
+/// The engine registry a fixture process service admits recorded starts
+/// against: the one stock engine, over the artifacts the test publishes.
+pub(super) fn fixture_process_engines(
+    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    surface: LashlangSurface,
+) -> Arc<lash_core::ProcessEngineRegistry> {
+    Arc::new(lash_core::ProcessEngineRegistry::new().with_registration(
+        lash_lashlang_runtime::lashlang_process_engine_registration(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                artifact_store,
+                process_engine_surface(surface),
+            ),
+        ),
+    ))
+}
 
 pub(super) fn status_inspect_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
@@ -1507,13 +1545,41 @@ pub(super) struct TypeScriptProcessInspectionToolProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
+    // FIG-2999: the fixture's cell starts a process before it inspects one, and
+    // starting is a leaf tool, so this provider serves the process controls
+    // beside its own inspection tool.
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![status_inspect_definition().manifest()]
+        let mut manifests = vec![status_inspect_definition().manifest()];
+        manifests.extend(ProcessControlToolProvider.tool_manifests());
+        manifests
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == "status_inspect" || name == "tool:status_inspect")
-            .then(|| Arc::new(status_inspect_definition().contract()))
+        if name == "status_inspect" || name == "tool:status_inspect" {
+            return Some(Arc::new(status_inspect_definition().contract()));
+        }
+        ProcessControlToolProvider.resolve_contract(name)
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        ProcessControlToolProvider.attempt_may_defer(tool_id)
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
+        if call.name == "status_inspect" || call.name == "tool:status_inspect" {
+            *self.inspected_process_id.lock().unwrap() = call
+                .args
+                .get("process_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            return lash_core::ToolAttemptOutcome::done_without_intents(
+                lash_core::ToolOutcomeDone::ok(serde_json::json!("inspected-ok")),
+            );
+        }
+        ProcessControlToolProvider.execute_attempt(call).await
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
@@ -1531,21 +1597,96 @@ impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
     }
 }
 
+/// The process-control leaf tools a cell reaches for, backed by the shipped
+/// plugin.
+///
+/// FIG-2999: starting, signalling and yielding are leaf tools rather than
+/// dialect special forms, so a fixture that drives a process installs the same
+/// declarations and the same attempt bodies `lash-plugin-process-controls`
+/// ships, instead of a host-bridge arm the executor no longer has.
+pub(super) struct ProcessControlToolProvider;
+
+pub(super) fn process_control_tool_definitions() -> Vec<lash_core::ToolDefinition> {
+    vec![
+        lash_plugin_process_controls::process_start_tool_definition(),
+        lash_plugin_process_controls::process_signal_tool_definition(),
+        lash_plugin_process_controls::process_emit_tool_definition(),
+        lash_plugin_process_controls::process_register_tool_definition(),
+        lash_plugin_process_controls::process_await_tool_definition(),
+        lash_plugin_process_controls::process_cancel_tool_definition(),
+    ]
+}
+
+pub(super) fn process_control_tool_catalog() -> lash_core::ToolCatalog {
+    lash_core::ToolCatalog::from_tool_definitions(process_control_tool_definitions())
+}
+
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for EmptyTypeScriptSignalToolProvider {
+impl lash_core::ToolProvider for ProcessControlToolProvider {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        Vec::new()
+        process_control_tool_definitions()
+            .iter()
+            .map(lash_core::ToolDefinition::manifest)
+            .collect()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        None
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        process_control_tool_definitions()
+            .into_iter()
+            .find(|definition| definition.manifest().name == name)
+            .map(|definition| Arc::new(definition.contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == "tool:await_process"
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
         lash_core::ToolOutcome::err(serde_json::json!(format!(
-            "signal round-trip test has no tool `{}`",
+            "process control tool `{}` needs the attempt signature",
             call.name
         )))
+    }
+
+    async fn execute_attempt(
+        &self,
+        call: lash_core::ToolCall<'_>,
+    ) -> lash_core::ToolAttemptOutcome {
+        match call.name {
+            "start_process" => {
+                lash_plugin_process_controls::execute_process_start_tool_call(
+                    call.context,
+                    call.args,
+                )
+                .await
+            }
+            "signal_process" => lash_plugin_process_controls::execute_process_signal_tool_call(
+                call.context,
+                call.args,
+            ),
+            "emit_process_event" => lash_plugin_process_controls::execute_process_emit_tool_call(
+                call.context,
+                call.args,
+            ),
+            "register_process" => lash_plugin_process_controls::execute_process_register_tool_call(
+                call.context,
+                call.args,
+            ),
+            "await_process" => lash_plugin_process_controls::execute_process_await_tool_call(
+                call.context,
+                call.args,
+            ),
+            other => {
+                let lash_core::ToolOutcome::Done(output) = lash_core::ToolOutcome::err(
+                    serde_json::json!(format!("unknown process control tool `{other}`")),
+                ) else {
+                    unreachable!("an error outcome is always done")
+                };
+                lash_core::ToolAttemptOutcome::done_without_intents(
+                    lash_core::ToolOutcomeDone::from_output(*output),
+                )
+            }
+        }
     }
 }
 
@@ -1565,20 +1706,73 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
             .and_then(|record| record.max_attempts))
     }
 
-    // The recorded-intent routes belong to atomic tool attempts, which this
+    /// FIG-2999: `processes.start` is a declaring leaf tool, so a cell that
+    /// starts a process reaches the registry through the recorded-intent route
+    /// rather than through the host-bridge arm the executor no longer has.
+    /// This fixture registers the child the same way its direct `start` does.
+    async fn start_from_recorded_intent(
+        &self,
+        session_id: &SessionId,
+        request: lash_core::ProcessStartRequest,
+        scope: lash_core::ProcessOpScope<'_>,
+    ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
+        // The starting session observes the child it started, the way the
+        // runtime's own start command records it.
+        let mut observers = request.observers.clone();
+        if !observers.contains(session_id) {
+            observers.push(session_id.clone());
+        }
+        let request_env_spec = request.env_spec.clone();
+        let env_ref = match request.env_spec.clone() {
+            Some(spec) => Some(
+                lash_core::testing::publish_process_execution_env_for_testing(
+                    self.env_store.as_ref(),
+                    &lash_core::ArtifactOwner::process_start(&request.id),
+                    &spec,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let registration = request.into_registration(env_ref);
+        // The runtime's recorded-intent route admits an engine start against
+        // the env its own record carries and stamps the identity the engine
+        // resolved, which is where the process's signal event types come from.
+        let registration = match registration.input.as_ref() {
+            lash_core::ProcessInput::Engine { kind, payload } => {
+                let admitted = self
+                    .engines
+                    .admit(kind, payload, request_env_spec.as_ref())
+                    .await?;
+                registration.with_admitted_identity(admitted)
+            }
+            _ => registration,
+        };
+        // The runtime's own recorded-intent route re-registers with the bound
+        // on the row when one exists, so the fixture does too: a redrive after
+        // the host default moved must not change the registration fingerprint.
+        let registration = match self
+            .recorded_max_attempts(session_id, &registration.id)
+            .await?
+        {
+            Some(recorded) => registration.with_max_attempts(Some(recorded)),
+            None => registration,
+        };
+        let record = self
+            .start(
+                session_id,
+                registration,
+                lash_core::ProcessStartOptions::new().with_initial_observers(observers),
+                scope,
+            )
+            .await?;
+        Ok(lash_core::ProcessHandleView::from_record(record))
+    }
+
+    // The remaining recorded-intent routes belong to atomic tool attempts this
     // signal fixture never opens. Refuse them rather than pretend, so a test
     // that starts using them fails loudly instead of silently taking a
     // non-atomic path.
-    async fn start_from_recorded_intent(
-        &self,
-        _session_id: &SessionId,
-        _request: lash_core::ProcessStartRequest,
-        _scope: lash_core::ProcessOpScope<'_>,
-    ) -> Result<lash_core::ProcessHandleView, lash_core::PluginError> {
-        Err(lash_core::PluginError::Session(
-            "recorded process starts are unavailable in this test".to_string(),
-        ))
-    }
 
     async fn cancel_recorded_intent(
         &self,
@@ -1592,18 +1786,22 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         ))
     }
 
+    /// FIG-2999: `processes.signal` is a declaring leaf tool, so a cell that
+    /// signals reaches the process through the recorded-intent route. The
+    /// delivery is the same one the possessed route performs — the fixture's
+    /// waiter-side assertion included — so it delegates rather than growing a
+    /// second copy that could drift from it.
     async fn signal_recorded_intent(
         &self,
-        _session_id: &SessionId,
-        _process_id: &ProcessId,
-        _signal: String,
-        _call_id: String,
-        _payload: serde_json::Value,
-        _scope: lash_core::ProcessOpScope<'_>,
+        session_id: &SessionId,
+        process_id: &ProcessId,
+        signal: String,
+        call_id: String,
+        payload: serde_json::Value,
+        scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessEvent, lash_core::PluginError> {
-        Err(lash_core::PluginError::Session(
-            "recorded process signals are unavailable in this test".to_string(),
-        ))
+        self.signal_possessed(session_id, process_id, signal, call_id, payload, scope)
+            .await
     }
 
     async fn emit_event_recorded_intent(
@@ -1808,9 +2006,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
             .allow_process_lifetime_completion_keys(),
     );
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_process_signals(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
     );
@@ -1835,7 +2031,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
-                surface.clone(),
+                process_engine_surface(surface.clone()),
             ),
         ),
     );
@@ -1859,10 +2055,12 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         registry: registry.clone(),
         controller: controller.clone(),
         originator_override: None,
+        env_store: Arc::clone(&process_env_store),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        Arc::new(EmptyTypeScriptSignalToolProvider),
-        lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+        Arc::new(ProcessControlToolProvider),
+        process_control_tool_catalog(),
         None,
         processes,
         controller,
@@ -1879,12 +2077,9 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ExecRequest {
             language: "typescript".to_string(),
             code: r#"
-                    const worker = defineProcess({
-                      name: "worker", signals: { ready: null },
-                      run: async () => await waitSignal("ready")
-                    });
-                    const handle = start(worker);
-                    wake(handle, "ready", { ok: true });
+                    const worker = async () => await waitSignal("ready");
+                    const handle = await processes.start({ definition: worker });
+                    await processes.signal({ handle: handle, name: "ready", payload: { ok: true } });
                     finish("signal-sent");
                 "#
             .to_string(),
@@ -1965,7 +2160,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             .allow_process_lifetime_completion_keys(),
     );
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default().with_processes(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
     );
@@ -1990,7 +2185,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
-                surface.clone(),
+                process_engine_surface(surface.clone()),
             ),
         ),
     );
@@ -2014,10 +2209,12 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         registry: registry.clone(),
         controller: controller.clone(),
         originator_override: None,
+        env_store: Arc::clone(&process_env_store),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
-        Arc::new(EmptyTypeScriptSignalToolProvider),
-        lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+        Arc::new(ProcessControlToolProvider),
+        process_control_tool_catalog(),
         None,
         processes,
         controller,
@@ -2034,11 +2231,8 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ExecRequest {
             language: "typescript".to_string(),
             code: r#"
-                    const worker = defineProcess({
-                      name: "worker", signals: {},
-                      run: async () => { return "done"; }
-                    });
-                    const handle = start(worker);
+                    const worker = async () => { return "done"; };
+                    const handle = await processes.start({ definition: worker });
                     finish("started");
                 "#
             .to_string(),
@@ -2108,12 +2302,11 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     let tool_provider = Arc::new(TypeScriptProcessInspectionToolProvider {
         inspected_process_id: Arc::clone(&inspected),
     });
-    let tool_catalog =
-        lash_core::ToolCatalog::from_tool_definitions(vec![status_inspect_definition()]);
+    let mut catalog_definitions = vec![status_inspect_definition()];
+    catalog_definitions.extend(process_control_tool_definitions());
+    let tool_catalog = lash_core::ToolCatalog::from_tool_definitions(catalog_definitions);
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_process_signals(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
     );
@@ -2138,7 +2331,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 artifact_store.clone(),
-                surface.clone(),
+                process_engine_surface(surface.clone()),
             ),
         ),
     );
@@ -2162,6 +2355,8 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         registry: registry.clone(),
         controller: controller.clone(),
         originator_override: None,
+        env_store: Arc::clone(&process_env_store),
+        engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
         tool_provider,
@@ -2181,11 +2376,8 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         ExecRequest {
             language: "typescript".to_string(),
             code: r#"
-                    const worker = defineProcess({
-                      name: "worker", signals: {},
-                      run: async () => { return "done"; }
-                    });
-                    const handle = start(worker);
+                    const worker = async () => { return "done"; };
+                    const handle = await processes.start({ definition: worker });
                     const processId = handle.process_id;
                     const status = await status_tool.inspect({ process_id: processId });
                     finish({ id: processId, status: status });

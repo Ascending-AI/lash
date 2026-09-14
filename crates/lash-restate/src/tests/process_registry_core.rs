@@ -732,16 +732,12 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 async move {
                     llm_provider_calls.fetch_add(1, Ordering::SeqCst);
                     let source = r#"<typescript>
-const replayProbe = defineProcess({
-  name: "replay_probe",
-  signals: {},
-  run: async () => {
-    const counted = await tools.replay_scalar_counter({});
-    const resumed = await tools.replay_pending_input({});
-    return { counted: counted.value, answer: resumed.answer };
-  }
-});
-const handle = start(replayProbe);
+const replayProbe = async () => {
+  const counted = await tools.replay_scalar_counter({});
+  const resumed = await tools.replay_pending_input({});
+  return { counted: counted.value, answer: resumed.answer };
+};
+const handle = await processes.start({ definition: replayProbe });
 finish(await handle);
 </typescript>"#;
                     Ok(lash_core::LlmResponse {

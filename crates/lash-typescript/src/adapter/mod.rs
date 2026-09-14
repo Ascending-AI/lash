@@ -156,7 +156,7 @@ pub(crate) struct SwitchCase {
 #[derive(Clone, Debug)]
 pub(crate) enum Pattern {
     /// A bound name, with the type annotation written on it if there was one.
-    /// The annotation is decorative everywhere but a `defineProcess.run`
+    /// The annotation is decorative everywhere but a process-literal
     /// parameter, where it becomes the process's declared input type.
     Ident(String, Option<TypeAnnotation>),
     Rest(Box<Pattern>),

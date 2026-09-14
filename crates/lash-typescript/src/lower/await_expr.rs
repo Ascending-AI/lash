@@ -91,8 +91,6 @@ impl Lowerer {
             LashExpr::SleepFor(_)
                 | LashExpr::SleepUntil(_)
                 | LashExpr::WaitSignal { .. }
-                | LashExpr::SignalRun { .. }
-                | LashExpr::Wake(_)
                 | LashExpr::Finish(_)
                 | LashExpr::Fail(_)
         ) {
@@ -100,11 +98,6 @@ impl Lowerer {
         }
         if matches!(lowered, LashExpr::ReceiverCall { .. }) {
             return Ok(LashExpr::Await(Box::new(LashExpr::ResultUnwrap(Box::new(
-                lowered,
-            )))));
-        }
-        if matches!(lowered, LashExpr::StartProcess(_)) {
-            return Ok(LashExpr::ResultUnwrap(Box::new(LashExpr::Await(Box::new(
                 lowered,
             )))));
         }

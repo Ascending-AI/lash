@@ -80,6 +80,21 @@ fn resources() -> LashlangHostCatalog {
         .expect("host catalog operation must not conflict");
     crate::add_trigger_resource_operations(&mut catalog)
         .expect("trigger resource operations are unique");
+    // The process control surface is a set of leaf tools now (FIG-2999), so a
+    // fixture that starts, signals or cancels a process calls them like any
+    // other module operation.
+    for operation in ["start", "signal", "cancel"] {
+        catalog
+            .add_module_operation(
+                ["processes"],
+                "Processes",
+                operation,
+                operation,
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
+    }
     // The FIG-2997 lift fixture: a leaf tool whose `program` slot is typed
     // `Process` through the `x-lash` keyword (FIG-2993), the way real process
     // controls declare a target. The lift is type-directed on exactly this

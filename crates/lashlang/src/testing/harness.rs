@@ -13,9 +13,9 @@
 use crate::{
     AbilityOp, AbilityResult, CompiledProgram, ExecutionEnvironment, ExecutionHost,
     ExecutionHostError, ExecutionOutcome, LashlangAbilities, LashlangExecutionSite,
-    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule, Program,
-    ProjectedBindings, ResourceOperation, ResourceOperationBatchResult, ResourceOperationResult,
-    RuntimeError, RuntimeFailure, State, TypeExpr, Value,
+    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule,
+    ProcessType, Program, ProjectedBindings, ResourceOperation, ResourceOperationBatchResult,
+    ResourceOperationResult, RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
 };
 
 /// A host that answers the four `tools.*` operations [`test_environment`]
@@ -55,7 +55,7 @@ impl ExecutionHost for EchoHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
-                Self::perform_resource_operation(operation).map(AbilityResult::Value)
+                Self::perform_resource_operation(*operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
                 ResourceOperationBatchResult::settled_in_input_order(
@@ -81,8 +81,50 @@ impl ExecutionHost for EchoHost {
     }
 }
 
+/// Adds the `processes` control tools every process fixture links against.
+///
+/// FIG-2999: starting, signalling, cancelling and yielding are leaf tools, not
+/// special forms, so a fixture that drives a process needs them in its
+/// catalogue.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls; the catalogue is empty of these names"
+)]
+pub fn add_process_control_operations(resources: &mut LashlangHostCatalog) {
+    // `start` types its `definition` slot as a process: that expected type is
+    // what lifts a process literal out of the argument, so a fixture that
+    // starts one links the way a real catalogue's `processes.start` does.
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "start",
+            "start",
+            TypeExpr::Object(vec![TypeField {
+                name: "definition".into(),
+                ty: TypeExpr::Process(ProcessType::unknown()),
+                optional: false,
+            }]),
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    for operation in ["signal", "cancel", "emit"] {
+        resources
+            .add_module_operation(
+                ["processes"],
+                "Processes",
+                operation,
+                operation,
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
+    }
+}
+
 /// The host environment the scaffolding links against: a `tools` module with
-/// `echo`, `err`, `missing` and `spawn`, and every ability granted.
+/// `echo`, `err`, `missing` and `spawn`, a `processes` module carrying the
+/// process control tools, and every ability granted.
 #[expect(
     clippy::expect_used,
     reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
@@ -101,6 +143,7 @@ pub fn test_environment() -> LashlangHostEnvironment {
             )
             .expect("host catalog operation must not conflict");
     }
+    add_process_control_operations(&mut resources);
     LashlangHostEnvironment::new(resources, LashlangAbilities::all())
 }
 

@@ -9,8 +9,8 @@
 //! back to the structural spelling:
 //!
 //! * `ProcessDecl { body: Try(Finish(Call(Function))) }` with the generated
-//!   `__typescript_process_error` catch prints back as `defineProcess({ name,
-//!   run: async (..) => { .. } })`.
+//!   `__typescript_process_error` catch prints back as
+//!   `const <name> = async (..) => { .. };`.
 //! * `Print(__typescript_stdlib("__consoleObservationText", x))` prints back as
 //!   `console.log(x)`.
 //! * `__typescript_await_array([..], false)` prints back as
@@ -102,8 +102,9 @@ impl Printer {
 
         for declaration in &program.declarations {
             match declaration {
-                // A process declaration is printed where `main` binds it, so the
-                // authored `const <binding> = defineProcess(..)` keeps its name.
+                // A process declaration is printed where `main` binds it, so
+                // the authored `const <binding> = async (..) => ..` keeps its
+                // name.
                 Declaration::Process(_) => {}
                 Declaration::Type(_) => {
                     return Err(TypeScriptSourceError::Unrepresentable {
@@ -169,7 +170,11 @@ impl Printer {
         Ok(out)
     }
 
-    /// Re-sugar a lowered process declaration into its authored `defineProcess`.
+    /// Re-sugar a lowered process declaration into its authored arrow.
+    ///
+    /// A process is an uncalled `const`-bound `async` arrow (FIG-2999): the
+    /// binding is the name a reader sees, and the declaration's own name is a
+    /// lift digest that no authored source spells.
     fn define_process(
         &self,
         binding: &str,
@@ -177,7 +182,7 @@ impl Printer {
         bound: &mut Vec<String>,
     ) -> Printed {
         let body = process_run_body(process).ok_or(TypeScriptSourceError::Unrepresentable {
-            kind: "a process body that is not the lowerer's `defineProcess` wrapper",
+            kind: "a process body that is not the lowerer's process wrapper",
         })?;
         let params = process
             .params
@@ -190,9 +195,8 @@ impl Printer {
             out.push('\n');
         }
         out.push_str(&format!(
-            "const {} = defineProcess({{\n  name: {},\n  run: async ({}) => ",
+            "const {} = async ({}) => ",
             self.identifier("process binding", binding)?,
-            string_literal(process.name.as_str()),
             params.join(", "),
         ));
         let mut run_bound = process
@@ -200,8 +204,8 @@ impl Printer {
             .iter()
             .map(|param| param.name.to_string())
             .collect::<Vec<_>>();
-        out.push_str(&self.block(body, 1, &mut run_bound)?);
-        out.push_str(",\n});\n");
+        out.push_str(&self.block(body, 0, &mut run_bound)?);
+        out.push_str(";\n");
         bound.push(binding.to_string());
         Ok(out)
     }
@@ -281,7 +285,15 @@ impl Printer {
                 );
                 if target.is_simple() && !bound.contains(&target.root.to_string()) {
                     bound.push(target.root.to_string());
-                    return Ok(format!("{prefix}let {rendered}"));
+                    // A process literal only lifts from a `const` binding, so
+                    // the one binding form the lens cannot spell as `let` is
+                    // the one that introduces a process.
+                    let keyword = if matches!(expr.as_ref(), Expr::ProcessLiteral(_)) {
+                        "const"
+                    } else {
+                        "let"
+                    };
+                    return Ok(format!("{prefix}{keyword} {rendered}"));
                 }
                 Ok(format!("{prefix}{rendered}"))
             }
@@ -461,24 +473,6 @@ impl Printer {
                 self.expression(then_block)?,
                 self.expression(else_block)?
             )),
-            Expr::StartProcess(start) => {
-                let args = start
-                    .args
-                    .iter()
-                    .map(|(name, value)| {
-                        Ok(format!(
-                            "{}: {}",
-                            key(name.as_str()),
-                            self.expression(value)?
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, TypeScriptSourceError>>()?;
-                let process = self.identifier("process", start.process.as_str())?;
-                if args.is_empty() {
-                    return Ok(format!("start({process})"));
-                }
-                Ok(format!("start({process}, {{ {} }})", args.join(", ")))
-            }
             Expr::ProcessRef { process } => self.identifier("process", process.as_str()),
             Expr::ResourceRef(resource) => self.resource_ref(resource),
             Expr::HostDescriptorConstructor { type_name, .. } => {
@@ -511,16 +505,8 @@ impl Printer {
                 "await waitSignal({})",
                 string_literal(name.as_str())
             )),
-            Expr::SignalRun { run, name, payload } => Ok(format!(
-                "wake({}, {}, {})",
-                self.expression(run)?,
-                string_literal(name.as_str()),
-                self.expression(payload)?
-            )),
-            Expr::Cancel(value) => Ok(format!("cancel({})", self.expression(value)?)),
             Expr::Print(value) => Ok(format!("print({})", self.expression(value)?)),
             Expr::Yield(value) => Ok(format!("yield {}", self.expression(value)?)),
-            Expr::Wake(value) => Ok(format!("wake({})", self.expression(value)?)),
             Expr::Finish(value) => Ok(format!("finish({})", self.expression(value)?)),
             Expr::Fail(value) => Ok(format!("fail({})", self.expression(value)?)),
             Expr::FunctionCall { function, args } => {

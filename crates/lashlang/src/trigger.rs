@@ -16,6 +16,11 @@ use crate::runtime::{LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_K
 const TRIGGERS_RESOURCE_TYPE: &str = "Triggers";
 const TRIGGERS_ALIAS: &str = "triggers";
 const TRIGGER_REGISTRATION_TYPE: &str = "lash.TriggerRegistration";
+
+/// The module alias the trigger operations are reached through.
+pub const TRIGGER_MODULE_ALIAS: &str = TRIGGERS_ALIAS;
+/// The named data type a trigger listing answers with.
+pub const TRIGGER_REGISTRATION_TYPE_NAME: &str = TRIGGER_REGISTRATION_TYPE;
 pub const LASH_TRIGGER_EVENT_KEY: &str = "$lash.trigger.event";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1092,10 +1097,7 @@ mod tests {
     }
 
     fn process_environment(resources: LashlangHostCatalog) -> crate::LashlangHostEnvironment {
-        crate::LashlangHostEnvironment::new(
-            resources,
-            crate::LashlangAbilities::default().with_processes(),
-        )
+        crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::default())
     }
 
     /// Links `declarations` above `source = cron.Schedule({ expr: "*" })` and

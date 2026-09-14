@@ -12,20 +12,6 @@ fn accept_mode(argument: Expr) -> Program {
 
 /// `process select(mode: <mode_ty>) { finish mode }`
 /// `start select(mode: "nope")`
-fn select_process(mode_ty: TypeExpr) -> Program {
-    builders::module(
-        vec![builders::process(
-            "select",
-            vec![builders::param("mode", mode_ty)],
-            builders::block(vec![builders::finish(builders::var("mode"))]),
-        )],
-        vec![builders::start(
-            "select",
-            vec![("mode", builders::string("nope"))],
-        )],
-    )
-}
-
 /// `process consume(<params>) { for item in <iterable> { await tools.accept_int(item)? } }`
 fn consume_process(params: Vec<ProcessParam>, iterable: Expr) -> Program {
     builders::module(
@@ -156,29 +142,6 @@ fn expected_enum_slots_reject_wrong_literals_but_admit_members_and_broad_strings
         LinkedModule::link(declared_return, full_host_environment()),
         Err(LinkError::IncompatibleExpectedLiteral { .. })
     ));
-
-    // process select(mode: enum["default"]) { finish mode }
-    // start select(mode: "nope")
-    let declared_argument = select_process(TypeExpr::Enum(vec!["default".into()]));
-    assert!(matches!(
-        LinkedModule::link(declared_argument, full_host_environment()),
-        Err(LinkError::IncompatibleExpectedLiteral { .. })
-    ));
-}
-
-#[test]
-fn union_expected_types_do_not_treat_dict_as_accepting_string_literals() {
-    // process select(mode: enum["a"] | dict) { finish mode }
-    // start select(mode: "nope")
-    let program = select_process(TypeExpr::Union(vec![
-        TypeExpr::Enum(vec!["a".into()]),
-        TypeExpr::Dict,
-    ]));
-
-    assert!(matches!(
-        LinkedModule::link(program, full_host_environment()),
-        Err(LinkError::IncompatibleExpectedLiteral { .. })
-    ));
 }
 
 #[test]
@@ -247,39 +210,6 @@ fn for_bindings_use_list_elements_and_unknown_iterables_remain_gradual() {
     assert!(matches!(
         LinkedModule::link(non_list, full_host_environment()),
         Err(LinkError::IncompatibleIterationTarget { .. })
-    ));
-}
-
-#[test]
-fn awaited_process_handles_carry_the_inferred_process_output() {
-    // process child() { finish { value: "text" } }
-    // result = await start child()
-    // await tools.accept_int(result.value)?
-    let program = builders::module(
-        vec![builders::process(
-            "child",
-            Vec::new(),
-            builders::block(vec![builders::finish(builders::record(vec![(
-                "value",
-                builders::string("text"),
-            )]))]),
-        )],
-        vec![
-            builders::assign(
-                "result",
-                builders::await_expr(builders::start("child", Vec::new())),
-            ),
-            builders::module_call(
-                &["tools"],
-                "accept_int",
-                vec![builders::field(builders::var("result"), "value")],
-            ),
-        ],
-    );
-
-    assert!(matches!(
-        LinkedModule::link(program, full_host_environment()),
-        Err(LinkError::IncompatibleOperationInput { actual, .. }) if actual.contains("str")
     ));
 }
 

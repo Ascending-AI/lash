@@ -1,7 +1,7 @@
 //! Declared TypeScript types, carried from a parameter annotation to the
 //! process signature.
 //!
-//! A `defineProcess.run` parameter is the one place where an annotation is
+//! A process-literal parameter is the one place where an annotation is
 //! load-bearing rather than decorative: it is the process's durable input
 //! shape, and a trigger registration is checked against it before any
 //! foreground effect runs (FIG-3071). Everywhere else the dialect stays

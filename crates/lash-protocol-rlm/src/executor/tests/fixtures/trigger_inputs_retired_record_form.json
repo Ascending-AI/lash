@@ -52,7 +52,7 @@
                 }
               }
             },
-            "name": "remember",
+            "name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
             "params": [
               {
                 "name": "tick",
@@ -75,7 +75,7 @@
             "Assign": {
               "expr": {
                 "ProcessRef": {
-                  "process": "remember"
+                  "process": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0"
                 }
               },
               "target": {
@@ -202,18 +202,15 @@
     },
     "exports": {
       "processes": {
-        "remember": {
-          "component": "71c9196a4af83856a6c962f72c52474a31d80d095e73842e4924fdf1ddac1202",
+        "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0": {
+          "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
           "pos": 0
         }
       }
     },
     "host_requirements": {
       "abilities": {
-        "process_signals": false,
-        "processes": true,
-        "sleep": false,
-        "triggers": false
+        "sleep": false
       },
       "language_features": {
         "label_annotations": false
@@ -335,26 +332,26 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:05e2bb74f2c2c2c142121ec2ee572ecdf1c4c682e034188b2df82aa7cd5459cc",
-    "module_ref": "lashlang:v2:blake3:992984990324e5222c46904b850819eff35afa48fc4f0b46e2d1d6cc22ca8c75"
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
+    "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
-      "remember": {
-        "component": "71c9196a4af83856a6c962f72c52474a31d80d095e73842e4924fdf1ddac1202",
+      "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0": {
+        "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:05e2bb74f2c2c2c142121ec2ee572ecdf1c4c682e034188b2df82aa7cd5459cc",
-  "module_ref": "lashlang:v2:blake3:992984990324e5222c46904b850819eff35afa48fc4f0b46e2d1d6cc22ca8c75",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
+  "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:05e2bb74f2c2c2c142121ec2ee572ecdf1c4c682e034188b2df82aa7cd5459cc",
-    "module_ref": "lashlang:v2:blake3:992984990324e5222c46904b850819eff35afa48fc4f0b46e2d1d6cc22ca8c75",
-    "process_name": "remember",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
+    "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+    "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
     "process_ref": {
-      "component": "71c9196a4af83856a6c962f72c52474a31d80d095e73842e4924fdf1ddac1202",
+      "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
       "pos": 0
     }
   },
@@ -446,11 +443,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:05e2bb74f2c2c2c142121ec2ee572ecdf1c4c682e034188b2df82aa7cd5459cc",
-        "module_ref": "lashlang:v2:blake3:992984990324e5222c46904b850819eff35afa48fc4f0b46e2d1d6cc22ca8c75",
-        "process_name": "remember",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
+        "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+        "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
         "process_ref": {
-          "component": "71c9196a4af83856a6c962f72c52474a31d80d095e73842e4924fdf1ddac1202",
+          "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
           "pos": 0
         }
       },
@@ -460,11 +457,11 @@
       "definition": {
         "definition": {
           "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:05e2bb74f2c2c2c142121ec2ee572ecdf1c4c682e034188b2df82aa7cd5459cc",
-          "module_ref": "lashlang:v2:blake3:992984990324e5222c46904b850819eff35afa48fc4f0b46e2d1d6cc22ca8c75",
-          "process_name": "remember",
+          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
+          "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+          "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
           "process_ref": {
-            "component": "71c9196a4af83856a6c962f72c52474a31d80d095e73842e4924fdf1ddac1202",
+            "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
             "pos": 0
           }
         },
@@ -474,9 +471,9 @@
         }
       },
       "kind": "lashlang",
-      "label": "remember"
+      "label": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0"
     },
-    "target_label": "remember",
+    "target_label": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
     "wake_target": {
       "agent_frame_id": "test-frame",
       "session_id": "test-session"

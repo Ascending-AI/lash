@@ -201,7 +201,7 @@ pub(super) fn parse_assignment_target_fragment(
 ///
 /// A TypeScript fragment is parsed by the dialect's own front-end, which
 /// rejects an unknown binding. The names live where the fragment sits are
-/// exactly the node's available variables, and the module's `defineProcess`
+/// exactly the node's available variables, and the module's process
 /// bindings stay process handles rather than ordinary ambient values, so a
 /// fragment that starts one still resolves a static process target.
 #[derive(Clone, Debug, Default)]
@@ -262,7 +262,7 @@ impl GraphScope {
     }
 }
 
-/// The `defineProcess` bindings a projected graph declares.
+/// The process bindings a projected graph declares.
 pub(super) fn process_bindings(graph: &WorkflowGraph) -> BTreeSet<String> {
     graph
         .declarations
@@ -274,7 +274,7 @@ pub(super) fn process_bindings(graph: &WorkflowGraph) -> BTreeSet<String> {
         .collect()
 }
 
-/// The `defineProcess` bindings an edited document declares, which is the
+/// The process bindings an edited document declares, which is the
 /// baseline's set plus any process the host renamed or added in this edit.
 pub(super) fn document_process_bindings(
     document: &WorkflowDocument,
@@ -359,15 +359,11 @@ pub(super) fn effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
 
 pub(super) fn direct_effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
     match expression {
-        Expr::StartProcess(_) => Some(WorkflowEffectKind::StartProcess),
         Expr::Await(_) => Some(WorkflowEffectKind::AwaitJoin),
-        Expr::SignalRun { .. } => Some(WorkflowEffectKind::SignalRun),
         Expr::WaitSignal { .. } => Some(WorkflowEffectKind::WaitSignal),
         Expr::SleepFor(_) | Expr::SleepUntil(_) => Some(WorkflowEffectKind::Sleep),
-        Expr::Cancel(_) => Some(WorkflowEffectKind::Cancel),
         Expr::Print(_) => Some(WorkflowEffectKind::Print),
         Expr::Yield(_) => Some(WorkflowEffectKind::Yield),
-        Expr::Wake(_) => Some(WorkflowEffectKind::Wake),
         Expr::Break => Some(WorkflowEffectKind::Break),
         Expr::Continue => Some(WorkflowEffectKind::Continue),
         _ => None,

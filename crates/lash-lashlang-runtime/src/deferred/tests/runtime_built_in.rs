@@ -32,7 +32,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
         b::module_call(&["web"], "fetch", vec![b::record(Vec::new())]),
     ]);
     let surface = LashlangSurface {
-        abilities: lashlang::LashlangAbilities::default().with_triggers(),
+        abilities: lashlang::LashlangAbilities::default(),
         ..LashlangSurface::default()
     };
     let mut first_record = DeferredResolutionRecord::default();
@@ -74,8 +74,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
         vec![vec!["web.fetch".to_string()]]
     );
 
-    let mut changed_surface = surface_with_shared_fetch_modules(&["web"]);
-    changed_surface.abilities = changed_surface.abilities.with_triggers();
+    let changed_surface = surface_with_shared_fetch_modules(&["web"]);
     let catalog = incompatible_shared_fetch_catalog();
     let mut replayed_record = DeferredResolutionRecord::default();
     let replay_ctx = link_context_with_controller(

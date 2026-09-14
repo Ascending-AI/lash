@@ -4,13 +4,46 @@ use crate::native::prompt::execution_section;
 use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
 
 fn catalog() -> lash_core::ToolCatalog {
-    lash_core::ToolCatalog::from_tool_definitions((0..7).map(|index| {
+    lash_core::ToolCatalog::from_tool_definitions(catalog_definitions())
+}
+
+fn catalog_definitions() -> Vec<lash_core::ToolDefinition> {
+    ((0..7).map(|index| {
             lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
                 "Return a STRING containing record-looking text, not a structured record{{type_literal_hint}}.",
                 serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
                 serde_json::json!({"type":"string"}))
                 .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
-        }).collect())
+        })).collect()
+}
+
+/// A catalogue carrying the process control surface.
+///
+/// FIG-2999: the process authoring block is gated by catalogue presence, not
+/// by an ability, so a fixture that wants it declares a `processes.*` tool.
+fn process_catalog() -> lash_core::ToolCatalog {
+    let mut tools = catalog_definitions();
+    tools.push(
+        lash_core::ToolDefinition::raw(
+            "tool:process-controls/start",
+            "processes_start",
+            "Start a process",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "definition": { "type": "object" } },
+                "required": ["definition"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        )
+        .with_tool_binding(ToolBinding::new(["processes"], "start")),
+    );
+    lash_core::ToolCatalog::from_tool_definitions(tools)
 }
 
 fn dialect(enabled: bool) -> TypescriptDialect {
@@ -31,7 +64,15 @@ fn dialect(enabled: bool) -> TypescriptDialect {
 }
 
 fn system(dialect: &TypescriptDialect, native: bool, enabled: bool) -> String {
-    let catalog = catalog();
+    system_with(dialect, native, enabled, catalog())
+}
+
+fn system_with(
+    dialect: &TypescriptDialect,
+    native: bool,
+    enabled: bool,
+    catalog: lash_core::ToolCatalog,
+) -> String {
     let features = crate::protocol::RlmPromptFeatures {
         images: enabled,
         type_literals: enabled,
@@ -87,8 +128,7 @@ fn prompt_diet_sizes_and_capability_gates() {
             assert!(!off.contains("### Host Surface"));
         }
     }
-    let durable =
-        crate::dialect::typescript::typescript_process_prompt(&lashlang::LashlangAbilities::all());
+    let durable = crate::dialect::typescript::typescript_process_prompt(true);
     // Raised from 900 with FIG-2986, by the smallest amount the ruled change
     // forces: `inputs?: (event: unknown) => Record<string, unknown>` is 21
     // characters longer than `inputs: Record<string, unknown>`, and the prose
@@ -144,32 +184,39 @@ fn execution_heading_has_a_body_in_both_channels() {
 }
 
 #[test]
-fn durable_primitives_gate_independently() {
-    for mask in 0..16 {
-        let abilities = lashlang::LashlangAbilities {
-            processes: mask & 1 != 0,
-            sleep: mask & 2 != 0,
-            process_signals: mask & 4 != 0,
-            triggers: mask & 8 != 0,
-        };
-        let text = crate::dialect::typescript::typescript_process_prompt(&abilities);
-        for (needle, expected) in [
-            ("run", abilities.processes),
-            ("defineProcess", abilities.processes),
-            ("sleep(", abilities.sleep),
-            (
-                "waitSignal",
-                abilities.processes && abilities.process_signals,
-            ),
-            ("registerTrigger", abilities.processes && abilities.triggers),
-            ("signals?", abilities.processes && abilities.process_signals),
+fn the_process_block_follows_the_catalogue_and_sleep_follows_its_ability() {
+    // FIG-2999: `processes`, `process_signals` and `triggers` are gone as
+    // abilities. The authoring block rides on the rendered catalogue, and
+    // `sleep` is the one remaining engine ability.
+    for process_surface in [false, true] {
+        let text = crate::dialect::typescript::typescript_process_prompt(process_surface);
+        for needle in [
+            "async",
+            "waitSignal",
+            "Captures are by value",
+            "A started handle outlives the turn",
         ] {
-            assert_eq!(
-                text.contains(needle),
-                expected,
-                "mask={mask}, {needle}: {text}"
-            );
+            assert_eq!(text.contains(needle), process_surface, "{needle}: {text}");
         }
+        for retired in ["defineProcess", "registerTrigger", "signals?", "wake("] {
+            assert!(!text.contains(retired), "{retired}: {text}");
+        }
+    }
+
+    for sleep in [false, true] {
+        let surface = LashlangSurface {
+            abilities: lashlang::LashlangAbilities { sleep },
+            ..LashlangSurface::default()
+        };
+        let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
+        let text = dialect
+            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog())
+            .unwrap();
+        assert_eq!(
+            text.contains("`await sleep(ms)` pauses the program."),
+            sleep,
+            "{text}"
+        );
     }
 }
 
@@ -177,7 +224,7 @@ fn durable_primitives_gate_independently() {
 fn child_lifecycle_copy_is_present_once_on_every_process_channel() {
     for native in [false, true] {
         {
-            let prompt = system(&dialect(true), native, true);
+            let prompt = system_with(&dialect(true), native, true, process_catalog());
             for fact in [
                 "A started handle outlives the turn",
                 "Stop cancels only the awaited handle",
@@ -338,9 +385,11 @@ fn each_host_capability_gates_its_own_vocabulary() {
     // contribute no vocabulary to gate any more (FIG-3021). Decomposition gates
     // the continuation tool's own docs, which
     // `continuation_docs_are_short_and_gated` covers against a catalogue that
-    // actually carries that tool.
+    // actually carries that tool. FIG-2999 leaves `sleep` as the only ability;
+    // the process vocabulary is gated by the catalogue instead, so it is
+    // exercised here on the same axis.
     for native in [false, true] {
-        for capability in 0..4 {
+        for capability in 0..2 {
             for enabled in [false, true] {
                 let features = crate::protocol::RlmPromptFeatures {
                     images: false,
@@ -348,39 +397,29 @@ fn each_host_capability_gates_its_own_vocabulary() {
                     decomposition: false,
                 };
                 let mut surface = LashlangSurface::default();
+                let mut catalog = catalog();
                 let needles: &[&str] = match capability {
                     0 => {
-                        surface.abilities.processes = enabled;
-                        &[
-                            "defineProcess(",
-                            "start(p:Process",
-                            "A started handle outlives the turn",
-                        ]
-                    }
-                    1 => {
                         surface.abilities.sleep = enabled;
                         &["`await sleep(ms)` pauses the program."]
                     }
-                    2 => {
-                        surface.abilities.processes = true;
-                        surface.abilities.process_signals = enabled;
-                        &["waitSignal", "waitSignal is run-only"]
-                    }
                     _ => {
-                        surface.abilities.processes = true;
-                        surface.abilities.triggers = enabled;
+                        if enabled {
+                            catalog = process_catalog();
+                        }
                         &[
-                            "registerTrigger(c: {source",
-                            "Literal target; inputs match params, arrow erased.",
+                            "### Processes",
+                            "Captures are by value",
+                            "A started handle outlives the turn",
                         ]
                     }
                 };
                 let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
                 let text = if native {
-                    execution_section(&dialect, features, &catalog())
+                    execution_section(&dialect, features, &catalog)
                 } else {
                     dialect
-                        .render_execution_section(features, &catalog())
+                        .render_execution_section(features, &catalog)
                         .unwrap()
                 };
                 for needle in needles {
@@ -429,44 +468,43 @@ fn tool_signatures_cover_every_operation_parameter_and_return_shape() {
 #[test]
 fn typescript_capabilities_gate_in_both_assembled_channels() {
     for native in [false, true] {
-        for mask in 0..16 {
-            let abilities = lashlang::LashlangAbilities {
-                processes: mask & 1 != 0,
-                sleep: mask & 2 != 0,
-                process_signals: mask & 4 != 0,
-                triggers: mask & 8 != 0,
-            };
-            let dialect = crate::dialect::TypescriptDialect::prompt_only(LashlangSurface {
-                abilities,
-                ..Default::default()
-            });
-            let prompt = system(&dialect, native, false);
-            for (needle, enabled) in [
-                ("defineProcess", abilities.processes),
-                ("### Processes", abilities.processes),
-                ("await sleep(ms)", abilities.sleep),
-                (
-                    "waitSignal",
-                    abilities.processes && abilities.process_signals,
-                ),
-                ("registerTrigger", abilities.processes && abilities.triggers),
-            ] {
-                assert_eq!(
-                    prompt.contains(needle),
-                    enabled,
-                    "mask={mask}, native={native}, {needle}"
-                );
-            }
-            // These retired surface syntaxes must never enter TypeScript copy,
-            // even when their host-side feature flags are enabled.
-            for needle in [
-                "@label",
-                "Type {",
-                "### Type literals",
-                "sleep for",
-                "wait_signal",
-            ] {
-                assert!(!prompt.contains(needle), "{needle}: {prompt}");
+        for sleep in [false, true] {
+            for process_surface in [false, true] {
+                let dialect = crate::dialect::TypescriptDialect::prompt_only(LashlangSurface {
+                    abilities: lashlang::LashlangAbilities { sleep },
+                    ..Default::default()
+                });
+                let catalog = if process_surface {
+                    process_catalog()
+                } else {
+                    catalog()
+                };
+                let prompt = system_with(&dialect, native, false, catalog);
+                for (needle, enabled) in [
+                    ("### Processes", process_surface),
+                    ("Captures are by value", process_surface),
+                    ("waitSignal", process_surface),
+                    ("await sleep(ms)", sleep),
+                ] {
+                    assert_eq!(
+                        prompt.contains(needle),
+                        enabled,
+                        "sleep={sleep}, process_surface={process_surface}, native={native}, {needle}"
+                    );
+                }
+                // These retired surface syntaxes must never enter TypeScript
+                // copy, and neither may the deleted special forms (FIG-2999).
+                for needle in [
+                    "@label",
+                    "Type {",
+                    "### Type literals",
+                    "sleep for",
+                    "wait_signal",
+                    "defineProcess",
+                    "registerTrigger",
+                ] {
+                    assert!(!prompt.contains(needle), "{needle}: {prompt}");
+                }
             }
         }
     }

@@ -57,12 +57,12 @@ fn engine_property() -> Value {
 }
 
 /// `processes.start(definition, args)` — declare a durable child start and
-/// answer with the id it will have.
+/// answer with the handle it will be held by.
 pub fn process_start_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:start_process",
         "start_process",
-        "Start a durable process from a process definition value and return its id. The start is durable: it survives a restart of the starting turn, and the id returned here is the id the process registry holds afterwards.",
+        "Start a durable process from a process definition value and return a handle to it. The start is durable: it survives a restart of the starting turn, and the handle returned here names the process the registry holds afterwards.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -82,14 +82,16 @@ pub fn process_start_tool_definition() -> ToolDefinition {
             "required": ["definition"],
             "additionalProperties": false
         }),
+        // The answer *is* the handle, so it is typed as the one process type
+        // rather than as the record that carries it: a start whose result read
+        // as a plain object could not be handed back to `await`, `signal` or
+        // `cancel`, which is the whole point of holding it. The record's own
+        // fields are `__handle__` and the opaque `id`, plus the `process_id`
+        // the process tools take; the id is opaque to the cell and is never
+        // parsed or built by guest code (ADR 0095).
         serde_json::json!({
-            "type": "object",
-            "properties": {
-                "id": { "type": "string", "description": "Id of the started process." },
-                "process_id": { "type": "string", "description": "Same id, repeated for tools that ask for `process_id`." }
-            },
-            "required": ["id", "process_id"],
-            "additionalProperties": false
+            "x-lash": { "kind": "process_unknown" },
+            "description": "Handle to the started process: await it for the result, or pass it to `processes.signal`, `processes.cancel` or `processes.await`.",
         }),
     )
     .with_examples(vec![
@@ -265,13 +267,22 @@ pub async fn execute_process_start_tool_call(
             agent_frame_id: Some(context.agent_frame_id().clone()),
         },
         lash_core::ProcessLifecyclePolicy::new(parent, lash_core::OnParentEnd::Abandon),
-    );
+    )
+    // The attempt bound this host stamps onto a child. It lives on the runtime
+    // execution context, which only the in-attempt start path could read before
+    // FIG-2999; a leaf start that could not reach it registered its child with
+    // no bound, and a child failing the same way every attempt retried forever.
+    // A redrive that re-registers the same deterministic id still takes the
+    // bound recorded on the row, not this one.
+    .with_max_attempts(context.engine_child_max_attempts().map(|bound| bound.get()))
+    // An engine start is admitted against the execution env its own record
+    // carries, never against the live session env, so the declaration captures
+    // the attempt's env spec here rather than leaving realization to substitute
+    // one (FIG-2999).
+    .with_env_spec(context.process_execution_env_spec());
     let process_id = ProcessId::from_intent_identity(&identity);
     ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(serde_json::json!({
-            "id": process_id,
-            "process_id": process_id,
-        })),
+        ToolOutcomeDone::ok(unrealized_start_handle(&process_id)),
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(
             lash_core::StartProcessIntent {
                 session_id,
@@ -279,6 +290,27 @@ pub async fn execute_process_start_tool_call(
             },
         ))]),
     )
+}
+
+/// The handle a start answers with before its declaration is realized.
+///
+/// A handle names a process *and* the incarnation it was taken against, and the
+/// incarnation is a sequence the registry allocates when the row lands — after
+/// this attempt has sealed its output. So the declaration answers the one
+/// handle kind with the incarnation it does not yet have, and the realization
+/// projects the handle the registry actually minted over it
+/// (`project_recorded_intent_outcomes`). A cell that somehow held this record
+/// without the projection holds a handle that names no incarnation, which every
+/// reader already refuses (`ProcessRef::from_handle_json`) — it can never be
+/// mistaken for a live one.
+const UNREALIZED_INCARNATION: u64 = 0;
+
+fn unrealized_start_handle(process_id: &ProcessId) -> Value {
+    let mut handle = lash_sansio::handle::handle_record_json(
+        &lash_sansio::handle::HandleId::process(process_id.as_str(), UNREALIZED_INCARNATION),
+    );
+    handle["process_id"] = serde_json::json!(process_id);
+    handle
 }
 
 /// Declares the signal against the process the handle names.

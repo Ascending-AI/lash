@@ -1,4 +1,4 @@
-//! Turning a declared `defineProcess.run` parameter type into the runtime's
+//! Turning a declared process-literal parameter type into the runtime's
 //! type language.
 //!
 //! A process parameter's declared type is the only TypeScript annotation the

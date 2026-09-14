@@ -548,7 +548,6 @@ async fn execute_code_inner(
         deferred_execution_grants,
         artifact_store: Arc::clone(&artifact_store),
         child_max_attempts: state.child_max_attempts(),
-        child_max_attempts_default: ctx.engine_child_max_attempts(),
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()

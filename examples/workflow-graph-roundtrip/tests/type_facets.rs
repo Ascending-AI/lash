@@ -17,18 +17,14 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         .post(format!("{base}/project"))
         .json(&serde_json::json!({
             "source": r#"
-                const typed = defineProcess({
-                  name: "typed",
-                  signals: {},
-                  run: async (name) => {
-                    let result = await display.show_message({ text: name });
-                    let shape = { ready: true };
-                    for (const item of [shape.missing]) {
-                      let seen = item;
-                    }
-                    return result;
-                  },
-                });
+                const typed = async (name) => {
+                  let result = await display.show_message({ text: name });
+                  let shape = { ready: true };
+                  for (const item of [shape.missing]) {
+                    let seen = item;
+                  }
+                  return result;
+                };
             "#
         }))
         .send()

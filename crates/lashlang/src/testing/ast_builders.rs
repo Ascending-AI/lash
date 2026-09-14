@@ -20,8 +20,7 @@ use crate::ast::{
     AssignPathStep, AssignTarget, AstString, BinaryOp, CatchClause, Declaration, Expr,
     ExpressionSourceSpan, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata,
     ListComprehensionClause, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature,
-    ProcessStartExpr, ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
-    TypeField, UnaryOp,
+    ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
 };
 use crate::span::Span;
 
@@ -439,20 +438,12 @@ pub fn yield_expr(expr: Expr) -> Expr {
     Expr::Yield(Box::new(expr))
 }
 
-pub fn wake(expr: Expr) -> Expr {
-    Expr::Wake(Box::new(expr))
-}
-
 pub fn await_expr(expr: Expr) -> Expr {
     Expr::Await(Box::new(expr))
 }
 
 pub fn unwrap(expr: Expr) -> Expr {
     Expr::ResultUnwrap(Box::new(expr))
-}
-
-pub fn cancel(expr: Expr) -> Expr {
-    Expr::Cancel(Box::new(expr))
 }
 
 pub fn sleep_for(expr: Expr) -> Expr {
@@ -465,14 +456,6 @@ pub fn sleep_until(expr: Expr) -> Expr {
 
 pub fn wait_signal(name: &str) -> Expr {
     Expr::WaitSignal { name: name.into() }
-}
-
-pub fn signal_run(run: Expr, name: &str, payload: Expr) -> Expr {
-    Expr::SignalRun {
-        run: Box::new(run),
-        name: name.into(),
-        payload: Box::new(payload),
-    }
 }
 
 pub fn builtin(name: &str, args: Vec<Expr>) -> Expr {
@@ -526,22 +509,45 @@ pub fn module_call(path: &[&str], operation: &str, args: Vec<Expr>) -> Expr {
     unwrap(await_expr(receiver_call(resource(path), operation, args)))
 }
 
+/// `await processes.start({ definition: <name>, args: { ..args } })?`
+///
+/// The tool spelling that replaced the retired `start` form (FIG-2999): the
+/// operation answers with the process handle the old expression produced, so
+/// a fixture that started a process and awaited the handle keeps its shape.
+pub fn start(process: &str, args: Vec<(&str, Expr)>) -> Expr {
+    let fields = vec![("definition", process_ref(process)), ("args", record(args))];
+    module_call(&["processes"], "start", vec![record(fields)])
+}
+
+/// `await processes.signal({ handle, signal, payload })?` — the tool spelling
+/// that replaced the retired `signal_run` form (FIG-2999).
+pub fn signal_run(run: Expr, name: &str, payload: Expr) -> Expr {
+    module_call(
+        &["processes"],
+        "signal",
+        vec![record(vec![
+            ("handle", run),
+            ("signal", string(name)),
+            ("payload", payload),
+        ])],
+    )
+}
+
+/// `await processes.cancel({ handle })?` — the tool spelling that replaced the
+/// retired `cancel` form (FIG-2999).
+pub fn cancel(handle: Expr) -> Expr {
+    module_call(
+        &["processes"],
+        "cancel",
+        vec![record(vec![("handle", handle)])],
+    )
+}
+
 /// A reference to a declared process by name.
 pub fn process_ref(name: &str) -> Expr {
     Expr::ProcessRef {
         process: name.into(),
     }
-}
-
-/// `start <process>(<args>)`
-pub fn start(process: &str, args: Vec<(&str, Expr)>) -> Expr {
-    Expr::StartProcess(ProcessStartExpr {
-        process: process.into(),
-        args: args
-            .into_iter()
-            .map(|(name, value)| (AstString::from(name), value))
-            .collect(),
-    })
 }
 
 /// A host descriptor constructor, e.g. `timer.Schedule({ .. })`.

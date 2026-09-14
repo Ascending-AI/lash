@@ -154,16 +154,12 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             );
         }
         HostSetupFailureSite::ArtifactStore => {
-            request.code = r#"const worker = defineProcess({
-              name: "worker",
-              signals: {},
-              run: async () => { return null; }
-            });
+            request.code = r#"const worker = async () => { return null; };
             finish(null);"#
                 .to_string();
             artifact_store = Arc::new(FailingArtifactStore);
             surface = LashlangSurface::new(
-                lashlang::LashlangAbilities::default().with_processes(),
+                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             );
@@ -1061,19 +1057,22 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // for the one handle kind. Re-pinned again by FIG-3088, which moved the
         // constant to v12 after the hash-writer rewrite. Re-pinned again by
         // FIG-2997, which moved the constant to v13 for the process-literal
-        // lift. What the pair asserts is unchanged: the two
+        // lift. Re-pinned again by FIG-2999, which moved the constant to v14
+        // after the process special forms left the dialect and the ability set
+        // they were gated by left `host_requirements`. What the pair asserts is
+        // unchanged: the two
         // sides are still equal, which is the trace-sink independence this
         // test exists for; only the constant both sides derive from moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:b8eabb2d25fbe9642db10efe:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:8a0d159365ac64bd3ce1bf79:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:b8eabb2d25fbe9642db10efe:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:8a0d159365ac64bd3ce1bf79:1"
             )
         );
 
@@ -1087,11 +1086,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/41a01d5170ff80702f8e2c18911f4469e9350111f8b1019bbf363f8bf75f70c6"
+            "frame-key/v2/1e5c4328e577816e15f65024f09da1d9c53400eda3d734127f6f187b928f6bc5"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/41a01d5170ff80702f8e2c18911f4469e9350111f8b1019bbf363f8bf75f70c6"
+            "frame-key/v2/1e5c4328e577816e15f65024f09da1d9c53400eda3d734127f6f187b928f6bc5"
         );
     });
 }
@@ -1231,13 +1230,12 @@ pub(super) async fn execute_with_host_environment(
     resources: lashlang::LashlangHostCatalog,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::new();
-    let ctx = if abilities.triggers {
-        lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
-            lash_core::facade_support::InMemoryTriggerStore::default(),
-        ))
-    } else {
-        lash_core::testing::code_execution_context()
-    };
+    // Triggers are catalogue presence rather than an ability now (FIG-2999), so
+    // the harness always supplies the store: a program that never registers one
+    // never reaches it.
+    let ctx = lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
+        lash_core::facade_support::InMemoryTriggerStore::default(),
+    ));
     let surface = LashlangSurface::new(
         abilities,
         lashlang::LashlangLanguageFeatures::default(),

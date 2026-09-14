@@ -65,12 +65,9 @@ async fn explicit_start_and_await_merges_distinct_results() {
     let value = finished(
         execute(
             r#"
-        const sleep_echo = defineProcess({
-          name: "sleep_echo",
-          run: async (value: string) => { return value; }
-        });
-        const left = start(sleep_echo, { value: "a" });
-        const right = start(sleep_echo, { value: "b" });
+        const sleep_echo = async (value: string) => { return value; };
+        const left = await processes.start({ definition: sleep_echo, args: { value: "a" } });
+        const right = await processes.start({ definition: sleep_echo, args: { value: "b" } });
         finish({ left: await left, right: await right });
         "#,
             &mut state,
@@ -101,14 +98,10 @@ async fn a_started_process_is_not_an_aggregate_leaf() {
 
     let error = execute(
         r#"
-        const sleep_echo = defineProcess({
-          name: "sleep_echo",
-          run: async (value: string) => { return value; }
-        });
-        const results = await Promise.all([
-          start(sleep_echo, { value: "a" }),
-          start(sleep_echo, { value: "b" })
-        ]);
+        const sleep_echo = async (value: string) => { return value; };
+        const left = await processes.start({ definition: sleep_echo, args: { value: "a" } });
+        const right = await processes.start({ definition: sleep_echo, args: { value: "b" } });
+        const results = await Promise.all([left, right]);
         finish({ first: results[0], second: results[1] });
         "#,
         &mut state,

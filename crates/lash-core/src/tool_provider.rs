@@ -158,6 +158,10 @@ pub struct AttemptContext<'run> {
     tool_call_id: Option<String>,
     attempt_number: u32,
     max_attempts: u32,
+    /// The attempt bound this host stamps onto a child a leaf body declares.
+    /// `None` where the attempt runs with no runtime execution context to read
+    /// it from, which is the same case that leaves the bound unset today.
+    engine_child_max_attempts: Option<std::num::NonZeroU32>,
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
@@ -259,6 +263,10 @@ impl<'run> AttemptContext<'run> {
             tool_call_id: context.tool_call_id.clone(),
             attempt_number: context.attempt_number,
             max_attempts: context.max_attempts,
+            engine_child_max_attempts: context
+                .runtime_execution_context
+                .as_ref()
+                .map(crate::RuntimeExecutionContext::engine_child_max_attempts),
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
@@ -367,6 +375,17 @@ impl<'run> AttemptContext<'run> {
     /// Integrator class 3 retry ceiling sealed for this invocation.
     pub fn max_attempts(&self) -> u32 {
         self.max_attempts
+    }
+    /// The attempt bound the host stamps onto a child this body declares.
+    ///
+    /// A declaring start is the only caller: the bound lives on the runtime
+    /// execution context, and before FIG-2999 only the in-attempt start path
+    /// could read it, so a leaf-tool start registered its child with no bound
+    /// at all and a deterministically failing child retried forever. `None`
+    /// means there is no runtime context to read, and the child registers
+    /// engine-paced exactly as it did before.
+    pub fn engine_child_max_attempts(&self) -> Option<std::num::NonZeroU32> {
+        self.engine_child_max_attempts
     }
     /// Integrator class 3 durable attempt replay key when supplied by the host.
     pub fn replay_key(&self) -> Option<&str> {

@@ -109,6 +109,26 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         .expect("host catalog operation must not conflict");
     resources
         .add_module_operation(
+            ["processes"],
+            "Processes",
+            "start",
+            "start_process_handle",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "cancel",
+            "cancel_process_handle",
+            TypeExpr::Any,
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    resources
+        .add_module_operation(
             ["control"],
             "Control",
             "continue_as",

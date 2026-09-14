@@ -50,7 +50,7 @@ fn a_lifted_body_captures_immutable_cell_locals_and_refuses_mutable_ones() {
             console.log(counter);
             return counter;
         };
-        const handle = start(tickle, { tick: 1 });
+        const handle = await processes.start({ definition: tickle, args: { tick: 1 } });
         finish(handle);
     "#;
     let Diagnostic { message, .. } = lash_typescript::parse(mutable).expect_err("mutable refused");
@@ -65,40 +65,39 @@ fn a_lifted_body_captures_immutable_cell_locals_and_refuses_mutable_ones() {
     );
 }
 
-/// FIG-2998: a `defineProcess` binding registers the signal set its own body
-/// waits for. The declaration key is gone, so the wait sites are the only
-/// source left; a `defineProcess` lowers straight to a process declaration and
-/// never reaches the linker's lifted-literal inference, so an empty set here
-/// means the process refuses every signal it was written to receive
-/// ("emitted undeclared event type `signal.first`") at runtime.
+/// FIG-2998 / FIG-2999: a process registers the signal set its own body waits
+/// for. The `signals` declaration key is gone and so is `defineProcess`, so a
+/// process is a lifted literal and the wait sites in its body are the only
+/// source of its signal set; an empty set here means the process refuses every
+/// signal it was written to receive ("emitted undeclared event type
+/// `signal.first`") at runtime. The inference is the linker's, over the body
+/// of the literal it lifts, and it counts a wait in a branch this run never
+/// takes.
 #[test]
-fn a_define_process_binding_registers_the_signals_its_body_waits_for() {
+fn a_lifted_process_registers_the_signals_its_body_waits_for() {
     let source = r#"
-        const waiter = defineProcess({
-            name: "waiter",
-            run: async (workflow_id) => {
-                const first = await waitSignal("first");
-                if (first === "skip") {
-                    await waitSignal("unreached");
-                }
-                const second = await waitSignal("second");
-                return { workflow_id: workflow_id, first: first, second: second };
+        const waiter = async (workflow_id: string) => {
+            const first = await waitSignal("first");
+            if (first === "skip") {
+                await waitSignal("unreached");
             }
-        });
-        const handle = start(waiter, { workflow_id: "w" });
-        finish({ process_id: handle.process_id });
+            const second = await waitSignal("second");
+            return { workflow_id: workflow_id, first: first, second: second };
+        };
+        const handle = await processes.start({ definition: waiter, args: { workflow_id: "w" } });
+        finish(handle);
     "#;
-    let program = lash_typescript::parse(source).expect("the waiter program links");
-    let signals = program
+    let linked = lash_typescript::link(source, &process_environment())
+        .unwrap_or_else(|error| panic!("the waiter program links: {error:?}"));
+    let signals = linked
+        .program()
         .declarations
         .iter()
         .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) if process.name.as_str() == "waiter" => {
-                Some(process.signals.clone())
-            }
+            lashlang::Declaration::Process(process) => Some(process.signals.clone()),
             _ => None,
         })
-        .expect("the waiter declaration is registered");
+        .expect("the lifted waiter declaration is registered");
     let names = signals
         .iter()
         .map(|signal| signal.name.to_string())
@@ -112,4 +111,25 @@ fn a_define_process_binding_registers_the_signals_its_body_waits_for() {
         ],
         "every literal wait site declares its signal, including the branch this run never takes"
     );
+}
+
+fn process_environment() -> lashlang::LashlangHostEnvironment {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    // FIG-2999: `start` is a leaf tool whose `definition` slot is typed as a
+    // process, and that expected type is what lifts the literal.
+    catalog
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "start",
+            "processes.start",
+            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                name: "definition".into(),
+                ty: lashlang::TypeExpr::Process(lashlang::ProcessType::unknown()),
+                optional: false,
+            }]),
+            lashlang::TypeExpr::Any,
+        )
+        .expect("processes.start binding");
+    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
 }

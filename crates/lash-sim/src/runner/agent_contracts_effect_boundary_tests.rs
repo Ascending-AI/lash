@@ -235,18 +235,14 @@ async fn batched_lashlang_provider_invocations_cross_tool_attempt_effect_boundar
         "lash_runtime batched tool attempt envelope",
         vec![
             r#"<typescript>
-const collect = defineProcess({
-  name: "collect",
-  signals: {},
-  run: async () => {
-    const [first, second] = await Promise.all([
-      tools.envelope_probe({ value: "a" }),
-      tools.envelope_probe({ value: "b" })
-    ]);
-    return { first: first, second: second };
-  }
-});
-const handle = start(collect);
+const collect = async () => {
+  const [first, second] = await Promise.all([
+    tools.envelope_probe({ value: "a" }),
+    tools.envelope_probe({ value: "b" })
+  ]);
+  return { first: first, second: second };
+};
+const handle = await processes.start({ definition: collect });
 finish(await handle);
 </typescript>"#,
         ],

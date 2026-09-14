@@ -200,7 +200,7 @@ impl<'a> GraphProjector<'a> {
             }
         }
         // A process literal in an argument is a process container of the
-        // module the same way a `defineProcess` binding is (ADR 0095): it
+        // module the same way a `const`-bound process arrow is (ADR 0095): it
         // projects as its own declaration, named identically to what the
         // linker will lift it to (canonical body plus AST path), addressed at
         // the path where it sits. Its name is invented — no authored binding
@@ -252,7 +252,7 @@ impl<'a> GraphProjector<'a> {
             params: process.params.clone(),
             signals: process.signals.clone(),
             return_ty: process.return_ty.clone(),
-            // `defineProcess` lowers to a wrapper that translates an uncaught
+            // A process body lowers to a wrapper that translates an uncaught
             // error into process failure. Only the inner `run` body was
             // authored, so that is what the graph shows — addressed by the
             // wrapper's own AST path so node identity and execution-site
@@ -976,7 +976,7 @@ struct RenderContext<'a> {
     scope: RenderScope,
     /// The process names the module declares.
     ///
-    /// `const child = defineProcess(..)` projects as the module binding its
+    /// `const child = async (..) => ..` projects as the module binding its
     /// process reference. The reference is not ordinary text — the name is
     /// bound by the very statement that reads it — so it is rebuilt from the
     /// declaration list instead of parsed.
@@ -984,7 +984,7 @@ struct RenderContext<'a> {
 }
 
 impl RenderContext<'_> {
-    /// The module's `defineProcess` bindings, as a fragment parse sees them.
+    /// The module's process bindings, as a fragment parse sees them.
     fn process_bindings(&self) -> std::collections::BTreeSet<String> {
         self.processes.iter().cloned().collect()
     }

@@ -48,10 +48,8 @@ impl ExecutionHost for SlowToolHost {
 
 #[derive(Default)]
 struct RecordingProcessHost {
-    starts: Mutex<Vec<ProcessStart>>,
     events: Mutex<Vec<ProcessEvent>>,
     sleeps: Mutex<Vec<Sleep>>,
-    signals: Mutex<Vec<ProcessSignal>>,
 }
 
 impl ExecutionHost for RecordingProcessHost {
@@ -60,23 +58,6 @@ impl ExecutionHost for RecordingProcessHost {
             AbilityOp::ResourceOperation(_) | AbilityOp::ResourceOperationBatch(_) => Err(
                 ExecutionHostError::new("module operations are not supported by this host"),
             ),
-            AbilityOp::StartProcess(start) => {
-                self.starts.lock_recover().push(*start);
-                let mut handle = Record::new();
-                handle.insert(
-                    lash_sansio::handle::HANDLE_FIELD.to_string(),
-                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
-                );
-                handle.insert(
-                    "id".to_string(),
-                    Value::String(
-                        lash_sansio::handle::HandleId::process("proc-1", 1)
-                            .as_str()
-                            .into(),
-                    ),
-                );
-                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
-            }
             AbilityOp::ProcessEvent(event) => {
                 self.events.lock_recover().push(event);
                 Ok(AbilityResult::Unit)
@@ -88,10 +69,6 @@ impl ExecutionHost for RecordingProcessHost {
             AbilityOp::WaitSignal { name } => {
                 assert_eq!(name, "ready");
                 Ok(AbilityResult::Value(Value::String("signal-payload".into())))
-            }
-            AbilityOp::SignalRun(signal) => {
-                self.signals.lock_recover().push(signal);
-                Ok(AbilityResult::Value(Value::Null))
             }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
@@ -760,22 +737,13 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
                 batch.aggregate_unwrap
             )
         }
-        Instruction::StartProcess { process, keys } => format!(
-            "start_process {} {}",
-            name_text(chunk, process),
-            keys_snapshot(chunk, keys)
-        ),
         Instruction::AwaitHandle => "await_handle".to_string(),
         Instruction::SleepFor => "sleep_for".to_string(),
         Instruction::SleepUntil => "sleep_until".to_string(),
         Instruction::ProcessWaitSignal { name } => {
             format!("process_wait_signal {}", name_text(chunk, name))
         }
-        Instruction::ProcessSignalRun { name } => {
-            format!("process_signal_run {}", name_text(chunk, name))
-        }
         Instruction::AwaitHandleUnwrap => "await_handle_unwrap".to_string(),
-        Instruction::CancelHandle => "cancel_handle".to_string(),
         Instruction::Intrinsic(op) => intrinsic_snapshot(chunk, op),
         Instruction::AddAssign(slot) => format!("add_assign {slot}:{}", slot_name(chunk, slot)),
         Instruction::AddAssignNumber { slot, right } => {
@@ -804,7 +772,6 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::Print => "print".to_string(),
         Instruction::Finish => "finish".to_string(),
         Instruction::ProcessYield => "process_yield".to_string(),
-        Instruction::ProcessWake => "process_wake".to_string(),
         Instruction::ProcessFail => "process_fail".to_string(),
         Instruction::ObserveStep => "observe_step".to_string(),
         Instruction::Pop => "pop".to_string(),

@@ -21,6 +21,25 @@ use lashlang::{
     node_id_for_execution_site,
 };
 
+/// The one process a fixture lifts.
+///
+/// A process literal's declaration is named by the linker's lift digest, so a
+/// fixture pins "the process this module lifted", never a spelled-out name.
+fn only_process(graph: &WorkflowGraph) -> &lashlang::WorkflowProcess {
+    let mut processes = graph.declarations.iter().filter_map(|declaration| {
+        let WorkflowDeclaration::Process(process) = declaration else {
+            return None;
+        };
+        Some(process)
+    });
+    let process = processes.next().expect("the module lifts one process");
+    assert!(
+        processes.next().is_none(),
+        "this fixture lifts exactly one process"
+    );
+    process
+}
+
 fn canonical(source: &str) -> String {
     typescript_program_source(&parse(source).expect("fixture parses"))
         .expect("a parsed fixture prints back as TypeScript")
@@ -43,17 +62,14 @@ fn assert_lens_laws(source: &str) {
     );
 }
 
-const REPRESENTATIVE: &str = r#"const child = defineProcess({
-  name: "child",
-  run: async (input: unknown) => {
+const REPRESENTATIVE: &str = r#"const child = async (input: unknown) => {
     let total = 0;
     for (const value of input.values) {
       await sleep(1);
     }
     const signal = await waitSignal("refresh");
     return total;
-  }
-});
+  };
 const items = [1, 2, 3].filter((value) => value > 1).map((value) => value * 2);
 if (items.length > 0) {
   console.log(items);
@@ -335,44 +351,30 @@ finish(state);
 
 #[test]
 fn edited_expression_text_is_rendered_and_reprojected() {
-    let source = r#"const child = defineProcess({
-  name: "child",
-  run: async () => {
+    // A process body lifts out of the module as a derived declaration, so the
+    // editable statements a host reaches are the module's own: every slot below
+    // lives in `main`, and the one process literal stays a value it names.
+    let source = r#"const child = async () => {
     return 1;
-  }
-});
-const workflow = defineProcess({
-  name: "workflow",
-  run: async () => {
-    const state = { count: 0, other: 0 };
-    while (state.count < 3) {
-      state.count = state.count + 1;
-    }
-    state.count = 7;
-    const runs = [start(child, {}), start(child, {})];
-    return state;
-  }
-});
+  };
+const state = { count: 0, other: 0 };
+while (state.count < 3) {
+  state.count = state.count + 1;
+}
+state.count = 7;
+const runs = [await processes.start({ definition: child }), await processes.start({ definition: child })];
 finish(1);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
 
     let mut edited = graph.clone();
-    let process = edited
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) if process.name == "workflow" => Some(process),
-            _ => None,
-        })
-        .expect("the workflow process is declared");
     let WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) =
-        &mut process.body.nodes[1].kind
+        &mut edited.main.nodes[2].kind
     else {
         panic!("expected while container")
     };
     *condition = "(state.count < 2)".to_string();
-    let WorkflowNodeKind::StateUpdate { target, expression } = &mut process.body.nodes[2].kind
+    let WorkflowNodeKind::StateUpdate { target, expression } = &mut edited.main.nodes[3].kind
     else {
         panic!("expected state update")
     };
@@ -381,12 +383,12 @@ finish(1);
     let WorkflowNodeKind::Computation {
         binding,
         expression,
-    } = &mut process.body.nodes[3].kind
+    } = &mut edited.main.nodes[4].kind
     else {
         panic!("expected computation")
     };
     *binding = Some("started".to_string());
-    *expression = "[start(child, {}), start(child, {}), start(child, {})]".to_string();
+    *expression = "[await processes.start({ definition: child }), await processes.start({ definition: child }), await processes.start({ definition: child })]".to_string();
 
     let rendered = workflow_graph_to_source(&edited).expect("edited graph renders");
     assert!(
@@ -395,29 +397,26 @@ finish(1);
     );
     assert!(rendered.contains("state.other = (state.count + 40);"));
     assert!(
-        // `start(child, {})` and `start(child)` lower to the same start, and
-        // the canonical spelling of an empty input is the shorter one.
-        rendered.contains("started = [start(child), start(child), start(child)];"),
+        rendered.contains("started = [await (processes.start({ definition: child })), await (processes.start({ definition: child })), await (processes.start({ definition: child }))];"),
         "rendered source:\n{rendered}"
     );
 
     let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
-    let process = reprojected.process("workflow").expect("workflow process");
     assert!(matches!(
-        &process.body.nodes[1].kind,
+        &reprojected.main.nodes[2].kind,
         WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. })
             if condition == "(state.count < 2)"
     ));
     assert!(matches!(
-        &process.body.nodes[2].kind,
+        &reprojected.main.nodes[3].kind,
         WorkflowNodeKind::StateUpdate { target, expression }
             if target == "state.other" && expression == "(state.count + 40)"
     ));
     assert!(matches!(
-        &process.body.nodes[3].kind,
+        &reprojected.main.nodes[4].kind,
         WorkflowNodeKind::Computation { binding, expression }
             if binding.as_deref() == Some("started")
-                && expression == "[start(child), start(child), start(child)]"
+                && expression == "[await (processes.start({ definition: child })), await (processes.start({ definition: child })), await (processes.start({ definition: child }))]"
     ));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("reprojected graph renders"),
@@ -427,20 +426,11 @@ finish(1);
 
 #[test]
 fn invalid_edited_expression_returns_field_typed_error() {
-    let mut graph = workflow_graph_from_source(
-        "const workflow = defineProcess({ name: \"workflow\", run: async () => { while (true) { await sleep(1); } return null; } });\nfinish(1);\n",
-    )
-    .expect("fixture projects");
-    let process = graph
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process),
-            _ => None,
-        })
-        .expect("the process is declared");
+    let mut graph =
+        workflow_graph_from_source("while (true) {\n  await sleep(1);\n}\nfinish(1);\n")
+            .expect("fixture projects");
     let WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) =
-        &mut process.body.nodes[0].kind
+        &mut graph.main.nodes[0].kind
     else {
         panic!("expected while container")
     };
@@ -454,32 +444,10 @@ fn invalid_edited_expression_returns_field_typed_error() {
         })
     ));
 
-    let mut graph = workflow_graph_from_source(
-        "const workflow = defineProcess({ name: \"workflow\", run: async () => { const state = { count: 0 }; state.count = 1; return state; } });\nfinish(1);\n",
-    )
-    .expect("fixture projects");
-    let state_update_id = graph
-        .process("workflow")
-        .expect("workflow process")
-        .body
-        .nodes[1]
-        .id
-        .clone();
-    let process = graph
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process),
-            _ => None,
-        })
-        .expect("the process is declared");
-    let node = process
-        .body
-        .nodes
-        .iter_mut()
-        .find(|node| node.id == state_update_id)
-        .expect("the state-update node");
-    let WorkflowNodeKind::StateUpdate { target, .. } = &mut node.kind else {
+    let mut graph =
+        workflow_graph_from_source("const state = { count: 0 };\nstate.count = 1;\nfinish(1);\n")
+            .expect("fixture projects");
+    let WorkflowNodeKind::StateUpdate { target, .. } = &mut graph.main.nodes[1].kind else {
         panic!("expected state update")
     };
     *target = "state.".to_string();
@@ -494,40 +462,26 @@ fn invalid_edited_expression_returns_field_typed_error() {
 
 #[test]
 fn all_container_expression_slots_accept_host_edits() {
-    let source = r#"const workflow = defineProcess({
-  name: "workflow",
-  run: async () => {
-    const values = [1, 2];
-    if (true) {
-      await sleep(1);
-    } else {
-      await sleep(2);
-    }
-    for (const value of values) {
-      await sleep(value);
-    }
-    return values;
-  }
-});
+    let source = r#"const values = [1, 2];
+if (true) {
+  await sleep(1);
+} else {
+  await sleep(2);
+}
+for (const value of values) {
+  await sleep(value);
+}
 finish(1);
 "#;
     let mut graph = workflow_graph_from_source(source).expect("fixture projects");
-    let process = graph
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process),
-            _ => None,
-        })
-        .expect("the process is declared");
     let WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. }) =
-        &mut process.body.nodes[1].kind
+        &mut graph.main.nodes[1].kind
     else {
         panic!("expected if container")
     };
     *condition = "false".to_string();
     let WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. }) =
-        &mut process.body.nodes[2].kind
+        &mut graph.main.nodes[2].kind
     else {
         panic!("expected for container")
     };
@@ -544,14 +498,13 @@ finish(1);
     );
 
     let reprojected = workflow_graph_from_source(&rendered).expect("edited source reprojects");
-    let process = reprojected.process("workflow").expect("workflow process");
     assert!(matches!(
-        &process.body.nodes[1].kind,
+        &reprojected.main.nodes[1].kind,
         WorkflowNodeKind::Container(WorkflowContainer::If { condition, .. })
             if condition == "false"
     ));
     assert!(matches!(
-        &process.body.nodes[2].kind,
+        &reprojected.main.nodes[2].kind,
         WorkflowNodeKind::Container(WorkflowContainer::For { iterable, .. })
             if iterable == "[3, 4]"
     ));
@@ -761,22 +714,19 @@ finish(item);
 #[test]
 fn nodes_expose_stable_identifiers_available_before_their_execution() {
     let graph = workflow_graph_from_source(
-        r#"const scoped = defineProcess({
-  name: "scoped",
-  run: async (record: unknown) => {
+        r#"const scoped = async (record: unknown) => {
     const state = { count: 0 };
     const first = 1;
     for (const item of [1]) {
       const nested = first + item;
     }
     return state;
-  }
-});
+  };
 finish(1);
 "#,
     )
     .expect("fixture projects");
-    let process = graph.process("scoped").expect("scoped process");
+    let process = only_process(&graph);
     assert_eq!(process.body.nodes[0].available_variables, ["record"]);
     assert_eq!(
         process.body.nodes[1].available_variables,
@@ -826,17 +776,14 @@ fn facet_environment() -> LashlangHostEnvironment {
 
 #[test]
 fn catalog_projection_exposes_typed_facets_non_fatally() {
-    let source = r#"const workflow = defineProcess({
-  name: "workflow",
-  run: async (name: string) => {
+    let source = r#"const workflow = async (name: string) => {
     const query = name;
     const result = await tools.lookup({ query: query });
     for (const item of "not a list") {
       const seen = item;
     }
     return result;
-  }
-});
+  };
 finish(1);
 "#;
 
@@ -846,7 +793,7 @@ finish(1);
         graph.facet_schema_version,
         Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
-    let process = graph.process("workflow").expect("workflow process");
+    let process = only_process(&graph);
 
     let call_facets = process.body.nodes[1]
         .type_facets
@@ -930,13 +877,10 @@ fn standalone_pure_expressions_remain_computations() {
 
 #[test]
 fn effectful_composites_are_typed_and_never_opaque() {
-    let source = r#"const child = defineProcess({
-  name: "child",
-  run: async () => {
+    let source = r#"const child = async () => {
     return 1;
-  }
-});
-const runs = [start(child, {}), start(child, {})];
+  };
+const runs = [await processes.start({ definition: child }), await processes.start({ definition: child })];
 const tupled = [await runs[0], await runs[1]];
 const recorded = { value: await runs[0] };
 const binary = (await runs[0]) + 1;
@@ -1006,22 +950,19 @@ fn function_declarations_survive_the_graph_round_trip() {
 fn projection_covers_calls_containers_and_terminals() {
     // Moved from the Lashlang parser suite, which asserted graph projection
     // rather than parsing (FIG-3033).
-    let source = r#"const triage = defineProcess({
-  name: "triage",
-  run: async (input: unknown) => {
+    let source = r#"const triage = async (input: unknown) => {
     if (input.source === "gmail") {
       const message = await gmail.getMessage(input.messageId);
       return message;
     } else {
       return null;
     }
-  }
-});
-const handle = start(triage, { input: 1 });
+  };
+const handle = await processes.start({ definition: triage, args: { input: 1 } });
 finish(handle);
 "#;
     let graph = workflow_graph_from_source(source).expect("module should project");
-    assert!(graph.process("triage").is_some());
+    assert_eq!(only_process(&graph).params.len(), 1);
     assert!(
         graph
             .nodes()
@@ -1048,14 +989,11 @@ finish(handle);
 const LABELED: &str = r#"/** @label Lookup — Read the app's current state */
 const value = await tools.app_lookup({});
 /** @label Traffic lights */
-const lights = defineProcess({
-  name: "lights",
-  run: async () => {
-    /** @label Go — Turn the green light on */
-    await display.set_light({ name: "green", state: "on" });
-    return 0;
-  },
-});
+const lights = async () => {
+  /** @label Go — Turn the green light on */
+  await display.set_light({ name: "green", state: "on" });
+  return 0;
+};
 "#;
 
 /// A label is authored as a doc comment, and the whole point of the spelling
@@ -1078,16 +1016,28 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
         Some("Read the app's current state")
     );
 
-    let WorkflowDeclaration::Process(process) = graph
-        .declarations
+    // A lifted process is named by its digest, so the label an author wrote on
+    // the binding names the binding's node; the declaration keeps the derived
+    // name the linker will lift to.
+    let labeled = graph
+        .main
+        .nodes
         .iter()
-        .find(|declaration| matches!(declaration, WorkflowDeclaration::Process(_)))
-        .expect("the declared process")
-    else {
-        unreachable!("filtered to processes")
-    };
-    assert_eq!(process.display_name.as_str(), "Traffic lights");
-    assert_eq!(process.name_source, WorkflowNodeNameSource::Label);
+        .filter(|node| node.name_source == WorkflowNodeNameSource::Label)
+        .map(|node| node.name.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labeled,
+        vec!["Lookup".to_string(), "Traffic lights".to_string()]
+    );
+    let process = only_process(&graph);
+    assert!(
+        process
+            .name
+            .as_str()
+            .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+    );
+    assert_eq!(process.name_source, WorkflowNodeNameSource::Derived);
     assert_eq!(
         process
             .body
@@ -1217,7 +1167,7 @@ fn a_label_with_no_spelling_is_refused_by_the_renderer() {
 /// argument position.
 #[test]
 fn an_inline_process_body_projects_as_a_process_container() {
-    let source = "await registerTrigger({\n  source: { expr: \"0 8 * * *\" },\n  target: async (event) => {\n    print(event);\n  },\n})\nfinish(null);\n";
+    let source = "await triggers.register({\n  source: { expr: \"0 8 * * *\" },\n  target: async (event) => {\n    print(event);\n  },\n})\nfinish(null);\n";
     let canonical = canonical(source);
     let graph = workflow_graph_from_source(&canonical).expect("canonical source projects");
     let literal = graph

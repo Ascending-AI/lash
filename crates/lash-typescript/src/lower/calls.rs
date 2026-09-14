@@ -46,12 +46,8 @@ impl GlobalBuiltin {
             "AggregateError" => Some(Self::ErrorConstructor(ErrorConstructor::Aggregate)),
             "finish" => Some(Self::AgentPrimitive(AgentPrimitive::Finish)),
             "print" => Some(Self::AgentPrimitive(AgentPrimitive::Print)),
-            "wake" => Some(Self::AgentPrimitive(AgentPrimitive::Wake)),
             "sleep" => Some(Self::AgentPrimitive(AgentPrimitive::Sleep)),
             "waitSignal" => Some(Self::AgentPrimitive(AgentPrimitive::WaitSignal)),
-            "start" => Some(Self::AgentPrimitive(AgentPrimitive::Start)),
-            "registerTrigger" => Some(Self::AgentPrimitive(AgentPrimitive::RegisterTrigger)),
-            "defineProcess" => Some(Self::AgentPrimitive(AgentPrimitive::DefineProcess)),
             _ => None,
         }
     }
@@ -172,12 +168,8 @@ impl ErrorConstructor {
 enum AgentPrimitive {
     Finish,
     Print,
-    Wake,
     Sleep,
     WaitSignal,
-    Start,
-    RegisterTrigger,
-    DefineProcess,
 }
 
 impl AgentPrimitive {
@@ -185,12 +177,8 @@ impl AgentPrimitive {
         match self {
             Self::Finish => "finish",
             Self::Print => "print",
-            Self::Wake => "wake",
             Self::Sleep => "sleep",
             Self::WaitSignal => "waitSignal",
-            Self::Start => "start",
-            Self::RegisterTrigger => "registerTrigger",
-            Self::DefineProcess => "defineProcess",
         }
     }
 }
@@ -405,22 +393,12 @@ impl Lowerer {
                 "finish is cell-only",
                 None,
             )
-            .with_hint("return from defineProcess.run so enclosing finally blocks execute")),
+            .with_hint("return from the process body so enclosing finally blocks execute")),
             (AgentPrimitive::Finish, [value]) => {
                 Ok(LashExpr::Finish(Box::new(self.lower_expr(value)?)))
             }
             (AgentPrimitive::Print, [value]) => {
                 Ok(LashExpr::Print(Box::new(self.lower_expr(value)?)))
-            }
-            (AgentPrimitive::Wake, [value]) => {
-                Ok(LashExpr::Wake(Box::new(self.lower_expr(value)?)))
-            }
-            (AgentPrimitive::Wake, [run, Expr::String(signal), payload]) => {
-                Ok(LashExpr::SignalRun {
-                    run: Box::new(self.lower_expr(run)?),
-                    name: signal.as_str().into(),
-                    payload: Box::new(self.lower_expr(payload)?),
-                })
             }
             (AgentPrimitive::Sleep, [milliseconds]) if self.position.await_depth > 0 => {
                 Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
@@ -430,34 +408,15 @@ impl Lowerer {
                     name: name.as_str().into(),
                 })
             }
-            (AgentPrimitive::Start, [Expr::Ident(target, _)]) => self.lower_start(target, &[]),
-            (AgentPrimitive::Start, [Expr::Ident(target, _), Expr::Object(entries)]) => {
-                self.lower_start(target, entries)
+            (AgentPrimitive::Sleep | AgentPrimitive::WaitSignal, _)
+                if self.position.await_depth == 0 =>
+            {
+                Err(Diagnostic::new(
+                    DiagnosticCode::AwaitRequired,
+                    format!("agent primitive `{}` requires await", primitive.name()),
+                    None,
+                ))
             }
-            (AgentPrimitive::RegisterTrigger, [config]) if self.position.await_depth > 0 => {
-                Ok(LashExpr::ReceiverCall {
-                    receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(vec![
-                        "triggers".into(),
-                    ]))),
-                    operation: "register".into(),
-                    args: vec![self.lower_trigger_config(config)?],
-                })
-            }
-            (AgentPrimitive::DefineProcess, _) => Err(Diagnostic::new(
-                DiagnosticCode::ProcessDefinitionNotTopLevel,
-                "defineProcess must initialize a top-level binding",
-                None,
-            )),
-            (
-                AgentPrimitive::Sleep
-                | AgentPrimitive::WaitSignal
-                | AgentPrimitive::RegisterTrigger,
-                _,
-            ) if self.position.await_depth == 0 => Err(Diagnostic::new(
-                DiagnosticCode::AwaitRequired,
-                format!("agent primitive `{}` requires await", primitive.name()),
-                None,
-            )),
             _ => Err(Diagnostic::defect(
                 DiagnosticCode::UnsupportedExpression,
                 format!(
@@ -487,11 +446,11 @@ impl Lowerer {
     /// non-async arrow is an ordinary closure value and lowers as one; a
     /// dynamic call keeps that shape too, since its slots carry no contract to
     /// decide with.
-    fn lower_call_argument(&mut self, arg: &Expr) -> Result<LashExpr, Diagnostic> {
+    pub(super) fn lower_call_argument(&mut self, arg: &Expr) -> Result<LashExpr, Diagnostic> {
         if let Expr::Function(function) = arg
             && function.is_async
         {
-            return self.lower_process_literal_arrow(function);
+            return self.lower_process_literal_arrow(function, None);
         }
         self.lower_expr(arg)
     }
@@ -1071,10 +1030,11 @@ impl Lowerer {
         } else {
             self.lower_expr(object)?
         };
-        // `registerTrigger` is the convenience spelling of `triggers.register`
-        // and `update`/`revive` take the same registration record, so the
-        // `inputs` template is erased on all four paths. Retiring the event
-        // binding for one of them would strand the other three.
+        // `registerTrigger` was the retired global spelling of
+        // `triggers.register`, and `update`/`revive` take the same registration
+        // record, so the `inputs` template is erased on all three remaining
+        // paths. Retiring the event binding for one of them would strand the
+        // other two.
         let lowered_args = if receiver_is_module_authority
             && matches!(object, Expr::Ident(root, _) if root == "triggers")
             && is_trigger_registration_operation(method)
@@ -1099,42 +1059,6 @@ impl Lowerer {
         } else {
             call
         })
-    }
-
-    fn lower_start(
-        &mut self,
-        target: &str,
-        entries: &[ObjectProperty],
-    ) -> Result<LashExpr, Diagnostic> {
-        // `start` resolves its target through the scope stack like every other
-        // read, so a nearer binding of the same name — a parameter, a block
-        // local — is what the author wrote, and it is not the process.
-        let process = match self.binding(target).map(|binding| &binding.role) {
-            Ok(BindingRole::ProcessDefinition(process)) => process.clone(),
-            _ => {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::ProcessTargetStaticRequired,
-                    format!("`{target}` is not a top-level defineProcess binding"),
-                    None,
-                ));
-            }
-        };
-        Ok(LashExpr::StartProcess(ProcessStartExpr {
-            process: process.into(),
-            args: entries
-                .iter()
-                .map(|property| match property {
-                    ObjectProperty::KeyValue(PropertyKey::Static(name), value) => {
-                        Ok((name.as_str().into(), self.lower_expr(value)?))
-                    }
-                    _ => Err(Diagnostic::refusal(
-                        DiagnosticCode::UnsupportedExpression,
-                        "start arguments require static properties without spread",
-                        None,
-                    )),
-                })
-                .collect::<Result<_, Diagnostic>>()?,
-        }))
     }
 }
 

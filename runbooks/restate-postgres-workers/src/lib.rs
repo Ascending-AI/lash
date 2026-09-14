@@ -489,13 +489,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .wall_clock(WallClockBound::secs(30))
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
-            .with_lashlang_abilities(
-                LashlangAbilities::default()
-                    .with_processes()
-                    .with_sleep()
-                    .with_process_signals()
-                    .with_triggers(),
-            ),
+            .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
         artifact_store,
     );
     if let Some(trace_dir) = config.trace_dir.as_ref() {
@@ -584,11 +578,7 @@ impl PluginFactory for E2ePluginFactory {
                   and the contribution's statically defined abilities serialize"
     )]
     fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-        let abilities = LashlangAbilities::default()
-            .with_processes()
-            .with_sleep()
-            .with_process_signals()
-            .with_triggers();
+        let abilities = LashlangAbilities::default().with_sleep();
         let mut resources = LashlangHostCatalog::new();
         resources
             .add_trigger_source_constructor(

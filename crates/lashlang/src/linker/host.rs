@@ -392,32 +392,18 @@ impl LashlangLanguageFeatures {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LashlangAbilities {
-    pub processes: bool,
     pub sleep: bool,
-    pub process_signals: bool,
-    pub triggers: bool,
 }
 
 impl LashlangAbilities {
     pub fn union(self, other: Self) -> Self {
         Self {
-            processes: self.processes || other.processes,
             sleep: self.sleep || other.sleep,
-            process_signals: self.process_signals || other.process_signals,
-            triggers: self.triggers || other.triggers,
         }
     }
 
     pub fn satisfies(self, required: Self) -> bool {
-        (!required.processes || self.processes)
-            && (!required.sleep || self.sleep)
-            && (!required.process_signals || self.process_signals)
-            && (!required.triggers || self.triggers)
-    }
-
-    pub fn with_processes(mut self) -> Self {
-        self.processes = true;
-        self
+        !required.sleep || self.sleep
     }
 
     pub fn with_sleep(mut self) -> Self {
@@ -425,22 +411,8 @@ impl LashlangAbilities {
         self
     }
 
-    pub fn with_process_signals(mut self) -> Self {
-        self.process_signals = true;
-        self
-    }
-
-    pub fn with_triggers(mut self) -> Self {
-        self.triggers = true;
-        self
-    }
-
     pub fn all() -> Self {
-        Self::default()
-            .with_sleep()
-            .with_processes()
-            .with_process_signals()
-            .with_triggers()
+        Self::default().with_sleep()
     }
 }
 

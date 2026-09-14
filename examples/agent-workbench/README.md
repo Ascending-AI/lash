@@ -426,18 +426,14 @@ multi-account showcase:
 
 ```text
 <typescript>
-const triage = defineProcess({
-  name: "triage",
-  signals: {},
-  run: async (box: Inbox) => {
-    const items = await box.list({});
-    wake({ kind: "triage", account: items.account, count: items.messages.length });
-    return true;
-  }
-});
+const triage = async (box: Inbox) => {
+  const items = await box.list({});
+  await processes.emit({ value: { kind: "triage", account: items.account, count: items.messages.length } });
+  return true;
+};
 
-const work = start(triage, { box: inbox.work });
-const personal = start(triage, { box: inbox.personal });
+const work = await processes.start({ definition: triage, args: { box: inbox.work } });
+const personal = await processes.start({ definition: triage, args: { box: inbox.personal } });
 finish(await Promise.all([work, personal]));
 </typescript>
 ```
@@ -459,23 +455,19 @@ process. Register an inbox concierge once and it fires on every delivery:
 
 ```text
 <typescript>
-const onMail = defineProcess({
-  name: "on_mail",
-  signals: {},
-  run: async (event: mail.Received) => {
-    const [work, personal] = await Promise.all([
-      inbox.work.list({}),
-      inbox.personal.list({})
-    ]);
-    wake({
-      kind: "mail_brief",
-      arrived_in: event.account,
-      title: event.title,
-      waiting: work.messages.length + personal.messages.length
-    });
-    return true;
-  }
-});
+const onMail = async (event: mail.Received) => {
+  const [work, personal] = await Promise.all([
+    inbox.work.list({}),
+    inbox.personal.list({})
+  ]);
+  await processes.emit({ value: {
+    kind: "mail_brief",
+    arrived_in: event.account,
+    title: event.title,
+    waiting: work.messages.length + personal.messages.length
+  } });
+  return true;
+};
 
 const handle = await triggers.register({
   source: mail.received({}),
@@ -499,14 +491,10 @@ payload:
 
 ```text
 <typescript>
-const onButton = defineProcess({
-  name: "on_button",
-  signals: {},
-  run: async (event: ui.button.Pressed) => {
-    wake({ kind: "button_pressed", button: event.button, message: event.message });
-    return true;
-  }
-});
+const onButton = async (event: ui.button.Pressed) => {
+  await processes.emit({ value: { kind: "button_pressed", button: event.button, message: event.message } });
+  return true;
+};
 
 const handle = await triggers.register({
   source: ui.button.pressed({}),
@@ -530,14 +518,10 @@ registry:
 
 ```text
 <typescript>
-const dailyDigest = defineProcess({
-  name: "daily_digest",
-  signals: {},
-  run: async (tick: cron.Tick) => {
-    wake({ kind: "daily_digest_due", tick });
-    return true;
-  }
-});
+const dailyDigest = async (tick: cron.Tick) => {
+  await processes.emit({ value: { kind: "daily_digest_due", tick } });
+  return true;
+};
 
 const source = cron.Schedule({ expr: "0 8 * * *", tz: "UTC" });
 const handle = await triggers.register({

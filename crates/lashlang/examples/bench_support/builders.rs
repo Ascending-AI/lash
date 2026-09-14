@@ -16,8 +16,7 @@ use compact_str::CompactString as AstString;
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, FunctionDecl,
     FunctionExpr, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl, ProcessParam,
-    ProcessSignalDecl, ProcessStartExpr, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
-    TypeField, UnaryOp,
+    ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
 };
 
 // ---------------------------------------------------------------------------
@@ -354,10 +353,6 @@ pub fn yield_expr(expr: Expr) -> Expr {
     Expr::Yield(Box::new(expr))
 }
 
-pub fn wake(expr: Expr) -> Expr {
-    Expr::Wake(Box::new(expr))
-}
-
 pub fn await_expr(expr: Expr) -> Expr {
     Expr::Await(Box::new(expr))
 }
@@ -366,8 +361,14 @@ pub fn unwrap(expr: Expr) -> Expr {
     Expr::ResultUnwrap(Box::new(expr))
 }
 
+/// `await processes.cancel({ handle })` — the tool spelling that replaced the
+/// retired `cancel` form.
 pub fn cancel(expr: Expr) -> Expr {
-    Expr::Cancel(Box::new(expr))
+    await_expr(unwrap(receiver_call(
+        var("processes"),
+        "cancel",
+        vec![record(vec![("handle", expr)])],
+    )))
 }
 
 pub fn sleep_for(expr: Expr) -> Expr {
@@ -380,14 +381,6 @@ pub fn sleep_until(expr: Expr) -> Expr {
 
 pub fn wait_signal(name: &str) -> Expr {
     Expr::WaitSignal { name: name.into() }
-}
-
-pub fn signal_run(run: Expr, name: &str, payload: Expr) -> Expr {
-    Expr::SignalRun {
-        run: Box::new(run),
-        name: name.into(),
-        payload: Box::new(payload),
-    }
 }
 
 pub fn builtin(name: &str, args: Vec<Expr>) -> Expr {
@@ -448,15 +441,22 @@ pub fn process_ref(name: &str) -> Expr {
     }
 }
 
-/// `start <process>(<args>)`
+/// `processes.start({ definition, args: { tool, ..args } })` — the tool
+/// spelling that replaced the retired `start` form. The process reference keeps
+/// the declaration live in the linked module; `tool` names the stub the bench
+/// host answers with.
 pub fn start(process: &str, args: Vec<(&str, Expr)>) -> Expr {
-    Expr::StartProcess(ProcessStartExpr {
-        process: process.into(),
-        args: args
-            .into_iter()
-            .map(|(name, value)| (AstString::from(name), value))
-            .collect(),
-    })
+    let mut inner = vec![("tool", string(process))];
+    inner.extend(args);
+    let fields = vec![
+        ("definition", process_ref(process)),
+        ("args", record(inner)),
+    ];
+    await_expr(unwrap(receiver_call(
+        var("processes"),
+        "start",
+        vec![record(fields)],
+    )))
 }
 
 /// A host descriptor constructor, e.g. `timer.Schedule({ .. })`.

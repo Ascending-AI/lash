@@ -163,10 +163,7 @@ impl<'module> Linker<'module> {
                         .insert(decl.name.to_string(), decl.ty.clone());
                     continue;
                 }
-                Declaration::Process(decl) => {
-                    self.ensure_feature(self.surface.abilities.processes, "processes", span)?;
-                    ("process", decl.name.as_str())
-                }
+                Declaration::Process(decl) => ("process", decl.name.as_str()),
                 // Functions need nothing from the host — no journal, no
                 // scheduler, no durability tier — so unlike `process` they are
                 // not gated on an ability. There is deliberately no host switch
@@ -722,19 +719,6 @@ impl<'module> Linker<'module> {
         }
     }
 
-    pub(super) fn process_output_type(&self, process: &str) -> TypeExpr {
-        match self.process_types.get(process) {
-            // Awaited process handles are runtime result envelopes. Preserve
-            // the inferred payload as the known branch while keeping the
-            // envelope gradual; `?` does not narrow gradual information.
-            Some(TypeExpr::Process(process)) => process
-                .as_signature()
-                .map(|signature| union_type(vec![signature.output().clone(), TypeExpr::Any]))
-                .unwrap_or(TypeExpr::Any),
-            _ => TypeExpr::Any,
-        }
-    }
-
     pub(super) fn validate_type_refs(
         &self,
         ty: &TypeExpr,
@@ -869,7 +853,6 @@ impl<'module> Linker<'module> {
         Ok(match declaration {
             Declaration::Type(type_decl) => Declaration::Type(type_decl.clone()),
             Declaration::Process(process) => {
-                self.ensure_feature(self.surface.abilities.processes, "processes", span)?;
                 if process.label.is_some() {
                     self.ensure_feature(
                         self.surface.language_features.label_annotations,
@@ -891,11 +874,6 @@ impl<'module> Linker<'module> {
                 }
                 let mut seen_signals = BTreeSet::new();
                 for signal in &process.signals {
-                    self.ensure_feature(
-                        self.surface.abilities.process_signals,
-                        "process signals",
-                        span,
-                    )?;
                     if !seen_signals.insert(signal.name.to_string()) {
                         return Err(LinkError::DuplicateProcessSignal {
                             name: signal.name.to_string(),
@@ -1066,14 +1044,10 @@ fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
         Expr::SleepFor(_) => Some("sleep for"),
         Expr::SleepUntil(_) => Some("sleep until"),
         Expr::WaitSignal { .. } => Some("wait_signal"),
-        Expr::SignalRun { .. } => Some("signal_run"),
-        Expr::Cancel(_) => Some("cancel"),
-        Expr::StartProcess(_) => Some("start"),
         Expr::ProcessRef { .. } => Some("a process reference"),
         Expr::ProcessLiteral(_) => Some("a process literal"),
         Expr::Print(_) => Some("print"),
         Expr::Yield(_) => Some("yield"),
-        Expr::Wake(_) => Some("wake"),
         Expr::Finish(_) => Some("finish"),
         Expr::Fail(_) => Some("fail"),
         // A label names a step in the workflow graph, and a pure body

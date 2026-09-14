@@ -101,16 +101,12 @@ pub mod conformance {
         }
 
         const TRIGGER_SOURCE: &str = r#"
-const remember = defineProcess({
-  name: "remember",
-  signals: {},
-  run: async (tick: clock.Tick) => {
-    wake({ id: tick.id, scheduled_at: tick.scheduled_at });
-    return { id: tick.id, ok: true };
-  }
-});
+const remember = async (tick: clock.Tick) => {
+  await processes.emit({ value: { id: tick.id, scheduled_at: tick.scheduled_at } });
+  return { id: tick.id, ok: true };
+};
 
-const handle = await registerTrigger({
+const handle = await triggers.register({
   source: clock.Alarm({ at: "08:00" }),
   target: remember,
   inputs: (event) => ({ tick: event }),
@@ -120,16 +116,12 @@ finish("registered");
 "#;
 
         const BUTTON_TRIGGER_SOURCE: &str = r#"
-const remember_button = defineProcess({
-  name: "remember_button",
-  signals: {},
-  run: async (event: ui.button.Pressed) => {
-    wake({ button: event.button, message: event.message });
-    return { button: event.button, ok: true };
-  }
-});
+const remember_button = async (event: ui.button.Pressed) => {
+  await processes.emit({ value: { button: event.button, message: event.message } });
+  return { button: event.button, ok: true };
+};
 
-const handle = await registerTrigger({
+const handle = await triggers.register({
   source: ui.button.pressed({}),
   target: remember_button,
   inputs: (event) => ({ event: event }),
@@ -184,11 +176,7 @@ finish("registered");
         }
 
         fn rebuild_abilities() -> crate::rlm::LashlangAbilities {
-            crate::rlm::LashlangAbilities::default()
-                .with_processes()
-                .with_sleep()
-                .with_process_signals()
-                .with_triggers()
+            crate::rlm::LashlangAbilities::default().with_sleep()
         }
 
         /// Installs the trigger abilities used by the rebuild conformance program.
@@ -655,8 +643,8 @@ finish("registered");
                 .await
                 .expect("trigger-triggered process events")
                 .into_iter()
-                .find(|event| event.event_type == "process.wake")
-                .expect("trigger-triggered process wake event")
+                .find(|event| event.event_type == "process.yield")
+                .expect("trigger-triggered process progress event")
                 .sequence;
             let describe_process_messages = |read_view: &lash_core::SessionReadView| {
                 read_view
@@ -686,7 +674,7 @@ finish("registered");
                                 caused_by,
                                 ..
                             }) if wake_process_id == process_id
-                                && event_type == "process.wake"
+                                && event_type == "process.yield"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)
                         )
@@ -790,7 +778,7 @@ finish("registered");
                                 caused_by,
                                 ..
                             }) if wake_process_id == process_id
-                                && event_type == "process.wake"
+                                && event_type == "process.yield"
                                 && *sequence == wake_sequence
                                 && caused_by.as_ref() == Some(&process_caused_by)
                         )

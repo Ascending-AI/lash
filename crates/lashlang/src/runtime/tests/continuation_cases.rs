@@ -557,7 +557,7 @@ impl ExecutionHost for SegmentRecordingHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
-                let value = Host::perform_resource_operation(operation)?;
+                let value = Host::perform_resource_operation(*operation)?;
                 self.effects.lock_recover().push(value.clone());
                 Ok(AbilityResult::Value(value))
             }

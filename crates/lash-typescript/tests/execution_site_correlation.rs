@@ -58,6 +58,29 @@ fn parse_program(source: &str) -> Program {
     parse(source).expect("fixture parses")
 }
 
+/// The one process a fixture lifts.
+///
+/// FIG-2999: a process literal's declaration is named by the linker's lift
+/// digest, so a fixture asks the linked module for the process it lifted rather
+/// than spelling a name the source no longer carries.
+fn only_lifted_process(linked: &lashlang::LinkedModule) -> String {
+    let mut names =
+        linked
+            .program()
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                lashlang::Declaration::Process(process) => Some(process.name.to_string()),
+                _ => None,
+            });
+    let name = names.next().expect("the module lifts one process");
+    assert!(
+        names.next().is_none(),
+        "this fixture lifts exactly one process"
+    );
+    name
+}
+
 /// A resource operation inside a process correlates to its workflow node.
 ///
 /// Was `labeled_process_resource_operation_site_correlates_to_workflow_node`,
@@ -70,19 +93,16 @@ fn parse_program(source: &str) -> Program {
 /// scenarios.
 #[test]
 fn process_resource_operation_site_correlates_to_workflow_node() {
-    let source = r#"const searchTest = defineProcess({
-  name: "search_test",
-  run: async () => {
-    const result = await tools.echo({ value: { ok: true } });
-    wake(result);
-    return result;
-  }
-});
+    let source = r#"const searchTest = async () => {
+  const result = await tools.echo({ value: { ok: true } });
+  await processes.emit({ value: result });
+  return result;
+};
 finish(1);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled =
-        lashlang::compile_linked_process(&linked, "search_test").expect("process should compile");
+    let compiled = lashlang::compile_linked_process(&linked, &only_lifted_process(&linked))
+        .expect("process should compile");
     let site = compiled_execution_sites(&compiled)
         .into_iter()
         .find(|site| site.node_kind == "resource_operation")
@@ -321,20 +341,17 @@ finish(identity(1));
 /// and `sleep`/`sleep until`, neither of which the front end lowers to.
 #[test]
 fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
-    let source = r#"const worker = defineProcess({
-  name: "worker",
-    run: async () => {
-    const payload = await waitSignal("ready");
-    wake(payload);
-    return payload;
-  }
-});
+    let source = r#"const worker = async () => {
+  const payload = await waitSignal("ready");
+  await processes.emit({ value: payload });
+  return payload;
+};
 /** @label Plain value */
 const plain = 1;
 const result = await tools.echo({ value: plain });
-const run = start(worker, {});
+const run = await processes.start({ definition: worker });
 await sleep(1);
-wake(run, "ready", null);
+await processes.signal({ handle: run, name: "ready", payload: null });
 if (true) {
 } else {
 }
@@ -344,8 +361,8 @@ finish(result);
 "#;
     let linked = link_labeled(parse_program(source));
     let main = compile_labeled_program(linked.program().clone());
-    let process =
-        lashlang::compile_linked_process(&linked, "worker").expect("descriptor process compiles");
+    let process = lashlang::compile_linked_process(&linked, &only_lifted_process(&linked))
+        .expect("descriptor process compiles");
 
     let mut compiler = descriptor_pairs(&main);
     compiler.extend(descriptor_pairs(&process));
@@ -362,10 +379,14 @@ finish(result);
     let mut expected = vec![
         ("branch".to_string(), "if".to_string()),
         ("call".to_string(), "function call".to_string()),
-        ("child_process".to_string(), "start worker".to_string()),
-        ("process_event".to_string(), "wake".to_string()),
+        // FIG-2999: starting, signalling and yielding are leaf tools now, so
+        // they carry the one `resource_operation` descriptor kind instead of
+        // the `child_process`, `signal` and `process_event` kinds the deleted
+        // special forms had.
         ("resource_operation".to_string(), "echo".to_string()),
-        ("signal".to_string(), "signal_run".to_string()),
+        ("resource_operation".to_string(), "emit".to_string()),
+        ("resource_operation".to_string(), "signal".to_string()),
+        ("resource_operation".to_string(), "start".to_string()),
         ("sleep".to_string(), "sleep for".to_string()),
         ("step".to_string(), "Plain value".to_string()),
         ("terminal".to_string(), "result".to_string()),
@@ -378,7 +399,7 @@ finish(result);
     );
 
     // The compiler emits one descriptor the projector cannot: the
-    // `defineProcess` wrapper's generated catch, which fails the process on an
+    // process-literal wrapper's generated catch, which fails the process on an
     // uncaught error. It has no authored spelling, so the lens projects the
     // inner `run` body and never mints a node for it (FIG-3057).
     let mut expected_compiler = expected.clone();

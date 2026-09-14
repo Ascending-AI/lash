@@ -13,15 +13,12 @@ fn stack_budget_lower_link_compile_execute_process_fanout() {
         let test = Box::pin(async {
             let program = lash_typescript::parse(
                 r#"
-const child = defineProcess({
-  name: "child",
-  run: async (value: string) => {
-    return { value: value, lookup: "lookup:" + value };
-  }
-});
+const child = async (value: string) => {
+  return { value: value, lookup: "lookup:" + value };
+};
 
-const left = start(child, { value: "left" });
-const right = start(child, { value: "right" });
+const left = await processes.start({ definition: child, args: { value: "left" } });
+const right = await processes.start({ definition: child, args: { value: "right" } });
 const joined = { left: await left, right: await right };
 await sleep(0);
 finish({
@@ -32,10 +29,31 @@ finish({
 "#,
             )
             .expect("program lowers");
-            let surface = LashlangHostEnvironment::new(
-                lashlang::LashlangHostCatalog::new(),
-                LashlangAbilities::all(),
-            );
+            // FIG-2999: the process surface is a leaf tool, so the fan-out
+            // starts its children through `processes.start`, whose `definition`
+            // slot is what the linker lifts the literal into.
+            let mut catalog = lashlang::LashlangHostCatalog::new();
+            catalog
+                .add_module_operation_contract(
+                    ["processes"],
+                    "Processes",
+                    "start",
+                    "processes.start",
+                    &lashlang::OperationContract::new(
+                        serde_json::json!({
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "definition": { "x-lash": { "kind": "process_unknown" } },
+                                "args": { "type": "object" }
+                            },
+                            "required": ["definition"]
+                        }),
+                        serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+                    ),
+                )
+                .expect("process start operation");
+            let surface = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
             let linked = lashlang::LinkedModule::link(program, surface).expect("program links");
             let compiled = compile_linked(&linked);
             let mut state = State::new();
@@ -277,9 +295,18 @@ struct StackBudgetHost;
 impl ExecutionHost for StackBudgetHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(start) => {
-                let Value::String(value) = start
+            AbilityOp::ResourceOperation(operation) => {
+                // The start's own arguments ride in `args`, beside the
+                // `definition` slot that carries the process itself.
+                let args = operation
                     .args
+                    .first()
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("args"))
+                    .and_then(Value::as_record)
+                    .cloned()
+                    .unwrap_or_default();
+                let Value::String(value) = args
                     .get("value")
                     .cloned()
                     .unwrap_or(Value::String("unknown".into()))

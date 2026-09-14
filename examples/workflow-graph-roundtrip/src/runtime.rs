@@ -235,7 +235,7 @@ impl ExecutionHost for RunHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(operation) => {
-                self.apply_operation(operation).map(AbilityResult::Value)
+                self.apply_operation(*operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch

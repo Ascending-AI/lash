@@ -1109,11 +1109,7 @@ impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
             PluginExtensionContribution::new(
                 lash::rlm::LASHLANG_SURFACE_EXTENSION_ID,
                 lash::rlm::LashlangSurfaceContribution::new(
-                    lash::rlm::LashlangAbilities::default()
-                        .with_processes()
-                        .with_sleep()
-                        .with_process_signals()
-                        .with_triggers(),
+                    lash::rlm::LashlangAbilities::default().with_sleep(),
                     lash::rlm::LashlangLanguageFeatures::default(),
                     benchmark_workbench_lashlang_resources(),
                 ),

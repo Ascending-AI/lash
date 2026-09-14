@@ -123,7 +123,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
         deferred_execution_grants: BTreeMap::new(),
         artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
         child_max_attempts: state.child_max_attempts(),
-        child_max_attempts_default: std::num::NonZeroU32::new(5).expect("non-zero"),
     });
     let host = ParkedCellHost { bridge };
     let mut vm = Vm::from_state(cached_program.compiled_program(), &mut state.rlm, &host)

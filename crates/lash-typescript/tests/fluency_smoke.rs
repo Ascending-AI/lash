@@ -23,7 +23,6 @@ impl ExecutionHost for FluencyHost {
             AbilityOp::ResourceOperation(call) => {
                 Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
             }
-            AbilityOp::StartProcess(_) => Ok(AbilityResult::Value(process_handle("fluency-run"))),
             AbilityOp::Await(Value::Record(handle))
                 if handle.get("process_id") == Some(&Value::String("fluency-run".into())) =>
             {
@@ -50,7 +49,7 @@ fn process_handle(id: &str) -> Value {
 /// Answers one host resource operation.
 ///
 /// `Date.now()` and `Math.random()` are journaled reads on the
-/// `__typescript_runtime` resource and `registerTrigger` is a call on the
+/// `__typescript_runtime` resource and `triggers.register` is a call on the
 /// trigger registry — host operations rather than language builtins, so the
 /// host has to answer each in its own declared shape. Everything else is a
 /// tool call and gets the corpus's page payload.
@@ -63,6 +62,7 @@ fn resource_operation_value(call: &lashlang::ResourceOperation, index: usize) ->
         ("__typescript_runtime", "now") => Value::Number(1_700_000_000_000.0),
         ("__typescript_runtime", "random") => Value::Number(0.5),
         ("triggers", "register") => trigger_registration_value(),
+        ("processes", "start") => process_handle("fluency-run"),
         _ => Value::String(format!("page-{}", index + 1).into()),
     }
 }
@@ -107,7 +107,7 @@ fn trigger_registration_value() -> Value {
 /// `lash_lashlang_runtime::lashlang_host_environment_from_tool_catalog`: the
 /// `__typescript_runtime` `now`/`random` bindings behind `Date.now()` and
 /// `Math.random()`, and — with triggers enabled — the trigger resource
-/// operations behind `registerTrigger`. A bare catalog cannot reach any of the
+/// operations behind `triggers.register`. A bare catalog cannot reach any of the
 /// three, so a corpus built on one was silently unable to exercise three
 /// behaviours the production prompt advertises.
 fn fluency_environment() -> lashlang::LashlangHostEnvironment {
@@ -152,6 +152,23 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
         .expect("fluency timer trigger source");
     catalog
         .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:processes/start",
+            &lashlang::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": { "definition": { "x-lash": { "kind": "process_unknown" } } },
+                    "required": ["definition"]
+                }),
+                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+            ),
+        )
+        .expect("fluency process start binding");
+    catalog
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
@@ -161,11 +178,7 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
         .expect("fluency web binding");
     lashlang::LashlangHostEnvironment::new(
         catalog,
-        lashlang::LashlangAbilities::default()
-            .with_sleep()
-            .with_processes()
-            .with_process_signals()
-            .with_triggers(),
+        lashlang::LashlangAbilities::default().with_sleep(),
     )
 }
 
@@ -176,11 +189,11 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
 /// runs on the shared VM; a lowering-only success is not acceptance evidence.
 ///
 /// The process row is narrower than the others by construction, and the doc
-/// comment used to overstate it. `start` and `await` cross the effect boundary,
+/// comment used to overstate it. `processes.start` and `await` cross the effect boundary,
 /// so the host answers them and the process *body* runs in a separate durable
 /// execution that a cell-level host cannot drive. This row is therefore
 /// evidence that the primitives lower, link and round-trip through the
-/// boundary — not that `waitSignal`/`sleep`/`wake` execute. Those are executed
+/// boundary — not that `waitSignal`/`sleep` execute. Those are executed
 /// under suspension in `dialect.rs::a_process_suspended_inside_for_of_resumes`
 /// and `agent_surface.rs`.
 ///
@@ -212,15 +225,13 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         finish({ total, last: input[input.length - 1].toUpperCase() });
         "#,
         r#"
-        const worker = defineProcess({
-          name: "worker",           run: async (request: unknown) => {
-            const signal = await waitSignal("ready");
-            await sleep(10);
-            wake(signal);
-            return request;
-          }
-        });
-        finish(await start(worker, { request: Math.max(1, 2) }));
+        const worker = async (request: unknown) => {
+          const signal = await waitSignal("ready");
+          await sleep(10);
+          return { request, signal };
+        };
+        const running = await processes.start({ definition: worker, args: { request: Math.max(1, 2) } });
+        finish(await running);
         "#,
         // `for...of` over data a tool returned: the dialect's flagship v1 guard,
         // and the shape Phase 2 of the parity runbook asks a model to write.
@@ -254,15 +265,13 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         const jitter = Math.random();
         finish({ startedAt, bounded: jitter >= 0 && jitter <= 1 });
         "#,
-        // `registerTrigger`, the third advertised behaviour the bare catalog
+        // `triggers.register`, the third advertised behaviour the bare catalog
         // could not reach: it needs the trigger resource operations and a
         // trigger source constructor.
         r#"
-        const remember = defineProcess({
-          name: "remember",           run: async (tick: unknown) => { return tick; }
-        });
+        const remember = async (tick: unknown) => { return tick; };
         const source = timer.Schedule({ expr: "0 8 * * *" });
-        const registration = await registerTrigger({
+        const registration = await triggers.register({
           source,
           target: remember,
           inputs: (event) => ({ tick: event }),

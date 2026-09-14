@@ -346,15 +346,11 @@ fn immutable_deployment_fixture_a_provider(
                 match calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                     0 => Ok(text_response(
                         r#"<typescript>
-const immutable_deployment_probe = defineProcess({
-  name: "immutable_deployment_probe",
-  signals: {},
-  run: async () => {
-    await sleep(15000);
-    return "fixture A process completed";
-  }
-});
-const handle = start(immutable_deployment_probe, {});
+const immutable_deployment_probe = async () => {
+  await sleep(15000);
+  return "fixture A process completed";
+};
+const handle = await processes.start({ definition: immutable_deployment_probe });
 print("fixture A journal prefix committed");
 </typescript>"#,
                     )),

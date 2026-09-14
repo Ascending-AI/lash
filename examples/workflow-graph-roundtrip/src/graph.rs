@@ -250,7 +250,7 @@ pub(crate) fn graph_from_document(
 
 /// Give every declared process its module binding.
 ///
-/// A TypeScript process is `const name = defineProcess({...})`: the module body
+/// A TypeScript process is `const name = async (..) => {..}`: the module body
 /// holds the binding and the declaration hangs off it, so a graph whose main
 /// subgraph never binds a declared process cannot be rendered. A host that adds
 /// a process container gets that binding here rather than having to know the
@@ -1362,14 +1362,10 @@ mod tests {
 
     #[test]
     fn promoted_constructs_flatten_and_rebuild_as_typed_nodes() {
-        let input = r#"const worker = defineProcess({
-  name: "worker",
-  signals: {},
-  run: async () => {
-    return 1;
-  }
-});
-const runs = [start(worker), start(worker)];
+        let input = r#"const worker = async () => {
+  return 1;
+};
+const runs = [await processes.start({ definition: worker }), await processes.start({ definition: worker })];
 const state = { count: 0 };
 state.count = 1;
 while (state.count < 2) {

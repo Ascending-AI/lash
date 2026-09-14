@@ -1,13 +1,12 @@
-use lash_core::ProcessId;
 use std::sync::Arc;
 
+use crate::LashlangExecutionCallSite;
 use crate::span::Span;
-use crate::{LashlangExecutionCallSite, LashlangExecutionChild};
 
 use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
-    AbilityOp, AbilityResult, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart,
-    ResourceOperation, ResourceOperationBatch, ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, ProcessEvent, ProcessEventKind, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationResult, Sleep, SleepKind,
 };
 use super::super::ops::value_type_name;
 use super::super::{
@@ -31,13 +30,10 @@ pub(super) enum VmEffect {
     AwaitPending,
     ResourceOperationBatch(usize),
     ResourceOperationListBatch(usize),
-    StartProcess { process: usize, keys: usize },
     AwaitHandle,
     Sleep(SleepKind),
     WaitSignal { name: usize },
-    SignalRun { name: usize },
     AwaitHandleUnwrap,
-    CancelHandle,
     Print,
     ProcessEvent(ProcessEventKind),
     Finish,
@@ -79,12 +75,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let operation_name = self.chunk.names[operation].text.to_string();
                 let result = match self
                     .host
-                    .perform(AbilityOp::ResourceOperation(ResourceOperation {
+                    .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
                         receiver,
                         operation: operation_name.clone(),
                         args,
                         call_site: active.map(lashlang_execution_call_site),
-                    }))
+                    })))
                     .await
                 {
                     Ok(AbilityResult::Value(value)) => host_success(value, &operation_name),
@@ -107,12 +103,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ensure_no_tool_handle_arguments(&args)?;
                 let value = self
                     .host
-                    .perform(AbilityOp::ResourceOperation(ResourceOperation {
+                    .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
                         receiver,
                         operation: self.chunk.names[operation].text.to_string(),
                         args,
                         call_site: active.map(lashlang_execution_call_site),
-                    }))
+                    })))
                     .await
                     .and_then(|result| result.into_value("module operation"))
                     .map_err(|source| RuntimeError::UnwrappedModuleOperationFailed { source })?;
@@ -157,55 +153,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::ResourceOperationListBatch(batch) => {
                 self.resolve_resource_operation_list_batch(batch).await?;
             }
-            VmEffect::StartProcess { process, keys } => {
-                let args = self.drain_record_from_stack(keys)?;
-                let start_site = active
-                    .map(lashlang_execution_call_site)
-                    .ok_or(RuntimeError::StartSiteMissing)?;
-                let process_name = self.chunk.names[process].text.to_string();
-                let module_context = self
-                    .chunk
-                    .module_context
-                    .as_ref()
-                    .ok_or(RuntimeError::LinkedArtifactMissing)?;
-                let process_ref = module_context
-                    .process_refs
-                    .get(&process_name)
-                    .cloned()
-                    .ok_or_else(|| RuntimeError::LinkedProcessNotExported {
-                        module_ref: module_context.module_ref.clone(),
-                        name: process_name.clone(),
-                    })?;
-                let child_module_ref = module_context.module_ref.clone();
-                let child_host_requirements_ref = module_context.host_requirements_ref.clone();
-                let value = self
-                    .host
-                    .perform(AbilityOp::StartProcess(Box::new(ProcessStart {
-                        module_ref: child_module_ref.clone(),
-                        process_ref: process_ref.clone(),
-                        host_requirements_ref: child_host_requirements_ref,
-                        start_site,
-                        process_name: process_name.clone(),
-                        args,
-                    })))
-                    .await
-                    .and_then(|result| result.into_value("process start"))
-                    .map_err(|source| RuntimeError::ProcessStartFailed { source })?;
-                if let (Some(active), Some(process_id)) =
-                    (active, process_handle_id_from_value(&value))
-                {
-                    self.observe_child_started(
-                        active,
-                        LashlangExecutionChild {
-                            process_id,
-                            module_ref: child_module_ref,
-                            process_ref,
-                            process_name,
-                        },
-                    );
-                }
-                self.stack.push(value);
-            }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
                 let result = self.await_value(handle).await?;
@@ -232,36 +179,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .map_err(|source| RuntimeError::WaitSignalFailed { source })?;
                 self.stack.push(value);
             }
-            VmEffect::SignalRun { name } => {
-                let payload = self.pop_stack()?;
-                let run = self.pop_stack()?;
-                self.host
-                    .perform(AbilityOp::SignalRun(ProcessSignal {
-                        run,
-                        name: self.chunk.names[name].text.to_string(),
-                        payload,
-                    }))
-                    .await
-                    .and_then(|result| result.into_value("signal_run"))
-                    .map_err(|source| RuntimeError::SignalRunFailed { source })?;
-                self.last_value = Some(Value::Null);
-                self.stack.push(Value::Null);
-            }
             VmEffect::AwaitHandleUnwrap => {
                 let handle = self.pop_stack()?;
                 let result = self.await_value_unwrap(handle).await?;
                 self.stack.push(result);
-            }
-            VmEffect::CancelHandle => {
-                let handle = self.pop_stack()?;
-                let value = self
-                    .host
-                    .perform(AbilityOp::Cancel(handle))
-                    .await
-                    .and_then(|result| result.into_value("cancel"))
-                    .map_err(|source| RuntimeError::CancelFailed { source })?;
-                self.last_value = Some(value.clone());
-                self.stack.push(value);
             }
             VmEffect::ProcessEvent(kind) => {
                 let value = self.pop_stack()?;
@@ -901,20 +822,6 @@ fn lashlang_execution_call_site(active: &ActiveLashlangExecutionNode) -> Lashlan
         site: active.site.clone(),
         occurrence: active.occurrence,
     }
-}
-
-fn process_handle_id_from_value(value: &Value) -> Option<ProcessId> {
-    let record = value.as_record()?;
-    let Value::String(kind) = record.get("__handle__")? else {
-        return None;
-    };
-    if kind.as_str() != "process" {
-        return None;
-    }
-    let Value::String(id) = record.get("id")? else {
-        return None;
-    };
-    Some(ProcessId::from(id.to_string()))
 }
 
 /// A host value that clears the value-entry guard becomes a success result; one

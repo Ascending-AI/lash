@@ -1,7 +1,7 @@
 //! The workflow lens's inline process-body projection (FIG-2997).
 //!
 //! A process literal in an argument is a process container of the module the
-//! same way a `defineProcess` binding is (ADR 0095): it projects its own
+//! same way a `const`-bound process arrow is (ADR 0095): it projects its own
 //! declaration, named identically to what the linker will lift it to, and its
 //! authored arrow re-parses straight off the call site.
 

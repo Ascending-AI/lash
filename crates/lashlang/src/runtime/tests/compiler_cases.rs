@@ -16,8 +16,8 @@ fn labeled_spawn_program() -> Program {
     ])
 }
 
-/// `process search_test() {` the body of [`labeled_spawn_program`] plus a
-/// `wake result` before the `finish` `}`.
+/// `process search_test() {` the body of [`labeled_spawn_program`], then
+/// `finish result` `}`.
 fn labeled_spawn_process_program() -> Program {
     builders::module(
         vec![builders::process(
@@ -31,7 +31,6 @@ fn labeled_spawn_process_program() -> Program {
                         await_echo_unwrap(builders::record(vec![("ok", builders::bool_lit(true))])),
                     ),
                 ),
-                builders::wake(builders::var("result")),
                 builders::finish(builders::var("result")),
             ]),
         )],
@@ -398,26 +397,22 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
 
 #[test]
 fn aggregate_await_effectful_non_tool_leaf_keeps_existing_path() {
-    // `process child() { finish "done" }`
-    // / `result = await { child: start child(), tool: tools.echo({ value: "x" })? }`
+    // `result = await { signal: wait_signal("ready"), tool: tools.echo({ value: "x" })? }`
     // / `finish result`
-    let compiled = compile_program_for_tests(builders::module(
-        vec![builders::process(
-            "child",
-            Vec::new(),
-            builders::block(vec![builders::finish(builders::string("done"))]),
-        )],
-        vec![
-            builders::assign(
-                "result",
-                builders::await_expr(builders::record(vec![
-                    ("child", builders::start("child", Vec::new())),
-                    ("tool", echo_unwrap(builders::string("x"))),
-                ])),
-            ),
-            builders::finish(builders::var("result")),
-        ],
-    ));
+    //
+    // FIG-2999 retired `start`, which used to be this test's non-tool leaf;
+    // `wait_signal` is the remaining effect that is not a resource operation,
+    // so it is the one that must keep the unbatched aggregate-await path.
+    let compiled = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "result",
+            builders::await_expr(builders::record(vec![
+                ("signal", builders::wait_signal("ready")),
+                ("tool", echo_unwrap(builders::string("x"))),
+            ])),
+        ),
+        builders::finish(builders::var("result")),
+    ]));
     let listing = compiled_instruction_listing(&compiled);
     assert!(
         !compiled
@@ -432,7 +427,7 @@ fn aggregate_await_effectful_non_tool_leaf_keeps_existing_path() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::StartProcess { .. })),
+            .any(|instruction| matches!(instruction, Instruction::ProcessWaitSignal { .. })),
         "test should cover a non-tool effect leaf:\n{listing}"
     );
 }
@@ -1447,12 +1442,16 @@ fn existing_execution_site_ids_are_unchanged() {
         compiled_site_descriptors(&historical),
         "only the recorded execution context may differ"
     );
+    // Re-pinned by FIG-2999: the fixture's `wake result` statement went with
+    // the retired special forms. The resource operation ahead of it keeps its
+    // id, which is the stability this pin is about; the terminal behind it sat
+    // at a statement index the deleted `wake` used to occupy, so its id moved
+    // with the program, not with the id scheme.
     assert_eq!(
         execution_site_ids(&historical),
         [
             "resource_operation:a27f5176d6e2e5669b60ff3b",
-            "process_event:1ec2b872e0ce7bec713fb2b4",
-            "terminal:f297ff069fbe7fe3a3965b0e",
+            "terminal:7951ccc418aaa1b1fbcc09bb",
         ]
     );
 }

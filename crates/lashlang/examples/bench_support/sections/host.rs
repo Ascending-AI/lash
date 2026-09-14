@@ -29,9 +29,6 @@ impl ExecutionHost for BenchHost {
                         .collect(),
                 ),
             )),
-            AbilityOp::StartProcess(start) => {
-                Self::task_handle(&start.process_name, &start.args).map(AbilityResult::Value)
-            }
             AbilityOp::Await(handle) => {
                 let record = handle
                     .as_record()
@@ -40,7 +37,6 @@ impl ExecutionHost for BenchHost {
                     record.get("value").cloned().unwrap_or(Value::Null),
                 ))
             }
-            AbilityOp::Cancel(handle) => Ok(AbilityResult::Value(handle)),
             AbilityOp::Print(_) => Ok(AbilityResult::Unit),
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
@@ -74,6 +70,18 @@ fn bench_resource_call(
 
 fn bench_call(name: &str, args: &Record) -> Result<Value, ExecutionHostError> {
     match name {
+        "start_process_handle" => {
+            // The start's own arguments ride in `args`, where the stub name the
+            // bench answers with sits beside the process's parameters.
+            let Some(start_args) = args.get("args").and_then(Value::as_record) else {
+                return Err(ExecutionHostError::new("start expects an `args` record"));
+            };
+            let Some(Value::String(process)) = start_args.get("tool") else {
+                return Err(ExecutionHostError::new("start expects a `tool` name"));
+            };
+            BenchHost::task_handle(process.as_ref(), start_args)
+        }
+        "cancel_process_handle" => Ok(args.get("handle").cloned().unwrap_or(Value::Null)),
         "echo" => Ok(args.get("value").cloned().unwrap_or(Value::Null)),
         "boom" => Err(ExecutionHostError::new("explicit failure for benchmark")),
         "exec_command" => {

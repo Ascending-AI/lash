@@ -64,18 +64,9 @@ pub enum LashlangRuntimeError {
         #[source]
         source: serde_json::Error,
     },
-    /// The host does not provide process execution.
-    #[error("processes are not available")]
-    ProcessesUnavailable,
     /// The host does not provide sleeping.
     #[error("sleep is not available")]
     SleepUnavailable,
-    /// The host does not provide process signals.
-    #[error("process signals are not available")]
-    ProcessSignalsUnavailable,
-    /// The host does not provide triggers.
-    #[error("triggers are not available")]
-    TriggersUnavailable,
     /// The host does not provide label annotations.
     #[error("label annotations are not available")]
     LabelAnnotationsUnavailable,

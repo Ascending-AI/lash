@@ -30,153 +30,125 @@ pub(crate) struct BuiltInWorkflow {
 // and the tool-facing examples carry none, so the derived-name path stays
 // exercised too.
 
-const BLANK_WORKFLOW: &str = r#"const blank = defineProcess({
-  name: "blank",
-  signals: {},
-  run: async () => {
-    return 0;
-  }
-});
+const BLANK_WORKFLOW: &str = r#"const blank = async () => {
+  return 0;
+};
 "#;
 
 const TRAFFIC_LIGHTS_WORKFLOW: &str = r#"/** @label Traffic lights — Cycle a three-light signal twice */
-const traffic_lights = defineProcess({
-  name: "traffic_lights",
-  signals: {},
-  run: async () => {
-    await display.set_status({ key: "traffic", value: "running" });
-    /** @label Run two cycles */
-    for (const cycle of [1, 2]) {
-      await display.add_item({ list: "cycles", item: cycle });
-      /** @label Red — Stop the traffic */
-      await display.set_light({ name: "red", state: "on" });
-      await display.set_light({ name: "amber", state: "off" });
-      await display.set_light({ name: "green", state: "off" });
-      await sleep("350ms");
-      await display.set_light({ name: "red", state: "off" });
-      await display.set_light({ name: "amber", state: "on" });
-      await sleep("350ms");
-      await display.set_light({ name: "amber", state: "off" });
-      await display.set_light({ name: "green", state: "on" });
-      await display.show_message({ text: "Go" });
-      await sleep("500ms");
-    }
-    await display.set_status({ key: "traffic", value: "complete" });
-    return null;
+const traffic_lights = async () => {
+  await display.set_status({ key: "traffic", value: "running" });
+  /** @label Run two cycles */
+  for (const cycle of [1, 2]) {
+    await display.add_item({ list: "cycles", item: cycle });
+    /** @label Red — Stop the traffic */
+    await display.set_light({ name: "red", state: "on" });
+    await display.set_light({ name: "amber", state: "off" });
+    await display.set_light({ name: "green", state: "off" });
+    await sleep("350ms");
+    await display.set_light({ name: "red", state: "off" });
+    await display.set_light({ name: "amber", state: "on" });
+    await sleep("350ms");
+    await display.set_light({ name: "amber", state: "off" });
+    await display.set_light({ name: "green", state: "on" });
+    await display.show_message({ text: "Go" });
+    await sleep("500ms");
   }
-});
+  await display.set_status({ key: "traffic", value: "complete" });
+  return null;
+};
 "#;
 
 const BRANCHING_APPROVAL_WORKFLOW: &str = r#"/** @label Branching approval — Wait for a decision and take one of two paths */
-const branching_approval = defineProcess({
-  name: "branching_approval",
-  signals: { continue: null },
-  run: async () => {
-    await display.set_status({ key: "approval", value: "waiting" });
-    await display.highlight({ target: "approval" });
-    await display.show_message({ text: "Approval requested" });
-    /** @label Wait for the decision */
-    const decision = await waitSignal("continue");
-    if (decision.autoFired) {
-      await display.set_status({ key: "approval", value: "approved" });
-      if (true) {
-        await display.set_light({ name: "approved", state: "green" });
-        await display.show_message({ text: "Request approved" });
-      } else {
-        await display.show_message({ text: "Approval needs review" });
-      }
+const branching_approval = async () => {
+  await display.set_status({ key: "approval", value: "waiting" });
+  await display.highlight({ target: "approval" });
+  await display.show_message({ text: "Approval requested" });
+  /** @label Wait for the decision */
+  const decision = await waitSignal("continue");
+  if (decision.autoFired) {
+    await display.set_status({ key: "approval", value: "approved" });
+    if (true) {
+      await display.set_light({ name: "approved", state: "green" });
+      await display.show_message({ text: "Request approved" });
     } else {
-      await display.set_status({ key: "approval", value: "rejected" });
-      await display.set_light({ name: "rejected", state: "red" });
-      await display.show_message({ text: "Request rejected" });
+      await display.show_message({ text: "Approval needs review" });
     }
-    await sleep("400ms");
-    await display.highlight({ target: "result" });
-    return decision;
+  } else {
+    await display.set_status({ key: "approval", value: "rejected" });
+    await display.set_light({ name: "rejected", state: "red" });
+    await display.show_message({ text: "Request rejected" });
   }
-});
+  await sleep("400ms");
+  await display.highlight({ target: "result" });
+  return decision;
+};
 "#;
 
 const COUNTER_LOOP_WORKFLOW: &str = r#"/** @label Counter loop — Count to three, then walk a fixed progress list */
-const counter_loop = defineProcess({
-  name: "counter_loop",
-  signals: {},
-  run: async () => {
-    await display.set_status({ key: "counter", value: "running" });
-    await display.set_progress({ pct: 5 });
-    const state = { count: 0 };
-    /** @label Count to three */
-    while (state.count < 3) {
-      await display.add_item({ list: "counts", item: state.count });
-      await display.set_progress({ pct: state.count * 20 + 20 });
-      state.count = state.count + 1;
-      await sleep("250ms");
-    }
-    /** @label Walk the progress list */
-    for (const pct of [70, 85, 100]) {
-      await display.set_progress({ pct: pct });
-      await sleep("300ms");
-    }
-    await display.highlight({ target: "progress" });
-    await display.set_status({ key: "counter", value: "complete" });
-    await display.show_message({ text: "Counter complete" });
-    return state.count;
+const counter_loop = async () => {
+  await display.set_status({ key: "counter", value: "running" });
+  await display.set_progress({ pct: 5 });
+  const state = { count: 0 };
+  /** @label Count to three */
+  while (state.count < 3) {
+    await display.add_item({ list: "counts", item: state.count });
+    await display.set_progress({ pct: state.count * 20 + 20 });
+    state.count = state.count + 1;
+    await sleep("250ms");
   }
-});
+  /** @label Walk the progress list */
+  for (const pct of [70, 85, 100]) {
+    await display.set_progress({ pct: pct });
+    await sleep("300ms");
+  }
+  await display.highlight({ target: "progress" });
+  await display.set_status({ key: "counter", value: "complete" });
+  await display.show_message({ text: "Counter complete" });
+  return state.count;
+};
 "#;
 
-const SUMMARIZE_EMAILS_WORKFLOW: &str = r#"const summarize_top_emails = defineProcess({
-  name: "summarize_top_emails",
-  signals: {},
-  run: async () => {
-    const emails = await gmail.list_recent({ count: 5 });
-    for (const email of emails) {
-      await llm.query({
-        task: "Summarize this email in one sentence",
-        inputs: { sender: email["from"], subject: email.subject, snippet: email.snippet }
-      });
-    }
-    const digest = await llm.query({
-      task: "Format these five summaries as a concise numbered email digest",
-      inputs: { summaries: emails }
+const SUMMARIZE_EMAILS_WORKFLOW: &str = r#"const summarize_top_emails = async () => {
+  const emails = await gmail.list_recent({ count: 5 });
+  for (const email of emails) {
+    await llm.query({
+      task: "Summarize this email in one sentence",
+      inputs: { sender: email["from"], subject: email.subject, snippet: email.snippet }
     });
-    await display.show_message({ text: digest });
-    return digest;
   }
-});
+  const digest = await llm.query({
+    task: "Format these five summaries as a concise numbered email digest",
+    inputs: { summaries: emails }
+  });
+  await display.show_message({ text: digest });
+  return digest;
+};
 "#;
 
-const RESEARCH_NVIDIA_WORKFLOW: &str = r#"const research_nvidia_stock = defineProcess({
-  name: "research_nvidia_stock",
-  signals: {},
-  run: async () => {
-    const search = await web.search({ query: "NVIDIA stock outlook" });
-    const research = await agents.spawn({
-      capability: "explore",
-      task: "Research NVIDIA's stock outlook from the supplied web search results",
-      seed: { search_results: search.results }
-    });
-    await display.show_message({ text: research.summary });
-    return research;
-  }
-});
+const RESEARCH_NVIDIA_WORKFLOW: &str = r#"const research_nvidia_stock = async () => {
+  const search = await web.search({ query: "NVIDIA stock outlook" });
+  const research = await agents.spawn({
+    capability: "explore",
+    task: "Research NVIDIA's stock outlook from the supplied web search results",
+    seed: { search_results: search.results }
+  });
+  await display.show_message({ text: research.summary });
+  return research;
+};
 "#;
 
-const TEAM_STANDUP_WORKFLOW: &str = r#"const team_standup_digest = defineProcess({
-  name: "team_standup_digest",
-  signals: {},
-  run: async () => {
-    const messages = await slack.recent({ channel: "team-platform", since: "yesterday" });
-    const activity = await github.recent({ repo: "acme/widgets", since: "yesterday" });
-    const standup = await agents.spawn({
-      capability: "peer",
-      task: "Synthesize a concise team standup digest and call out blockers",
-      seed: { slack_messages: messages, github_activity: activity }
-    });
-    await display.show_message({ text: standup.digest });
-    return standup.digest;
-  }
-});
+const TEAM_STANDUP_WORKFLOW: &str = r#"const team_standup_digest = async () => {
+  const messages = await slack.recent({ channel: "team-platform", since: "yesterday" });
+  const activity = await github.recent({ repo: "acme/widgets", since: "yesterday" });
+  const standup = await agents.spawn({
+    capability: "peer",
+    task: "Synthesize a concise team standup digest and call out blockers",
+    seed: { slack_messages: messages, github_activity: activity }
+  });
+  await display.show_message({ text: standup.digest });
+  return standup.digest;
+};
 "#;
 
 pub(crate) const BUILT_IN_WORKFLOWS: &[BuiltInWorkflow] = &[

@@ -2199,16 +2199,12 @@ fn trigger_registration_provider() -> ProviderHandle {
 
 fn test_button_trigger_source() -> &'static str {
     r#"
-        const remember = defineProcess({
-          name: "remember",
-          signals: {},
-          run: async (event: unknown) => {
-            wake({ kind: "button_pressed", button: event.button, message: event.message });
-            return { button: event.button, ok: true };
-          }
-        });
+        const remember = async (event: unknown) => {
+          await processes.emit({ value: { kind: "button_pressed", button: event.button, message: event.message } });
+          return { button: event.button, ok: true };
+        };
 
-        const handle = await registerTrigger({
+        const handle = await triggers.register({
           source: ui.button.pressed({}),
           target: remember,
           inputs: (event) => ({ event: event }),

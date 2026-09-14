@@ -95,9 +95,7 @@ pub(super) fn parse_typescript_fragment(
                 .map(|name| format!("  let {name};\n"))
                 .collect::<String>();
             (
-                format!(
-                    "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", run: async () => {{\n{prelude}{text}\n}} }});\n"
-                ),
+                format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n"),
                 BTreeSet::new(),
                 names.len(),
             )
@@ -177,7 +175,7 @@ pub fn parse_typescript_assign_target(
 /// Parse one editable TypeScript statement that only a process body accepts,
 /// such as the `return` that ends a process.
 ///
-/// The text is reparsed inside a generated `defineProcess` wrapper, with
+/// The text is reparsed inside a generated process-arrow wrapper, with
 /// `globals` re-declared in the run body so an edited reassignment still
 /// parses, and the wrapper's single statement is returned. The wrapper name
 /// never reaches a graph.
@@ -190,9 +188,7 @@ pub fn parse_typescript_process_statement(
         .iter()
         .map(|name| format!("  let {name};\n"))
         .collect::<String>();
-    let source = format!(
-        "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", run: async () => {{\n{prelude}{text}\n}} }});\n"
-    );
+    let source = format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n");
     let program = crate::parse_workflow_fragment(&source, &BTreeSet::new(), processes)
         .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
     let Some(lashlang::Declaration::Process(process)) = program.declarations.into_iter().next()
@@ -239,17 +235,28 @@ pub(super) fn parse_expression_field(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    // An expression field is read in expression position, so it parses inside
-    // parentheses: `{ count: 0 }` is an object literal here, and a bare
-    // statement parse would read it as a labelled block.
-    let parenthesized = format!("(\n{text}\n)");
-    let program =
-        crate::parse_workflow_fragment(&parenthesized, &globals, &context.process_bindings())
-            .map_err(|error| GraphRenderError::InvalidExpression {
-                node_id: node.id.to_string(),
-                field,
-                message: error.to_string(),
-            })?;
+    // An `async` arrow is a process literal, and only a top-level `const`
+    // binding promotes it to one. Parenthesising it would read it as an
+    // ordinary function expression, whose `await`s the dialect then refuses —
+    // so this one shape parses as the binding statement it is and the bound
+    // value is taken back out.
+    let (fragment, unwrap_binding) = if is_async_arrow_text(text) {
+        (
+            format!("const {PROCESS_LITERAL_BINDING} =\n{text}\n;"),
+            true,
+        )
+    } else {
+        // Every other expression field is read in expression position, so it
+        // parses inside parentheses: `{ count: 0 }` is an object literal here,
+        // and a bare statement parse would read it as a labelled block.
+        (format!("(\n{text}\n)"), false)
+    };
+    let program = crate::parse_workflow_fragment(&fragment, &globals, &context.process_bindings())
+        .map_err(|error| GraphRenderError::InvalidExpression {
+            node_id: node.id.to_string(),
+            field,
+            message: error.to_string(),
+        })?;
     if !program.declarations.is_empty() {
         return Err(GraphRenderError::InvalidExpression {
             node_id: node.id.to_string(),
@@ -257,11 +264,35 @@ pub(super) fn parse_expression_field(
             message: "expected one expression, found a declaration".to_string(),
         });
     }
-    single_expression(program.main).ok_or(GraphRenderError::InvalidExpression {
-        node_id: node.id.to_string(),
-        field,
-        message: "expected exactly one expression".to_string(),
-    })
+    let expression =
+        single_expression(program.main).ok_or_else(|| GraphRenderError::InvalidExpression {
+            node_id: node.id.to_string(),
+            field,
+            message: "expected exactly one expression".to_string(),
+        })?;
+    if !unwrap_binding {
+        return Ok(expression);
+    }
+    match expression {
+        Expr::Assign { target, expr } if target.root.as_str() == PROCESS_LITERAL_BINDING => {
+            Ok(*expr)
+        }
+        _ => Err(GraphRenderError::InvalidExpression {
+            node_id: node.id.to_string(),
+            field,
+            message: "expected a process literal binding".to_string(),
+        }),
+    }
+}
+
+/// The throwaway binding an `async` arrow field is parsed under.
+const PROCESS_LITERAL_BINDING: &str = "__workflow_process_literal";
+
+/// Whether an expression field is an `async` arrow, and so a process literal.
+fn is_async_arrow_text(text: &str) -> bool {
+    let rest = text.trim_start();
+    rest.strip_prefix("async")
+        .is_some_and(|rest| rest.starts_with([' ', '(', '\t', '\n']))
 }
 
 fn single_expression(main: Expr) -> Option<Expr> {

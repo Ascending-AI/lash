@@ -698,20 +698,16 @@ finish(result);"#,
 async fn rlm_spawn_process_handle_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
         r#"<typescript>
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  signals: {},
-  run: async () => {
-    const result = await agents.spawn({
-      capability: "default",
-      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["a", "b"] },
-      output: { len: "int" }
-    });
-    return result;
-  }
-});
-const handle = start(spawnChild);
+const spawnChild = async () => {
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["a", "b"] },
+    output: { len: "int" }
+  });
+  return result;
+};
+const handle = await processes.start({ definition: spawnChild });
 finish(await handle);
 </typescript>"#,
         TurnInput::text("spawn a child with a seeded chunk through start/await"),
@@ -743,20 +739,16 @@ finish(await handle);
 async fn rlm_spawn_labeled_inside_process_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
         r#"<typescript>
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  signals: {},
-  run: async () => {
-    const result = await agents.spawn({
-      capability: "default",
-      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["a", "b"] },
-      output: { len: "int" }
-    });
-    return result;
-  }
-});
-const handle = start(spawnChild);
+const spawnChild = async () => {
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["a", "b"] },
+    output: { len: "int" }
+  });
+  return result;
+};
+const handle = await processes.start({ definition: spawnChild });
 finish(await handle);
 </typescript>"#,
         TurnInput::text("spawn a child inside a durable process"),
@@ -781,20 +773,16 @@ finish(await handle);
 async fn rlm_spawn_captured_process_authority_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
         r#"<typescript>
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  signals: {},
-  run: async () => {
-    const result = await agents.spawn({
-      capability: "default",
-      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["a", "b"] },
-      output: { len: "int" }
-    });
-    return result;
-  }
-});
-const handle = start(spawnChild);
+const spawnChild = async () => {
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["a", "b"] },
+    output: { len: "int" }
+  });
+  return result;
+};
+const handle = await processes.start({ definition: spawnChild });
 finish(await handle);
 </typescript>"#,
         TurnInput::text("spawn a child with captured agents authority through start/await"),
@@ -1072,10 +1060,7 @@ async fn run_seed_probe_inner(
     ];
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let host_plugins = PluginHost::new(factories.clone());
-    let process_abilities = LashlangAbilities::default()
-        .with_processes()
-        .with_sleep()
-        .with_process_signals();
+    let process_abilities = LashlangAbilities::default().with_sleep();
     let mut extensions = host_plugins.extensions().clone();
     extensions.insert(
         lash_core::facade_support::PluginExtensionContribution::new(

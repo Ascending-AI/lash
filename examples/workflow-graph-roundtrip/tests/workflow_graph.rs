@@ -2,10 +2,10 @@
 /// position. It projects as its own process container of the module — named
 /// exactly what the linker lifts the literal to — and render -> parse ->
 /// render is a fixed point over the call that carries it, the same laws the
-/// `defineProcess` corpora prove.
+/// process corpora prove.
 #[test]
 fn inline_trigger_target_projects_as_a_process_container_and_fixpoints() {
-    let literal_source = r#"await registerTrigger({
+    let literal_source = r#"await triggers.register({
   source: { expr: "0 8 * * *" },
   target: async (event) => {
     await display.set_status({ key: "review", value: "waking" });

@@ -171,32 +171,8 @@ fn linker_reproduces_full_error_set() {
             |err| matches!(err, LinkError::UnresolvedReceiver { operation, .. } if operation == "read_file"),
         ),
         (
-            "process scan() { finish 1 }\nstart scan(extra: 1)",
-            builders::module(
-                vec![builders::process(
-                    "scan",
-                    Vec::new(),
-                    builders::block(vec![builders::finish(builders::num(1.0))]),
-                )],
-                vec![builders::start("scan", vec![("extra", builders::num(1.0))])],
-            ),
-            |err| matches!(err, LinkError::UnexpectedProcessArgument { arg, .. } if arg == "extra"),
-        ),
-        (
-            "process scan(needed: str) { finish needed }\nstart scan()",
-            builders::module(
-                vec![builders::process(
-                    "scan",
-                    vec![builders::param("needed", TypeExpr::Str)],
-                    builders::block(vec![builders::finish(builders::var("needed"))]),
-                )],
-                vec![builders::start("scan", Vec::new())],
-            ),
-            |err| matches!(err, LinkError::MissingProcessArgument { arg, .. } if arg == "needed"),
-        ),
-        (
-            "start ghost()",
-            builders::program(vec![builders::start("ghost", Vec::new())]),
+            "ghost",
+            builders::program(vec![builders::finish(builders::process_ref("ghost"))]),
             |err| matches!(err, LinkError::UnknownProcess { name, .. } if name == "ghost"),
         ),
     ];

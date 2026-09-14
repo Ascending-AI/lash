@@ -365,16 +365,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Instruction::ResourceOperationBatch(_) | Instruction::ResourceOperationListBatch(_) => {
                 Some("resource_batch".to_string())
             }
-            Instruction::AwaitHandle | Instruction::AwaitHandleUnwrap => Some("await".to_string()),
-            Instruction::StartProcess { .. } => Some("start".to_string()),
+            // A handle await is an await whether the front end could type the
+            // binding as a handle or had to classify it at runtime: the author
+            // wrote `await`, and the error detail names what they wrote.
+            Instruction::AwaitHandle
+            | Instruction::AwaitHandleUnwrap
+            | Instruction::AwaitPending => Some("await".to_string()),
             Instruction::SleepFor => Some("sleep_for".to_string()),
             Instruction::SleepUntil => Some("sleep_until".to_string()),
             Instruction::ProcessWaitSignal { .. } => Some("wait_signal".to_string()),
-            Instruction::ProcessSignalRun { .. } => Some("signal_run".to_string()),
-            Instruction::CancelHandle => Some("cancel".to_string()),
             Instruction::Print => Some("print".to_string()),
             Instruction::ProcessYield => Some("yield".to_string()),
-            Instruction::ProcessWake => Some("wake".to_string()),
             Instruction::Finish => Some("finish".to_string()),
             Instruction::ProcessFail => Some("fail".to_string()),
             _ => None,

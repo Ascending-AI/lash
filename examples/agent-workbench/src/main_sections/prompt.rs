@@ -21,26 +21,22 @@ pub(crate) const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside
 Available host features:
 - Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
 - You may call `agents.spawn(...)` for independent investigation.
-- You may use durable process definitions for work that should run independently. A `start` creates a process run immediately; a trigger registration is the durable rule that creates future runs when the host emits a matching event.
-- `await start(process, args)` waits for the run and gives you the value the run returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be signalled and awaited later.
-- Bind every definition to a `const` whose identifier is exactly its `name` literal (`const on_button = defineProcess({ name: "on_button", ... })`). A trigger target is resolved by that name, and a definition bound under a different identifier is refused when it is registered.
-- To run subagents or slow tool branches in parallel, define one branch process and start every handle before awaiting any of them. Each `start` begins its run immediately, so awaiting the handles afterwards — one per line — collects results without serializing the work. Do not write several `const x = await agents.spawn(...)` lines and call that parallel. `Promise.all` joins tool promises and plain values only; a process handle is awaited directly on its own line:
+- You may use durable process definitions for work that should run independently. `processes.start` creates a process run immediately; a trigger registration is the durable rule that creates future runs when the host emits a matching event.
+- A process is an `async` arrow the cell never calls: `const on_button = async (event: unknown) => { ... };`. Pass it to `processes.start` or to a trigger registration by that `const`.
+- `await processes.start({ definition: p, args: { ...args } })` returns a handle; `await handle` waits for the run and gives you the value it returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be signalled and awaited later.
+- To run subagents or slow tool branches in parallel, define one branch process and start every handle before awaiting any of them. Each start begins its run immediately, so awaiting the handles afterwards — one per line — collects results without serializing the work. Do not write several `const x = await agents.spawn(...)` lines and call that parallel. `Promise.all` joins tool promises and plain values only; a process handle is awaited directly on its own line:
 
     <typescript>
-    const research = defineProcess({
-      name: "research",
-      signals: {},
-      run: async (task: unknown) => {
-        return await agents.spawn({
-          task: task,
-          capability: "explore",
-          output: { summary: "str", key_metrics: "list[str]" }
-        });
-      }
-    });
+    const research = async (task: unknown) => {
+      return await agents.spawn({
+        task: task,
+        capability: "explore",
+        output: { summary: "str", key_metrics: "list[str]" }
+      });
+    };
 
-    const first = start(research, { task: "Research the first topic" });
-    const second = start(research, { task: "Research the second topic" });
+    const first = await processes.start({ definition: research, args: { task: "Research the first topic" } });
+    const second = await processes.start({ definition: research, args: { task: "Research the second topic" } });
     const first_result = await first;
     const second_result = await second;
     finish("## Results\n\n### First topic\n" + first_result.summary + "\n\nKey metrics:\n- " + first_result.key_metrics.join("\n- ") + "\n\n### Second topic\n" + second_result.summary + "\n\nKey metrics:\n- " + second_result.key_metrics.join("\n- "));
@@ -49,16 +45,12 @@ Available host features:
 - The red and blue UI buttons emit `ui.button.pressed`. Register `ui.button.pressed({})`; the selected button arrives in the event payload, not in the source config:
 
     <typescript>
-    const on_button = defineProcess({
-      name: "on_button",
-      signals: {},
-      run: async (event: unknown) => {
-        wake({ kind: "button_pressed", button: event.button, message: event.message });
-        return true;
-      }
-    });
+    const on_button = async (event: unknown) => {
+      await processes.emit({ value: { kind: "button_pressed", button: event.button, message: event.message } });
+      return true;
+    };
 
-    const handle = await registerTrigger({
+    const handle = await triggers.register({
       source: ui.button.pressed({}),
       target: on_button,
       inputs: (event) => ({ event: event }),
@@ -79,22 +71,18 @@ Available host features:
 - When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the host emits `mail.received` with payload `mail.Received { account: str, title: str, text: str }`. `mail.Received.account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries. Register an inbox concierge once and it will fire on every delivery:
 
     <typescript>
-    const on_mail = defineProcess({
-      name: "on_mail",
-      signals: {},
-      run: async (event: unknown) => {
-        const boxes = await Promise.all([inbox.work.list({}), inbox.personal.list({})]);
-        wake({
-          kind: "mail_brief",
-          arrived_in: event.account,
-          title: event.title,
-          waiting: boxes[0].messages.length + boxes[1].messages.length
-        });
-        return true;
-      }
-    });
+    const on_mail = async (event: unknown) => {
+      const boxes = await Promise.all([inbox.work.list({}), inbox.personal.list({})]);
+      await processes.emit({ value: {
+        kind: "mail_brief",
+        arrived_in: event.account,
+        title: event.title,
+        waiting: boxes[0].messages.length + boxes[1].messages.length
+      } });
+      return true;
+    };
 
-    const handle = await registerTrigger({
+    const handle = await triggers.register({
       source: mail.received({}),
       target: on_mail,
       inputs: (event) => ({ event: event }),

@@ -56,15 +56,7 @@ pub enum DiagnosticCode {
     UnknownBinding,
     AssignConst,
     MutableCaptureUnsupported,
-    ProcessDefinitionNotTopLevel,
-    ProcessConfigLiteralRequired,
-    ProcessConfigFieldUnsupported,
-    ProcessNameLiteralRequired,
-    ProcessSignalsLiteralRequired,
-    ProcessSignalsRemoved,
-    ProcessRunLiteralRequired,
-    ProcessCaptureUnsupported,
-    ProcessTargetStaticRequired,
+    NonLiftableCapture,
     ProcessParamTypeUnsupported,
     TriggerSourceEventAccess,
     TriggerEventRemoved,
@@ -140,15 +132,7 @@ impl DiagnosticCode {
         Self::UnknownBinding,
         Self::AssignConst,
         Self::MutableCaptureUnsupported,
-        Self::ProcessDefinitionNotTopLevel,
-        Self::ProcessConfigLiteralRequired,
-        Self::ProcessConfigFieldUnsupported,
-        Self::ProcessNameLiteralRequired,
-        Self::ProcessSignalsLiteralRequired,
-        Self::ProcessSignalsRemoved,
-        Self::ProcessRunLiteralRequired,
-        Self::ProcessCaptureUnsupported,
-        Self::ProcessTargetStaticRequired,
+        Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
         Self::TriggerSourceEventAccess,
         Self::TriggerEventRemoved,
@@ -262,11 +246,9 @@ impl DiagnosticCode {
             Self::MutableCaptureUnsupported => {
                 "pass the value into the function as a parameter and return the new value"
             }
-            Self::ProcessConfigFieldUnsupported => {
-                "a `defineProcess` config accepts `name`, `signals`, and `run`"
-            }
-            Self::ProcessCaptureUnsupported => {
-                "pass the value to the process through its `run` arguments"
+            Self::NonLiftableCapture => "pass the value to the process through its `run` arguments",
+            Self::ProcessParamTypeUnsupported => {
+                "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
             }
             Self::MethodUnsupported => {
                 "use a method the dialect's standard-library contract lists for this receiver"
@@ -283,24 +265,6 @@ impl DiagnosticCode {
             Self::SourceNestingLimit => "name intermediate values instead of nesting expressions",
             Self::SourceTooLarge => "split the work across several cells",
             Self::ReservedIdentifier => "choose a different name",
-            Self::ProcessDefinitionNotTopLevel => "bind `defineProcess` to one top-level `const`",
-            Self::ProcessConfigLiteralRequired => {
-                "pass `defineProcess` a literal object with static properties"
-            }
-            Self::ProcessNameLiteralRequired => "give `name` a string literal",
-            Self::ProcessSignalsLiteralRequired => {
-                "give `signals` a literal object with static properties"
-            }
-            Self::ProcessSignalsRemoved => {
-                "drop `signals` and let the body's `waitSignal` sites declare the set"
-            }
-            Self::ProcessRunLiteralRequired => "give `run` a function literal",
-            Self::ProcessTargetStaticRequired => {
-                "name a top-level `defineProcess` binding directly"
-            }
-            Self::ProcessParamTypeUnsupported => {
-                "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
-            }
             Self::TriggerSourceEventAccess
             | Self::TriggerEventRemoved
             | Self::TriggerInputsLiteralRequired => {
@@ -336,7 +300,6 @@ impl DiagnosticCode {
             Self::ClassUnsupported
             | Self::GeneratorUnsupported
             | Self::AsyncUnsupported
-            | Self::ProcessSignalsRemoved
             | Self::WithUnsupported
             | Self::EvalUnsupported
             | Self::FunctionConstructorUnsupported
@@ -370,8 +333,7 @@ impl DiagnosticCode {
             | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
             | Self::MutableCaptureUnsupported
-            | Self::ProcessConfigFieldUnsupported
-            | Self::ProcessCaptureUnsupported
+            | Self::NonLiftableCapture
             // Rules about size, placement, and shape. No single construct to
             // name, but just as much a refusal: the runtime will not accept
             // this program however it is debugged.
@@ -381,12 +343,6 @@ impl DiagnosticCode {
             | Self::SourceNestingLimit
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
-            | Self::ProcessDefinitionNotTopLevel
-            | Self::ProcessConfigLiteralRequired
-            | Self::ProcessNameLiteralRequired
-            | Self::ProcessSignalsLiteralRequired
-            | Self::ProcessRunLiteralRequired
-            | Self::ProcessTargetStaticRequired
             | Self::ProcessParamTypeUnsupported
             | Self::TriggerSourceEventAccess
             | Self::TriggerEventRemoved
@@ -471,15 +427,7 @@ impl DiagnosticCode {
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::MutableCaptureUnsupported => "TS_MUTABLE_CAPTURE_UNSUPPORTED",
-            Self::ProcessDefinitionNotTopLevel => "TS_PROCESS_DEFINITION_NOT_TOP_LEVEL",
-            Self::ProcessConfigLiteralRequired => "TS_PROCESS_CONFIG_LITERAL_REQUIRED",
-            Self::ProcessConfigFieldUnsupported => "TS_PROCESS_CONFIG_FIELD_UNSUPPORTED",
-            Self::ProcessNameLiteralRequired => "TS_PROCESS_NAME_LITERAL_REQUIRED",
-            Self::ProcessSignalsLiteralRequired => "TS_PROCESS_SIGNALS_LITERAL_REQUIRED",
-            Self::ProcessSignalsRemoved => "TS_PROCESS_SIGNALS_REMOVED",
-            Self::ProcessRunLiteralRequired => "TS_PROCESS_RUN_LITERAL_REQUIRED",
-            Self::ProcessCaptureUnsupported => "TS_PROCESS_CAPTURE_UNSUPPORTED",
-            Self::ProcessTargetStaticRequired => "TS_PROCESS_TARGET_STATIC_REQUIRED",
+            Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
             Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",
             Self::TriggerEventRemoved => "TS_TRIGGER_EVENT_REMOVED",

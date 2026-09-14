@@ -54,7 +54,6 @@ impl<'module> Linker<'module> {
         original: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(self.surface.abilities.processes, "processes", scope.span)?;
         let span = self
             .expression_spans
             .get(&(original as *const Expr as usize))
@@ -73,6 +72,12 @@ impl<'module> Linker<'module> {
             }
             self.validate_type_refs(&param.ty, span)?;
         }
+        // A capture's declared type is whatever the enclosing scope already
+        // knows about the name. The front end cannot type it — it has no type
+        // environment — so it writes `Any` and the lift refines it here. That
+        // is what lets one process literal name another: the captured binding
+        // is a `Process` out here, and stays one inside the body.
+        let mut hidden_args = Vec::with_capacity(literal.hidden_args.len());
         for hidden in &literal.hidden_args {
             if !seen.insert(hidden.name.to_string()) {
                 return Err(LinkError::DuplicateProcessParam {
@@ -81,7 +86,14 @@ impl<'module> Linker<'module> {
                 });
             }
             self.validate_type_refs(&hidden.ty, span)?;
+            let mut hidden = hidden.clone();
+            if matches!(hidden.ty, TypeExpr::Any)
+                && let Some(binding) = scope.get(&hidden.name)
+            {
+                hidden.ty = binding_type(&binding);
+            }
             start_params.push(hidden.clone());
+            hidden_args.push(hidden);
         }
         for param in start_params.clone() {
             process_scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
@@ -129,7 +141,7 @@ impl<'module> Linker<'module> {
                 name: name.clone().into(),
                 params: {
                     let mut linked = literal.params.clone();
-                    linked.extend(literal.hidden_args.clone());
+                    linked.extend(hidden_args.clone());
                     linked
                 },
                 signals,

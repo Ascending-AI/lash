@@ -38,18 +38,14 @@ async fn live_restate_process_llm_query_with_typed_output_succeeds_inner() {
                 match call {
                     0 => Ok(text_response(
                         r#"<typescript>
-const enrich = defineProcess({
-  name: "enrich",
-  signals: {},
-  run: async (event: unknown) => {
-    return await llm.query({
-      task: "Classify the supplied email",
-      inputs: { event: event },
-      output: { category: "str", confidence: "float" }
-    });
-  }
-});
-const handle = start(enrich, { event: { email: "hello@example.com" } });
+const enrich = async (event: unknown) => {
+  return await llm.query({
+    task: "Classify the supplied email",
+    inputs: { event: event },
+    output: { category: "str", confidence: "float" }
+  });
+};
+const handle = await processes.start({ definition: enrich, args: { event: { email: "hello@example.com" } } });
 finish(await handle);
 </typescript>"#,
                     )),
@@ -333,19 +329,15 @@ async fn live_restate_stop_over_process_await_commits_cancelled_and_streams_evid
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const hold_for_stop = defineProcess({
-  name: "hold_for_stop",
-  signals: {},
-  run: async () => {
-    let elapsed_seconds = 0;
-    while (elapsed_seconds < 300) {
-      await sleep(1000);
-      elapsed_seconds = elapsed_seconds + 1;
-    }
-    return "unreachable";
+const hold_for_stop = async () => {
+  let elapsed_seconds = 0;
+  while (elapsed_seconds < 300) {
+    await sleep(1000);
+    elapsed_seconds = elapsed_seconds + 1;
   }
-});
-const handle = start(hold_for_stop, {});
+  return "unreachable";
+};
+const handle = await processes.start({ definition: hold_for_stop });
 finish(await handle);
 </typescript>"#,
             ))
@@ -1080,15 +1072,11 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const survive_revocation = defineProcess({
-  name: "survive_revocation",
-  signals: {},
-  run: async () => {
-    await sleep(90000);
-    return "survived session deletion";
-  }
-});
-const handle = start(survive_revocation, {});
+const survive_revocation = async () => {
+  await sleep(90000);
+  return "survived session deletion";
+};
+const handle = await processes.start({ definition: survive_revocation });
 finish(await handle);
 </typescript>"#,
             ))
@@ -1260,24 +1248,16 @@ async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const survivor = defineProcess({
-  name: "survivor",
-  signals: {},
-  run: async () => {
-    await sleep(8000);
-    return "survived session deletion";
-  }
-});
-const cancellable = defineProcess({
-  name: "cancellable",
-  signals: {},
-  run: async () => {
-    await sleep(60000);
-    return "cancellation failed";
-  }
-});
-const survivor_handle = start(survivor, {});
-const cancellable_handle = start(cancellable, {});
+const survivor = async () => {
+  await sleep(8000);
+  return "survived session deletion";
+};
+const cancellable = async () => {
+  await sleep(60000);
+  return "cancellation failed";
+};
+const survivor_handle = await processes.start({ definition: survivor });
+const cancellable_handle = await processes.start({ definition: cancellable });
 finish("started lifecycle gates");
 </typescript>"#,
             ))
