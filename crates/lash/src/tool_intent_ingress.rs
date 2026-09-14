@@ -172,7 +172,7 @@ pub enum ToolIntentIngressOutcome {
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
     Trigger(lash_core::facade_support::TriggerEmitReport),
-    TriggerRegistration(lash_core::TriggerMutationReceipt),
+    TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -672,7 +672,7 @@ impl ToolIntentIngress {
             )),
             RealizedIntent::TriggerRegistration(receipt) => Some((
                 lash_core::ToolIntentKind::RegisterTrigger,
-                serde_json::to_value(receipt).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(&*receipt).unwrap_or(serde_json::Value::Null),
             )),
             RealizedIntent::Process(_) => None,
         };
@@ -1033,7 +1033,10 @@ impl ToolIntentIngress {
                 let receipt = self
                     .register_recorded_trigger(identity, intent.draft)
                     .await?;
-                return Ok((RealizedIntent::TriggerRegistration(receipt), false));
+                return Ok((
+                    RealizedIntent::TriggerRegistration(Box::new(receipt)),
+                    false,
+                ));
             }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
