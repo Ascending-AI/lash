@@ -67,7 +67,9 @@ Abort (per RULES.md), not something to stub.
 The app **auto-creates a chat on first load** — do not click `New chat` on a fresh boot
 or you will have two. Gates:
 
-- `GET /api/chats` now lists exactly one chat; record its `chat_id`.
+- `GET /api/chats` now lists exactly one chat; record its `id` — the list objects are keyed
+  `id` (plus `title`, `created_at`, `model`), and that value is what the per-chat routes below
+  spell `{chat_id}`.
 - `GET /api/chats/{chat_id}/board` is the default board: nine `null` cells, `"turn":
   "X"`, `"status": "X to move"`, `legal_moves` = 0..8.
 - `#gameStatus` renders `X to move` (compare the DOM `textContent`, or
