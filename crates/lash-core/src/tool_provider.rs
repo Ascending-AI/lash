@@ -408,27 +408,13 @@ impl<'run> AttemptContext<'run> {
         &self,
         intent_index: usize,
     ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
-        match self
-            .parent_invocation
-            .as_deref()
-            .and_then(crate::RuntimeInvocation::replay_key)
-        {
-            Some(minting_emission_replay_key) => {
-                crate::tool_intent::derive_tool_intent_identity_for_emission(
-                    &self.session_id,
-                    &self.execution_scope_id,
-                    self.tool_call_id.as_deref(),
-                    intent_index,
-                    minting_emission_replay_key,
-                )
-            }
-            None => crate::derive_tool_intent_identity(
-                &self.session_id,
-                &self.execution_scope_id,
-                self.tool_call_id.as_deref(),
-                intent_index,
-            ),
-        }
+        crate::derive_tool_intent_identity_under(
+            &self.session_id,
+            &self.execution_scope_id,
+            self.tool_call_id.as_deref(),
+            intent_index,
+            self.parent_invocation.as_deref(),
+        )
     }
 }
 

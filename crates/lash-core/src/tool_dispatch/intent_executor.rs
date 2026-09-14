@@ -10,7 +10,7 @@ pub async fn execute_final_tool_intents(
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
 ) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
-    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V2 {
+    if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V3 {
         return Ok(Vec::new());
     }
     if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
@@ -87,7 +87,7 @@ fn admit_batch(
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
 ) -> Option<crate::ToolIntentRefusalReason> {
-    if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V2 {
+    if intents.protocol_version != crate::TOOL_INTENT_PROTOCOL_V3 {
         return Some(crate::ToolIntentRefusalReason::UnsupportedProtocolVersion {
             recorded: intents.protocol_version,
         });
@@ -188,27 +188,13 @@ fn derive_identity(
     tool_call_id: Option<&str>,
     intent_index: usize,
 ) -> Result<crate::ToolIntentIdentity, crate::ToolIntentRefusalReason> {
-    match context
-        .parent_invocation
-        .as_ref()
-        .and_then(crate::RuntimeInvocation::replay_key)
-    {
-        Some(minting_emission_replay_key) => {
-            crate::tool_intent::derive_tool_intent_identity_for_emission(
-                &context.session_id,
-                execution_scope_id,
-                tool_call_id,
-                intent_index,
-                minting_emission_replay_key,
-            )
-        }
-        None => crate::derive_tool_intent_identity(
-            &context.session_id,
-            execution_scope_id,
-            tool_call_id,
-            intent_index,
-        ),
-    }
+    crate::derive_tool_intent_identity_under(
+        &context.session_id,
+        execution_scope_id,
+        tool_call_id,
+        intent_index,
+        context.parent_invocation.as_ref(),
+    )
 }
 
 fn refused(
@@ -282,8 +268,10 @@ async fn execute_one(
 
     match intent {
         crate::ToolIntent::StartProcess(intent) => {
-            let mut request = intent.request.clone();
-            request.id = identity.recorded_process_id();
+            // The declaration carries no id: the sole constructor on this path
+            // derives it from this declaration's identity, so a redrive of the
+            // same attempt starts the same process id (FIG-2994).
+            let request = intent.into_request(identity);
             let summary = context
                 .processes
                 .start_from_recorded_intent(&intent.session_id, request, scope)
@@ -362,6 +350,85 @@ async fn execute_one(
                     .await?;
             Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
         }
+        crate::ToolIntent::RegisterProcessDefinition(intent) => {
+            Err(process_definition_registry_unavailable(&intent.engine_kind))
+        }
+        crate::ToolIntent::RegisterTrigger(intent) => {
+            let router = context.trigger_router.as_ref().ok_or_else(|| {
+                crate::PluginError::Session(
+                    "trigger store is unavailable in this runtime".to_string(),
+                )
+            })?;
+            let outcome = Box::pin(register_recorded_trigger(
+                context,
+                router,
+                identity,
+                intent.draft.clone(),
+            ))
+            .await?;
+            Ok(serde_json::to_value(outcome).unwrap_or(serde_json::Value::Null))
+        }
+    }
+}
+
+/// The definition registry table is a separate child of FIG-2990. Until it
+/// lands the declaration is admitted, identified and journaled like any other
+/// intent, and realization refuses in the shared typed vocabulary rather than
+/// reporting a registration that never happened.
+fn process_definition_registry_unavailable(engine_kind: &str) -> crate::PluginError {
+    crate::PluginError::Session(format!(
+        "process definition registry is unavailable in this runtime: \
+         cannot register a `{engine_kind}` definition"
+    ))
+}
+
+/// Install one recorded subscription draft through the trigger effect the
+/// foreground registration path uses, keyed by the declaration's replay key so
+/// a redrive re-installs the same subscription instead of a second one.
+async fn register_recorded_trigger(
+    context: &ToolDispatchContext<'_>,
+    router: &crate::TriggerRouter,
+    identity: &crate::ToolIntentIdentity,
+    draft: crate::TriggerSubscriptionDraft,
+) -> Result<crate::TriggerMutationReceipt, crate::PluginError> {
+    let scoped = context.effect_controller.scoped();
+    let invocation = crate::RuntimeEffectInvocation::new(
+        crate::EffectAddress::new(
+            scoped.execution_scope().clone(),
+            identity.replay_key.clone(),
+        )
+        .expect("tool-intent execution carries an admitted effect scope"),
+        context.parentless_attribution(),
+        identity.replay_key.clone(),
+    )
+    .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+        identity.clone(),
+    ));
+    let session_scope = crate::SessionScope::new(context.session_id.clone());
+    let outcome = scoped
+        .execute_effect(
+            crate::RuntimeEffectEnvelope::new(
+                invocation,
+                crate::RuntimeEffectCommand::Trigger {
+                    command: Box::new(crate::TriggerCommand::Register {
+                        owner_scope: crate::TriggerOwnerScope::session(context.session_id.clone()),
+                        actor: crate::ProcessOriginator::session(session_scope),
+                        draft,
+                    }),
+                },
+            ),
+            crate::RuntimeEffectLocalExecutor::triggers(router.store()),
+        )
+        .await
+        .map_err(crate::PluginError::RuntimeEffectController)?
+        .into_trigger()
+        .map_err(crate::PluginError::RuntimeEffectController)?
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    match outcome {
+        crate::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+        other => Err(crate::PluginError::Session(format!(
+            "trigger registration returned a non-mutation outcome: {other:?}"
+        ))),
     }
 }
 
@@ -402,7 +469,7 @@ mod tests {
 
     #[test]
     fn protocol_dispatch_refuses_predecessor_and_unknown_records() {
-        for recorded in [0, 1, 3] {
+        for recorded in [0, 1, 2, 4] {
             let intents = crate::ToolIntents {
                 protocol_version: recorded,
                 intents: vec![signal(
@@ -419,7 +486,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_total_count_overflow() {
-        let intents = crate::ToolIntents::v2(
+        let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_COUNT)
                 .map(|index| {
                     signal(
@@ -440,7 +507,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
-        let intents = crate::ToolIntents::v2(
+        let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_PER_KIND)
                 .map(|index| {
                     signal(
@@ -462,7 +529,7 @@ mod tests {
 
     #[test]
     fn admission_is_all_or_nothing_for_canonical_byte_overflow() {
-        let intents = crate::ToolIntents::v2(vec![signal(
+        let intents = crate::ToolIntents::v3(vec![signal(
             &SessionId::from("session"),
             serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
         )]);
@@ -479,7 +546,7 @@ mod tests {
 
     #[test]
     fn admission_refuses_the_entire_batch_on_session_mismatch() {
-        let intents = crate::ToolIntents::v2(vec![
+        let intents = crate::ToolIntents::v3(vec![
             signal(&SessionId::from("session"), serde_json::json!({"index": 0})),
             signal(
                 &SessionId::from("other-session"),

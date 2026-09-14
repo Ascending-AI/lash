@@ -66,7 +66,7 @@ impl ToolIntentIngressKey {
             minting_emission_replay_key: None,
         });
         Self {
-            protocol_version: lash_core::TOOL_INTENT_PROTOCOL_V2,
+            protocol_version: lash_core::TOOL_INTENT_PROTOCOL_V3,
             identity,
         }
     }
@@ -172,6 +172,7 @@ pub enum ToolIntentIngressOutcome {
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
     Trigger(lash_core::facade_support::TriggerEmitReport),
+    TriggerRegistration(lash_core::TriggerMutationReceipt),
 }
 
 /// Session-and-scope-bound host front door for durable intent realization.
@@ -530,7 +531,7 @@ impl ToolIntentIngress {
         key: &ToolIntentIngressKey,
         intent: &lash_core::ToolIntent,
     ) -> Option<ToolIntentIngressRefusal> {
-        if key.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+        if key.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
             return Some(ToolIntentIngressRefusal::UnsupportedProtocolVersion {
                 recorded: key.protocol_version,
             });
@@ -573,16 +574,14 @@ impl ToolIntentIngress {
         None
     }
 
+    /// The identity a well-formed record must carry, re-derived from its own
+    /// durable fields by the single re-derivation constructor. Deriving it here
+    /// instead dropped `minting_emission_replay_key` and so read every
+    /// runtime-minted identity as forged (FIG-2994).
     fn expected_identity(
         identity: &lash_core::ToolIntentIdentity,
     ) -> Option<lash_core::ToolIntentIdentity> {
-        lash_core::derive_tool_intent_identity(
-            &identity.session_id,
-            &identity.execution_scope_id,
-            Some(&identity.tool_call_id),
-            identity.intent_index as usize,
-        )
-        .ok()
+        lash_core::rederive_tool_intent_identity(identity).ok()
     }
 
     async fn realize(
@@ -632,7 +631,7 @@ impl ToolIntentIngress {
                 match admission {
                     lash_core::ToolIntentSubmissionAdmission::Admitted => intent,
                     lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+                        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
                             return Err(RealizationFailure::Refused(
                                 ToolIntentIngressRefusal::UnsupportedProtocolVersion {
                                     recorded: existing.protocol_version,
@@ -666,19 +665,29 @@ impl ToolIntentIngress {
             .realize_inner(identity, intent)
             .await
             .map_err(|error| Self::realization_failure(kind, error))?;
-        let result = match result {
-            RealizedIntent::Trigger(report) => {
-                let value = serde_json::to_value(report).unwrap_or(serde_json::Value::Null);
+        let trigger_result = match &result {
+            RealizedIntent::Trigger(report) => Some((
+                lash_core::ToolIntentKind::EmitTrigger,
+                serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
+            )),
+            RealizedIntent::TriggerRegistration(receipt) => Some((
+                lash_core::ToolIntentKind::RegisterTrigger,
+                serde_json::to_value(receipt).unwrap_or(serde_json::Value::Null),
+            )),
+            RealizedIntent::Process(_) => None,
+        };
+        let result = match trigger_result {
+            Some((trigger_kind, value)) => {
                 // `realize_inner` dispatches on the submitted intent, so this
                 // pairing only breaks if an admitted submission row carries a
-                // kind its own payload contradicts. The trigger route has no
+                // kind its own payload contradicts. The trigger routes have no
                 // journal replay to cross-check, so the row is the only place
                 // that corruption can come from; refuse rather than report a
                 // trigger outcome under another kind.
-                if kind != lash_core::ToolIntentKind::EmitTrigger {
+                if kind != trigger_kind {
                     return Err(RealizationFailure::Refused(
                         ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                            recorded_kind: lash_core::ToolIntentKind::EmitTrigger,
+                            recorded_kind: trigger_kind,
                             submitted_kind: kind,
                         },
                     ));
@@ -703,7 +712,12 @@ impl ToolIntentIngress {
                     })?;
                 return Ok(((kind, value), replayed));
             }
-            RealizedIntent::Process(result) => result,
+            None => match result {
+                RealizedIntent::Process(result) => result,
+                RealizedIntent::Trigger(_) | RealizedIntent::TriggerRegistration(_) => {
+                    unreachable!("trigger outcomes are settled above")
+                }
+            },
         };
         let recorded_kind = match &result {
             lash_core::ProcessEffectOutcome::Start { .. } => {
@@ -857,7 +871,7 @@ impl ToolIntentIngress {
         let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
             return Ok(());
         };
-        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V3 {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::UnsupportedProtocolVersion {
                     recorded: existing.protocol_version,
@@ -921,11 +935,11 @@ impl ToolIntentIngress {
     ) -> crate::Result<(RealizedIntent, bool)> {
         let command = match intent {
             lash_core::ToolIntent::StartProcess(intent) => {
-                let mut request = intent.request;
-                // The replay key is the process id, so a re-submitted
-                // declaration starts the same process. One projection, shared
-                // with core's recorded-intent seam (FIG-2876).
-                request.id = identity.recorded_process_id();
+                // The declaration carries no id. The replay key is the process
+                // id, so a re-submitted declaration starts the same process:
+                // one constructor, shared with core's recorded-intent seam
+                // (FIG-2876, FIG-2994).
+                let request = intent.into_request(identity);
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
                 let registration = self
@@ -1003,9 +1017,102 @@ impl ToolIntentIngress {
                 let replayed = realization.is_coalesced();
                 return Ok((RealizedIntent::Trigger(report), replayed));
             }
+            lash_core::ToolIntent::RegisterProcessDefinition(intent) => {
+                // The definition registry table is a separate child of
+                // FIG-2990; the declaration is admitted and identified here,
+                // and realization refuses until that table exists.
+                return Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                    format!(
+                        "process definition registry is unavailable in this runtime: \
+                         cannot register a `{}` definition",
+                        intent.engine_kind
+                    ),
+                )));
+            }
+            lash_core::ToolIntent::RegisterTrigger(intent) => {
+                let receipt = self
+                    .register_recorded_trigger(identity, intent.draft)
+                    .await?;
+                return Ok((RealizedIntent::TriggerRegistration(receipt), false));
+            }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
         Ok((RealizedIntent::Process(result), replayed))
+    }
+
+    /// Install one recorded subscription draft through the same trigger effect
+    /// the runtime intent executor uses, keyed by the declaration's replay key.
+    async fn register_recorded_trigger(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        draft: lash_core::TriggerSubscriptionDraft,
+    ) -> crate::Result<lash_core::TriggerMutationReceipt> {
+        let store = self
+            .core
+            .env
+            .trigger_store
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                    "trigger store is unavailable in this runtime".to_string(),
+                ))
+            })?;
+        let scoped = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .scoped(self.scope.clone())?;
+        let invocation = lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                scoped.execution_scope().clone(),
+                identity.replay_key.clone(),
+            )
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?,
+            lash_core::RuntimeAttribution::for_session(self.session_id.clone()),
+            identity.replay_key.clone(),
+        )
+        .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ));
+        let session_scope = lash_core::SessionScope::new(self.session_id.clone());
+        let outcome = scoped
+            .execute_effect(
+                lash_core::RuntimeEffectEnvelope::new(
+                    invocation,
+                    lash_core::RuntimeEffectCommand::Trigger {
+                        command: Box::new(lash_core::TriggerCommand::Register {
+                            owner_scope: lash_core::TriggerOwnerScope::session(
+                                self.session_id.clone(),
+                            ),
+                            actor: lash_core::ProcessOriginator::session(session_scope),
+                            draft,
+                        }),
+                    },
+                ),
+                lash_core::RuntimeEffectLocalExecutor::triggers(store),
+            )
+            .await
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            })?
+            .into_trigger()
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            })?
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?;
+        match outcome {
+            lash_core::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+            other => Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                format!("trigger registration returned a non-mutation outcome: {other:?}"),
+            ))),
+        }
     }
 
     /// Emit one recorded trigger declaration through the same router the

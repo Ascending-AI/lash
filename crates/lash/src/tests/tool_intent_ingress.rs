@@ -790,8 +790,7 @@ fn emit_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        request: lash_core::ProcessStartRequest::external(
-            "ingress-start",
+        declaration: lash_core::ProcessStartDeclaration::external(
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
             lash_core::ProcessLifecyclePolicy::new(
@@ -805,8 +804,7 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        request: lash_core::ProcessStartRequest::new(
-            "ingress-env-start",
+        declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::ToolCall {
                 call: lash_core::PreparedToolCall::from_parts(
                     "ingress-env-call",
@@ -1890,8 +1888,7 @@ async fn ingress_engine_core() -> Result<(LashCore, Arc<TestLocalProcessRegistry
 fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         session_id: SessionId::from(SESSION.to_string()),
-        request: lash_core::ProcessStartRequest::new(
-            "ingress-engine-start",
+        declaration: lash_core::ProcessStartDeclaration::new(
             lash_core::ProcessInput::Engine {
                 kind: kind.to_string(),
                 payload,
@@ -2051,7 +2048,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         runtime.process_service()?
     };
     let intents =
-        lash_core::ToolIntents::v2(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
+        lash_core::ToolIntents::v3(vec![engine_start_intent(INGRESS_ENGINE_KIND, payload)]);
     let outcomes = lash_core::testing::execute_tool_intents_with_services(
         scoped,
         processes,

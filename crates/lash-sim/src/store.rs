@@ -1232,11 +1232,10 @@ impl ModelStore {
             .stable_hash()
             .expect("abstract durable-effect envelope is serializable");
         let recorded_intents =
-            lash_core::ToolIntents::v2(vec![lash_core::ToolIntent::StartProcess(Box::new(
+            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
                 lash_core::StartProcessIntent {
                     session_id: SessionId::from(event.actor_alias.clone()),
-                    request: lash_core::ProcessStartRequest::external(
-                        format!("{effect_id}:intent-child"),
+                    declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),
                         lash_core::ProcessLifecyclePolicy::new(

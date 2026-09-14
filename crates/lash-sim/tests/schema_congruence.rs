@@ -864,7 +864,9 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             | ToolIntentKind::SignalProcess
             | ToolIntentKind::CancelProcess
             | ToolIntentKind::EmitProcessEvent
-            | ToolIntentKind::EmitTrigger => {}
+            | ToolIntentKind::EmitTrigger
+            | ToolIntentKind::RegisterProcessDefinition
+            | ToolIntentKind::RegisterTrigger => {}
         }
     }
     fn exhaustive_effect_row_status(status: EffectRowStatus) {

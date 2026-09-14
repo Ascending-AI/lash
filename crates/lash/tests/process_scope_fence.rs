@@ -746,7 +746,7 @@ async fn registration_path_lifts_the_fence(kind: Kind, path: RegistrationPath) {
                     ingress_key.clone(),
                     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
                         session_id: SessionId::from(REUSE_SESSION.to_string()),
-                        request: start_request(&ProcessId::from("host-chosen-id-is-replaced")),
+                        declaration: start_request(&ProcessId::from("unused")).into_declaration(),
                     })),
                 )
                 .await;

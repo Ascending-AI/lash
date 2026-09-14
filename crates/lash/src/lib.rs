@@ -196,7 +196,7 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PreparedToolCall, SignalProcessIntent, StartProcessIntent,
         TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
-        TOOL_INTENT_PROTOCOL_V2, TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy,
+        TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy,
         ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
         ToolCallRecord, ToolCatalogEntry, ToolContext, ToolContract, ToolDefinition,
         ToolDirectCompletionClient, ToolDiscovery, ToolDispatchClient, ToolExecutionGrant,

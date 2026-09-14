@@ -267,17 +267,27 @@ impl From<lash_core::ToolIntentIdentity> for RemoteToolIntentIdentity {
     }
 }
 
-impl From<lash_core::ToolIntentKind> for RemoteToolIntentKind {
-    fn from(value: lash_core::ToolIntentKind) -> Self {
-        match value {
-            lash_core::ToolIntentKind::StartProcess => Self::StartProcess,
-            lash_core::ToolIntentKind::SignalProcess => Self::SignalProcess,
-            lash_core::ToolIntentKind::CancelProcess => Self::CancelProcess,
-            lash_core::ToolIntentKind::EmitProcessEvent => Self::EmitProcessEvent,
-            lash_core::ToolIntentKind::EmitTrigger => Self::EmitTrigger,
+macro_rules! define_remote_tool_intent_kind_conversions {
+    ($($variant:ident $wire:literal,)*) => {
+        impl From<lash_core::ToolIntentKind> for RemoteToolIntentKind {
+            fn from(value: lash_core::ToolIntentKind) -> Self {
+                match value {
+                    $(lash_core::ToolIntentKind::$variant => Self::$variant,)*
+                }
+            }
         }
-    }
+
+        impl From<RemoteToolIntentKind> for lash_core::ToolIntentKind {
+            fn from(value: RemoteToolIntentKind) -> Self {
+                match value {
+                    $(RemoteToolIntentKind::$variant => Self::$variant,)*
+                }
+            }
+        }
+    };
 }
+
+lash_sansio::tool_intent_variants!(define_remote_tool_intent_kind_conversions);
 
 impl From<lash_core::ToolIntentRefusalReason> for RemoteToolIntentRefusalReason {
     fn from(value: lash_core::ToolIntentRefusalReason) -> Self {

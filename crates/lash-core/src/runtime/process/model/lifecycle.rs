@@ -116,6 +116,150 @@ impl ProcessLifecyclePolicy {
     }
 }
 
+/// A start request as a leaf tool attempt declares it: everything a process
+/// start needs except its id.
+///
+/// The id is not declaration material. It is a pure function of the declaring
+/// attempt's intent identity ([`ProcessId::from_intent_identity`]), so the
+/// attempt can name the child it is starting before the start commits, and the
+/// executor derives the same id on every redrive. Carrying an id here instead
+/// would hash a field the executor overwrites into the submission payload,
+/// which is what tripped the duplicate-identity check on redrive (FIG-2994).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessStartDeclaration {
+    pub input: ProcessInput,
+    pub disposition: RecoveryContract,
+    pub lifecycle: ProcessLifecyclePolicy,
+    /// Maximum execution attempts. `None` delegates pacing indefinitely to the
+    /// engine; deterministic failures then require host cancellation or
+    /// abandonment to resolve awaiters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_spec: Option<super::ProcessExecutionEnvSpec>,
+    pub originator: super::ProcessOriginator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<super::DeclaredProcessIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observers: Vec<SessionId>,
+    #[serde(default)]
+    pub event_types: Vec<ProcessEventType>,
+}
+
+impl ProcessStartDeclaration {
+    /// Declare a process start for store and durable-substrate implementors.
+    /// The id is absent by construction; realization derives it.
+    pub fn new(
+        input: ProcessInput,
+        disposition: RecoveryContract,
+        originator: super::ProcessOriginator,
+        lifecycle: ProcessLifecyclePolicy,
+    ) -> Self {
+        Self {
+            input,
+            disposition,
+            lifecycle,
+            max_attempts: None,
+            env_spec: None,
+            originator,
+            identity: None,
+            wake_session_id: None,
+            observers: Vec::new(),
+            event_types: default_process_event_types(),
+        }
+    }
+
+    /// External placeholder declaration: `ProcessInput::External` is always
+    /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
+    pub fn external(
+        originator: super::ProcessOriginator,
+        metadata: serde_json::Value,
+        lifecycle: ProcessLifecyclePolicy,
+    ) -> Self {
+        Self::new(
+            ProcessInput::External { metadata },
+            RecoveryContract::ExternallyOwned,
+            originator,
+            lifecycle,
+        )
+    }
+
+    /// Sets the env spec carried by this declaration.
+    pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
+        self.env_spec = Some(env_spec);
+        self
+    }
+
+    /// Sets the max attempts carried by this declaration.
+    pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
+        self.max_attempts = max_attempts;
+        self
+    }
+
+    /// Sets the declared identity carried by this declaration.
+    pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
+        self.identity = Some(declared);
+        self
+    }
+
+    /// Sets the wake session id carried by this declaration.
+    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
+        self.wake_session_id = wake_session_id;
+        self
+    }
+
+    /// Sets the observers carried by this declaration.
+    pub fn with_observers(
+        mut self,
+        observers: impl IntoIterator<Item = impl Into<SessionId>>,
+    ) -> Self {
+        self.observers = observers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the event types carried by this declaration.
+    pub fn with_event_types(
+        mut self,
+        event_types: impl IntoIterator<Item = ProcessEventType>,
+    ) -> Self {
+        self.event_types = event_types.into_iter().collect();
+        self
+    }
+
+    /// Adds event types to those already carried by this declaration.
+    pub fn with_extra_event_types(
+        mut self,
+        event_types: impl IntoIterator<Item = ProcessEventType>,
+    ) -> Self {
+        self.event_types.extend(event_types);
+        self
+    }
+
+    /// Bind this declaration to the id derived from the declaring attempt.
+    ///
+    /// The only way a declaration becomes a request: every realization route
+    /// passes `ProcessId::from_intent_identity(identity)` here, so the id the
+    /// attempt returned and the id the executor starts are the same value by
+    /// construction rather than by convention.
+    pub fn into_request(self, id: ProcessId) -> ProcessStartRequest {
+        ProcessStartRequest {
+            id,
+            input: self.input,
+            disposition: self.disposition,
+            lifecycle: self.lifecycle,
+            max_attempts: self.max_attempts,
+            env_spec: self.env_spec,
+            originator: self.originator,
+            identity: self.identity,
+            wake_session_id: self.wake_session_id,
+            observers: self.observers,
+            event_types: self.event_types,
+        }
+    }
+}
+
 /// Public host-facing request for starting a visible process handle.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartRequest {
@@ -240,6 +384,24 @@ impl ProcessStartRequest {
     ) -> Self {
         self.event_types.extend(event_types);
         self
+    }
+
+    /// Drops the id a caller happened to carry, leaving the declaration a leaf
+    /// attempt records. The id is re-derived from the attempt identity at
+    /// realization, never carried across the journal.
+    pub fn into_declaration(self) -> ProcessStartDeclaration {
+        ProcessStartDeclaration {
+            input: self.input,
+            disposition: self.disposition,
+            lifecycle: self.lifecycle,
+            max_attempts: self.max_attempts,
+            env_spec: self.env_spec,
+            originator: self.originator,
+            identity: self.identity,
+            wake_session_id: self.wake_session_id,
+            observers: self.observers,
+            event_types: self.event_types,
+        }
     }
 
     /// Extracts the registration outcome for store and durable-substrate implementors while

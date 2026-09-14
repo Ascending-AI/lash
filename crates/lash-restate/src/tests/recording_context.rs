@@ -1187,7 +1187,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                                 "tool-intent-corpus-call",
                                 "tool_intent_corpus",
                             )),
-                            intents: lash_core::ToolIntents::v2(vec![
+                            intents: lash_core::ToolIntents::v3(vec![
                                 lash_core::ToolIntent::SignalProcess(
                                     lash_core::SignalProcessIntent {
                                         session_id: SessionId::from(
@@ -1340,9 +1340,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v4-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v5-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v5-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1807,16 +1807,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v4-mid-drain",
+            "v5-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v4-mid-intent",
+            "v5-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v4-full-drain", "full_drain", full),
+        ("v5-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
