@@ -346,7 +346,7 @@ pub use turn_control::{
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
-pub(crate) use turn_input_ingress::ingress_message_id;
+pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,

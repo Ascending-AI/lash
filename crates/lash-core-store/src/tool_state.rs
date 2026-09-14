@@ -72,7 +72,7 @@ impl ToolState {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub fn with_generation(mut self, generation: u64) -> Self {
+    pub(crate) fn with_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
     }
@@ -246,4 +246,22 @@ pub enum ReconfigureError {
     UnknownSource(String),
     #[error("generation mismatch: expected {expected}, actual {actual}")]
     GenerationMismatch { expected: u64, actual: u64 },
+}
+
+/// Generation injection for backend checkpoint round-trip fixtures.
+///
+/// `ToolState::with_generation` stays crate-private so the facade's sealed-surface
+/// contract holds: a host cannot forge a tool-state generation. Certification
+/// fixtures reach it through this trait, which `lash-core` re-exports at
+/// `crate::testing::conformance_support::ToolStateConformanceAccess`.
+#[cfg(any(test, feature = "testing"))]
+pub trait ToolStateConformanceAccess {
+    fn with_generation_for_conformance(self, generation: u64) -> Self;
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl ToolStateConformanceAccess for ToolState {
+    fn with_generation_for_conformance(self, generation: u64) -> Self {
+        ToolState::with_generation(self, generation)
+    }
 }

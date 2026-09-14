@@ -1,6 +1,7 @@
 use super::*;
 use crate::SessionId;
 use crate::ToolDefinition;
+use crate::testing::conformance_support::ToolStateConformanceAccess;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -946,7 +947,7 @@ fn apply_state_rebinds_source_free_snapshot_to_current_sources() {
     let target_registry =
         ToolRegistry::from_tool_provider(Arc::new(MixedEnabledTool)).expect("target registry");
     let next_generation = target_registry
-        .apply_state(snapshot.with_generation(target_registry.generation()))
+        .apply_state(snapshot.with_generation_for_conformance(target_registry.generation()))
         .expect("state rebound");
 
     assert_eq!(next_generation, target_registry.generation());
@@ -982,7 +983,7 @@ fn apply_state_rejects_snapshot_when_provider_is_absent() {
     let target_registry =
         ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target registry");
     let err = target_registry
-        .apply_state(snapshot.with_generation(target_registry.generation()))
+        .apply_state(snapshot.with_generation_for_conformance(target_registry.generation()))
         .expect_err("missing provider should fail");
 
     assert!(matches!(err, ReconfigureError::Validation(_)));
@@ -1890,7 +1891,7 @@ fn restore_state_adopts_generation_at_or_above_three() {
     // delta) rejects it. This is the exact divergence the durable worker /
     // session resume rebuild relies on `restore_state` to absorb.
     let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    let snapshot = source.export_state().with_generation(3);
+    let snapshot = source.export_state().with_generation_for_conformance(3);
 
     let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target registry");
     assert_eq!(
@@ -2257,7 +2258,7 @@ fn apply_state_round_trips_while_orphans_exist() {
 
     // But a snapshot that does NOT mark the tool orphaned still fails —
     // strictness is preserved for entries that were bound at export.
-    let strict = snapshot_with_external_tool().with_generation(target.generation());
+    let strict = snapshot_with_external_tool().with_generation_for_conformance(target.generation());
     assert!(matches!(
         target.apply_state(strict),
         Err(ReconfigureError::Validation(_))

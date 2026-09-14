@@ -4,7 +4,7 @@ error[E0624]: method `with_generation` is private
 2 |     let forged = lash_core::ToolState::default().with_generation(9_999);
   |                                                  ^^^^^^^^^^^^^^^ private method
   |
- ::: $WORKSPACE/crates/lash-core/src/tool_registry/state.rs
+ ::: $WORKSPACE/crates/lash-core-store/src/tool_state.rs
   |
   |     pub(crate) fn with_generation(mut self, generation: u64) -> Self {
   |     ---------------------------------------------------------------- private method defined here
