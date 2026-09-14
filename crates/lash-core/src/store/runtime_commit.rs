@@ -178,6 +178,10 @@ impl RuntimeCommit {
 
     /// Build a test commit with explicit host-owned byte and node limits.
     #[track_caller]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only constructor: node-id derivation failing here is a broken fixture, which must abort the test"
+    )]
     pub fn persisted_state_for_test_with_budget(
         state: &crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -208,6 +212,10 @@ impl RuntimeCommit {
     }
 
     /// Build a test commit with a fixed operation identity.
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only constructor: node-id derivation failing here is a broken fixture, which must abort the test"
+    )]
     pub fn persisted_state_with_operation_for_testing(
         state: &crate::RuntimeSessionState,
         usage_deltas: &[crate::TokenLedgerEntry],
@@ -228,6 +236,10 @@ impl RuntimeCommit {
     }
 
     #[track_caller]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only constructor: node-id derivation failing here is a broken fixture, which must abort the test"
+    )]
     pub fn persisted_state_with_graph_commit(
         state: &crate::RuntimeSessionState,
         mut graph: GraphAppend,

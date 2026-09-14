@@ -28,6 +28,10 @@ pub(crate) enum ToolAttemptEffectIdentity {
 }
 
 impl ToolAttemptEffectIdentity {
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     fn attempt_invocation(
         &self,
         context: &ToolDispatchContext<'_>,
@@ -70,6 +74,10 @@ impl ToolAttemptEffectIdentity {
         )
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     fn retry_sleep_invocation(
         &self,
         context: &ToolDispatchContext<'_>,

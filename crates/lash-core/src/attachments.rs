@@ -1201,6 +1201,10 @@ async fn reclamation_fence_backoff(clock: &dyn crate::Clock, attempt: u32) {
     clock.sleep(delay).await;
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a BLAKE3 hex digest is 64 lowercase hex characters, which satisfies every attachment-id rule"
+)]
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
     // A BLAKE3 hex digest is 64 lowercase hex characters — statically within
     // every attachment-id rule, so this cannot fail.

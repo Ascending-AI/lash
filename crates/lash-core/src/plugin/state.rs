@@ -162,6 +162,11 @@ impl PluginStateStore {
         })?;
         self.set(key, value)
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "the store is constructed bound to a plugin id whose namespace the runtime inserts at bind time, \
+                  and a u64 generation counter cannot be exhausted"
+    )]
     pub fn remove(&self, key: &str) -> Result<u64, PluginStateError> {
         validate_key(key)?;
         let mut state = self.state.lock_recover();
@@ -198,6 +203,12 @@ impl PluginStateStore {
     ) -> Result<u64, PluginStateError> {
         self.edit(Some(expected_generation), edits)
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "the store is constructed bound to a plugin id whose namespace the runtime inserts at bind time, \
+                  a `serde_json::Value` re-encodes without a failing case, and a u64 generation counter \
+                  cannot be exhausted"
+    )]
     fn edit(
         &self,
         expected: Option<u64>,
@@ -388,6 +399,10 @@ impl PluginStateRegistry {
         Ok(())
     }
 }
+#[expect(
+    clippy::expect_used,
+    reason = "`PluginState` is a map of strings to `serde_json::Value`, which MessagePack encodes without a failing case"
+)]
 fn state_ref(state: &PluginState) -> crate::BlobRef {
     crate::BlobRef::for_content(&rmp_serde::to_vec_named(state).expect("plugin state encodes"))
 }

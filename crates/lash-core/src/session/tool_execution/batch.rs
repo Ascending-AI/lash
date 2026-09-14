@@ -9,6 +9,10 @@
 use super::*;
 
 impl RuntimeExecutionContext<'_> {
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeEffectInvocation {
         let suffix = format!("tool-batch:{batch_id}");
         if let Some(parent) = self.parent_invocation.as_ref() {
@@ -522,6 +526,10 @@ impl RuntimeExecutionContext<'_> {
             }
         }
 
+        #[expect(
+            clippy::expect_used,
+            reason = "the loop above writes every index of `replies` exactly once before it is drained here"
+        )]
         let replies = replies
             .into_iter()
             .map(|reply| reply.expect("every batch reply slot should be filled"))

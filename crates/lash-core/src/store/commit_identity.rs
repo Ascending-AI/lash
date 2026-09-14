@@ -294,6 +294,9 @@ fn push_message_role(encoded: &mut Vec<u8>, role: crate::MessageRole) {
     });
 }
 
+/// An `EffectAddress` cannot be built without an admitted execution scope, and
+/// the scope is what carries the journal identity read back here.
+#[expect(clippy::expect_used, reason = "the address carries the scope")]
 fn push_causal_ref(encoded: &mut Vec<u8>, caused_by: &crate::CausalRef) {
     match caused_by {
         crate::CausalRef::Turn {

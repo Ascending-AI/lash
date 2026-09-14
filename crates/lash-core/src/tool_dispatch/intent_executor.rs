@@ -242,6 +242,10 @@ fn record_refused_metric(kind: crate::ToolIntentKind, refusal: &crate::ToolInten
 #[cfg(not(feature = "otel-trace"))]
 fn record_refused_metric(_kind: crate::ToolIntentKind, _refusal: &crate::ToolIntentRefusalReason) {}
 
+#[expect(
+    clippy::expect_used,
+    reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+)]
 async fn execute_one(
     context: &ToolDispatchContext<'_>,
     intent: &crate::ToolIntent,
@@ -385,6 +389,10 @@ fn process_definition_registry_unavailable(engine_kind: &str) -> crate::PluginEr
 /// Install one recorded subscription draft through the trigger effect the
 /// foreground registration path uses, keyed by the declaration's replay key so
 /// a redrive re-installs the same subscription instead of a second one.
+#[expect(
+    clippy::expect_used,
+    reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+)]
 async fn register_recorded_trigger(
     context: &ToolDispatchContext<'_>,
     router: &crate::TriggerRouter,

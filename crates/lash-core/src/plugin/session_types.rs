@@ -180,6 +180,10 @@ impl SessionSnapshot {
 
     /// Replaces the active frame's readable message tail for store implementors restoring a
     /// snapshot; transient messages are not inserted into the graph.
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and a graph node identity is never empty"
+    )]
     pub fn replace_active_read_state(
         &mut self,
         messages: &[crate::Message],
@@ -199,6 +203,10 @@ impl SessionSnapshot {
 
     /// Appends non-transient messages after the active leaf for store implementors applying a
     /// snapshot delta in source order.
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and a graph node identity is never empty"
+    )]
     pub fn append_active_read_delta(&mut self, messages: &[crate::Message]) {
         self.session_graph.append_active_read_delta(messages);
         self.current_frame_node_id = self

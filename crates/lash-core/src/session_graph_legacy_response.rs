@@ -4,6 +4,11 @@
 /// the body and recognizes an `LlmResponse` by its complete stable field set
 /// before consuming the retired `full_text` field. This keeps unrelated plugin
 /// payloads with coincidental `full_text` and `parts` keys untouched.
+#[expect(
+    clippy::expect_used,
+    reason = "`LlmOutputPart::Text` holds a `String` and an optional metadata struct, \
+              whose serialization has no failing case"
+)]
 pub(super) fn upgrade_session_node_llm_responses(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(values) => {

@@ -848,6 +848,10 @@ pub fn append_request_commit_for_testing(
     )
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "`FrameNodeId::new` rejects only the empty string, and a remapping target is a derived node id, never empty"
+)]
 fn remap_optional_node_id(
     node_id: &mut Option<crate::FrameNodeId>,
     mapping: &[(crate::NodeId, crate::NodeId)],

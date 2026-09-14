@@ -330,6 +330,10 @@ impl ToolOutcome {
     /// internal `$lash_tool_value: "untrusted_json"` discriminant and `value`
     /// wrapper into the public shape. This method removes that envelope while
     /// preserving typed attachment projection.
+    #[expect(
+        clippy::expect_used,
+        reason = "the doc comment above states the contract: calling this on a pending result is a caller error"
+    )]
     pub fn value_for_projection(&self) -> serde_json::Value {
         match &self
             .as_done_output()
@@ -361,6 +365,10 @@ impl ToolOutcome {
 
     /// Borrows the immediate tool output for protocol and process-engine implementors; calling it
     /// on deferred completion is a contract violation and panics.
+    #[expect(
+        clippy::expect_used,
+        reason = "the doc comment above states the contract: calling this on deferred completion is a caller error"
+    )]
     pub fn as_output(&self) -> &crate::ToolCallOutput {
         self.as_done_output()
             .expect("pending tool result cannot be viewed as completed output")

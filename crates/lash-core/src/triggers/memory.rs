@@ -87,6 +87,10 @@ impl InMemoryTriggerStore {
 
     /// Insert one receipt encoded exactly as an older SQL backend stored it.
     #[cfg(any(test, feature = "testing"))]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only accessor: a missing subscription row or an undecodable fixture is a broken test setup"
+    )]
     pub fn insert_legacy_mutation_receipt_for_testing(
         &self,
         operation_id: impl Into<String>,
@@ -111,6 +115,10 @@ impl InMemoryTriggerStore {
     }
 
     #[cfg(any(test, feature = "testing"))]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only accessor: a missing subscription row or an undecodable fixture is a broken test setup"
+    )]
     pub fn inject_revision_for_testing(&self, subscription_id: &str, value: i64) {
         assert!(value >= 0, "in-memory trigger revisions cannot be negative");
         self.state
@@ -122,6 +130,10 @@ impl InMemoryTriggerStore {
     }
 
     #[cfg(any(test, feature = "testing"))]
+    #[expect(
+        clippy::expect_used,
+        reason = "test-only accessor: a missing subscription row or an undecodable fixture is a broken test setup"
+    )]
     pub fn revision_snapshot_for_testing(&self, subscription_id: &str) -> String {
         let state = self.state.lock_recover();
         let record = state
@@ -513,6 +525,10 @@ impl TriggerStore for InMemoryTriggerStore {
                     )));
                 }
             }
+            #[expect(
+                clippy::expect_used,
+                reason = "the occurrence ids being drained were enumerated from this same staged map under one lock"
+            )]
             let occurrence = staged
                 .occurrences
                 .remove(occurrence_id)

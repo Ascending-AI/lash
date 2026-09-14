@@ -265,6 +265,10 @@ impl ToolRegistry {
         self.reconcile_source(source)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the ids were collected from this very surface a few lines above, under the same write guard"
+    )]
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
         let source_key = ToolSourceKey::Leaf(source_id.to_string());
         let mut authority = self.inner.write_recover();

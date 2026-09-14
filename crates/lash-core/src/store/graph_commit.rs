@@ -40,6 +40,10 @@ impl GraphAppend {
         self.nodes.iter()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and both identities here are read back out of a graph, where a node id is never empty"
+    )]
     pub(crate) fn derive_current_frame_node_id(
         &self,
         resident_graph: &crate::SessionGraph,

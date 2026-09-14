@@ -527,9 +527,11 @@ impl RuntimeExecutionContext<'_> {
                 .runtime_process_id(self.process_id().map(String::from).map(Into::into))
                 .parent_invocation(Some(attempt_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook);
-        if let Some(process_events) = self.process_event_context() {
+        if let Some(process_id) = self.process_id()
+            && let Some(process_events) = self.process_event_context()
+        {
             tool_context = tool_context.process_events(
-                self.process_id().unwrap(),
+                process_id,
                 process_events.execution_write_authority.clone(),
                 process_events.process_work.clone(),
                 process_events.store.clone(),
@@ -742,6 +744,10 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
     async fn await_pending_tool_dispatch_outcome_with_suffix(
         &self,
         call_id: &str,
@@ -1020,6 +1026,10 @@ impl RuntimeExecutionContext<'_> {
                 if authorization.allows_orchestration()
                     && self.dispatch.is_orchestrating_tool(&prepared.tool_id)
                 {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+                    )]
                     let tool_context =
                         crate::ToolContext::from_dispatch(Arc::new(dispatch.clone()))
                             .prepared_call(&prepared)

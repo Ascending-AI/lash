@@ -160,6 +160,11 @@ fn advertised_tool_entries(
     Ok(advertised)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "every entry already in the advertised surface is bound to a source, and each insert error \
+          names the conflicting entry this function just indexed"
+)]
 pub(super) fn insert_advertised_entry(
     advertised: &mut ToolSurface,
     source_key: &ToolSourceKey,
@@ -254,6 +259,10 @@ fn bound_tool_entry(
     ToolRegistryEntry::new(manifest, source_key, kind)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the branch is entered only when the matches contain a leaf registration, which is what the find returns"
+)]
 fn resolve_snapshot_id(
     id: &ToolId,
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
