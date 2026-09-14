@@ -90,6 +90,21 @@ pub(crate) fn with_expression_spans(mut program: Program, spans: &[(usize, usize
     program
 }
 
+/// Attaches the per-declaration span vector a linker diagnostic reads.
+///
+/// Parallel to `program.declarations`, in order. See `with_source_spans` for
+/// why these tables are stated rather than parsed.
+pub(crate) fn with_declaration_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {
+    program.declaration_spans = spans
+        .iter()
+        .map(|(start, end)| Span {
+            start: *start,
+            end: *end,
+        })
+        .collect();
+    program
+}
+
 /// `type <name> = <ty>`
 pub(crate) fn type_decl(name: &str, ty: TypeExpr) -> Declaration {
     Declaration::Type(TypeDecl {

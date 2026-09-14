@@ -1,4 +1,29 @@
 use super::*;
+use crate::ast::UnaryOp;
+
+/// `process scan(tick: timer.Tick) { finish tick.fired_at }`
+fn scan_tick_process() -> Declaration {
+    builders::process(
+        "scan",
+        vec![builders::param("tick", TypeExpr::Ref("timer.Tick".into()))],
+        builders::block(vec![builders::finish(builders::field(
+            builders::var("tick"),
+            "fired_at",
+        ))]),
+    )
+}
+
+/// `await triggers.register({ source: <source>, target: scan, inputs: { tick: trigger.event } })?`
+fn register_scan_trigger(source: Expr) -> Expr {
+    triggers_call(
+        "register",
+        vec![
+            ("source", source),
+            ("target", builders::var("scan")),
+            ("inputs", builders::record(vec![("tick", trigger_event())])),
+        ],
+    )
+}
 
 fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
     let surface = full_host_environment();
@@ -97,8 +122,21 @@ fn canonical_walk_aligns_javascript_and_map_bindings_with_facets() {
 
 #[test]
 fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
-    for source in ["value = [1][missing]", "value = -missing"] {
-        let program = crate::parse(source).expect("operand witness parses");
+    let witnesses = [
+        (
+            "value = [1][missing]",
+            builders::index(
+                builders::list(vec![builders::num(1.0)]),
+                builders::var("missing"),
+            ),
+        ),
+        (
+            "value = -missing",
+            builders::unary(UnaryOp::Negate, builders::var("missing")),
+        ),
+    ];
+    for (source, operand) in witnesses {
+        let program = builders::program(vec![builders::assign("value", operand)]);
         assert!(matches!(
             LinkedModule::link(program.clone(), full_host_environment()),
             Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
@@ -115,22 +153,33 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
 
 #[test]
 fn default_trigger_key_rejects_a_shadowed_comprehension_source() {
-    let program = crate::parse(
-        r#"
-            process scan(tick: timer.Tick) {
-              finish tick.fired_at
-            }
-            source = timer.Schedule({ expr: "0 8 * * *" })
-            sources = [timer.Schedule({ expr: "0 9 * * *" })]
-            registrations = [await triggers.register({
-              source: source,
-              target: scan,
-              inputs: { tick: trigger.event }
-            })? for source in sources]
-            finish registrations
-            "#,
-    )
-    .expect("comprehension trigger witness parses");
+    // process scan(tick: timer.Tick) { finish tick.fired_at }
+    // source = timer.Schedule({ expr: "0 8 * * *" })
+    // sources = [timer.Schedule({ expr: "0 9 * * *" })]
+    // registrations = [await triggers.register({
+    //   source: source,
+    //   target: scan,
+    //   inputs: { tick: trigger.event }
+    // })? for source in sources]
+    // finish registrations
+    let program = builders::module(
+        vec![scan_tick_process()],
+        vec![
+            builders::assign("source", timer_schedule("0 8 * * *")),
+            builders::assign("sources", builders::list(vec![timer_schedule("0 9 * * *")])),
+            builders::assign(
+                "registrations",
+                builders::comprehension(
+                    register_scan_trigger(builders::var("source")),
+                    vec![builders::comprehension_for(
+                        "source",
+                        builders::var("sources"),
+                    )],
+                ),
+            ),
+            builders::finish(builders::var("registrations")),
+        ],
+    );
 
     assert!(matches!(
         LinkedModule::link(program, full_host_environment()),
@@ -140,45 +189,31 @@ fn default_trigger_key_rejects_a_shadowed_comprehension_source() {
 
 #[test]
 fn default_trigger_key_uses_the_pre_try_scope_in_the_catch_path() {
-    let mut program = crate::parse(
-        r#"
-            process scan(tick: timer.Tick) {
-              finish tick.fired_at
-            }
-            source = timer.Schedule({ expr: "0 8 * * *" })
-            await triggers.register({
-              source: source,
-              target: scan,
-              inputs: { tick: trigger.event }
-            })?
-            "#,
-    )
-    .expect("base trigger witness parses");
-    let Expr::Block(main) = &mut program.main else {
-        unreachable!("parsed main is a block")
-    };
-    let register = main.pop().expect("registration expression");
-    let outer_source = main.pop().expect("outer source assignment");
-    let mut body_source = outer_source.clone();
-    let Expr::Assign { expr, .. } = &mut body_source else {
-        unreachable!("source setup is an assignment")
-    };
-    let Expr::ReceiverCall { args, .. } = expr.as_mut() else {
-        panic!("unexpected timer source expression: {expr:?}")
-    };
-    let [Expr::Record(fields)] = args.as_mut_slice() else {
-        unreachable!("timer source input is a record")
-    };
-    fields[0].1 = Expr::String("0 9 * * *".into());
-    main.push(outer_source);
-    main.push(Expr::Try(Box::new(crate::TryExpr {
-        body: Box::new(body_source),
-        catch: Some(crate::CatchClause {
-            binding: "error".into(),
-            body: Box::new(register),
-        }),
-        finally: None,
-    })));
+    // process scan(tick: timer.Tick) { finish tick.fired_at }
+    // source = timer.Schedule({ expr: "0 8 * * *" })
+    // try { source = timer.Schedule({ expr: "0 9 * * *" }) }
+    // catch error { await triggers.register({
+    //   source: source,
+    //   target: scan,
+    //   inputs: { tick: trigger.event }
+    // })? }
+    //
+    // The catch body must derive its key from the pre-try binding, so the
+    // shadowing assignment lives inside the try body.
+    let program = builders::module(
+        vec![scan_tick_process()],
+        vec![
+            builders::assign("source", timer_schedule("0 8 * * *")),
+            builders::try_expr(
+                builders::assign("source", timer_schedule("0 9 * * *")),
+                Some(builders::catch(
+                    "error",
+                    register_scan_trigger(builders::var("source")),
+                )),
+                None,
+            ),
+        ],
+    );
 
     let linked = LinkedModule::link(program, full_host_environment())
         .expect("catch path resolves source from its lowering scope");
@@ -236,28 +271,30 @@ fn registration_key(expr: &Expr) -> &str {
 
 #[test]
 fn assignment_indexes_retain_lowering_and_their_own_trigger_keys_in_evaluation_order() {
-    let program = crate::parse(
-        r#"
-            process scan(tick: timer.Tick) {
-              finish tick.fired_at
-            }
-            items[await triggers.register({
-              source: timer.Schedule({ expr: "0 8 * * *" }),
-              target: scan,
-              inputs: { tick: trigger.event }
-            })?] = await triggers.register({
-              source: timer.Schedule({ expr: "0 9 * * *" }),
-              target: scan,
-              inputs: { tick: trigger.event }
-            })?
-            await triggers.register({
-              source: timer.Schedule({ expr: "0 10 * * *" }),
-              target: scan,
-              inputs: { tick: trigger.event }
-            })?
-            "#,
-    )
-    .expect("dynamic assignment-index witness parses");
+    // process scan(tick: timer.Tick) { finish tick.fired_at }
+    // items[await triggers.register({
+    //   source: timer.Schedule({ expr: "0 8 * * *" }), target: scan,
+    //   inputs: { tick: trigger.event }
+    // })?] = await triggers.register({
+    //   source: timer.Schedule({ expr: "0 9 * * *" }), target: scan,
+    //   inputs: { tick: trigger.event }
+    // })?
+    // await triggers.register({
+    //   source: timer.Schedule({ expr: "0 10 * * *" }), target: scan,
+    //   inputs: { tick: trigger.event }
+    // })?
+    let register_at = |expr: &str| register_scan_trigger(timer_schedule(expr));
+    let program = builders::module(
+        vec![scan_tick_process()],
+        vec![
+            builders::assign_path(
+                "items",
+                vec![builders::index_step(register_at("0 8 * * *"))],
+                register_at("0 9 * * *"),
+            ),
+            register_at("0 10 * * *"),
+        ],
+    );
     let linked = LinkedModule::link(program, full_host_environment().with_globals(["items"]))
         .expect("every registration keeps its own derived key");
     let Expr::Block(main) = &linked.program().main else {
@@ -358,12 +395,21 @@ fn assert_unknown_child(analysis: &crate::WorkflowLinkAnalysis, statements: &[Ex
 fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     let environment = full_host_environment();
 
-    let if_source = r#"
-        value = 1
-        if missing { value = "then"; child = unknown } else { value = "else" }
-        after = value
-    "#;
-    let program = crate::parse(if_source).expect("if witness parses");
+    // value = 1
+    // if missing { value = "then"; child = unknown } else { value = "else" }
+    // after = value
+    let program = builders::program(vec![
+        builders::assign("value", builders::num(1.0)),
+        builders::if_else(
+            builders::var("missing"),
+            builders::block(vec![
+                builders::assign("value", builders::string("then")),
+                builders::assign("child", builders::var("unknown")),
+            ]),
+            builders::block(vec![builders::assign("value", builders::string("else"))]),
+        ),
+        builders::assign("after", builders::var("value")),
+    ]);
     assert!(matches!(
         LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
@@ -396,12 +442,20 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
         &TypeExpr::Int,
     );
 
-    let while_source = r#"
-        value = 1
-        while missing { value = "loop"; child = unknown }
-        after = value
-    "#;
-    let program = crate::parse(while_source).expect("while witness parses");
+    // value = 1
+    // while missing { value = "loop"; child = unknown }
+    // after = value
+    let program = builders::program(vec![
+        builders::assign("value", builders::num(1.0)),
+        builders::while_loop(
+            builders::var("missing"),
+            builders::block(vec![
+                builders::assign("value", builders::string("loop")),
+                builders::assign("child", builders::var("unknown")),
+            ]),
+        ),
+        builders::assign("after", builders::var("value")),
+    ]);
     assert!(matches!(
         LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
@@ -424,12 +478,21 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
         &TypeExpr::Int,
     );
 
-    let for_source = r#"
-        item = "outer"
-        for item in 1 { seen = item; child = unknown }
-        after = item
-    "#;
-    let program = crate::parse(for_source).expect("for witness parses");
+    // item = "outer"
+    // for item in 1 { seen = item; child = unknown }
+    // after = item
+    let program = builders::program(vec![
+        builders::assign("item", builders::string("outer")),
+        builders::for_in(
+            "item",
+            builders::num(1.0),
+            builders::block(vec![
+                builders::assign("seen", builders::var("item")),
+                builders::assign("child", builders::var("unknown")),
+            ]),
+        ),
+        builders::assign("after", builders::var("item")),
+    ]);
     assert!(matches!(
         LinkedModule::link(program.clone(), environment.clone()),
         Err(LinkError::IncompatibleIterationTarget { .. })
@@ -468,12 +531,30 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
 fn recovered_diagnostics_follow_the_workflow_projection_owner() {
     let environment = full_label_environment();
 
-    for source in [
-        "value = missing ? 1 : 2",
-        "value = [missing ? 1 : 2]",
-        "value = { choice: missing ? 1 : 2 }",
+    let conditional = || {
+        builders::if_else(
+            builders::var("missing"),
+            builders::num(1.0),
+            builders::num(2.0),
+        )
+    };
+    for (source, assigned) in [
+        ("value = missing ? 1 : 2", conditional()),
+        (
+            "value = [missing ? 1 : 2]",
+            builders::list(vec![conditional()]),
+        ),
+        (
+            "value = { choice: missing ? 1 : 2 }",
+            builders::record(vec![("choice", conditional())]),
+        ),
     ] {
-        let program = crate::parse(source).expect("an assigned invalid conditional parses");
+        // The statement's own span is stated, since the recovered diagnostic
+        // falls back to the span of the statement that owns the expression.
+        let program = builders::with_source_spans(
+            builders::program(vec![builders::assign("value", assigned)]),
+            &[(&[0], 0, source.len())],
+        );
         let analysis = analyze_workflow_program(&program, &environment);
         let owner = statement_facts(&analysis, &statements(&program)[0]);
         assert_eq!(
@@ -490,24 +571,51 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         ));
     }
 
-    let print_source = "print (missing ? 1 : 2)";
-    let program = crate::parse(print_source).expect("a printed invalid conditional parses");
-    let analysis = analyze_workflow_program(&program, &environment);
+    // print (missing ? 1 : 2)
+    let print_program = builders::program(vec![builders::print(builders::if_else(
+        builders::var("missing"),
+        builders::num(1.0),
+        builders::num(2.0),
+    ))]);
+    let analysis = analyze_workflow_program(&print_program, &environment);
     assert!(
-        statement_facts(&analysis, &statements(&program)[0])
+        statement_facts(&analysis, &statements(&print_program)[0])
             .diagnostics
             .is_empty()
     );
     assert!(matches!(
-        LinkedModule::link(program, environment.clone()),
+        LinkedModule::link(print_program, environment.clone()),
         Err(LinkError::UnknownName { ref name, .. }) if name == "missing"
     ));
 
-    for source in [
-        "@label(title: \"Guard\")\nif missing { seen = 1 } else { seen = 2 }",
-        "@label(title: \"Choice\")\nvalue = [missing ? 1 : 2]",
+    for (source, statement) in [
+        (
+            "@label(title: \"Guard\")\nif missing { seen = 1 } else { seen = 2 }",
+            builders::labelled(
+                builders::label("Guard", None),
+                builders::if_else(
+                    builders::var("missing"),
+                    builders::block(vec![builders::assign("seen", builders::num(1.0))]),
+                    builders::block(vec![builders::assign("seen", builders::num(2.0))]),
+                ),
+            ),
+        ),
+        (
+            "@label(title: \"Choice\")\nvalue = [missing ? 1 : 2]",
+            builders::labelled(
+                builders::label("Choice", None),
+                builders::assign(
+                    "value",
+                    builders::list(vec![builders::if_else(
+                        builders::var("missing"),
+                        builders::num(1.0),
+                        builders::num(2.0),
+                    )]),
+                ),
+            ),
+        ),
     ] {
-        let program = crate::parse(source).expect("a labeled invalid conditional parses");
+        let program = builders::program(vec![statement]);
         let analysis = analyze_workflow_program(&program, &environment);
         let owner = statement_facts(&analysis, &statements(&program)[0]);
         assert_eq!(
@@ -519,10 +627,17 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         assert!(owner.diagnostics[0].error.to_string().contains("missing"));
     }
 
-    let call_source = r#"value = missing
-        ? timer.Schedule({ expr: "0 8 * * *" })
-        : timer.Schedule({ expr: "0 9 * * *" })"#;
-    let program = crate::parse(call_source).expect("a recovered call conditional parses");
+    // value = missing
+    //     ? timer.Schedule({ expr: "0 8 * * *" })
+    //     : timer.Schedule({ expr: "0 9 * * *" })
+    let program = builders::program(vec![builders::assign(
+        "value",
+        builders::if_else(
+            builders::var("missing"),
+            timer_schedule("0 8 * * *"),
+            timer_schedule("0 9 * * *"),
+        ),
+    )]);
     let analysis = analyze_workflow_program(&program, &environment);
     let owner = statement_facts(&analysis, &statements(&program)[0]);
     assert_eq!(owner.diagnostics.len(), 1);
