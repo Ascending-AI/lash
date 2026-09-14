@@ -1060,12 +1060,12 @@ pub(super) fn assignment_sugar(expression: &Expr) -> Option<(AssignTarget, &Expr
         || !generated_binding(result_target, "_assignment_result")
         || store.root != base_target.root
         || store.steps.is_empty()
-        || completion != &result_target.root
+        || *completion != result_target.root
     {
         return None;
     }
     match stored.as_ref() {
-        Expr::Variable(name) if name == &result_target.root => {}
+        Expr::Variable(name) if *name == result_target.root => {}
         _ => return None,
     }
     let Expr::Variable(root) = base.as_ref() else {
@@ -1155,12 +1155,11 @@ fn array_callback_method(body: &Expr) -> Option<&'static str> {
                     method = Some("filter");
                 }
             }
-            Expr::Assign { target, expr } => {
+            Expr::Assign { target, expr }
                 if target.root.as_str().ends_with("_callback_output")
-                    && matches!(expr.as_ref(), Expr::Call { .. })
-                {
-                    method = Some("map");
-                }
+                    && matches!(expr.as_ref(), Expr::Call { .. }) =>
+            {
+                method = Some("map");
             }
             _ => {}
         }
