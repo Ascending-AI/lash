@@ -1,5 +1,66 @@
 use super::*;
 
+/// `await tools.echo({ value: <value> })?`
+fn echo_call(value: Expr) -> Expr {
+    builders::module_call(
+        &["tools"],
+        "echo",
+        vec![builders::record(vec![("value", value)])],
+    )
+}
+
+/// `a = await tools.echo({ value: 2 })?`
+/// `b = await tools.echo({ value: a + 3 })?`
+/// `c = await tools.echo({ value: b * 4 })?`
+/// `finish [a, b, c]`
+fn three_echo_chain() -> Program {
+    builders::program(vec![
+        builders::assign("a", echo_call(builders::num(2.0))),
+        builders::assign(
+            "b",
+            echo_call(builders::binary(
+                builders::var("a"),
+                BinaryOp::Add,
+                builders::num(3.0),
+            )),
+        ),
+        builders::assign(
+            "c",
+            echo_call(builders::binary(
+                builders::var("b"),
+                BinaryOp::Multiply,
+                builders::num(4.0),
+            )),
+        ),
+        builders::finish(builders::list(vec![
+            builders::var("a"),
+            builders::var("b"),
+            builders::var("c"),
+        ])),
+    ])
+}
+
+/// `items = []` / `for n in range(0, 20) { items = items + [{ n: n }] }`
+/// `finish items`
+fn record_accumulating_program() -> Program {
+    builders::program(vec![
+        builders::assign("items", builders::list(vec![])),
+        builders::for_in(
+            "n",
+            builders::builtin("range", vec![builders::num(0.0), builders::num(20.0)]),
+            builders::block(vec![builders::assign(
+                "items",
+                builders::binary(
+                    builders::var("items"),
+                    BinaryOp::Add,
+                    builders::list(vec![builders::record(vec![("n", builders::var("n"))])]),
+                ),
+            )]),
+        ),
+        builders::finish(builders::var("items")),
+    ])
+}
+
 pub(super) fn continuation_test_vm<'a>(
     program: &'a CompiledProgram,
     host: &'a Host,
@@ -76,18 +137,30 @@ fn slot_number(
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_resumes_jump_based_while_with_accumulator() {
-    let program = compile_source(
-        r#"
-        n = 0
-        total = 0
-        while n < 6 {
-          total = total + n
-          n = n + 1
-        }
-        finish { n: n, total: total }
-        "#,
-    )
-    .expect("program should compile");
+    // `n = 0` / `total = 0`
+    // `while n < 6 { total = total + n; n = n + 1 }`
+    // `finish { n: n, total: total }`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("n", builders::num(0.0)),
+        builders::assign("total", builders::num(0.0)),
+        builders::while_loop(
+            builders::binary(builders::var("n"), BinaryOp::Less, builders::num(6.0)),
+            builders::block(vec![
+                builders::assign(
+                    "total",
+                    builders::binary(builders::var("total"), BinaryOp::Add, builders::var("n")),
+                ),
+                builders::assign(
+                    "n",
+                    builders::binary(builders::var("n"), BinaryOp::Add, builders::num(1.0)),
+                ),
+            ]),
+        ),
+        builders::finish(builders::record(vec![
+            ("n", builders::var("n")),
+            ("total", builders::var("total")),
+        ])),
+    ]));
     let expected = uninterrupted_continuation_result(&program).await;
     let continuation = find_instruction_continuation(&program, |continuation| {
         let Some(n @ 2.0..=4.0) = slot_number(&program, continuation, "n") else {
@@ -105,16 +178,29 @@ async fn continuation_resumes_jump_based_while_with_accumulator() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_resumes_for_iterator_at_saved_cursor() {
-    let program = compile_source(
-        r#"
-        seen = []
-        for item in [2, 4, 6, 8] {
-          seen = seen + [item]
-        }
-        finish seen
-        "#,
-    )
-    .expect("program should compile");
+    // `seen = []` / `for item in [2, 4, 6, 8] { seen = seen + [item] }`
+    // `finish seen`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("seen", builders::list(vec![])),
+        builders::for_in(
+            "item",
+            builders::list(vec![
+                builders::num(2.0),
+                builders::num(4.0),
+                builders::num(6.0),
+                builders::num(8.0),
+            ]),
+            builders::block(vec![builders::assign(
+                "seen",
+                builders::binary(
+                    builders::var("seen"),
+                    BinaryOp::Add,
+                    builders::list(vec![builders::var("item")]),
+                ),
+            )]),
+        ),
+        builders::finish(builders::var("seen")),
+    ]));
     let expected = uninterrupted_continuation_result(&program).await;
     let continuation = find_instruction_continuation(&program, |continuation| {
         matches!(
@@ -135,18 +221,41 @@ async fn continuation_resumes_for_iterator_at_saved_cursor() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_resumes_nested_inner_iterator() {
-    let program = compile_source(
-        r#"
-        total = 0
-        for outer in [1, 2, 3] {
-          for inner in [10, 20, 30] {
-            total = total + outer + inner
-          }
-        }
-        finish total
-        "#,
-    )
-    .expect("program should compile");
+    // `total = 0`
+    // `for outer in [1, 2, 3] { for inner in [10, 20, 30] { total = total + outer + inner } }`
+    // `finish total`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("total", builders::num(0.0)),
+        builders::for_in(
+            "outer",
+            builders::list(vec![
+                builders::num(1.0),
+                builders::num(2.0),
+                builders::num(3.0),
+            ]),
+            builders::block(vec![builders::for_in(
+                "inner",
+                builders::list(vec![
+                    builders::num(10.0),
+                    builders::num(20.0),
+                    builders::num(30.0),
+                ]),
+                builders::block(vec![builders::assign(
+                    "total",
+                    builders::binary(
+                        builders::binary(
+                            builders::var("total"),
+                            BinaryOp::Add,
+                            builders::var("outer"),
+                        ),
+                        BinaryOp::Add,
+                        builders::var("inner"),
+                    ),
+                )]),
+            )]),
+        ),
+        builders::finish(builders::var("total")),
+    ]));
     let expected = uninterrupted_continuation_result(&program).await;
     let continuation = find_instruction_continuation(&program, |continuation| {
         continuation.iterator_stack.len() == 2
@@ -165,13 +274,15 @@ async fn continuation_resumes_nested_inner_iterator() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_suspends_at_quiescent_post_effect_point() {
-    let program = compile_source(
-        r#"
-        value = await tools.echo({ value: 7 })?
-        finish value + 1
-        "#,
-    )
-    .expect("program should compile");
+    // `value = await tools.echo({ value: 7 })?` / `finish value + 1`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("value", echo_call(builders::num(7.0))),
+        builders::finish(builders::binary(
+            builders::var("value"),
+            BinaryOp::Add,
+            builders::num(1.0),
+        )),
+    ]));
     let expected = uninterrupted_continuation_result(&program).await;
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
@@ -190,15 +301,25 @@ async fn continuation_suspends_at_quiescent_post_effect_point() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn durable_segment_round_trip_preserves_nan_and_negative_zero() {
-    let program = compile_source(
-        r#"
-        nan = 0 / 0
-        negative_zero = -0.0
-        marker = await tools.echo({ value: 1 })?
-        finish [nan, negative_zero, marker]
-        "#,
-    )
-    .expect("numeric segment program should compile");
+    // `nan = 0 / 0` / `negative_zero = -0.0`
+    // `marker = await tools.echo({ value: 1 })?`
+    // `finish [nan, negative_zero, marker]`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "nan",
+            builders::binary(builders::num(0.0), BinaryOp::Divide, builders::num(0.0)),
+        ),
+        builders::assign(
+            "negative_zero",
+            builders::unary(crate::ast::UnaryOp::Negate, builders::num(0.0)),
+        ),
+        builders::assign("marker", echo_call(builders::num(1.0))),
+        builders::finish(builders::list(vec![
+            builders::var("nan"),
+            builders::var("negative_zero"),
+            builders::var("marker"),
+        ])),
+    ]));
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
     vm.suspend_after_effects(1);
@@ -231,14 +352,12 @@ async fn durable_segment_round_trip_preserves_nan_and_negative_zero() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_distinguishes_present_null_from_unset_slot() {
-    let program = compile_source(
-        r#"
-        value = null
-        ignored = await tools.echo({ value: 7 })?
-        finish value
-        "#,
-    )
-    .expect("program should compile");
+    // `value = null` / `ignored = await tools.echo({ value: 7 })?` / `finish value`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("value", builders::null()),
+        builders::assign("ignored", echo_call(builders::num(7.0))),
+        builders::finish(builders::var("value")),
+    ]));
     let expected = uninterrupted_continuation_result(&program).await;
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
@@ -265,14 +384,20 @@ async fn continuation_distinguishes_present_null_from_unset_slot() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_preserves_record_insertion_order() {
-    let program = compile_source(
-        r#"
-        ordered = { zebra: 1, alpha: 2, middle: 3 }
-        ignored = await tools.echo({ value: 7 })?
-        finish ordered
-        "#,
-    )
-    .expect("program should compile");
+    // `ordered = { zebra: 1, alpha: 2, middle: 3 }`
+    // `ignored = await tools.echo({ value: 7 })?` / `finish ordered`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "ordered",
+            builders::record(vec![
+                ("zebra", builders::num(1.0)),
+                ("alpha", builders::num(2.0)),
+                ("middle", builders::num(3.0)),
+            ]),
+        ),
+        builders::assign("ignored", echo_call(builders::num(7.0))),
+        builders::finish(builders::var("ordered")),
+    ]));
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
     vm.suspend_after_effects(1);
@@ -308,7 +433,11 @@ async fn continuation_preserves_record_insertion_order() {
 
 #[test]
 fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
-    let program = compile_source("value = null\nfinish value").expect("program should compile");
+    // `value = null` / `finish value`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("value", builders::null()),
+        builders::finish(builders::var("value")),
+    ]));
     let slot_count = program.chunk.slot_names.len();
     let base = VmContinuation {
         pending_tools: Vec::new(),
@@ -366,15 +495,7 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_multi_effect_determinism_sweep() {
-    let program = compile_source(
-        r#"
-        a = await tools.echo({ value: 2 })?
-        b = await tools.echo({ value: a + 3 })?
-        c = await tools.echo({ value: b * 4 })?
-        finish [a, b, c]
-        "#,
-    )
-    .expect("program should compile");
+    let program = compile_program_for_tests(three_echo_chain());
     let expected = uninterrupted_continuation_result(&program).await;
 
     for effect_count in 1..=3 {
@@ -400,7 +521,10 @@ async fn continuation_multi_effect_determinism_sweep() {
 /// projection by identity.
 #[test]
 fn continuation_carries_a_projected_binding_slot_by_identity() {
-    let program = compile_source("finish input").expect("program should compile");
+    // `finish input`
+    let program = compile_program_for_tests(builders::program(vec![builders::finish(
+        builders::var("input"),
+    )]));
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
     let slots = SlotState::from_globals(Record::new(), &program.chunk.slot_names, &projected);
@@ -480,15 +604,7 @@ async fn run_with_segment_budget(
 
 #[tokio::test(flavor = "current_thread")]
 async fn segmented_multi_effect_run_preserves_result_and_observable_effects() {
-    let program = compile_source(
-        r#"
-        a = await tools.echo({ value: 2 })?
-        b = await tools.echo({ value: a + 3 })?
-        c = await tools.echo({ value: b * 4 })?
-        finish [a, b, c]
-        "#,
-    )
-    .expect("program should compile");
+    let program = compile_program_for_tests(three_echo_chain());
     let unsegmented = run_with_segment_budget(&program, None).await;
     let segmented = run_with_segment_budget(&program, Some(1)).await;
 
@@ -511,15 +627,20 @@ async fn segmented_multi_effect_run_preserves_result_and_observable_effects() {
 /// assertion: taking a boundary mid-run leaves the VM runnable to completion.
 #[tokio::test(flavor = "current_thread")]
 async fn requested_boundary_mid_run_leaves_the_vm_runnable() {
-    let source = r#"
-        value = await tools.echo({ value: 7 })?
-        finish input
-        "#;
-    let linked = crate::LinkedModule::link(
-        crate::parse(source).expect("program should parse"),
-        runtime_test_environment().with_globals(["input"]),
-    )
-    .expect("program should link");
+    let program = builders::program(vec![
+        builders::assign(
+            "value",
+            builders::module_call(
+                &["tools"],
+                "echo",
+                vec![builders::record(vec![("value", builders::num(7.0))])],
+            ),
+        ),
+        builders::finish(builders::var("input")),
+    ]);
+    let linked =
+        crate::LinkedModule::link(program, runtime_test_environment().with_globals(["input"]))
+            .expect("program should link");
     let program = crate::compile_linked(&linked);
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
@@ -558,8 +679,8 @@ impl ExecutionHost for BoundedContinuationHost {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_resume_accounts_for_pre_park_instruction_and_time_meters() {
-    let program = compile_source("i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i")
-        .expect("program should compile");
+    // `i = 0` / `while i < 5000 { i = i + 1 }` / `finish i`
+    let program = compile_program_for_tests(long_counting_loop_program());
     let host = Host;
     let mut state = State::new();
     let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
@@ -649,17 +770,41 @@ impl ExecutionHost for DynamicMemoryHost {
 }
 
 async fn heap_conformance_run(stress_gc: bool) -> (ExecutionOutcome, Vec<u8>) {
-    let program = compile_source(
-        r#"
-        retained = { values: [1, 2, 3], label: "stable" }
-        garbage = []
-        for n in range(0, 30) {
-          garbage = [{ n: n }, { n: n + 1 }]
-        }
-        finish retained
-        "#,
-    )
-    .expect("heap conformance program should compile");
+    // `retained = { values: [1, 2, 3], label: "stable" }` / `garbage = []`
+    // `for n in range(0, 30) { garbage = [{ n: n }, { n: n + 1 }] }`
+    // `finish retained`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "retained",
+            builders::record(vec![
+                (
+                    "values",
+                    builders::list(vec![
+                        builders::num(1.0),
+                        builders::num(2.0),
+                        builders::num(3.0),
+                    ]),
+                ),
+                ("label", builders::string("stable")),
+            ]),
+        ),
+        builders::assign("garbage", builders::list(vec![])),
+        builders::for_in(
+            "n",
+            builders::builtin("range", vec![builders::num(0.0), builders::num(30.0)]),
+            builders::block(vec![builders::assign(
+                "garbage",
+                builders::list(vec![
+                    builders::record(vec![("n", builders::var("n"))]),
+                    builders::record(vec![(
+                        "n",
+                        builders::binary(builders::var("n"), BinaryOp::Add, builders::num(1.0)),
+                    )]),
+                ]),
+            )]),
+        ),
+        builders::finish(builders::var("retained")),
+    ]));
     let host = HeapConformanceHost {
         stress_gc,
         memory_limit: ExecutionBound::Unbounded,
@@ -684,8 +829,19 @@ async fn gc_stress_mode_preserves_results_and_canonical_dumps() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn logical_memory_exhaustion_is_an_uncatchable_typed_terminal() {
-    let program = compile_source("value = [1, 2, 3, 4]\nfinish value")
-        .expect("memory-bound program should compile");
+    // `value = [1, 2, 3, 4]` / `finish value`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "value",
+            builders::list(vec![
+                builders::num(1.0),
+                builders::num(2.0),
+                builders::num(3.0),
+                builders::num(4.0),
+            ]),
+        ),
+        builders::finish(builders::var("value")),
+    ]));
     let host = HeapConformanceHost {
         stress_gc: false,
         memory_limit: ExecutionBound::logical_bytes(32),
@@ -716,8 +872,18 @@ async fn failed_heapification_preserves_compound_state_transactionally() {
     state
         .insert_global("payload", original.clone())
         .expect("seed plain global");
-    let program = compile_source("payload[0].nested = 2\nfinish payload")
-        .expect("path update should compile");
+    // `payload[0].nested = 2` / `finish payload`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign_path(
+            "payload",
+            vec![
+                builders::index_step(builders::num(0.0)),
+                builders::field_step("nested"),
+            ],
+            builders::num(2.0),
+        ),
+        builders::finish(builders::var("payload")),
+    ]));
     let host = HeapConformanceHost {
         stress_gc: false,
         memory_limit: ExecutionBound::logical_bytes(1),
@@ -743,9 +909,23 @@ async fn failed_heapification_preserves_compound_state_transactionally() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
-    let setup = compile_source("counts = {}").expect("setup should compile");
-    let update = compile_source("key = \"a-long-new-key\"\ncounts[key] = counts[key] + 1")
-        .expect("indexed add should compile");
+    // `counts = {}`, then `key = "a-long-new-key"` / `counts[key] = counts[key] + 1`
+    let setup = compile_program_for_tests(builders::program(vec![builders::assign(
+        "counts",
+        builders::record(vec![]),
+    )]));
+    let update = compile_program_for_tests(builders::program(vec![
+        builders::assign("key", builders::string("a-long-new-key")),
+        builders::assign_path(
+            "counts",
+            vec![builders::index_step(builders::var("key"))],
+            builders::binary(
+                builders::index(builders::var("counts"), builders::var("key")),
+                BinaryOp::Add,
+                builders::num(1.0),
+            ),
+        ),
+    ]));
     let empty_record_bytes = HeapObject::Record(Box::default()).logical_bytes();
     let mut grown = Record::new();
     grown.insert("a-long-new-key".to_string(), Value::Number(1.0));
@@ -798,15 +978,21 @@ async fn indexed_add_exact_limit_succeeds_and_one_byte_over_preserves_state() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
-    let program = compile_source(
-        r#"
-        garbage = []
-        for n in range(0, 100) { garbage = [n] }
-        marker = await tools.echo({ value: 1 })?
-        finish marker
-        "#,
-    )
-    .expect("divergence program should compile");
+    // `garbage = []` / `for n in range(0, 100) { garbage = [n] }`
+    // `marker = await tools.echo({ value: 1 })?` / `finish marker`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("garbage", builders::list(vec![])),
+        builders::for_in(
+            "n",
+            builders::builtin("range", vec![builders::num(0.0), builders::num(100.0)]),
+            builders::block(vec![builders::assign(
+                "garbage",
+                builders::list(vec![builders::var("n")]),
+            )]),
+        ),
+        builders::assign("marker", echo_call(builders::num(1.0))),
+        builders::finish(builders::var("marker")),
+    ]));
     let host = DynamicMemoryHost::unbounded();
     let slots = SlotState::from_globals(
         Record::new(),
@@ -840,10 +1026,7 @@ async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_dump_round_trip_is_byte_identical_and_preserves_heap_meters() {
-    let program = compile_source(
-        "items = []\nfor n in range(0, 20) { items = items + [{ n: n }] }\nfinish items",
-    )
-    .expect("meter program should compile");
+    let program = compile_program_for_tests(record_accumulating_program());
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
     vm.suspend_after_instructions(40);
@@ -893,20 +1076,52 @@ async fn determinism_process_probe() {
     if std::env::var_os("LASHLANG_HEAP_DETERMINISM_PROBE").is_none() {
         return;
     }
-    let program = compile_source(
-        r#"
-        special = { nan: 0 / 0, minus_zero: -0.0 }
-        retained = []
-        for n in range(0, 1300) {
-          row = [n]
-          if n == 0 { retained = push(retained, row) }
-          if n == 1023 { retained = push(retained, row) }
-          if n == 1299 { retained = push(retained, row) }
-        }
-        finish { retained: retained, special: special }
-        "#,
-    )
-    .expect("probe program should compile");
+    // `special = { nan: 0 / 0, minus_zero: -0.0 }` / `retained = []`
+    // `for n in range(0, 1300) { row = [n]; if n == <k> { retained = push(retained, row) } ... }`
+    // `finish { retained: retained, special: special }`
+    let retain_at = |n: f64| {
+        builders::if_else(
+            builders::binary(builders::var("n"), BinaryOp::Equal, builders::num(n)),
+            builders::block(vec![builders::assign(
+                "retained",
+                builders::builtin(
+                    "push",
+                    vec![builders::var("retained"), builders::var("row")],
+                ),
+            )]),
+            builders::block(vec![]),
+        )
+    };
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "special",
+            builders::record(vec![
+                (
+                    "nan",
+                    builders::binary(builders::num(0.0), BinaryOp::Divide, builders::num(0.0)),
+                ),
+                (
+                    "minus_zero",
+                    builders::unary(crate::ast::UnaryOp::Negate, builders::num(0.0)),
+                ),
+            ]),
+        ),
+        builders::assign("retained", builders::list(vec![])),
+        builders::for_in(
+            "n",
+            builders::builtin("range", vec![builders::num(0.0), builders::num(1300.0)]),
+            builders::block(vec![
+                builders::assign("row", builders::list(vec![builders::var("n")])),
+                retain_at(0.0),
+                retain_at(1023.0),
+                retain_at(1299.0),
+            ]),
+        ),
+        builders::finish(builders::record(vec![
+            ("retained", builders::var("retained")),
+            ("special", builders::var("special")),
+        ])),
+    ]));
     let host = Host;
     let mut state = State::new();
     let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
@@ -1004,10 +1219,7 @@ async fn meter_persistence_process_probe() {
     let Some(mode) = std::env::var_os("LASHLANG_METER_PROBE_MODE") else {
         return;
     };
-    let program = compile_source(
-        "items = []\nfor n in range(0, 20) { items = items + [{ n: n }] }\nfinish items",
-    )
-    .expect("meter probe program should compile");
+    let program = compile_program_for_tests(record_accumulating_program());
     let host = Host;
     if mode == "produce" {
         let mut vm = continuation_test_vm(&program, &host);

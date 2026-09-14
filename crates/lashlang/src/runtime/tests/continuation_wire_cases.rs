@@ -122,10 +122,17 @@ async fn accepted_continuation_wire_survives_resume_suspend_and_re_encode() {
     // decode, resume, run, park again, and both re-encode and re-decode. The
     // reported failure decoded and resumed, then lost a live object to the next
     // collection and could not be serialized at all.
-    let program = compile_source(
-        "rows = []\nfor n in range(0, 4) { rows = rows + [[n]] }\ntotal = len(rows)\nfinish total",
-    )
-    .expect("round-trip program should compile");
+    // `rows = []` / `for n in range(0, 4) { rows = rows + [[n]] }`
+    // `total = len(rows)` / `finish total`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("rows", builders::list(vec![])),
+        range_loop(4.0, vec![append_row(vec![builders::var("n")])]),
+        builders::assign(
+            "total",
+            builders::builtin("len", vec![builders::var("rows")]),
+        ),
+        builders::finish(builders::var("total")),
+    ]));
     let host = Host;
     let mut vm = continuation_test_vm(&program, &host);
     vm.suspend_after_instructions(18);
@@ -163,22 +170,60 @@ async fn accepted_continuation_wire_survives_resume_suspend_and_re_encode() {
     );
 }
 
+/// `for n in range(0, <end>) { <body> }`
+fn range_loop(end: f64, body: Vec<Expr>) -> Expr {
+    builders::for_in(
+        "n",
+        builders::builtin("range", vec![builders::num(0.0), builders::num(end)]),
+        builders::block(body),
+    )
+}
+
+/// `n + <offset> + 1` — the `n + 1`, `n + 2` terms the loops above build.
+fn plus_one(offset: f64) -> Expr {
+    builders::binary(
+        builders::var("n"),
+        BinaryOp::Add,
+        builders::num(offset + 1.0),
+    )
+}
+
+/// `rows = rows + [[<items>]]`
+fn append_row(items: Vec<Expr>) -> Expr {
+    builders::assign(
+        "rows",
+        builders::binary(
+            builders::var("rows"),
+            BinaryOp::Add,
+            builders::list(vec![builders::list(items)]),
+        ),
+    )
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn park_and_resume_is_invisible_to_a_straight_through_run() {
     // The control VM never calls `suspend`: it runs from the same starting
     // point straight to completion. Comparing two collected executions would
     // hide any bug the collection itself introduces, which is exactly what
     // parking is supposed to be free of.
-    let source = r#"
-        garbage = []
-        rows = []
-        for n in range(0, 60) {
-          garbage = [n, n + 1]
-          rows = rows + [[n]]
-        }
-        finish len(rows)
-        "#;
-    let program = compile_source(source).expect("equivalence program should compile");
+    // `garbage = []` / `rows = []`
+    // `for n in range(0, 60) { garbage = [n, n + 1]; rows = rows + [[n]] }`
+    // `finish len(rows)`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("garbage", builders::list(vec![])),
+        builders::assign("rows", builders::list(vec![])),
+        range_loop(
+            60.0,
+            vec![
+                builders::assign(
+                    "garbage",
+                    builders::list(vec![builders::var("n"), plus_one(0.0)]),
+                ),
+                append_row(vec![builders::var("n")]),
+            ],
+        ),
+        builders::finish(builders::builtin("len", vec![builders::var("rows")])),
+    ]));
     let host = Host;
 
     let mut control = continuation_test_vm(&program, &host);
@@ -228,14 +273,20 @@ async fn park_and_resume_is_invisible_to_a_straight_through_run() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn park_and_resume_never_exhausts_memory_earlier_than_a_straight_through_run() {
-    let source = r#"
-        rows = []
-        for n in range(0, 400) {
-          rows = rows + [[n, n + 1, n + 2]]
-        }
-        finish len(rows)
-        "#;
-    let program = compile_source(source).expect("limit program should compile");
+    // `rows = []` / `for n in range(0, 400) { rows = rows + [[n, n + 1, n + 2]] }`
+    // `finish len(rows)`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("rows", builders::list(vec![])),
+        range_loop(
+            400.0,
+            vec![append_row(vec![
+                builders::var("n"),
+                plus_one(0.0),
+                plus_one(1.0),
+            ])],
+        ),
+        builders::finish(builders::builtin("len", vec![builders::var("rows")])),
+    ]));
     let probe_host = DynamicMemoryHost::unbounded();
     let mut probe = continuation_test_vm_with_host(&program, &probe_host);
     probe
@@ -313,8 +364,8 @@ fn continuation_test_vm_with_host<'a, H: ExecutionHost>(
 /// collection ran against empty pins and swept everything the VM still held —
 /// including bindings the program had not touched. The reported repro left a
 /// dangling reference behind an untouched binding.
-async fn stress_collected_result(source: &str) -> Result<Value, RuntimeError> {
-    let program = compile_source(source).expect("stress program should compile");
+async fn stress_collected_result(program: Program) -> Result<Value, RuntimeError> {
+    let program = compile_program_for_tests(program);
     let host = HeapConformanceHost {
         stress_gc: true,
         memory_limit: ExecutionBound::Unbounded,
@@ -325,8 +376,8 @@ async fn stress_collected_result(source: &str) -> Result<Value, RuntimeError> {
     }
 }
 
-async fn unstressed_result(source: &str) -> Result<Value, RuntimeError> {
-    let program = compile_source(source).expect("program should compile");
+async fn unstressed_result(program: Program) -> Result<Value, RuntimeError> {
+    let program = compile_program_for_tests(program);
     let host = HeapConformanceHost {
         stress_gc: false,
         memory_limit: ExecutionBound::Unbounded,
@@ -341,11 +392,30 @@ async fn unstressed_result(source: &str) -> Result<Value, RuntimeError> {
 async fn stress_collection_survives_a_general_concat() {
     // The reported repro: the concat's isolation allocates while `x` is live
     // only from a slot.
-    let source = "x = [1]\nz = [2]\ny = [9]\ny = y + z\nfinish [x, y, z]";
-    let stressed = stress_collected_result(source)
+    // `x = [1]` / `z = [2]` / `y = [9]` / `y = y + z` / `finish [x, y, z]`
+    let program = || {
+        builders::program(vec![
+            builders::assign("x", builders::list(vec![builders::num(1.0)])),
+            builders::assign("z", builders::list(vec![builders::num(2.0)])),
+            builders::assign("y", builders::list(vec![builders::num(9.0)])),
+            builders::assign(
+                "y",
+                builders::binary(builders::var("y"), BinaryOp::Add, builders::var("z")),
+            ),
+            builders::finish(builders::list(vec![
+                builders::var("x"),
+                builders::var("y"),
+                builders::var("z"),
+            ])),
+        ])
+    };
+    let stressed = stress_collected_result(program())
         .await
         .expect("stress-collected concat should not lose live objects");
-    assert_eq!(stressed, unstressed_result(source).await.expect("baseline"));
+    assert_eq!(
+        stressed,
+        unstressed_result(program()).await.expect("baseline")
+    );
     assert_eq!(
         stressed,
         Value::List(
@@ -363,21 +433,62 @@ async fn stress_collection_survives_a_general_concat() {
 async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
     // `acc = acc + other` where the right operand is a bare variable lowers to
     // the fused slot form, which reads both slots without touching the stack.
-    let slot_form = "x = [1]\nother = [2]\nacc = [0]\nacc = acc + other\nfinish [x, acc]";
+    // `x = [1]` / `other = [2]` / `acc = [0]` / `acc = acc + other` /
+    // `finish [x, acc]`
+    let slot_form = || {
+        builders::program(vec![
+            builders::assign("x", builders::list(vec![builders::num(1.0)])),
+            builders::assign("other", builders::list(vec![builders::num(2.0)])),
+            builders::assign("acc", builders::list(vec![builders::num(0.0)])),
+            builders::assign(
+                "acc",
+                builders::binary(builders::var("acc"), BinaryOp::Add, builders::var("other")),
+            ),
+            builders::finish(builders::list(vec![
+                builders::var("x"),
+                builders::var("acc"),
+            ])),
+        ])
+    };
     assert_eq!(
-        stress_collected_result(slot_form)
+        stress_collected_result(slot_form())
             .await
             .expect("stress-collected slot concat should hold"),
-        unstressed_result(slot_form).await.expect("baseline")
+        unstressed_result(slot_form()).await.expect("baseline")
     );
 
-    let loop_form =
-        "kept = [[7]]\nacc = []\nfor n in range(0, 6) { acc = acc + [[n]] }\nfinish [kept, acc]";
+    // `kept = [[7]]` / `acc = []` / `for n in range(0, 6) { acc = acc + [[n]] }`
+    // / `finish [kept, acc]`
+    let loop_form = || {
+        builders::program(vec![
+            builders::assign(
+                "kept",
+                builders::list(vec![builders::list(vec![builders::num(7.0)])]),
+            ),
+            builders::assign("acc", builders::list(vec![])),
+            builders::for_in(
+                "n",
+                builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
+                builders::block(vec![builders::assign(
+                    "acc",
+                    builders::binary(
+                        builders::var("acc"),
+                        BinaryOp::Add,
+                        builders::list(vec![builders::list(vec![builders::var("n")])]),
+                    ),
+                )]),
+            ),
+            builders::finish(builders::list(vec![
+                builders::var("kept"),
+                builders::var("acc"),
+            ])),
+        ])
+    };
     assert_eq!(
-        stress_collected_result(loop_form)
+        stress_collected_result(loop_form())
             .await
             .expect("stress-collected loop concat should hold"),
-        unstressed_result(loop_form).await.expect("baseline")
+        unstressed_result(loop_form()).await.expect("baseline")
     );
 }
 
@@ -479,19 +590,65 @@ async fn continuation_decode_accepts_transient_duplication() {
 /// holder may point at what a durable one owns.
 #[tokio::test(flavor = "current_thread")]
 async fn a_store_allocates_one_object_per_live_object() {
-    for (source, expected_allocations, expected_live) in [
-        ("xs = [1]\nfinish 0", 1, 1),
-        ("xs = [[1]]\nfinish 0", 2, 2),
-        ("xs = { a: [1] }\nfinish 0", 2, 2),
+    let one = || builders::list(vec![builders::num(1.0)]);
+    let finish_zero = || builders::finish(builders::num(0.0));
+    for (source, statements, expected_allocations, expected_live) in [
+        (
+            "xs = [1]\nfinish 0",
+            vec![builders::assign("xs", one())],
+            1,
+            1,
+        ),
+        (
+            "xs = [[1]]\nfinish 0",
+            vec![builders::assign("xs", builders::list(vec![one()]))],
+            2,
+            2,
+        ),
+        (
+            "xs = { a: [1] }\nfinish 0",
+            vec![builders::assign("xs", builders::record(vec![("a", one())]))],
+            2,
+            2,
+        ),
         // Reference semantics (ADR 0096): binding or nesting an existing
         // container shares it instead of allocating an isolated copy, so these
         // three programs allocate one object per literal written, not one per
         // holder.
-        ("a = [1]\nxs = [a]\nfinish 0", 2, 2),
-        ("xs = [[1]]\nys = xs\nfinish 0", 2, 2),
-        ("xs = []\nxs = push(xs, [1])\nfinish 0", 2, 2),
+        (
+            "a = [1]\nxs = [a]\nfinish 0",
+            vec![
+                builders::assign("a", one()),
+                builders::assign("xs", builders::list(vec![builders::var("a")])),
+            ],
+            2,
+            2,
+        ),
+        (
+            "xs = [[1]]\nys = xs\nfinish 0",
+            vec![
+                builders::assign("xs", builders::list(vec![one()])),
+                builders::assign("ys", builders::var("xs")),
+            ],
+            2,
+            2,
+        ),
+        (
+            "xs = []\nxs = push(xs, [1])\nfinish 0",
+            vec![
+                builders::assign("xs", builders::list(vec![])),
+                builders::assign(
+                    "xs",
+                    builders::builtin("push", vec![builders::var("xs"), one()]),
+                ),
+            ],
+            2,
+            2,
+        ),
     ] {
-        let program = compile_source(source).expect("probe program should compile");
+        let mut expressions = statements;
+        expressions.push(finish_zero());
+        let program = compile_program_for_tests(builders::program(expressions));
         let mut state = State::new();
         execute_compiled(&program, &mut state, &Host)
             .await
@@ -514,8 +671,26 @@ async fn a_store_allocates_one_object_per_live_object() {
 /// which was Lashlang's value semantics, not the VM's.
 #[tokio::test(flavor = "current_thread")]
 async fn shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip() {
-    let program = compile_source("a = [1]\nxs = [a, a]\nrecord = { left: a, right: a }\na[0] = 9")
-        .expect("shared-binding literal program should compile");
+    // `a = [1]` / `xs = [a, a]` / `record = { left: a, right: a }` / `a[0] = 9`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("a", builders::list(vec![builders::num(1.0)])),
+        builders::assign(
+            "xs",
+            builders::list(vec![builders::var("a"), builders::var("a")]),
+        ),
+        builders::assign(
+            "record",
+            builders::record(vec![
+                ("left", builders::var("a")),
+                ("right", builders::var("a")),
+            ]),
+        ),
+        builders::assign_path(
+            "a",
+            vec![builders::index_step(builders::num(0.0))],
+            builders::num(9.0),
+        ),
+    ]));
     let mut state = State::new();
     execute_compiled(&program, &mut state, &Host)
         .await
@@ -555,8 +730,22 @@ async fn shared_binding_list_and_record_literals_stay_shared_after_snapshot_roun
 /// concatenation was durable, and encoded and decoded like any other.
 #[tokio::test(flavor = "current_thread")]
 async fn a_rejected_concat_leaves_the_accumulator_untouched() {
-    let setup = compile_source("acc = [0]\nother = [[1], [2], [3]]").expect("setup should compile");
-    let extend = compile_source("acc = acc + other").expect("extension should compile");
+    // `acc = [0]` / `other = [[1], [2], [3]]`, then `acc = acc + other`
+    let setup = compile_program_for_tests(builders::program(vec![
+        builders::assign("acc", builders::list(vec![builders::num(0.0)])),
+        builders::assign(
+            "other",
+            builders::list(vec![
+                builders::list(vec![builders::num(1.0)]),
+                builders::list(vec![builders::num(2.0)]),
+                builders::list(vec![builders::num(3.0)]),
+            ]),
+        ),
+    ]));
+    let extend = compile_program_for_tests(builders::program(vec![builders::assign(
+        "acc",
+        builders::binary(builders::var("acc"), BinaryOp::Add, builders::var("other")),
+    )]));
 
     let mut state = State::new();
     execute_compiled(&setup, &mut state, &Host)

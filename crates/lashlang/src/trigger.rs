@@ -958,6 +958,8 @@ fn object_type_assignable(source: &[TypeField], target: &[TypeField]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{Declaration, ProcessParam};
+    use crate::testing::ast_builders as builders;
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct ScheduleSource {
@@ -1004,15 +1006,41 @@ mod tests {
         )
     }
 
-    fn linked_artifact(source: &str, resources: LashlangHostCatalog) -> ModuleArtifact {
-        let source =
-            format!("{source}\nsource = cron.Schedule({{ expr: \"*\" }})\nfinish source\n");
-        crate::LinkedModule::link(
-            crate::parse(&source).expect("parse trigger target module"),
-            process_environment(resources),
+    /// Links `declarations` above `source = cron.Schedule({ expr: "*" })` and
+    /// `finish source`, the trailing main every trigger fixture shares.
+    fn linked_artifact(
+        declarations: Vec<Declaration>,
+        resources: LashlangHostCatalog,
+    ) -> ModuleArtifact {
+        let program = builders::module(
+            declarations,
+            vec![
+                builders::assign(
+                    "source",
+                    builders::receiver_call(
+                        builders::resource(&["cron"]),
+                        "Schedule",
+                        vec![builders::record(vec![("expr", builders::string("*"))])],
+                    ),
+                ),
+                builders::finish(builders::var("source")),
+            ],
+        );
+        crate::LinkedModule::link(program, process_environment(resources))
+            .expect("link trigger target module")
+            .artifact
+    }
+
+    /// `process tick(<params>) { finish event.fired_at }`
+    fn tick_process(params: Vec<ProcessParam>) -> Declaration {
+        builders::process(
+            "tick",
+            params,
+            builders::block(vec![builders::finish(builders::field(
+                builders::var("event"),
+                "fired_at",
+            ))]),
         )
-        .expect("link trigger target module")
-        .artifact
     }
 
     fn event_input_template() -> TriggerInputTemplate {
@@ -1212,7 +1240,10 @@ mod tests {
     #[test]
     fn trigger_compatibility_accepts_matching_event_mapping() {
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Ref("cron.Tick".into()),
+            )])],
             resources(),
         );
         let definition = definition_for(&artifact, "tick");
@@ -1236,7 +1267,10 @@ mod tests {
     #[test]
     fn trigger_compatibility_rejects_unknown_source() {
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Ref("cron.Tick".into()),
+            )])],
             resources(),
         );
         let definition = definition_for(&artifact, "tick");
@@ -1257,7 +1291,10 @@ mod tests {
     #[test]
     fn trigger_compatibility_rejects_wrong_process_ref() {
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Ref("cron.Tick".into()),
+            )])],
             resources(),
         );
         let mut definition = definition_for(&artifact, "tick");
@@ -1280,7 +1317,10 @@ mod tests {
     #[test]
     fn trigger_compatibility_rejects_missing_event_input() {
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Ref("cron.Tick".into()),
+            )])],
             resources(),
         );
         let definition = definition_for(&artifact, "tick");
@@ -1308,7 +1348,10 @@ mod tests {
     #[test]
     fn trigger_compatibility_rejects_unknown_input() {
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Ref("cron.Tick".into()),
+            )])],
             resources(),
         );
         let definition = definition_for(&artifact, "tick");
@@ -1335,7 +1378,13 @@ mod tests {
     #[test]
     fn trigger_compatibility_rejects_event_type_mismatch() {
         let artifact = linked_artifact(
-            "process tick(event: Type { fired_at: str, required: str }) { finish event.fired_at }",
+            vec![tick_process(vec![builders::param(
+                "event",
+                TypeExpr::Object(vec![
+                    required_field("fired_at", TypeExpr::Str),
+                    required_field("required", TypeExpr::Str),
+                ]),
+            )])],
             resources(),
         );
         let definition = definition_for(&artifact, "tick");
@@ -1359,7 +1408,10 @@ mod tests {
         let mut resources = resources();
         resources.ensure_resource_type("Bucket");
         let artifact = linked_artifact(
-            "process tick(event: cron.Tick, bucket: Bucket) { finish event.fired_at }",
+            vec![tick_process(vec![
+                builders::param("event", TypeExpr::Ref("cron.Tick".into())),
+                builders::param("bucket", TypeExpr::Ref("Bucket".into())),
+            ])],
             resources,
         );
         let definition = definition_for(&artifact, "tick");

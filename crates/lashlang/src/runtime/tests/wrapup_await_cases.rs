@@ -138,7 +138,40 @@ impl ExecutionHost for AggregateProcessHost {
     }
 }
 
-fn comprehension_compile(source: &str) -> CompiledProgram {
+/// Builds the module every case in this file links against.
+///
+/// `echo` is the process the aggregate cases start; the module operations are
+/// the leaves they settle. Callers pass the top-level expressions, so the
+/// declaration list stays in one place.
+fn comprehension_module(expressions: Vec<Expr>) -> Program {
+    builders::module(
+        vec![builders::process(
+            "echo",
+            Vec::new(),
+            builders::finish(builders::null()),
+        )],
+        expressions,
+    )
+}
+
+/// `h = start echo()` — the handle the aggregate cases await.
+fn started_handle() -> Expr {
+    builders::assign("h", builders::start("echo", Vec::new()))
+}
+
+/// `<module>.<operation>({ <args> })?` — an unawaited leaf.
+///
+/// Every use here sits inside an awaited aggregate, which is what settles it;
+/// an `await` on the leaf itself would be a different program.
+fn op(module: &str, operation: &str, args: Vec<(&str, Expr)>) -> Expr {
+    builders::unwrap(builders::receiver_call(
+        builders::resource(&[module]),
+        operation,
+        vec![builders::record(args)],
+    ))
+}
+
+fn comprehension_compile(program: Program) -> CompiledProgram {
     let mut catalog = crate::LashlangHostCatalog::new();
     for (module, operation) in [
         ("tools", "echo"),
@@ -158,15 +191,15 @@ fn comprehension_compile(source: &str) -> CompiledProgram {
             .unwrap();
     }
     let linked = crate::LinkedModule::link(
-        crate::parse(source).expect("program should parse"),
+        program,
         crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all()),
     )
     .expect("program should link");
     crate::compile_linked(&linked)
 }
 
-async fn comprehension_finish(host: &ComprehensionBatchHost, source: &str) -> Value {
-    let compiled = comprehension_compile(source);
+async fn comprehension_finish(host: &ComprehensionBatchHost, program: Program) -> Value {
+    let compiled = comprehension_compile(program);
     let mut state = State::new();
     match execute_compiled(&compiled, &mut state, host)
         .await
@@ -177,8 +210,8 @@ async fn comprehension_finish(host: &ComprehensionBatchHost, source: &str) -> Va
     }
 }
 
-async fn aggregate_process_finish(host: &AggregateProcessHost, source: &str) -> Value {
-    let compiled = comprehension_compile(source);
+async fn aggregate_process_finish(host: &AggregateProcessHost, program: Program) -> Value {
+    let compiled = comprehension_compile(program);
     let mut state = State::new();
     match execute_compiled(&compiled, &mut state, host)
         .await
@@ -193,14 +226,21 @@ async fn aggregate_process_finish(host: &AggregateProcessHost, source: &str) -> 
 /// through the durable process-await seam, however deeply the literal nests.
 #[tokio::test(flavor = "current_thread")]
 async fn literal_process_containers_use_process_await_seam() {
-    for (source, expected) in [(
-        "process echo() { finish null }; h=start echo(); finish await [[h], tools.echo({})?]",
+    for (label, program, expected) in [(
+        "handle nested one level inside an awaited literal",
+        comprehension_module(vec![
+            started_handle(),
+            builders::finish(builders::await_expr(builders::list(vec![
+                builders::list(vec![builders::var("h")]),
+                op("tools", "echo", Vec::new()),
+            ]))),
+        ]),
         r#"[[{"ok":true,"value":42}],7]"#,
     )] {
         let host = AggregateProcessHost::default();
-        let value = aggregate_process_finish(&host, source).await;
-        assert_eq!(value.to_string(), expected, "{source}");
-        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{source}");
+        let value = aggregate_process_finish(&host, program).await;
+        assert_eq!(value.to_string(), expected, "{label}");
+        assert_eq!(host.awaits.load(Ordering::SeqCst), 1, "{label}");
     }
 }
 
@@ -212,7 +252,11 @@ async fn awaiting_a_bound_list_settles_its_handle_elements() {
     let host = AggregateProcessHost::default();
     let value = aggregate_process_finish(
         &host,
-        "process echo() { finish null }; h=start echo(); hs=[h]; finish await hs",
+        comprehension_module(vec![
+            started_handle(),
+            builders::assign("hs", builders::list(vec![builders::var("h")])),
+            builders::finish(builders::await_expr(builders::var("hs"))),
+        ]),
     )
     .await;
     assert_eq!(value.to_string(), r#"[{"ok":true,"value":42}]"#);
@@ -226,28 +270,56 @@ async fn awaiting_a_bound_list_settles_its_handle_elements() {
 /// surface dialect's.
 #[tokio::test(flavor = "current_thread")]
 async fn bound_process_containers_are_carried_through_unsettled() {
-    for (source, expected) in [
+    // Each case binds a container to `hs`/`hr`, then awaits a literal whose
+    // first element is that bound name: only element positions settle.
+    let awaited = |bound: &str, container: Expr| {
+        comprehension_module(vec![
+            started_handle(),
+            builders::assign(bound, container),
+            builders::finish(builders::await_expr(builders::list(vec![
+                builders::var(bound),
+                op("tools", "echo", Vec::new()),
+            ]))),
+        ])
+    };
+    for (label, program, expected) in [
         (
-            "process echo() { finish null }; h=start echo(); hs=[h]; finish await [hs, tools.echo({})?]",
+            "list of one handle",
+            awaited("hs", builders::list(vec![builders::var("h")])),
             r#"[[{"handle":"h"}],7]"#,
         ),
         (
-            "process echo() { finish null }; h=start echo(); hr={child:h}; finish await [hr, tools.echo({})?]",
+            "record holding a handle",
+            awaited("hr", builders::record(vec![("child", builders::var("h"))])),
             r#"[{"child":{"handle":"h"}},7]"#,
         ),
         (
-            "process echo() { finish null }; h=start echo(); hs=[[[h]]]; finish await [hs, tools.echo({})?]",
+            "handle nested three lists deep",
+            awaited(
+                "hs",
+                builders::list(vec![builders::list(vec![builders::list(vec![
+                    builders::var("h"),
+                ])])]),
+            ),
             r#"[[[[{"handle":"h"}]]],7]"#,
         ),
         (
-            r#"process echo() { finish null }; h=start echo(); hs=[1,h,{note:"kept"}]; finish await [hs, tools.echo({})?]"#,
+            "handle beside plain values",
+            awaited(
+                "hs",
+                builders::list(vec![
+                    builders::num(1.0),
+                    builders::var("h"),
+                    builders::record(vec![("note", builders::string("kept"))]),
+                ]),
+            ),
             r#"[[1,{"handle":"h"},{"note":"kept"}],7]"#,
         ),
     ] {
         let host = AggregateProcessHost::default();
-        let value = aggregate_process_finish(&host, source).await;
-        assert_eq!(value.to_string(), expected, "{source}");
-        assert_eq!(host.awaits.load(Ordering::SeqCst), 0, "{source}");
+        let value = aggregate_process_finish(&host, program).await;
+        assert_eq!(value.to_string(), expected, "{label}");
+        assert_eq!(host.awaits.load(Ordering::SeqCst), 0, "{label}");
     }
 }
 
@@ -257,9 +329,14 @@ async fn bound_failing_process_waits_until_module_leaves_settle() {
         reject_await: true,
         ..AggregateProcessHost::default()
     };
-    let compiled = comprehension_compile(
-        "process echo() { finish null }; h=start echo(); hs=[h]; finish await [hs, tools.err({})?]",
-    );
+    let compiled = comprehension_compile(comprehension_module(vec![
+        started_handle(),
+        builders::assign("hs", builders::list(vec![builders::var("h")])),
+        builders::finish(builders::await_expr(builders::list(vec![
+            builders::var("hs"),
+            op("tools", "err", Vec::new()),
+        ]))),
+    ]));
     let error = execute_compiled(&compiled, &mut State::new(), &host)
         .await
         .expect_err("the module rejection must win");
@@ -269,16 +346,34 @@ async fn bound_failing_process_waits_until_module_leaves_settle() {
 
 #[test]
 fn awaiting_a_settled_literal_is_a_link_diagnostic() {
-    for (source, kind) in [
-        ("finish await [1, 2]", "list"),
-        ("finish await { a: 1 }", "record"),
-        ("finish await [x for x in [1, 2]]", "list"),
-        ("finish await 1", "number"),
-        ("finish await (1 + 2)", "number"),
-        ("finish await [1 + 2]", "list"),
-        ("finish await { a: 1 + 2 }", "record"),
+    let pair = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
+    let sum = || builders::binary(builders::num(1.0), BinaryOp::Add, builders::num(2.0));
+    for (source, awaited, kind) in [
+        ("finish await [1, 2]", pair(), "list"),
+        (
+            "finish await { a: 1 }",
+            builders::record(vec![("a", builders::num(1.0))]),
+            "record",
+        ),
+        (
+            "finish await [x for x in [1, 2]]",
+            builders::comprehension(
+                builders::var("x"),
+                vec![builders::comprehension_for("x", pair())],
+            ),
+            "list",
+        ),
+        ("finish await 1", builders::num(1.0), "number"),
+        ("finish await (1 + 2)", sum(), "number"),
+        ("finish await [1 + 2]", builders::list(vec![sum()]), "list"),
+        (
+            "finish await { a: 1 + 2 }",
+            builders::record(vec![("a", sum())]),
+            "record",
+        ),
     ] {
-        let diagnostic = link_diagnostic(source);
+        let program = builders::program(vec![builders::finish(builders::await_expr(awaited))]);
+        let diagnostic = link_diagnostic(program, source);
         assert!(
             diagnostic.contains(&format!("`await` of a settled {kind}:")),
             "{source}: {diagnostic}"
@@ -292,11 +387,10 @@ fn awaiting_a_settled_literal_is_a_link_diagnostic() {
 
 #[test]
 fn awaiting_a_handle_record_shape_is_not_rejected_as_settled() {
-    for source in [
-        r#"finish await { handle: "h" }"#,
-        r#"finish await { __handle__: "h" }"#,
-    ] {
-        let program = crate::parse(source).unwrap();
+    for field in ["handle", "__handle__"] {
+        let program = builders::program(vec![builders::finish(builders::await_expr(
+            builders::record(vec![(field, builders::string("h"))]),
+        ))]);
         crate::LinkedModule::link(program, runtime_test_environment())
             .expect("handle shape should link");
     }
@@ -304,44 +398,135 @@ fn awaiting_a_handle_record_shape_is_not_rejected_as_settled() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn nested_comprehension_aggregates_match_literal_expansion() {
-    for (nested, literal) in [
+    // `echo_for(x)` is the leaf a comprehension produces per element; the
+    // literal column spells the same leaves out by hand.
+    let echo_of = |value: Expr| op("tools", "echo", vec![("value", value)]);
+    let echo_num = |value: f64| echo_of(builders::num(value));
+    // `[m.op({ value: x })? for x in <items>]`
+    let comp_over = |items: Expr| {
+        builders::comprehension(
+            echo_of(builders::var("x")),
+            vec![builders::comprehension_for("x", items)],
+        )
+    };
+    let one_two = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
+    let finish_await =
+        |expr: Expr| comprehension_module(vec![builders::finish(builders::await_expr(expr))]);
+
+    for (label, nested, literal) in [
         (
-            r#"finish await ([tools.echo({ value: x })? for x in [1,2]], 7)"#,
-            r#"finish await ([tools.echo({ value: 1 })?, tools.echo({ value: 2 })?], 7)"#,
+            "comprehension inside an awaited tuple",
+            finish_await(builders::tuple(vec![
+                comp_over(one_two()),
+                builders::num(7.0),
+            ])),
+            finish_await(builders::tuple(vec![
+                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
+                builders::num(7.0),
+            ])),
         ),
         (
-            r#"finish await { orders: [tools.echo({ value: x })? for x in [1,2]] }"#,
-            r#"finish await { orders: [tools.echo({ value: 1 })?, tools.echo({ value: 2 })?] }"#,
+            "comprehension inside an awaited record field",
+            finish_await(builders::record(vec![("orders", comp_over(one_two()))])),
+            finish_await(builders::record(vec![(
+                "orders",
+                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
+            )])),
         ),
         (
-            r#"finish await [([ { orders: [tools.echo({ value: x })? for x in [1,2]] } ], tools.echo({ value: 3 })?)]"#,
-            r#"finish await [([ { orders: [tools.echo({ value: 1 })?, tools.echo({ value: 2 })?] } ], tools.echo({ value: 3 })?)]"#,
+            "comprehension nested under a list, record and tuple",
+            finish_await(builders::list(vec![builders::tuple(vec![
+                builders::list(vec![builders::record(vec![(
+                    "orders",
+                    comp_over(one_two()),
+                )])]),
+                echo_num(3.0),
+            ])])),
+            finish_await(builders::list(vec![builders::tuple(vec![
+                builders::list(vec![builders::record(vec![(
+                    "orders",
+                    builders::list(vec![echo_num(1.0), echo_num(2.0)]),
+                )])]),
+                echo_num(3.0),
+            ])])),
         ),
         (
-            r#"rows = [[1,2], [], [3]]; finish await [[tools.echo({ value: x })? for x in row] for row in rows]"#,
-            r#"finish await [[tools.echo({ value: 1 })?, tools.echo({ value: 2 })?], [], [tools.echo({ value: 3 })?]]"#,
+            "comprehension over a bound list of rows, including an empty row",
+            comprehension_module(vec![
+                builders::assign(
+                    "rows",
+                    builders::list(vec![
+                        one_two(),
+                        builders::list(Vec::new()),
+                        builders::list(vec![builders::num(3.0)]),
+                    ]),
+                ),
+                builders::finish(builders::await_expr(builders::comprehension(
+                    comp_over(builders::var("row")),
+                    vec![builders::comprehension_for("row", builders::var("rows"))],
+                ))),
+            ]),
+            finish_await(builders::list(vec![
+                builders::list(vec![echo_num(1.0), echo_num(2.0)]),
+                builders::list(Vec::new()),
+                builders::list(vec![echo_num(3.0)]),
+            ])),
         ),
         (
-            r#"finish await { before: tools.echo({ value: 0 })?, orders: [tools.echo({ value: x })? for x in []], after: tools.echo({ value: 3 })? }"#,
-            r#"finish await { before: tools.echo({ value: 0 })?, orders: [], after: tools.echo({ value: 3 })? }"#,
+            "empty comprehension between two settled leaves",
+            finish_await(builders::record(vec![
+                ("before", echo_num(0.0)),
+                ("orders", comp_over(builders::list(Vec::new()))),
+                ("after", echo_num(3.0)),
+            ])),
+            finish_await(builders::record(vec![
+                ("before", echo_num(0.0)),
+                ("orders", builders::list(Vec::new())),
+                ("after", echo_num(3.0)),
+            ])),
         ),
     ] {
         let nested_host = ComprehensionBatchHost::default();
         let literal_host = ComprehensionBatchHost::default();
         let expected = comprehension_finish(&literal_host, literal).await;
-        assert_eq!(comprehension_finish(&nested_host, nested).await, expected);
-        assert_eq!(nested_host.batches(), literal_host.batches());
-        assert_eq!(nested_host.batches().len(), 1);
-        assert_eq!(nested_host.singles.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            comprehension_finish(&nested_host, nested).await,
+            expected,
+            "{label}"
+        );
+        assert_eq!(nested_host.batches(), literal_host.batches(), "{label}");
+        assert_eq!(nested_host.batches().len(), 1, "{label}");
+        assert_eq!(nested_host.singles.load(Ordering::SeqCst), 0, "{label}");
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn nested_comprehension_rejections_follow_settlement_order() {
     let host = ComprehensionBatchHost::default();
-    let compiled = comprehension_compile(
-        r#"finish await { orders: [[tools.err({ value: x })? for x in row] for row in [["first", "second"]]], last: tools.echo({ value: "last" })? }"#,
-    );
+    let compiled = comprehension_compile(comprehension_module(vec![builders::finish(
+        builders::await_expr(builders::record(vec![
+            (
+                "orders",
+                builders::comprehension(
+                    builders::comprehension(
+                        op("tools", "err", vec![("value", builders::var("x"))]),
+                        vec![builders::comprehension_for("x", builders::var("row"))],
+                    ),
+                    vec![builders::comprehension_for(
+                        "row",
+                        builders::list(vec![builders::list(vec![
+                            builders::string("first"),
+                            builders::string("second"),
+                        ])]),
+                    )],
+                ),
+            ),
+            (
+                "last",
+                op("tools", "echo", vec![("value", builders::string("last"))]),
+            ),
+        ])),
+    )]));
     let error = execute_compiled(&compiled, &mut State::new(), &host)
         .await
         .unwrap_err();
@@ -362,9 +547,20 @@ async fn nested_comprehension_rejections_follow_settlement_order() {
 #[tokio::test(flavor = "current_thread")]
 async fn dynamic_settled_await_names_the_value_and_nested_path() {
     let host = ComprehensionBatchHost::default();
-    let compiled = comprehension_compile(
-        "value = tools.echo({ value: { orders: [7] } })?; finish await value",
-    );
+    let compiled = comprehension_compile(comprehension_module(vec![
+        builders::assign(
+            "value",
+            op(
+                "tools",
+                "echo",
+                vec![(
+                    "value",
+                    builders::record(vec![("orders", builders::list(vec![builders::num(7.0)]))]),
+                )],
+            ),
+        ),
+        builders::finish(builders::await_expr(builders::var("value"))),
+    ]));
     let error = execute_compiled(&compiled, &mut State::new(), &host)
         .await
         .unwrap_err();

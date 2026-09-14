@@ -5,6 +5,7 @@ use crate::ast::{
     TypeExpr,
 };
 use crate::runtime::entry_points::compile_program_internal;
+use crate::testing::ast_builders as builders;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::fmt::Write as _;
 use std::sync::{
@@ -136,8 +137,27 @@ impl ExecutionHost for RecordingProcessHost {
     }
 }
 
-async fn exec(source: &str) -> Result<Value, RuntimeError> {
-    let program = crate::parse(source).expect("program should parse");
+/// `while i < <limit> { i = i + 1 }`
+fn counting_loop(limit: f64) -> Expr {
+    builders::while_loop(
+        builders::binary(builders::var("i"), BinaryOp::Less, builders::num(limit)),
+        builders::block(vec![builders::assign(
+            "i",
+            builders::binary(builders::var("i"), BinaryOp::Add, builders::num(1.0)),
+        )]),
+    )
+}
+
+/// `i = 0` / `while i < 5000 { i = i + 1 }` / `finish i`
+fn long_counting_loop_program() -> Program {
+    builders::program(vec![
+        builders::assign("i", builders::num(0.0)),
+        counting_loop(5000.0),
+        builders::finish(builders::var("i")),
+    ])
+}
+
+async fn exec(program: Program) -> Result<Value, RuntimeError> {
     let mut state = State::new();
     match execute_program(&program, &mut state, &Host).await? {
         ExecutionOutcome::Finished(value) => Ok(value),
@@ -146,16 +166,18 @@ async fn exec(source: &str) -> Result<Value, RuntimeError> {
     }
 }
 
-async fn exec_outcome(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = crate::parse(source).expect("program should parse");
+async fn exec_outcome(program: Program) -> Result<ExecutionOutcome, RuntimeError> {
     let mut state = State::new();
     execute_program(&program, &mut state, &Host).await
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
+    // `i = 0` / `while i < 5000 { i = i + 1 }` / `finish i`; the span covers
+    // the whole loop statement, which is where the budget runs out.
     let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
-    let program = crate::parse(source).expect("program should parse");
+    let program =
+        builders::with_expression_spans(long_counting_loop_program(), &[(0, 5), (6, 34), (35, 43)]);
     let env = ExecutionEnvironment::new(&Host)
         .traced()
         .with_execution_bounds(ExecutionBounds::new(
@@ -179,7 +201,7 @@ async fn instruction_budget_exhaustion_is_typed_and_caret_rendered() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
-    let program = crate::parse("value = 1").expect("program should parse");
+    let program = builders::program(vec![builders::assign("value", builders::num(1.0))]);
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(1),
         ExecutionBound::Unbounded,
@@ -194,8 +216,20 @@ async fn effect_free_terminal_segment_enforces_tiny_instruction_budget() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_errors() {
-    let program = crate::parse("values = unique(range(0, 4000))\nfinish values.missing")
-        .expect("program should parse");
+    // `values = unique(range(0, 4000))` / `finish values.missing`
+    let program = builders::program(vec![
+        builders::assign(
+            "values",
+            builders::builtin(
+                "unique",
+                vec![builders::builtin(
+                    "range",
+                    vec![builders::num(0.0), builders::num(4000.0)],
+                )],
+            ),
+        ),
+        builders::finish(builders::field(builders::var("values"), "missing")),
+    ]);
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
         ExecutionBound::Unbounded,
@@ -210,7 +244,14 @@ async fn effect_free_intrinsic_dispatch_enforces_bounds_before_later_runtime_err
 
 #[tokio::test(flavor = "current_thread")]
 async fn shaping_collection_work_consumes_instruction_budget() {
-    let program = crate::parse("finish unique(range(0, 4000))").expect("program should parse");
+    // `finish unique(range(0, 4000))`
+    let program = builders::program(vec![builders::finish(builders::builtin(
+        "unique",
+        vec![builders::builtin(
+            "range",
+            vec![builders::num(0.0), builders::num(4000.0)],
+        )],
+    ))]);
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::instructions(10),
         ExecutionBound::Unbounded,
@@ -225,13 +266,20 @@ async fn shaping_collection_work_consumes_instruction_budget() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn deadline_excludes_awaited_tool_time() {
-    let source = r#"
-value = tools.echo({ value: 1 })
-i = 0
-while i < 100 { i = i + 1 }
-finish value
-"#;
-    let program = crate::parse(source).expect("program should parse");
+    // `value = tools.echo({ value: 1 })` / a hundred-step loop / `finish value`
+    let program = builders::program(vec![
+        builders::assign(
+            "value",
+            builders::receiver_call(
+                builders::resource(&["tools"]),
+                "echo",
+                vec![builders::record(vec![("value", builders::num(1.0))])],
+            ),
+        ),
+        builders::assign("i", builders::num(0.0)),
+        counting_loop(100.0),
+        builders::finish(builders::var("value")),
+    ]);
     let env = ExecutionEnvironment::new(&SlowToolHost).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
         ExecutionBound::millis(20),
@@ -246,8 +294,7 @@ finish value
 
 #[tokio::test(flavor = "current_thread")]
 async fn deadline_exhaustion_is_a_typed_runtime_error() {
-    let source = "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i";
-    let program = crate::parse(source).expect("program should parse");
+    let program = long_counting_loop_program();
     let env = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
         ExecutionBound::Bounded(std::time::Duration::from_nanos(1)),
@@ -265,7 +312,10 @@ async fn deadline_exhaustion_is_a_typed_runtime_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn string_membership_rejects_non_string_needles_without_coercion() {
-    let compiled = crate::compile("finish 1 in \"123\"").expect("source should compile");
+    // `finish 1 in "123"`
+    let compiled = compile_program(&builders::program(vec![builders::finish(
+        builders::binary(builders::num(1.0), BinaryOp::In, builders::string("123")),
+    )]));
     let mut state = State::new();
     let error = execute(&compiled, &mut state, &Host)
         .await
@@ -273,19 +323,40 @@ async fn string_membership_rejects_non_string_needles_without_coercion() {
     assert_eq!(error, RuntimeError::InUnsupported);
 }
 
-fn compile_source(source: &str) -> Result<CompiledProgram, crate::ParseError> {
-    let program = crate::parse(source)?;
-    if source.contains("tools.")
+/// Compiles a built program, linking it first when it names host modules.
+///
+/// The retired string helper decided this by looking for `tools.` in the source
+/// text; a built program is asked directly whether it carries a resource
+/// reference, which is the fact that mattered.
+fn compile_program_for_tests(program: Program) -> CompiledProgram {
+    if program_references_a_resource(&program.main)
         && let Ok(linked) = crate::LinkedModule::link(program.clone(), runtime_test_environment())
     {
-        Ok(crate::compile_linked(&linked))
+        crate::compile_linked(&linked)
     } else {
-        Ok(compile_program(&program))
+        compile_program(&program)
     }
 }
 
-fn compile_labeled_source(source: &str) -> CompiledProgram {
-    let program = crate::parse(source).expect("program should parse");
+fn program_references_a_resource(expr: &Expr) -> bool {
+    struct Finder(bool);
+
+    impl crate::ExprVisitor for Finder {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if matches!(expr, Expr::ResourceRef(_)) {
+                self.0 = true;
+                return;
+            }
+            crate::walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = Finder(false);
+    crate::ExprVisitor::visit_expr(&mut finder, expr);
+    finder.0
+}
+
+fn compile_labeled_program(program: Program) -> CompiledProgram {
     let surface = runtime_test_environment().with_language_features(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
@@ -293,8 +364,7 @@ fn compile_labeled_source(source: &str) -> CompiledProgram {
     crate::compile_linked(&linked)
 }
 
-fn compile_labeled_process_source(source: &str, process_name: &str) -> CompiledProgram {
-    let program = crate::parse(source).expect("program should parse");
+fn compile_labeled_process_program(program: Program, process_name: &str) -> CompiledProgram {
     let surface = runtime_test_environment().with_language_features(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
@@ -439,23 +509,6 @@ async fn execute_compiled_traced<H: ExecutionHost>(
     }
 }
 
-async fn execute_compiled_traced_with_projected_bindings<H: ExecutionHost>(
-    program: &CompiledProgram,
-    state: &mut State,
-    host: &H,
-    projected: &ProjectedBindings,
-) -> Result<ExecutionOutcome, RuntimeFailure> {
-    let env = ExecutionEnvironment::new(host)
-        .traced()
-        .with_projected_bindings(projected.clone());
-    match super::execute(program, state, &env).await {
-        Ok(outcome) => Ok(outcome),
-        Err(error) => Err(env
-            .take_runtime_failure()
-            .unwrap_or(RuntimeFailure { error, span: None })),
-    }
-}
-
 async fn execute_compiled_process<H: ExecutionHost>(
     program: &CompiledProgram,
     state: &mut State,
@@ -476,189 +529,109 @@ async fn profile_compiled<H: ExecutionHost>(
     Ok((outcome, profile))
 }
 
-const GOLDEN_CONTRACT_SOURCE: &str = r#"
-source = join(history, ",")
-beta_index = find(source, "beta")
-matches = grep_text(source, "beta")
-counts = {}
-for token in split(source, ",") {
-  counts[token] = counts[token] + 1
-}
-Payload = Type {
-  beta_index: int | null,
-  matches: list[dict],
-  counts: dict
-}
-finish validate(
-  { beta_index: beta_index, matches: matches, counts: counts },
-  Payload
-)
-"#;
-
-#[test]
-fn golden_parser_ast_contract_covers_lashlang_host_environment() {
-    let program = crate::parse(GOLDEN_CONTRACT_SOURCE).expect("program should parse");
-    insta::assert_snapshot!(
-        "lashlang_parser_ast_contract",
-        serde_json::to_string_pretty(&program).expect("program should serialize")
-    );
+/// The golden contract program, built from the AST.
+///
+/// It was `join`/`find`/`grep_text`/`split` over a projected `history`, a
+/// counting loop, a `Type { .. }` literal and a `validate` call — the shape the
+/// lashlang host environment has to compile. None of those builtins has a
+/// TypeScript spelling, so the program is stated here rather than parsed; the
+/// bytecode snapshot below is unchanged, which is what proves the translation.
+fn golden_contract_program() -> Program {
+    builders::program(vec![
+        builders::assign(
+            "source",
+            builders::builtin(
+                "join",
+                vec![builders::var("history"), builders::string(",")],
+            ),
+        ),
+        builders::assign(
+            "beta_index",
+            builders::builtin(
+                "find",
+                vec![builders::var("source"), builders::string("beta")],
+            ),
+        ),
+        builders::assign(
+            "matches",
+            builders::builtin(
+                "grep_text",
+                vec![builders::var("source"), builders::string("beta")],
+            ),
+        ),
+        builders::assign("counts", builders::record(vec![])),
+        builders::for_in(
+            "token",
+            builders::builtin(
+                "split",
+                vec![builders::var("source"), builders::string(",")],
+            ),
+            builders::block(vec![builders::assign_path(
+                "counts",
+                vec![builders::index_step(builders::var("token"))],
+                builders::binary(
+                    builders::index(builders::var("counts"), builders::var("token")),
+                    BinaryOp::Add,
+                    builders::num(1.0),
+                ),
+            )]),
+        ),
+        builders::assign(
+            "Payload",
+            builders::type_literal(TypeExpr::Object(vec![
+                builders::type_field(
+                    "beta_index",
+                    TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null]),
+                    false,
+                ),
+                builders::type_field("matches", TypeExpr::List(Box::new(TypeExpr::Dict)), false),
+                builders::type_field("counts", TypeExpr::Dict, false),
+            ])),
+        ),
+        builders::finish(builders::builtin(
+            "validate",
+            vec![
+                builders::record(vec![
+                    ("beta_index", builders::var("beta_index")),
+                    ("matches", builders::var("matches")),
+                    ("counts", builders::var("counts")),
+                ]),
+                builders::var("Payload"),
+            ],
+        )),
+    ])
 }
 
 #[test]
 fn golden_compiled_bytecode_contract_covers_lashlang_host_environment() {
     insta::assert_snapshot!(
         "lashlang_compiled_bytecode_contract",
-        compiled_program_snapshot(GOLDEN_CONTRACT_SOURCE)
+        compiled_program_snapshot(golden_contract_program())
     );
 }
 
+// The diagnostic renderer's location block and caret run are pinned against an
+// explicit span table (`builders::with_source_spans`) rather than a parsed one.
+// FIG-3065: the TypeScript lowerer emits a `Program` with empty span vectors,
+// so no front-end supplies these offsets any more; stating them keeps the
+// renderer's exact output pinned and makes this the test that proves FIG-3065
+// when it is fixed. The reachable, location-free half of the old corpus moved
+// to `tests/diagnostic_rendering.rs`, which lowers real TypeScript.
 #[tokio::test(flavor = "current_thread")]
 async fn golden_runtime_diagnostic_contract_is_exact() {
+    // `x = 1` / `finish len(true)`; the span covers the whole second statement.
+    let source = "x = 1\nfinish len(true)";
+    let program = builders::with_expression_spans(
+        builders::program(vec![
+            builders::assign("x", builders::num(1.0)),
+            builders::finish(builders::builtin("len", vec![builders::bool_lit(true)])),
+        ]),
+        &[(0, 5), (6, 22)],
+    );
     insta::assert_snapshot!(
         "lashlang_runtime_diagnostic_contract",
-        runtime_diagnostic("x = 1\nfinish len(true)").await
+        runtime_diagnostic(program, source).await
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn golden_lashlang_diagnostic_corpus_is_exact() {
-    let mut projected = ProjectedBindings::new();
-    projected.insert(
-        "history",
-        ProjectedValue::scalar(
-            "history",
-            Value::List(vec![Value::String("entry".into())].into()),
-        ),
-    );
-
-    let mut cases = Vec::new();
-    cases.push(diagnostic_case(
-        "parse_inline_if",
-        format_parse_diagnostic("finish if true { 1 }"),
-    ));
-    cases.push(diagnostic_case(
-        "parse_inline_for",
-        format_parse_diagnostic("finish [for x in [1] { x }]"),
-    ));
-    cases.push(diagnostic_case(
-        "parse_loop_control_outside_loop",
-        format_parse_diagnostic("break"),
-    ));
-    cases.push(diagnostic_case(
-        "parse_duplicate_type_field",
-        format_parse_diagnostic("Payload = Type { nested: { ok: bool, ok: str } }"),
-    ));
-    cases.push(diagnostic_case(
-        "parse_removed_parallel_keyword",
-        format_parse_diagnostic("parallel {\n  start echo(value: 1)\n}"),
-    ));
-    cases.push(diagnostic_case(
-        "link_membership_requires_container",
-        link_diagnostic("finish 1 in 2"),
-    ));
-    cases.push(diagnostic_case(
-        "link_membership_requires_list_item_type",
-        link_diagnostic("finish \"one\" in [1, 2]"),
-    ));
-    cases.push(diagnostic_case(
-        "link_record_membership_requires_string_key",
-        link_diagnostic("finish 1 in { one: true }"),
-    ));
-    cases.push(diagnostic_case(
-        "runtime_sort_mixed_types",
-        runtime_diagnostic("finish sort([1, \"two\"])").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_sort_by_missing_path",
-        runtime_diagnostic("finish sort_by([{ profile: { score: 1 } }, {}], \"profile.score\")")
-            .await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_sort_by_not_a_record",
-        runtime_diagnostic("finish sort_by([{ score: 1 }, 2], \"score\")").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_sort_by_empty_path",
-        runtime_diagnostic("finish sort_by([{ score: 1 }], \"\")").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_sum_non_number",
-        runtime_diagnostic("finish sum([1, \"two\"])").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_min_incomparable",
-        runtime_diagnostic("finish min([[1], [2]])").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_min_empty_list",
-        runtime_diagnostic("finish min([])").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_max_requires_list",
-        runtime_diagnostic("finish max({ value: 1 })").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_replace_requires_text",
-        runtime_diagnostic("finish replace(1, \"1\", \"one\")").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_lower_requires_text",
-        runtime_diagnostic("finish lower(false)").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_upper_requires_text",
-        runtime_diagnostic("finish upper(1)").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_unique_requires_list",
-        runtime_diagnostic("finish unique(1)").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_reverse_requires_list",
-        runtime_diagnostic("finish reverse(1)").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_bad_wrapper_unwrap",
-        runtime_diagnostic("finish ({ ok: false, error: \"boom\" })?").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_failed_resource_operation_unwrap",
-        runtime_diagnostic("finish (await tools.err({})?)").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_invalid_await_handle",
-        runtime_diagnostic("finish (await 1)?").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_read_only_projected_assignment",
-        runtime_diagnostic_with_projected("history = []\nfinish history", &projected).await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_invalid_validate_type_argument",
-        runtime_diagnostic("finish validate({ ok: true }, \"not a type\")").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_validation_failure",
-        runtime_diagnostic("finish validate({ count: \"x\" }, Type { count: int })").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_unknown_name",
-        runtime_diagnostic("finish missing").await,
-    ));
-    cases.push(diagnostic_case(
-        "runtime_unknown_builtin",
-        runtime_diagnostic("finish nope()").await,
-    ));
-    cases.push(diagnostic_case(
-        "link_unknown_resource_operation",
-        link_diagnostic("finish await tools.does_not_exist({})?"),
-    ));
-    cases.push(diagnostic_case(
-        "link_unresolved_receiver",
-        link_diagnostic("value = 1\nfinish await value.echo({})?"),
-    ));
-
-    insta::assert_snapshot!("lashlang_diagnostic_corpus", cases.join("\n\n---\n\n"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -669,7 +642,39 @@ result = await {
   bad: tools.err({})?
 }
 finish result"#;
-    let compiled = compile_labeled_source(source);
+    // The span is the failing leaf `tools.err({})?`, not the labelled
+    // statement: that is the whole point of the assertion below.
+    let program = builders::with_source_spans(
+        builders::program(vec![
+            builders::labelled(
+                builders::label("Aggregate", None),
+                builders::assign(
+                    "result",
+                    builders::await_expr(builders::record(vec![
+                        (
+                            "ok",
+                            builders::unwrap(builders::receiver_call(
+                                builders::resource(&["tools"]),
+                                "echo",
+                                vec![builders::record(vec![("value", builders::string("ok"))])],
+                            )),
+                        ),
+                        (
+                            "bad",
+                            builders::unwrap(builders::receiver_call(
+                                builders::resource(&["tools"]),
+                                "err",
+                                vec![builders::record(vec![])],
+                            )),
+                        ),
+                    ])),
+                ),
+            ),
+            builders::finish(builders::var("result")),
+        ]),
+        &[(&[0, 0, 0, 0, 1], 87, 101)],
+    );
+    let compiled = compile_labeled_program(program);
     let mut state = State::new();
     let failure = execute_compiled_traced(&compiled, &mut state, &Host)
         .await
@@ -686,38 +691,27 @@ finish result"#;
     assert!(!message.contains("--> line 1"), "{message}");
 }
 
-fn format_parse_diagnostic(source: &str) -> String {
-    let err = crate::parse(source).expect_err("parse should fail");
-    crate::format_parse_diagnostic(source, &err)
-}
-
-fn link_diagnostic(source: &str) -> String {
-    let program = crate::parse(source).expect("diagnostic source should parse");
+/// Renders the link refusal for `program` against `source`.
+///
+/// FIG-3065: with no span table the renderer emits the message and hint and no
+/// location block, which is what the callers below assert on.
+fn link_diagnostic(program: Program, source: &str) -> String {
     let error = crate::LinkedModule::link(program, runtime_test_environment())
-        .expect_err("diagnostic source should fail to link");
+        .expect_err("diagnostic program should fail to link");
     crate::format_link_diagnostic(source, &error)
 }
 
-async fn runtime_diagnostic(source: &str) -> String {
-    runtime_diagnostic_with_projected(source, &ProjectedBindings::default()).await
-}
-
-async fn runtime_diagnostic_with_projected(source: &str, projected: &ProjectedBindings) -> String {
-    let compiled = compile_source(source).expect("source should compile");
+async fn runtime_diagnostic(program: Program, source: &str) -> String {
+    let compiled = compile_program_for_tests(program);
     let mut state = State::new();
-    let failure =
-        execute_compiled_traced_with_projected_bindings(&compiled, &mut state, &Host, projected)
-            .await
-            .expect_err("runtime should fail");
+    let failure = execute_compiled_traced(&compiled, &mut state, &Host)
+        .await
+        .expect_err("runtime should fail");
     crate::format_runtime_diagnostic(source, &failure.error, failure.span)
 }
 
-fn diagnostic_case(name: &str, diagnostic: String) -> String {
-    format!("{name}\n{diagnostic}")
-}
-
-fn compiled_program_snapshot(source: &str) -> String {
-    let compiled = compile_source(source).expect("source should compile");
+fn compiled_program_snapshot(program: Program) -> String {
+    let compiled = compile_program_for_tests(program);
     let chunk = &compiled.chunk;
     let mut out = String::new();
 
@@ -1162,13 +1156,18 @@ async fn value_helpers_and_display_cover_all_variants() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn compiler_folds_constant_list_and_record_literals() {
-    let program = crate::parse(
-        r#"
-        items = [{ label: "a", weight: 1 }, { label: "b", weight: 2 }]
-        finish items
-        "#,
-    )
-    .expect("program should parse");
+    // `items = [{ label: "a", weight: 1 }, { label: "b", weight: 2 }]`
+    // `finish items`
+    let row = |label: &str, weight: f64| {
+        builders::record(vec![
+            ("label", builders::string(label)),
+            ("weight", builders::num(weight)),
+        ])
+    };
+    let program = builders::program(vec![
+        builders::assign("items", builders::list(vec![row("a", 1.0), row("b", 2.0)])),
+        builders::finish(builders::var("items")),
+    ]);
     let compiled = compile_program(&program);
 
     assert!(
@@ -1198,15 +1197,39 @@ async fn compiler_folds_constant_list_and_record_literals() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn compiler_propagates_safe_straight_line_constants() {
-    let program = crate::parse(
-        r#"
-        items = [1, 2, 3]
-        indexes = range(0, len(items))
-        extended = push(indexes, len(items))
-        finish extended
-        "#,
-    )
-    .expect("program should parse");
+    // `items = [1, 2, 3]` / `indexes = range(0, len(items))`
+    // `extended = push(indexes, len(items))` / `finish extended`
+    let program = builders::program(vec![
+        builders::assign(
+            "items",
+            builders::list(vec![
+                builders::num(1.0),
+                builders::num(2.0),
+                builders::num(3.0),
+            ]),
+        ),
+        builders::assign(
+            "indexes",
+            builders::builtin(
+                "range",
+                vec![
+                    builders::num(0.0),
+                    builders::builtin("len", vec![builders::var("items")]),
+                ],
+            ),
+        ),
+        builders::assign(
+            "extended",
+            builders::builtin(
+                "push",
+                vec![
+                    builders::var("indexes"),
+                    builders::builtin("len", vec![builders::var("items")]),
+                ],
+            ),
+        ),
+        builders::finish(builders::var("extended")),
+    ]);
     let compiled = compile_program(&program);
 
     // ADR 0096: the straight-line constant folder was part of Lashlang's
@@ -1233,16 +1256,37 @@ async fn compiler_propagates_safe_straight_line_constants() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn compiler_keeps_assignment_hot_paths_specialized() {
-    let source = r#"
-        items = []
-        total = 0
-        step = await tools.echo({ value: 3 })?
-        items = push(items, 1)
-        total = total + 2
-        total = total + step
-        finish { items: items, total: total }
-        "#;
-    let compiled = compile_source(source).expect("program should compile");
+    // `items = []` / `total = 0` / `step = await tools.echo({ value: 3 })?` /
+    // `items = push(items, 1)` / `total = total + 2` / `total = total + step` /
+    // `finish { items: items, total: total }`
+    let compiled = compile_program_for_tests(builders::program(vec![
+        builders::assign("items", builders::list(vec![])),
+        builders::assign("total", builders::num(0.0)),
+        builders::assign(
+            "step",
+            builders::module_call(
+                &["tools"],
+                "echo",
+                vec![builders::record(vec![("value", builders::num(3.0))])],
+            ),
+        ),
+        builders::assign(
+            "items",
+            builders::builtin("push", vec![builders::var("items"), builders::num(1.0)]),
+        ),
+        builders::assign(
+            "total",
+            builders::binary(builders::var("total"), BinaryOp::Add, builders::num(2.0)),
+        ),
+        builders::assign(
+            "total",
+            builders::binary(builders::var("total"), BinaryOp::Add, builders::var("step")),
+        ),
+        builders::finish(builders::record(vec![
+            ("items", builders::var("items")),
+            ("total", builders::var("total")),
+        ])),
+    ]));
 
     assert!(
         compiled.chunk.code.iter().any(|instruction| {
@@ -1300,6 +1344,8 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
     );
 }
 
+mod builtin_cases;
+mod case_builders;
 mod compiler_cases;
 mod projection_cases;
 use projection_cases::*;

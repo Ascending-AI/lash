@@ -227,17 +227,31 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn receiver_module_operation_unwraps_result() {
-    let value = exec(r#"finish (await tools.echo({ value: "ok" })?)"#)
-        .await
-        .expect("module operation should run");
+    // `finish (await tools.echo({ value: "ok" })?)`
+    let value = exec(builders::program(vec![builders::finish(
+        builders::module_call(
+            &["tools"],
+            "echo",
+            vec![builders::record(vec![("value", builders::string("ok"))])],
+        ),
+    )]))
+    .await
+    .expect("module operation should run");
     assert_eq!(value, Value::String("ok".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn receiver_module_operation_errors_are_sanitized() {
-    let err = exec(r#"finish (await tools.err({ value: "nope" })?)"#)
-        .await
-        .expect_err("module operation should fail");
+    // `finish (await tools.err({ value: "nope" })?)`
+    let err = exec(builders::program(vec![builders::finish(
+        builders::module_call(
+            &["tools"],
+            "err",
+            vec![builders::record(vec![("value", builders::string("nope"))])],
+        ),
+    )]))
+    .await
+    .expect_err("module operation should fail");
     assert!(matches!(
         err,
         RuntimeError::UnwrappedModuleOperationFailed { .. }
@@ -477,16 +491,17 @@ async fn process_mode_rejects_programmatic_foreground_controls() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sync_steps_resume_correctly_after_tool_effects() {
-    let value = exec(
-        r#"
-        before = 20 + 2
-        echoed = await tools.echo({ value: before })?
-        after = echoed + 1
-        finish [before, echoed, after]
-        "#,
-    )
-    .await
-    .expect("program should run");
+    // `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
+    // `after = echoed + 1` / `finish [before, echoed, after]`
+    let mut expressions = echo_round_trip_prefix();
+    expressions.push(builders::finish(builders::list(vec![
+        builders::var("before"),
+        builders::var("echoed"),
+        builders::var("after"),
+    ])));
+    let value = exec(builders::program(expressions))
+        .await
+        .expect("program should run");
 
     assert_eq!(
         value,
@@ -503,12 +518,34 @@ async fn sync_steps_resume_correctly_after_tool_effects() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn traced_started_tool_errors_point_at_failing_tool_expression() {
+    // `before = 1` / `value = await tools.err({})?` / `finish value`. The
+    // statement table carries the three top-level spans; the expression table
+    // carries the failing `tools.err({})` call, which is the span the caret run
+    // below pins. FIG-3065: nothing in production supplies these offsets any
+    // more, so the test states them.
     let source = r#"
         before = 1
         value = await tools.err({})?
         finish value
         "#;
-    let compiled = compile_source(source).expect("program should compile");
+    let compiled = compile_program_for_tests(builders::with_source_spans(
+        builders::with_expression_spans(
+            builders::program(vec![
+                builders::assign("before", builders::num(1.0)),
+                builders::assign(
+                    "value",
+                    builders::await_expr(builders::unwrap(builders::receiver_call(
+                        builders::resource(&["tools"]),
+                        "err",
+                        vec![builders::record(Vec::new())],
+                    ))),
+                ),
+                builders::finish(builders::var("value")),
+            ]),
+            &[(9, 19), (28, 56), (65, 77)],
+        ),
+        &[(&[1, 0, 0, 0], 42, 55)],
+    ));
     let mut state = State::new();
     let failure = execute_compiled_traced(&compiled, &mut state, &Host)
         .await
@@ -532,13 +569,11 @@ async fn traced_started_tool_errors_point_at_failing_tool_expression() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn profiled_tool_effect_keeps_sync_instruction_counts() {
-    let source = r#"
-        before = 20 + 2
-        echoed = await tools.echo({ value: before })?
-        after = echoed + 1
-        finish after
-        "#;
-    let compiled = compile_source(source).expect("program should compile");
+    // `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
+    // `after = echoed + 1` / `finish after`
+    let mut expressions = echo_round_trip_prefix();
+    expressions.push(builders::finish(builders::var("after")));
+    let compiled = compile_program_for_tests(builders::program(expressions));
     let mut state = State::new();
     let (_outcome, report) = profile_compiled(&compiled, &mut state, &Host)
         .await
@@ -563,11 +598,27 @@ async fn profiled_tool_effect_keeps_sync_instruction_counts() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn profile_report_tracks_list_comprehension_append_and_iteration() {
-    let source = r#"
-        values = [n * 2 for n in range(0, 6) if n > 1]
-        finish values
-        "#;
-    let compiled = compile_source(source).expect("program should compile");
+    // `values = [n * 2 for n in range(0, 6) if n > 1]` / `finish values`
+    let compiled = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "values",
+            builders::comprehension(
+                builders::binary(builders::var("n"), BinaryOp::Multiply, builders::num(2.0)),
+                vec![
+                    builders::comprehension_for(
+                        "n",
+                        builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
+                    ),
+                    builders::comprehension_if(builders::binary(
+                        builders::var("n"),
+                        BinaryOp::Greater,
+                        builders::num(1.0),
+                    )),
+                ],
+            ),
+        ),
+        builders::finish(builders::var("values")),
+    ]));
     assert!(
         compiled
             .chunk
@@ -855,6 +906,36 @@ async fn aggregate_await_reports_module_rejections_before_process_failures() {
 //  optional fields. See the top-level README for the full grammar.
 // ------------------------------------------------------------------
 
+/// `finish Type { <fields> }`
+fn finish_type_literal(fields: Vec<crate::ast::TypeField>) -> Program {
+    builders::program(vec![builders::finish(builders::type_literal(
+        TypeExpr::Object(fields),
+    ))])
+}
+
+/// `before = 20 + 2` / `echoed = await tools.echo({ value: before })?`
+/// `after = echoed + 1`
+fn echo_round_trip_prefix() -> Vec<Expr> {
+    vec![
+        builders::assign(
+            "before",
+            builders::binary(builders::num(20.0), BinaryOp::Add, builders::num(2.0)),
+        ),
+        builders::assign(
+            "echoed",
+            builders::module_call(
+                &["tools"],
+                "echo",
+                vec![builders::record(vec![("value", builders::var("before"))])],
+            ),
+        ),
+        builders::assign(
+            "after",
+            builders::binary(builders::var("echoed"), BinaryOp::Add, builders::num(1.0)),
+        ),
+    ]
+}
+
 /// Extract the inner JSON Schema wrapped by a `$lash_type` value.
 fn unwrap_schema(value: &Value) -> &Record {
     crate::runtime::unwrap_type_value(value)
@@ -864,14 +945,18 @@ fn unwrap_schema(value: &Value) -> &Record {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_scalar_schemas_const_fold_to_json_schema() {
-    for (src, expected) in [
-        ("finish Type { v: str }", "string"),
-        ("finish Type { v: int }", "integer"),
-        ("finish Type { v: float }", "number"),
-        ("finish Type { v: bool }", "boolean"),
-        ("finish Type { v: dict }", "object"),
+    for (src, ty, expected) in [
+        ("finish Type { v: str }", TypeExpr::Str, "string"),
+        ("finish Type { v: int }", TypeExpr::Int, "integer"),
+        ("finish Type { v: float }", TypeExpr::Float, "number"),
+        ("finish Type { v: bool }", TypeExpr::Bool, "boolean"),
+        ("finish Type { v: dict }", TypeExpr::Dict, "object"),
     ] {
-        let value = exec(src).await.expect("should succeed");
+        let value = exec(finish_type_literal(vec![builders::type_field(
+            "v", ty, false,
+        )]))
+        .await
+        .expect("should succeed");
         let schema = unwrap_schema(&value);
         assert_eq!(schema["type"], Value::String("object".into()));
         let props = schema["properties"]
@@ -889,9 +974,14 @@ async fn type_scalar_schemas_const_fold_to_json_schema() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_any_is_empty_schema() {
-    let value = exec("finish Type { v: any }")
-        .await
-        .expect("should succeed");
+    // `finish Type { v: any }`
+    let value = exec(finish_type_literal(vec![builders::type_field(
+        "v",
+        TypeExpr::Any,
+        false,
+    )]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let props = schema["properties"].as_record().expect("properties");
     let v = props["v"].as_record().expect("field schema");
@@ -900,9 +990,14 @@ async fn type_any_is_empty_schema() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_enum_produces_string_with_enum_array() {
-    let value = exec(r#"finish Type { status: enum["ok", "err", "pending"] }"#)
-        .await
-        .expect("should succeed");
+    // `finish Type { status: enum["ok", "err", "pending"] }`
+    let value = exec(finish_type_literal(vec![builders::type_field(
+        "status",
+        TypeExpr::Enum(vec!["ok".into(), "err".into(), "pending".into()]),
+        false,
+    )]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let status = schema["properties"].as_record().unwrap()["status"]
         .as_record()
@@ -919,9 +1014,14 @@ async fn type_enum_produces_string_with_enum_array() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_list_schema_wraps_inner_type_as_items() {
-    let value = exec("finish Type { tags: list[str] }")
-        .await
-        .expect("should succeed");
+    // `finish Type { tags: list[str] }`
+    let value = exec(finish_type_literal(vec![builders::type_field(
+        "tags",
+        TypeExpr::List(Box::new(TypeExpr::Str)),
+        false,
+    )]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let tags = schema["properties"].as_record().unwrap()["tags"]
         .as_record()
@@ -933,9 +1033,14 @@ async fn type_list_schema_wraps_inner_type_as_items() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_list_of_enum_preserves_nested_shape() {
-    let value = exec(r#"finish Type { labels: list[enum["a", "b"]] }"#)
-        .await
-        .expect("should succeed");
+    // `finish Type { labels: list[enum["a", "b"]] }`
+    let value = exec(finish_type_literal(vec![builders::type_field(
+        "labels",
+        TypeExpr::List(Box::new(TypeExpr::Enum(vec!["a".into(), "b".into()]))),
+        false,
+    )]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let labels = schema["properties"].as_record().unwrap()["labels"]
         .as_record()
@@ -947,17 +1052,18 @@ async fn type_list_of_enum_preserves_nested_shape() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_nested_object_is_full_subschema() {
-    let value = exec(
-        r#"
-        finish Type {
-          title: str,
-          meta: Type {
-            pages: int,
-            published: int
-          }
-        }
-        "#,
-    )
+    // `finish Type { title: str, meta: Type { pages: int, published: int } }`
+    let value = exec(finish_type_literal(vec![
+        builders::type_field("title", TypeExpr::Str, false),
+        builders::type_field(
+            "meta",
+            TypeExpr::Object(vec![
+                builders::type_field("pages", TypeExpr::Int, false),
+                builders::type_field("published", TypeExpr::Int, false),
+            ]),
+            false,
+        ),
+    ]))
     .await
     .expect("should succeed");
     let schema = unwrap_schema(&value);
@@ -979,9 +1085,13 @@ async fn type_nested_object_is_full_subschema() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_optional_field_drops_from_required() {
-    let value = exec("finish Type { a: str, b: int? }")
-        .await
-        .expect("should succeed");
+    // `finish Type { a: str, b: int? }`
+    let value = exec(finish_type_literal(vec![
+        builders::type_field("a", TypeExpr::Str, false),
+        builders::type_field("b", TypeExpr::Int, true),
+    ]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let required = match &schema["required"] {
         Value::List(items) => items,
@@ -996,12 +1106,28 @@ async fn type_optional_field_drops_from_required() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_ref_resolves_previously_defined_type() {
-    let src = r#"
-        Inner = Type { count: int }
-        Outer = Type { name: str, nested: Inner }
-        finish Outer
-    "#;
-    let value = exec(src).await.expect("should succeed");
+    // `Inner = Type { count: int }`
+    // `Outer = Type { name: str, nested: Inner }` / `finish Outer`
+    let value = exec(builders::program(vec![
+        builders::assign(
+            "Inner",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "count",
+                TypeExpr::Int,
+                false,
+            )])),
+        ),
+        builders::assign(
+            "Outer",
+            builders::type_literal(TypeExpr::Object(vec![
+                builders::type_field("name", TypeExpr::Str, false),
+                builders::type_field("nested", TypeExpr::Ref("Inner".into()), false),
+            ])),
+        ),
+        builders::finish(builders::var("Outer")),
+    ]))
+    .await
+    .expect("should succeed");
     let schema = unwrap_schema(&value);
     let nested = schema["properties"].as_record().unwrap()["nested"]
         .as_record()
@@ -1016,13 +1142,22 @@ async fn type_ref_resolves_previously_defined_type() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_ref_to_non_type_value_is_type_error() {
-    let err = exec(
-        r#"
-        Inner = { count: 5 }
-        Outer = Type { nested: Inner }
-        finish Outer
-        "#,
-    )
+    // `Inner = { count: 5 }` / `Outer = Type { nested: Inner }` / `finish Outer`
+    let err = exec(builders::program(vec![
+        builders::assign(
+            "Inner",
+            builders::record(vec![("count", builders::num(5.0))]),
+        ),
+        builders::assign(
+            "Outer",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "nested",
+                TypeExpr::Ref("Inner".into()),
+                false,
+            )])),
+        ),
+        builders::finish(builders::var("Outer")),
+    ]))
     .await
     .expect_err("should fail: Inner is not a Type value");
     assert!(
@@ -1033,9 +1168,14 @@ async fn type_ref_to_non_type_value_is_type_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn type_ref_with_undefined_name_is_undefined_variable() {
-    let err = exec("finish Type { nested: MissingType }")
-        .await
-        .expect_err("unknown ref should fail");
+    // `finish Type { nested: MissingType }`
+    let err = exec(finish_type_literal(vec![builders::type_field(
+        "nested",
+        TypeExpr::Ref("MissingType".into()),
+        false,
+    )]))
+    .await
+    .expect_err("unknown ref should fail");
     assert_eq!(
         err,
         RuntimeError::UndefinedVariable {
@@ -1046,13 +1186,35 @@ async fn type_ref_with_undefined_name_is_undefined_variable() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn compile_stats_count_const_folded_and_dynamic_literals() {
-    let src = r#"
-        Inner = Type { n: int }
-        A = Type { x: str }
-        B = Type { nested: Inner }
-        finish B
-    "#;
-    let compiled = compile_source(src).expect("should compile");
+    // `Inner = Type { n: int }` / `A = Type { x: str }`
+    // `B = Type { nested: Inner }` / `finish B`
+    let compiled = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "Inner",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "n",
+                TypeExpr::Int,
+                false,
+            )])),
+        ),
+        builders::assign(
+            "A",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "x",
+                TypeExpr::Str,
+                false,
+            )])),
+        ),
+        builders::assign(
+            "B",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "nested",
+                TypeExpr::Ref("Inner".into()),
+                false,
+            )])),
+        ),
+        builders::finish(builders::var("B")),
+    ]));
     let stats = compiled.compile_stats();
     assert_eq!(stats.type_literals_total, 3);
     // ADR 0096: the compile-time folder was Lashlang's value-semantics
@@ -1069,15 +1231,71 @@ async fn compile_stats_count_const_folded_and_dynamic_literals() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn profile_report_shows_resolve_type_ref_counts() {
-    let src = r#"
-        Inner = await tools.echo({ value: Type { n: int } })?
-        Outer = Type { nested: Inner }
-        limit = await tools.echo({ value: 1 })?
-        numbers = push(range(limit), limit)
-        checked = validate({ nested: { n: numbers[0] } }, Outer)
-        finish checked
-    "#;
-    let compiled = compile_source(src).expect("should compile");
+    // `Inner = await tools.echo({ value: Type { n: int } })?`
+    // `Outer = Type { nested: Inner }`
+    // `limit = await tools.echo({ value: 1 })?`
+    // `numbers = push(range(limit), limit)`
+    // `checked = validate({ nested: { n: numbers[0] } }, Outer)` / `finish checked`
+    let compiled = compile_program_for_tests(builders::program(vec![
+        builders::assign(
+            "Inner",
+            builders::module_call(
+                &["tools"],
+                "echo",
+                vec![builders::record(vec![(
+                    "value",
+                    builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                        "n",
+                        TypeExpr::Int,
+                        false,
+                    )])),
+                )])],
+            ),
+        ),
+        builders::assign(
+            "Outer",
+            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
+                "nested",
+                TypeExpr::Ref("Inner".into()),
+                false,
+            )])),
+        ),
+        builders::assign(
+            "limit",
+            builders::module_call(
+                &["tools"],
+                "echo",
+                vec![builders::record(vec![("value", builders::num(1.0))])],
+            ),
+        ),
+        builders::assign(
+            "numbers",
+            builders::builtin(
+                "push",
+                vec![
+                    builders::builtin("range", vec![builders::var("limit")]),
+                    builders::var("limit"),
+                ],
+            ),
+        ),
+        builders::assign(
+            "checked",
+            builders::builtin(
+                "validate",
+                vec![
+                    builders::record(vec![(
+                        "nested",
+                        builders::record(vec![(
+                            "n",
+                            builders::index(builders::var("numbers"), builders::num(0.0)),
+                        )]),
+                    )]),
+                    builders::var("Outer"),
+                ],
+            ),
+        ),
+        builders::finish(builders::var("checked")),
+    ]));
     let mut state = State::new();
     let (_outcome, report) = profile_compiled(&compiled, &mut state, &Host)
         .await
@@ -1188,9 +1406,14 @@ async fn unknown_type_constructor_becomes_ref_not_error_at_parse() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn lash_type_wrapper_survives_round_trip_through_json() {
-    let value = exec("finish Type { n: int }")
-        .await
-        .expect("should succeed");
+    // `finish Type { n: int }`
+    let value = exec(finish_type_literal(vec![builders::type_field(
+        "n",
+        TypeExpr::Int,
+        false,
+    )]))
+    .await
+    .expect("should succeed");
     // to_json + from_json must preserve the Type-ness.
     let json = crate::runtime::to_json(&value);
     let recovered = crate::runtime::from_json(json);
